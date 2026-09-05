@@ -16,6 +16,7 @@ from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import 
     apply_code_edit_script,
     build_code_edit_script_prompt,
     failures_for_file,
+    is_attributed,
     response_is_a_regeneration,
     should_use_edit_script,
 )
@@ -712,6 +713,33 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             "rewriting implementation only, against the tests as written"
         )
 
+    # #2851: which files the failures actually name, decided once per
+    # iteration. On run-issue4-120049 every one of six files was handed all
+    # four failures and told to fix all of them; the one file that owned three
+    # of the fixes took 3 minutes, and the files that could not do what they
+    # were told took 25-33 minutes each. When the corpus attributes to at
+    # least one file, a file it does not name has nothing to fix this
+    # iteration and is left as it is. When it attributes to none, every file
+    # gets the whole corpus, as before -- narrowing to nothing is worse than a
+    # prompt that is larger than it should be.
+    attributed_paths: set[str] = set()
+    if revision_error_context:
+        attributed_paths = {
+            spec["path"] for spec in files_to_modify
+            if is_attributed(revision_error_context, spec["path"])
+        }
+        if attributed_paths:
+            print(
+                f"    [N4] failures attributed to {len(attributed_paths)} of "
+                f"{len(files_to_modify)} file(s): "
+                + ", ".join(sorted(attributed_paths))
+            )
+        else:
+            print(
+                "    [N4] failures attributed to no file by traceback; every "
+                "file receives the whole failure set"
+            )
+
     for i, file_spec in enumerate(files_to_modify):
         filepath = file_spec["path"]
         change_type = file_spec.get("change_type", "Add")
@@ -920,6 +948,33 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         # learned this in #1528; this is the implementation stage inheriting
         # it. Any failure returns None and falls through to the full-file path
         # below, so this is never worse than the behavior it replaces.
+        # #2851: a file the failures do not name, in an iteration where they
+        # do name some other file, is left unchanged -- no call at all. The
+        # bookkeeping mirrors the skip-on-resume branch above so the file
+        # still counts as this iteration's output.
+        if (
+            attributed_paths
+            and filepath not in attributed_paths
+            and target_path.exists()
+        ):
+            try:
+                unchanged = target_path.read_text(encoding="utf-8")
+            except OSError:
+                # fail-open: the file on disk is left exactly as it is either
+                # way -- this branch changes nothing. What is lost is only the
+                # copy of its text carried as context for the files after it.
+                # The alternative, falling through to a model call on a file
+                # no failure names, is the waste #2851 exists to remove, and a
+                # read hiccup is not a reason to reintroduce it.
+                unchanged = ""
+            print(
+                f"        [EDIT-SCRIPT] no failure attributed to {filepath}; "
+                f"left unchanged this iteration"
+            )
+            completed_files.append((filepath, unchanged))
+            written_paths.append(str(target_path))
+            continue
+
         code = None
         if should_use_edit_script(
             change_type, edit_script_content, revision_error_context

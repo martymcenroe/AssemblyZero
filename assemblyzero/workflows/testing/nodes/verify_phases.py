@@ -238,6 +238,12 @@ def _build_failure_summary(output: str) -> str:
     return result
 
 
+#: A pytest `--tb=short` frame: `path/to/file.py:116: in some_function`.
+#: Matched on the stripped line, so indentation and Windows backslashes are
+#: both fine (#2851).
+_TRACEBACK_FRAME = re.compile(r"^\S+?\.py:\d+: in \S+")
+
+
 def _extract_traceback_blocks(output: str) -> str:
     """Pull distinct failure tracebacks out of pytest's FAILURES section.
 
@@ -280,14 +286,42 @@ def _extract_traceback_blocks(output: str) -> str:
         if not error_lines:
             continue
 
-        # The last non-E, non-blank line before the errors is the source line
-        # that raised -- the single most useful line in the block.
+        # The innermost frame before the errors names the file that raised,
+        # and the line after it is the source line -- the two most useful
+        # lines in the block. #2851: this used to keep "the last non-blank
+        # line before E", which on Python 3.11+ is the caret underline
+        # (`    ^^^^^^^`), not the code, and it never kept the frame at all.
+        # So the reviser was shown carets, and the edit-script attribution
+        # downstream never saw `src\boostgauge\collector.py:116: in
+        # _is_unleashed_session` -- the one line that says which file owns
+        # the failure -- and handed every file the whole corpus.
+        frame_line = ""
         source_line = ""
+        pre_error = []
         for line in body.splitlines():
             if line.startswith("E "):
                 break
-            if line.strip():
-                source_line = line.strip()
+            pre_error.append(line)
+        for idx, line in enumerate(pre_error):
+            if _TRACEBACK_FRAME.match(line.strip()):
+                frame_line = line.strip().replace("\\", "/")
+                # The source line follows its frame; skip a caret underline.
+                source_line = ""
+                for following in pre_error[idx + 1:]:
+                    stripped = following.strip()
+                    if not stripped or set(stripped) <= {"^", "~"}:
+                        continue
+                    if _TRACEBACK_FRAME.match(stripped):
+                        break
+                    source_line = stripped
+                    break
+        if not frame_line:
+            # Pre-3.11 shape, or a frame-less block: the old rule, minus the
+            # caret case it could never have hit.
+            for line in pre_error:
+                stripped = line.strip()
+                if stripped and not set(stripped) <= {"^", "~"}:
+                    source_line = stripped
 
         signature = "\n".join(error_lines)
         if signature in seen:
@@ -295,6 +329,7 @@ def _extract_traceback_blocks(output: str) -> str:
             continue
         seen[signature] = {
             "tests": [name],
+            "frame": frame_line,
             "source": source_line,
             "errors": error_lines,
         }
@@ -309,6 +344,8 @@ def _extract_traceback_blocks(output: str) -> str:
         if len(tests) > 1:
             header = f"{tests[0]} (and {len(tests) - 1} more with the same error)"
         lines = [header]
+        if entry.get("frame"):
+            lines.append(f"    {entry['frame']}")
         if entry["source"]:
             lines.append(f"    {entry['source']}")
         lines.extend(f"    {e}" for e in entry["errors"])
