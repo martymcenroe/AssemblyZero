@@ -992,6 +992,38 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             print(f"        {outcome.describe()}")
             code = outcome.code
 
+            # #2866: a failed patch on a planned TEST file is not a licence to
+            # rewrite it. On boostgauge #4 the fallback below regenerated a
+            # test file in two consecutive iterations after the model's
+            # SEARCH anchors missed -- both times the anchor was the timing
+            # loop of the CPU-budget test, pasted into a patch for another
+            # file -- and the suite went 47 -> 44 -> 41 tests. The freeze rule
+            # (#2064) never fired because the failing set kept changing. A
+            # test file that exists is the contract the loop measures against;
+            # a model that could not copy a line of it verbatim has not earned
+            # a rewrite of it. Implementation files keep the fallback: there
+            # the file is the loop's own output and a rewrite is the recovery.
+            if (
+                code is None
+                and target_path.exists()
+                and filepath.replace("\\", "/").split("/")[0] in ("tests", "test")
+            ):
+                try:
+                    kept = target_path.read_text(encoding="utf-8")
+                except OSError:
+                    # fail-open: the file on disk is untouched either way;
+                    # only the copy carried as context for later files is
+                    # lost, and regenerating a test file to recover a context
+                    # string would be the exact harm #2866 removes.
+                    kept = ""
+                print(
+                    "        [EDIT-SCRIPT] patch failed on a test file; left "
+                    "unchanged (tests are not regenerated on a failed patch)"
+                )
+                completed_files.append((filepath, kept))
+                written_paths.append(str(target_path))
+                continue
+
         if code is None:
             # Call Claude with retry logic (Issue #309)
             # Issue #267: Progress feedback during long API calls
