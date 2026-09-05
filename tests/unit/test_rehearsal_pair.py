@@ -144,15 +144,45 @@ class TestMockModeIsReadFromConfig:
 
 class TestEverySubWorkflowStageGetsTheFlag:
     """The hardcoded False was at exactly one of three sites, which is the
-    argument for reading it from config rather than passing it to each."""
+    argument for reading it from config rather than passing it to each.
 
-    @pytest.mark.parametrize("stage", ["lld", "spec", "impl"])
-    def test_the_stage_passes_mock_mode_through(self, stage):
-        source = (
-            ROOT / "assemblyzero" / "workflows" / "orchestrator" / "stages.py"
-        ).read_text(encoding="utf-8")
-        assert source.count('"config_mock_mode": mock_mode(state)') == 3, (
-            "all three sub-workflow stages must source the flag from config"
+    #2849: the flag must be sent under the name the RECEIVING schema declares,
+    and the three sub-workflows do not agree on it. requirements and
+    implementation_spec declare `config_mock_mode`; testing declares
+    `mock_mode`, and all nine of its readers ask for that. This test used to
+    count one literal three times across stages.py, which held the impl stage
+    to the wrong name -- LangGraph dropped the undeclared key, and a --mock
+    rehearsal ran the impl stage's nodes for real. Each stage is now checked
+    against its own sub-workflow's schema, which is the assertion that would
+    have failed then.
+    """
+
+    @pytest.mark.parametrize(
+        "stage, key, schema_module",
+        [
+            ("lld", "config_mock_mode", "assemblyzero.workflows.requirements.state"),
+            ("spec", "config_mock_mode", "assemblyzero.workflows.implementation_spec.state"),
+            ("impl", "mock_mode", "assemblyzero.workflows.testing.state"),
+        ],
+    )
+    def test_the_stage_passes_mock_mode_through(self, stage, key, schema_module):
+        import importlib
+        import inspect
+
+        source = inspect.getsource(getattr(st, f"run_{stage}_stage"))
+        assert f'"{key}": mock_mode(state)' in source, (
+            f"run_{stage}_stage must send the flag from config under the name "
+            f"its sub-workflow declares ({key})"
+        )
+
+        module = importlib.import_module(schema_module)
+        schema = next(
+            v for k, v in vars(module).items()
+            if k.endswith("State") and hasattr(v, "__annotations__")
+        )
+        assert key in schema.__annotations__, (
+            f"{schema_module} does not declare {key}; the flag run_{stage}_stage "
+            f"sends is dropped at the invoke boundary (#2849)"
         )
 
     def test_no_site_hardcodes_it_any_more(self):
@@ -160,6 +190,7 @@ class TestEverySubWorkflowStageGetsTheFlag:
             ROOT / "assemblyzero" / "workflows" / "orchestrator" / "stages.py"
         ).read_text(encoding="utf-8")
         assert '"config_mock_mode": False' not in source
+        assert '"mock_mode": False' not in source
 
 
 class TestARehearsalReachesNothingOutward:

@@ -418,9 +418,12 @@ class TestTheAuditActuallyInspectsSomething:
             f"expected exactly the three invoking stages, found {sorted(payloads)}"
         )
         # Sentinel keys that have been in these payloads for many issues.
+        # (#2848 retired `spec_path` from the impl payload -- the testing
+        # schema never declared it and no node read it. `worktree_path` is
+        # the key that payload exists to carry, per #1504.)
         assert "issue_number" in payloads["run_spec_stage"]
         assert "workflow_type" in payloads["run_lld_stage"]
-        assert "spec_path" in payloads["run_impl_stage"]
+        assert "worktree_path" in payloads["run_impl_stage"]
 
     def test_the_spec_workflow_is_still_the_one_that_cannot_self_provision(self):
         """Pins the asymmetry the fix rests on. If implementation_spec ever
