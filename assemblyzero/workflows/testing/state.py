@@ -275,6 +275,15 @@ class TestingWorkflowState(TypedDict, total=False):
     test_plan_revision_count: int  # Issue #1072: incremented per revision cycle
     auto_mode: bool
     mock_mode: bool
+    #: #1941: RESUMED or REGENERATED, set by the orchestrator on a stage retry;
+    #: #2845 sets RESUMED when the worktree was carved from a preserved
+    #: attempt. MUST stay declared (#2847): it was sent from the day #1941
+    #: landed and never arrived, because an undeclared key is discarded by
+    #: LangGraph at the invoke boundary (#2018). `is_regeneration` always read
+    #: None, and the red phase refused #2845's recovered worktree as
+    #: green-at-red on run-issue4-113418 because `_implementation_already_exists`
+    #: gates on this field and saw it empty.
+    retry_mode: str
     skip_e2e: bool
     scaffold_only: bool
     green_only: bool

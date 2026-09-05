@@ -1681,7 +1681,6 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
         )
         from assemblyzero.workflows.testing.state import DEFAULT_MAX_ITERATIONS
 
-        spec_path = state.get("spec_path", "")
         # #1440: Plumb orchestrator config into the sub-workflow state.
         config = state.get("config", {})
         stage_cfg = config.get("stages", {}).get("impl", {})
@@ -1693,9 +1692,16 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
         # on the issue-{N} branch. original_repo_root stays as target_repo
         # so load_lld.py's fallback (Issue #380) can find the LLD that
         # lives on target_repo's main.
+        # #2847: every key below is a declared channel of TestingWorkflowState,
+        # and tests/unit/test_impl_invoke_payload_is_declared.py holds it so.
+        # LangGraph discards an undeclared key at the invoke boundary without
+        # a word (#2018, #2679); three keys here were being discarded, one of
+        # them the retry_mode #1941 and #2845 both depended on. `spec_path`
+        # was one of the three and is gone: the schema never declared it and
+        # no testing node reads it -- N0 finds the spec through `lld_path`
+        # and its own search (#2848).
         sub_result = app.invoke({
             "issue_number": issue_number,
-            "spec_path": spec_path,
             "worktree_path": str(worktree_path),
             "repo_root": str(worktree_path),
             "original_repo_root": target_repo,
@@ -1724,7 +1730,12 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # budget it did not have and a freeze's loop-back was dropped at 3
             # without a word.
             "max_iterations": DEFAULT_MAX_ITERATIONS,
-            "config_mock_mode": mock_mode(state),
+            # #2849: `mock_mode` is the TESTING schema's field and the name all
+            # nine of its readers ask for. `config_mock_mode` is the spec
+            # workflow's field -- the spec invoke above sends it to a schema
+            # that declares it. Sent here it was undeclared, dropped, and a
+            # --mock rehearsal ran this stage's nodes for real.
+            "mock_mode": mock_mode(state),
         }, config={"recursion_limit": impl_recursion_limit(DEFAULT_MAX_ITERATIONS)})
 
         error_msg = sub_result.get("error_message", "")
