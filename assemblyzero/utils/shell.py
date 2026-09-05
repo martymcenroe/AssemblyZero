@@ -10,12 +10,12 @@ Issue #598: Permissible Command Middleware.
 Issue #611: Activate middleware across workflow nodes.
 """
 
-import re
 import sys
 import subprocess
 from typing import Any
 
 from assemblyzero.core.errors import SecurityException
+from assemblyzero.core.github_writes import suppress_if_inert
 
 PROHIBITED_FLAGS: frozenset[str] = frozenset({"--admin", "--force", "-D", "--hard"})
 
@@ -78,6 +78,13 @@ def run_command(
         SecurityException: If the command contains prohibited flags.
     """
     validate_command(command)
+
+    # #2826: under a replay every GitHub write is inert. Decided here, at the
+    # one runner every workflow node goes through, so a push or a PR added
+    # tomorrow is covered the day it is written.
+    suppressed = suppress_if_inert(command)
+    if suppressed is not None:
+        return suppressed
 
     if isinstance(command, str):
         command = wrap_bash_if_needed(command)

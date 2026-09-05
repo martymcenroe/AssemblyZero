@@ -45,6 +45,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.core.github_writes import inert_reason, suppress_if_inert
+
 MUST_RESOLVE_LABEL = "must-resolve"
 RUN_TAG_ENV = "SPEEDRUN_RUN_TAG"
 RUN_START_ENV = "SPEEDRUN_RUN_START"
@@ -161,6 +163,12 @@ class FilingResult:
 
 
 def _default_runner(args: list[str]) -> subprocess.CompletedProcess:
+    # #2826: the filer's own runner honours the same switch as run_command,
+    # so even a caller that bypasses the explicit branch in file_must_resolve
+    # cannot write under a replay.
+    suppressed = suppress_if_inert(args)
+    if suppressed is not None:
+        return suppressed
     try:
         return subprocess.run(
             args, capture_output=True, text=True, encoding="utf-8", errors="replace"
@@ -419,6 +427,25 @@ def file_must_resolve(
         conflict.get("criterion_a", ""), conflict.get("criterion_b", "")
     )
 
+    # #2826: a replay never writes to GitHub. On 2026-09-04 a replay of a
+    # halted run reached this point and filed boostgauge #434 -- a copy of a
+    # question already ruled and closed -- and the next launch was refused by
+    # it. The suppressed filing is recorded in the ledger without a number so
+    # the replay report can still say "this run would have asked here", and
+    # the launcher's reader, which keys on the number, never counts it.
+    inert = inert_reason()
+    if inert:
+        log(
+            f"  [{origin.tag}] NOT FILED ({inert}): GitHub writes are inert. "
+            f"A live roll would have raised must-resolve fingerprint {fingerprint} "
+            f"against #{source_issue}."
+        )
+        record_suppressed(
+            repo_root, title=build_title(source_issue, conflict),
+            fingerprint=fingerprint, run_id=run_id, ts=conflict_ts, reason=inert,
+        )
+        return FilingResult(True, "suppressed", None, fingerprint, detail=inert)
+
     slug = repo_slug(repo_root, runner=runner)
     if not slug:
         log(f"  [{origin.tag}] could not file must-resolve: no GitHub remote for {repo_root}")
@@ -577,6 +604,38 @@ def record_filed(
     except OSError:
         # The roll is already halting. Losing the ledger line costs the
         # summary a number; raising here would cost the halt.
+        return False
+
+
+def record_suppressed(
+    repo_root: Path | str,
+    *,
+    title: str,
+    fingerprint: str | None = None,
+    run_id: str = "",
+    ts: str | None = None,
+    reason: str,
+) -> bool:
+    """Append one filing that was NOT made because writes were inert (#2826).
+
+    Same file, same append-only discipline, no number: ``read_filed`` keys on
+    the number and so never surfaces these to the launcher, while the line
+    itself keeps the record that a replay reached a question.
+    """
+    try:
+        path = filed_ledger_path(repo_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "number": None,
+                "suppressed": reason,
+                "title": title or "",
+                "fingerprint": fingerprint or "",
+                "run_id": run_id or "",
+                "ts": ts or datetime.now().strftime(_TS_FMT),
+            }) + "\n")
+        return True
+    except OSError:
         return False
 
 
