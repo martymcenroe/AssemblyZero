@@ -46,14 +46,25 @@ def repo(tmp_path):
 class _Recorder:
     """Stands in for _run, recording argv and replaying scripted exit codes."""
 
-    def __init__(self, codes=None):
+    def __init__(self, codes=None, task_repo=None):
         self.calls = []
         self.codes = codes or {}
+        # #2831: what the scheduler says the task was registered for. A stop
+        # ends the task only when this names the repo being stopped; None
+        # plays a scheduler that cannot say.
+        self.task_repo = task_repo
 
     def __call__(self, cmd, cwd=None):
         self.calls.append(cmd)
         code = self.codes.get(cmd[1] if len(cmd) > 1 else "", 0)
-        return subprocess.CompletedProcess(cmd, code, stdout="", stderr="boom")
+        stdout = ""
+        if cmd[:2] == ["schtasks", "/Query"] and "/V" in cmd and self.task_repo:
+            stdout = (
+                "TaskName:      \\AZ-SpeedrunRoll\n"
+                f"Task To Run:   pythonw.exe speedrun_roll.py --repo {self.task_repo} "
+                "--issue 7 --log-dir x\n"
+            )
+        return subprocess.CompletedProcess(cmd, code, stdout=stdout, stderr="boom")
 
     def schtasks(self, verb):
         return [c for c in self.calls if c[0] == "schtasks" and c[1] == verb]
@@ -292,12 +303,15 @@ class TestStoppingADetachedRoll:
 
     def test_the_task_is_ended_after_the_tree_is_killed(self, repo, runs):
         runs.joinpath("detached-roll.pid").write_text("4242", encoding="utf-8")
-        rec = _Recorder()
+        rec = _Recorder(task_repo=repo)
         with patch.object(sr, "is_live_python", lambda pid: True):
             self._stop(repo, rec)
 
         order = [c[0] for c in rec.calls if c[0] in ("taskkill", "schtasks")]
-        assert order == ["taskkill", "schtasks"], order
+        # #2831: the tree kill, then the query that proves the task is this
+        # repo's, then the End.
+        assert order == ["taskkill", "schtasks", "schtasks"], order
+        assert rec.schtasks("/End"), rec.calls
 
     def test_a_recycled_pid_is_not_killed(self, repo, runs):
         """Windows reuses pids. A stale file must never authorise tree-killing
@@ -318,8 +332,9 @@ class TestStoppingADetachedRoll:
         assert not pid.exists()
 
     def test_stopping_with_nothing_running_is_not_an_error(self, repo, runs):
-        rec = _Recorder(codes={"/End": 1})
+        rec = _Recorder(codes={"/End": 1}, task_repo=repo)
         assert self._stop(repo, rec) == 0
+        assert rec.schtasks("/End"), rec.calls
 
     def test_stopping_works_from_a_stale_tree(self, repo, runs):
         """Stopping is about processes, not code -- a staleness gate standing

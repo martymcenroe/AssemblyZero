@@ -1792,7 +1792,7 @@ def is_live_python(pid: str) -> bool:
     return f'"{pid}"' in out and "python" in out.lower()
 
 
-def stop_detached(log_dir: Path) -> int:
+def stop_detached(log_dir: Path, repo_root: Path | None = None) -> int:
     """Stop a detached roll and everything it spawned (#2016).
 
     `schtasks /End` is not enough on its own: it ends the task's own process and
@@ -1834,10 +1834,11 @@ def stop_detached(log_dir: Path) -> int:
     else:
         print(f"No recorded pid at {path}.")
 
-    ended = _run(["schtasks", "/End", "/TN", TASK_NAME])
-    if ended.returncode != 0 and not killed:
+    # #2831: by name would end whatever roll is live on this machine.
+    ended, outcome = _end_task_for(repo_root or Path(log_dir).resolve().parents[2])
+    if not ended and not killed:
         log.write("DETACH-STOP nothing was running")
-        print(f"Task '{TASK_NAME}' was not running.")
+    print(outcome)
     return 0
 
 
@@ -1912,8 +1913,10 @@ def kill_roll(repo_root: Path, log_dir: Path, issue: int | None) -> int:
 
     if sys.platform == "win32":
         # Return the scheduled task to Ready when one was used. Absence is
-        # normal -- a foreground roll never registered one.
-        _run(["schtasks", "/End", "/TN", TASK_NAME])
+        # normal -- a foreground roll never registered one. #2831: only when
+        # the task is THIS repo's roll; the name is machine-global.
+        _ended, outcome = _end_task_for(repo_root)
+        print(f"  {outcome}")
 
     if stamped:
         print(f"Stamped '{KILLED_MARKER}' into {len(stamped)} run log(s).")
@@ -1962,6 +1965,50 @@ def _task_status() -> str:
         if len(fields) >= 3 and TASK_NAME in fields[0]:
             return fields[-1]
     return ""
+
+
+def _task_names_repo(repo_root: Path) -> bool | None:
+    """Whether the scheduled task on this machine was registered for `repo_root`.
+
+    #2831: the task name is machine-global -- there is one AZ-SpeedrunRoll --
+    so ending it by name ends whatever roll is live. On 2026-09-05 a unit test
+    killing its own tmp roll ended the operator's live run 13 that way, which
+    is the #2510 wrapper death. The task's own "Task To Run" carries the
+    `--repo` it was launched for; end it only when that names this repo.
+    None when schtasks cannot say, which is not a licence to end it.
+    """
+    result = _run(["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST"])
+    if result.returncode != 0:
+        return None
+    wanted = str(Path(repo_root).resolve()).lower().replace("/", "\\")
+    for line in (result.stdout or "").splitlines():
+        if line.strip().startswith("Task To Run:"):
+            command = line.split(":", 1)[1].lower().replace("/", "\\")
+            return wanted in command
+    return None
+
+
+def _end_task_for(repo_root: Path) -> tuple[bool, str]:
+    """End the scheduled task only when it is this repo's roll.
+
+    Returns (ended, what happened) so the caller can log and print the
+    outcome in one line each.
+    """
+    ours = _task_names_repo(repo_root)
+    if ours is None:
+        return False, (
+            f"Task '{TASK_NAME}' not ended: schtasks could not say which "
+            "repository it runs."
+        )
+    if not ours:
+        return False, (
+            f"Task '{TASK_NAME}' not ended: it is running another repository's "
+            f"roll, not {repo_root}."
+        )
+    ended = _run(["schtasks", "/End", "/TN", TASK_NAME])
+    if ended.returncode != 0:
+        return False, f"Task '{TASK_NAME}' was not running."
+    return True, f"Task '{TASK_NAME}' ended."
 
 
 def _task_last_result() -> int | None:
@@ -3475,7 +3522,7 @@ def main(argv: list[str] | None = None) -> int:
         return kill_roll(repo_root, log_dir, args.issue[0] if args.issue else None)
 
     if args.detach_stop:
-        return stop_detached(log_dir)
+        return stop_detached(log_dir, repo_root=repo_root)
 
     # #2138 / standard 0026: a viewer, not a launcher. It spends nothing and
     # runs no gates, so it must work even when a gate would refuse a launch.
