@@ -28,6 +28,13 @@ from typing import Literal, TypedDict
 #: reported passed while holding 31 passed / 1 failed.
 DEFAULT_MAX_ITERATIONS = 5
 
+#: #2841: the hard ceiling the green loop may be granted up to, one iteration
+#: at a time, while each iteration improves on the last (more tests passing,
+#: or the same tests at higher coverage). The base cap above stays the budget;
+#: this is how far a loop that is still converging may be carried past it.
+#: Run 15 climbed 29, 35, 45, 47 passing and met the base cap at 47 of 51.
+GREEN_ITERATION_CEILING = 10
+
 
 class HumanDecision(str, Enum):
     """User choices at human gate nodes."""

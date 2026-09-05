@@ -85,6 +85,10 @@ class TestTheBudgetIsDerived:
         from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             MAX_SCAFFOLD_ATTEMPTS,
         )
+        from assemblyzero.workflows.testing.state import (
+            DEFAULT_MAX_ITERATIONS,
+            GREEN_ITERATION_CEILING,
+        )
 
         expected = (
             TOTAL_STEPS
@@ -92,6 +96,9 @@ class TestTheBudgetIsDerived:
             + (MAX_SCAFFOLD_ATTEMPTS + 1) * 3
             + MAX_COMPLETENESS_ITERATIONS * 2
             + 5 * 3
+            # #2841: the iterations the cap may grant past the base, budgeted
+            # whether or not they are granted.
+            + (GREEN_ITERATION_CEILING - DEFAULT_MAX_ITERATIONS) * 3
             + MAX_COVERAGE_AUGMENT_ATTEMPTS * 2
             + 5 * 4
             + HEADROOM_STEPS
