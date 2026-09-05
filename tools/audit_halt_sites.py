@@ -32,11 +32,13 @@ _install_utf8_console()
 
 from assemblyzero.core.gate_registry import (  # noqa: E402
     ACTION_HALT,
+    EMITS_HEAD_EXEMPTIONS,
     GATE_REGISTRY,
     JUDGES_MODEL_OUTPUT,
     HaltSite,
     WalkCoverage,
     halt_counts,
+    mismatched_emits,
     renumberings,
     scan_halt_sites,
     site_to_gate,
@@ -179,14 +181,25 @@ def main(argv: list[str] | None = None) -> int:
         # check then reports the neighbours while saying nothing about the gate
         # that moved. In #2723 it named four gates that had not been touched.
         moved, fresh, ghosts = renumberings(sites)
-        if not fresh and not ghosts and not moved:
+        # #2776: a row can name a return that exists and is not its own, which
+        # neither direction of the two-way check can see. Compared here so a
+        # wrong pairing fails the same command an unregistered site does.
+        unpaired = mismatched_emits(sites)
+        if not fresh and not ghosts and not moved and not unpaired:
+            paired = sum(
+                1 for g in GATE_REGISTRY
+                if len(g.sites) == 1 and g.key not in EMITS_HEAD_EXEMPTIONS
+            )
             print(
                 f"PASS -- {coverage.files_scanned} files, {len(sites)} halt "
                 f"sites, every one registered; {len(GATE_REGISTRY)} gates, "
-                f"halt rows: {halt_counts()}"
+                f"halt rows: {halt_counts()}; {paired} row(s) paired to their "
+                f"own return, {len(EMITS_HEAD_EXEMPTIONS)} exempt (#2814)"
             )
             return 0
         parts = []
+        if unpaired:
+            parts.append(f"{len(unpaired)} mispaired row(s)")
         if moved:
             parts.append(f"{len(moved)} renumbered site(s)")
         if fresh:
@@ -202,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {rename.describe()}")
                 print(f"    {rename.named}")
                 print(f"    -> {rename.found}")
+        for gate_key, emits, head in unpaired:
+            print(f"  mispaired: {gate_key} claims {emits!r}")
+            print(f"    but its only site's head is {head[:70]!r}")
         for site in fresh:
             print(f"  unregistered: {site.key}  line {site.line}  {site.head[:70]!r}")
         for gate_key, site in ghosts:

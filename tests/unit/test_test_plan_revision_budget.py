@@ -10,7 +10,7 @@ since #2793 a recorded reason routes to HALT. `route_after_review` checks the
 error before it checks anything else, so the run ended on the FIRST short
 revision and never reached the branch that sends it back to N1.5. The comment
 above that return said "increment count and let the router decide whether to
-retry or END"; the router never decided. `MAX_REVISION_CYCLES = 2` was
+retry or END"; the router never decided. `MAX_REVISION_CYCLES` was
 unreachable from this site for as long as the site has existed.
 
 **The fix.** Under the cap, record no reason. At the cap, record one that
@@ -19,8 +19,14 @@ under ruling 1 of #2723: what ends the run is the allowance running out, not
 a verdict on what the drafter wrote.
 
 Note on the arithmetic, stated rather than assumed: `MAX_REVISION_CYCLES` is
-**2**, set by #1072. So a run gets two revision cycles, and the second short
-one is the one that halts. These tests are written against the shipped cap.
+**3** (#2815, operator ruling 2026-09-05). #1072 set it to 2 and nothing ever exercised
+the second cycle, because until #2775 the loop could not reach it at all --
+so the number in that constant had never once been tested. With the loop
+running, the acceptance is a plan that comes back short twice and complete on
+the third pass, which needs three.
+
+Every assertion below reads the constant rather than a literal, so the cap
+can move again without rewriting the suite.
 """
 
 from __future__ import annotations
@@ -128,7 +134,7 @@ class TestTheNodeItself:
         assert str(MAX_REVISION_CYCLES) in message, (
             "the message must say how large the allowance was"
         )
-        assert "1/2" in message, (
+        assert f"1/{len(REQUIREMENTS)}" in message, (
             "and how short the plan still is, so a reader knows which side "
             "to repair"
         )
