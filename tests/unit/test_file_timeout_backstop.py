@@ -13,7 +13,7 @@ from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
     ENV_TIMEOUT_FLOOR,
     FILE_TIMEOUT_CAP,
     FILE_TIMEOUT_FLOOR,
-    calculate_timeout,
+    compute_dynamic_timeout as calculate_timeout,
 )
 
 
