@@ -127,6 +127,15 @@ def _wrap_with_checkpoint(node_fn: Callable[..., dict[str, Any]],
         except Exception as e:
             print(f"  [CP:{ckpt_name}] wrapper caught unexpected error: {e}")
         return result
+
+    # #2813: the same carry `narrated` performs, for the same reason. This
+    # wrapper stands between a node function and the graph for six nodes;
+    # without it they report their module as `graph`, and nothing can ask
+    # which file supplies a node -- the question that catches a module
+    # imported but wired to nothing (#2787).
+    wrapped.__name__ = getattr(node_fn, "__name__", "wrapped")
+    wrapped.__module__ = getattr(node_fn, "__module__", wrapped.__module__)
+    wrapped.__wrapped__ = node_fn
     return wrapped
 
 
