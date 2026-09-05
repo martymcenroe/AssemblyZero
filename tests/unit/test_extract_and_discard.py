@@ -8,8 +8,6 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from assemblyzero.workflows.testing.nodes.review_test_plan import (
     review_test_plan,
     _mock_review_test_plan,
@@ -47,8 +45,6 @@ class TestBlockedVerdictExtraction:
         """Gemini BLOCKED → test_plan_verdict is short summary, not full response."""
         mock_root.return_value = Path("/tmp/test-repo")
         mock_prompt.return_value = "review prompt"
-
-        raw_prose = "A" * 500  # Long raw prose that should NOT appear in state
 
         mock_result = MagicMock()
         mock_result.success = True
@@ -258,7 +254,7 @@ class TestAuditFilePreservation:
                 mock_cov.return_value = {"passed": False, "total": 2, "covered": 1, "coverage_pct": 50.0, "missing": ["REQ-2"]}
 
                 state = _make_state(audit_dir=tmpdir)
-                result = review_test_plan(state)
+                review_test_plan(state)
 
             # Verify save_audit_file was called with the FULL raw response
             verdict_calls = [
