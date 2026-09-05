@@ -154,46 +154,108 @@ def should_use_edit_script(
     return True
 
 
+def _file_tokens(filepath: str) -> set[str]:
+    """The names a failure line would carry if this file were implicated.
+
+    `src/boostgauge/skins/stingray.py` -> boostgauge.skins.stingray, the bare
+    stem, the path itself, and `test_stingray` -- the runner names the test,
+    and the fix lands in the module under it.
+    """
+    path = Path(filepath)
+    stem = path.stem
+    if not stem:
+        return set()
+    parts = [p for p in path.with_suffix("").parts if p not in ("src", "lib")]
+    return {
+        stem.lower(),
+        ".".join(parts).lower(),
+        str(path).replace("\\", "/").lower(),
+        f"test_{stem}".lower(),
+    }
+
+
+def _attributed_blocks(failure_summary: str, filepath: str) -> list[str]:
+    """The blank-line-separated blocks of the corpus that name this file.
+
+    #2851: attribution is per BLOCK, not per line. A traceback block is a test
+    name, a frame, a source line and its `E` lines; the frame is the line that
+    names the owning file (`src/boostgauge/collector.py:116: in
+    _is_unleashed_session`), and keeping only that line would hand the model a
+    filename with no error under it. Lines are slash-normalised before the
+    match because pytest prints Windows frames with backslashes and the tokens
+    are built with forward slashes.
+    """
+    tokens = _file_tokens(filepath)
+    if not tokens:
+        return []
+    kept: list[str] = []
+    for block in _blocks(failure_summary):
+        haystack = block.replace("\\", "/").lower()
+        if any(token in haystack for token in tokens):
+            kept.append(block)
+    return kept
+
+
+def _blocks(failure_summary: str) -> list[str]:
+    """Split the summary into its units, by the one rule all three shapes obey.
+
+    A line at column 0 opens a unit; indented lines continue it; a blank line
+    ends it. That reads a bare `FAILED path::test - reason` line as a unit of
+    its own, a grouped entry (`N test(s): reason` over an indented `e.g.`) as
+    one unit, and a traceback block (test name over an indented frame, source
+    line and `E` lines) as one unit -- so the frame that names the file and
+    the error it explains are never separated.
+    """
+    blocks: list[str] = []
+    current: list[str] = []
+    for line in failure_summary.splitlines():
+        if not line.strip():
+            if current:
+                blocks.append("\n".join(current))
+                current = []
+            continue
+        if not line[0].isspace() and current:
+            blocks.append("\n".join(current))
+            current = []
+        current.append(line.rstrip())
+    if current:
+        blocks.append("\n".join(current))
+    return blocks
+
+
+def is_attributed(failure_summary: str, filepath: str) -> bool:
+    """Does at least one failure in the corpus name this file?
+
+    The caller's decision (#2851): when the corpus attributes to SOME file,
+    a file it does not attribute to has nothing to fix this iteration and is
+    left alone -- not sent the whole corpus with an order to fix all of it.
+    """
+    return bool(_attributed_blocks(failure_summary, filepath))
+
+
 def failures_for_file(failure_summary: str, filepath: str) -> str:
     """The failures this file is implicated in, or everything if unattributable.
 
     The issue asks to "scope the prompt to the failing tests rather than the
     full failure corpus WHERE THE RUNNER CAN ATTRIBUTE failures to files". The
-    conditional is load-bearing and is honoured literally: pytest names the
-    failing TEST file, not the implementation file, so attribution runs on the
-    module name and the file stem, and when nothing matches the caller gets the
-    whole corpus back. Silently narrowing to nothing would starve the fix of
-    the information it needs, which is a worse failure than a prompt that is
-    larger than necessary.
+    conditional is load-bearing and is honoured literally: when nothing
+    matches the caller gets the whole corpus back. Silently narrowing to
+    nothing would starve the fix of the information it needs, which is a worse
+    failure than a prompt that is larger than necessary.
+
+    #2851: what "matches" means changed. It used to be a line-by-line filter
+    over a summary whose traceback section had no frame lines and whose
+    "source line" was a caret underline, so on run-issue4-120049 nothing ever
+    matched and all six files were told to fix all four failures. Blocks are
+    kept whole now, and the frame `_extract_traceback_blocks` emits is what
+    they match on.
     """
     if not failure_summary.strip():
         return failure_summary
-
-    path = Path(filepath)
-    stem = path.stem
-    if not stem:
-        return failure_summary
-
-    # `src/boostgauge/skins/stingray.py` -> boostgauge.skins.stingray, and the
-    # bare stem, and the path itself. A failure mentioning any of them is this
-    # file's business.
-    parts = [p for p in path.with_suffix("").parts if p not in ("src", "lib")]
-    tokens = {
-        stem.lower(),
-        ".".join(parts).lower(),
-        str(path).replace("\\", "/").lower(),
-    }
-    # `test_gauge.py` implicates `gauge.py`: the runner names the test, and the
-    # fix lands in the module under it.
-    tokens.add(f"test_{stem}".lower())
-
-    kept = [
-        line for line in failure_summary.splitlines()
-        if any(token and token in line.lower() for token in tokens)
-    ]
+    kept = _attributed_blocks(failure_summary, filepath)
     if not kept:
         return failure_summary
-    return "\n".join(kept)
+    return "\n\n".join(kept)
 
 
 def build_code_edit_script_prompt(
@@ -221,9 +283,10 @@ def build_code_edit_script_prompt(
         "1-15 lines).\n"
         "2. To INSERT new code, SEARCH for the nearest existing anchor "
         "line(s) and REPLACE with those same anchor lines plus the new code.\n"
-        "3. Emit one edit block per fix. Fix ALL the failures listed below. "
-        "Touch NOTHING else -- code you do not name in a SEARCH block cannot "
-        "and must not change, and the passing tests depend on that.\n"
+        "3. Emit one edit block per fix. Fix the failures listed below that "
+        "this file is responsible for. Touch NOTHING else -- code you do not "
+        "name in a SEARCH block cannot and must not change, and the passing "
+        "tests depend on that.\n"
         "4. No preamble, no explanation, no markdown fences around the "
         "blocks -- edit blocks only."
     ]
