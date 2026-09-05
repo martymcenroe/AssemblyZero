@@ -569,7 +569,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
             "only because it fired on the FIRST short revision: the return "
             "recorded a reason, and since #2793 a recorded reason routes to "
             "HALT, so route_after_review never reached its revise branch and "
-            "MAX_REVISION_CYCLES = 2 was unreachable from this site -- the "
+            "MAX_REVISION_CYCLES was unreachable from this site -- the "
             "cap was dead code. The site now records no reason under the cap "
             "and the N1 <-> N1.5 loop runs; what is left here is the "
             "allowance running out, which is a budget"
@@ -1205,6 +1205,74 @@ def unregistered(
     """Walked sites no row names. The gate the ratchet exists to catch."""
     known = site_to_gate(registry)
     return [site for site in sites if site.key not in known]
+
+
+#: Site kinds whose head the WALKER synthesises rather than reads out of the
+#: code. `refusal` sites get the literal string "pinning refusal"; it appears
+#: in no source file and never will, so a text rule cannot be asked about them.
+_SYNTHETIC_HEAD_KINDS: frozenset[str] = frozenset({KIND_REFUSAL, KIND_CONSERVATION})
+
+
+#: Single-site rows whose site head the WALKER reads wrongly, not rows that
+#: are wrong (#2776). Each entry is a defect in `_static_head`, not in the
+#: registry, and #2814 is where they get fixed; every one should disappear.
+EMITS_HEAD_EXEMPTIONS: dict[str, str] = {
+    "impl.deterministic_failure": (
+        "the return is f\"{DETERMINISTIC_FAILURE}: {message}\", so the static "
+        "head is literally '{}: {}' and carries no text to compare"
+    ),
+    "spec.review_blocked": (
+        "the return interpolates three values and no literal words survive; "
+        "head is '{}\\n  exit: {}\\n  {}'"
+    ),
+    "spec.edit_script_rejected": (
+        "the return is _spec_edit_halt(halt_reason), and _static_head takes a "
+        "call's first literal ARGUMENT rather than following into the callee, "
+        "so it reads the reason ('every edit touched locked content...') "
+        "instead of the wrapper's '[EDIT-SCRIPT] spec revision rejected' "
+        "prefix. The row is right and the head is wrong"
+    ),
+}
+
+
+def mismatched_emits(
+    sites: list[HaltSite], registry: tuple[Gate, ...] = ()
+) -> list[tuple[str, str, str]]:
+    """(gate key, emits, head) where a row's message is not its site's (#2776).
+
+    The two-way check proves every site is named and every name exists.
+    Neither notices a row naming the WRONG return: retire a gate, add a return
+    at the end, and the surviving row owns a return it has nothing to do with,
+    with no phantom to give it away. Only comparing the row's message to THAT
+    SITE's head catches it.
+
+    Measured before it was written, because the obvious wider forms do not
+    work. Over the whole named set, `emits`-in-head fails 42 of 128 readable
+    sites -- a row covering five returns can only name one of their messages.
+    A source-text rule (is `emits` written in the function the site is in, or
+    in what `decided_in` names) reads 0 of 81 and is therefore worthless HERE:
+    both the right and the wrong return live in the same function, so it
+    passes the very case this exists to catch. A check that cannot fail on
+    its own scenario is the defect, not the guard.
+
+    So: single-site rows only, where `emits` and the head are answerable
+    one-to-one. That is 51 of the 81 rows with sites. The other 30 are
+    multi-site rows, whose `emits` names one of several messages by design,
+    and two rows whose only site has an unreadable head.
+    """
+    found: list[tuple[str, str, str]] = []
+    by_key = {s.key: s for s in sites}
+    for gate in (registry or GATE_REGISTRY):
+        if len(gate.sites) != 1 or gate.key in EMITS_HEAD_EXEMPTIONS:
+            continue
+        site = by_key.get(gate.sites[0])
+        if site is None or site.kind in _SYNTHETIC_HEAD_KINDS:
+            continue
+        if site.head.startswith("<"):
+            continue
+        if gate.emits not in site.head:
+            found.append((gate.key, gate.emits, site.head))
+    return sorted(found)
 
 
 def phantoms(

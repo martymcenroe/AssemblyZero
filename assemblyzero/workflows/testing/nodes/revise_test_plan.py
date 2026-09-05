@@ -3,7 +3,7 @@
 When N1 (review_test_plan) returns BLOCKED, the workflow used to END.
 With this node in the graph, the BLOCKED feedback is fed back to an
 LLM revisor that produces a fresh Test Scenarios table; the loop then
-returns to N1 for re-review. Hard cap: 2 revision cycles before END.
+returns to N1 for re-review, bounded by `MAX_REVISION_CYCLES` below.
 
 The revisor is invoked via the same provider abstraction as N1 with
 the #1071 retry policy, so transient failures during revision retry
@@ -23,9 +23,20 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 logger = logging.getLogger(__name__)
 
 
-# Maximum revision cycles before END. Hard cap prevents infinite loops
-# when the LLM cannot fix the underlying issue. Per #1072 acceptance.
-MAX_REVISION_CYCLES = 2
+# Maximum revision cycles before the budget ends the run. Hard cap prevents
+# infinite loops when the LLM cannot fix the underlying issue.
+#
+# #1072 set this to 2 and nothing ever exercised the second cycle, because
+# until #2775 the loop could not reach it: this node recorded a reason on the
+# FIRST short revision, and a recorded reason routes to HALT. The cap was
+# dead code for as long as it existed, so its number was never tested.
+#
+# 3 since #2815 (operator, 2026-09-05). With the loop actually running, the
+# acceptance this work was scoped against is a plan that comes back short
+# twice and complete on the third pass, which needs three cycles rather than
+# two. `step_budget.recursion_limit` imports this constant instead of
+# repeating it, so the graph's step allowance follows automatically.
+MAX_REVISION_CYCLES = 3
 
 
 # Pattern: T001 / T1 / 001 — captured by the same regex used in
