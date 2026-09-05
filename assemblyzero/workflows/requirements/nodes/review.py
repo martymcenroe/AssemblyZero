@@ -17,12 +17,11 @@ from typing import Any
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.verdict_schema import (
-    VERDICT_SCHEMA,
     FEEDBACK_SCHEMA,
     FeedbackResult,
     StructuredContractError,
     is_none_placeholder,
-    parse_structured_verdict,
+    parse_markdown_feedback,
     parse_structured_feedback,
     scan_open_questions_section,
 )
@@ -100,7 +99,51 @@ def _invoke_reviewer_with_feedback_schema(
     # Issue #1843: the payload lives on .response — `.content` never existed,
     # so parses ran against the stringified dataclass and always fell back.
     raw = getattr(result, "response", None) or ""
-    return parse_structured_feedback(raw)
+    try:
+        return parse_structured_feedback(raw)
+    except StructuredContractError as first:
+        # #2835: the Review Instructions hand the reviewer the 0702c markdown
+        # template and the transport asks for JSON; when it follows the
+        # template (run 14, 2026-09-05) the verdict is fully legible and is
+        # read as our own format (standard 0028 §3).
+        template = parse_markdown_feedback(raw)
+        if template is not None:
+            print(
+                "    [N3] verdict read from the 0702c review template, not JSON "
+                f"(#2835): {template['verdict']}"
+            )
+            return template
+        # Neither shape. One re-ask, naming the defect; then the rejection.
+        print(
+            "    [N3] reviewer answered in neither the JSON contract nor the "
+            "review template; asking once more for the JSON object (#2835)."
+        )
+        retry = provider.invoke(system + _REASK_FOR_JSON, prompt, **schema_kwargs)
+        raw_retry = getattr(retry, "response", None) or ""
+        try:
+            return parse_structured_feedback(raw_retry)
+        except StructuredContractError as second:
+            template = parse_markdown_feedback(raw_retry)
+            if template is not None:
+                print(
+                    "    [N3] re-asked verdict read from the 0702c review template "
+                    f"(#2835): {template['verdict']}"
+                )
+                return template
+            raise StructuredContractError(
+                "feedback",
+                f"unreadable twice -- first: {first.reason}; re-ask: {second.reason}",
+                raw_retry,
+            ) from second
+
+
+#: Appended to the system prompt for the one re-ask (#2835).
+_REASK_FOR_JSON = (
+    "\n\nYour previous answer was neither the JSON object the Response Format "
+    "section requires nor the review template. Answer again with ONLY that "
+    "JSON object: keys verdict (APPROVED, REVISE or DISCUSS), rationale, "
+    "feedback_items, open_questions."
+)
 
 
 def review(state: RequirementsWorkflowState) -> dict[str, Any]:
@@ -629,7 +672,7 @@ def _extract_actionable_feedback(
         if suggestions:
             parts.append(f"## Suggestions\n{suggestions}")
         if parts:
-            return f"Verdict: APPROVED\n\n" + "\n\n".join(parts)
+            return "Verdict: APPROVED\n\n" + "\n\n".join(parts)
         return "Verdict: APPROVED. No changes needed."
 
     # For BLOCKED/REVISE: extract all actionable feedback

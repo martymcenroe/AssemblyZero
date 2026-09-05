@@ -407,6 +407,108 @@ def scan_open_questions_section(text: str) -> DraftQuestionsResult:
     return DraftQuestionsResult(open_questions=open_questions, source="document_scan")
 
 
+#: The verdict checkboxes the LLD review template (docs/skills/0702c) scaffolds.
+#: A closed set: the reader accepts exactly one checked box and nothing else.
+_TEMPLATE_VERDICTS = ("APPROVED", "REVISE", "DISCUSS")
+
+#: What a template subsection says when there is nothing wrong.
+_TEMPLATE_NO_ISSUE = frozenset({"no issues found", "no blocking issues found"})
+
+
+def _template_section_lines(text: str, title: str):
+    """Yield the body lines of the template section whose heading starts with
+    ``title``, INCLUDING lines under its own sub-headings.
+
+    ``_iter_section_lines`` stops at any heading; the review template nests
+    ``### Cost`` / ``### Safety`` under ``## Tier 1``, so a Tier walk has to
+    carry on through headings deeper than the one it opened with and stop at
+    the next heading of the same or a shallower level.
+    """
+    wanted = title.casefold()
+    level = 0
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            depth = len(stripped) - len(stripped.lstrip("#"))
+            heading = stripped.lstrip("#").strip().rstrip(":").casefold()
+            if level and depth <= level:
+                level = 0
+            if not level and heading.startswith(wanted):
+                level = depth
+                continue
+        if level:
+            yield stripped
+
+
+def _checked_verdict(line: str) -> str | None:
+    """The verdict word on a checked template line (``[x] **REVISE** - …``)."""
+    stripped = line.strip()
+    if stripped.startswith("-"):
+        stripped = stripped[1:].strip()
+    if stripped[:3].casefold() != "[x]":
+        return None
+    rest = stripped[3:].strip().lstrip("*").strip().upper()
+    for verdict in _TEMPLATE_VERDICTS:
+        if rest.startswith(verdict):
+            return verdict
+    return None
+
+
+def _template_items(text: str, title: str) -> list[str]:
+    """The bullets under a Tier section that are findings, not placeholders."""
+    items: list[str] = []
+    for line in _template_section_lines(text, title):
+        if not line.startswith("-"):
+            continue
+        body = line[1:].strip()
+        if body[:3] in ("[ ]", "[x]", "[X]"):
+            body = body[3:].strip()
+        bare = body.strip("*_`").strip().rstrip(".!").casefold()
+        if not body or bare in _TEMPLATE_NO_ISSUE or is_none_placeholder(body):
+            continue
+        items.append(body)
+    return items
+
+
+def parse_markdown_feedback(raw: str) -> FeedbackResult | None:
+    """Read a design review written in the fleet's own 0702c template (#2835).
+
+    The reviewer is handed that template as its Review Instructions and, at
+    the transport, a directive to answer as one JSON object. On 2026-09-05
+    run 14 it followed the template, and the run ended on a verdict that was
+    fully legible. Standard 0028 §3 permits a deterministic walk of OUR OWN
+    markdown format; this is that walk, over headings 0702c defines:
+
+    - ``verdict``: the single checked box under ``## Verdict``;
+    - ``feedback_items``: the bullets under ``## Tier 1`` and ``## Tier 2``
+      that are not "No issues found" placeholders;
+    - ``open_questions``: the checkbox scan of ``## Open Questions Resolved``;
+    - ``rationale``: the whole text, so the node's own Tier arithmetic
+      (#1511) reads it exactly as it reads a JSON rationale.
+
+    None when there is not exactly one checked verdict -- the reader does
+    not guess, and the caller re-asks.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    checked = [
+        verdict for verdict in (
+            _checked_verdict(line) for line in _template_section_lines(text, "verdict")
+        ) if verdict
+    ]
+    if len(checked) != 1:
+        return None
+    return FeedbackResult(
+        verdict=checked[0],
+        rationale=text,
+        feedback_items=_template_items(text, "tier 1") + _template_items(text, "tier 2"),
+        open_questions=scan_open_questions_section(text)["open_questions"],
+        resolved_issues=[],
+        source="markdown_template",
+    )
+
+
 def scan_residual_questions(text: str) -> FinalizeQuestionsResult:
     """Deterministic residual question/TODO scan of generated content.
 
