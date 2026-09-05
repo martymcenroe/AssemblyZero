@@ -724,9 +724,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     # prompt that is larger than it should be.
     attributed_paths: set[str] = set()
     if revision_error_context:
+        # #2861: with repo_root, a failure raised inside a test body is
+        # attributed by the names the test uses, not only by its frames.
         attributed_paths = {
             spec["path"] for spec in files_to_modify
-            if is_attributed(revision_error_context, spec["path"])
+            if is_attributed(revision_error_context, spec["path"], repo_root)
         }
         if attributed_paths:
             print(
@@ -736,8 +738,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             )
         else:
             print(
-                "    [N4] failures attributed to no file by traceback; every "
-                "file receives the whole failure set"
+                "    [N4] failures attributed to no file by traceback or "
+                "test body; every file receives the whole failure set"
             )
 
     for i, file_spec in enumerate(files_to_modify):

@@ -1461,6 +1461,22 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     # attempt. Declared out here because a worktree that already exists skips
     # the creation block entirely and still reaches the sub-workflow invoke.
     recovered_branch = ""
+    # #2860: a resume that finds its worktree already on disk is in the same
+    # position as one that recovered it -- the code in it is the prior
+    # attempt's, because a resume exists only after a prior attempt ran. Run
+    # 18 (run-issue4-140813) took this path when the entry sweep could not
+    # remove the previous worktree, entered the sub-workflow as a first
+    # attempt, and the red phase refused the prior work as green-at-red in
+    # three seconds. The signal is "this is a resume", not "this entry ran
+    # `git worktree add`".
+    reused_existing = (
+        state.get("resumed_from") == "impl" and worktree_path.is_dir()
+    )
+    if reused_existing:
+        print(
+            f"    Reusing existing worktree {worktree_path} for the resume "
+            f"(the previous attempt's tree; entering as a later attempt)"
+        )
 
     try:
         # Ensure the worktree exists, carved from the TARGET repo (Issue #1374).
@@ -1723,7 +1739,10 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # iteration_count zero. The recovery would otherwise turn a
             # from-zero rebuild into a halt, which is worse than the defect
             # it fixes.
-            "retry_mode": RESUMED if recovered_branch else state.get("retry_mode", ""),
+            "retry_mode": (
+                RESUMED if (recovered_branch or reused_existing)
+                else state.get("retry_mode", "")
+            ),
             # #2344: seed the iteration cap explicitly. Left absent, each
             # reader fell back to its own inline default -- 5 in N5's progress
             # message, 3 in the router's decision -- so the run announced a
