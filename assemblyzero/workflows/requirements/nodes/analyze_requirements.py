@@ -235,24 +235,113 @@ def _format_conflict_message(
     return "\n".join(lines)
 
 
-def _parse_analysis(raw: str) -> dict | None:
-    """Parse the analysis JSON, tolerating fenced or prefixed output."""
-    if not raw:
-        return None
-    text = raw.strip()
+#: #2830: where a model puts its findings when it ignores the schema. Run 13
+#: on boostgauge #4 answered three times -- `{"issues": [...]}`, a bare list,
+#: `{"issues": [...]}` again with different item keys -- and the gate threw all
+#: three away for want of the key `is_consistent`. The question the gate asks
+#: is "two quoted criteria and where they diverge"; every answer carried it.
+#: A closed set, authored from the recorded responses, not discovered.
+_FINDINGS_KEYS = ("conflicts", "issues", "findings", "contradictions", "problems")
+_CRITERION_A_KEYS = ("criterion_a", "quote_1", "quote_a", "first")
+_CRITERION_B_KEYS = ("criterion_b", "quote_2", "quote_b", "second")
+_SITUATION_KEYS = (
+    "diverging_situation", "divergence", "explanation", "description",
+    "situation", "reason",
+)
+_CATEGORY_KEYS = ("category", "type")
+
+
+def _strip_fence(text: str) -> str:
+    text = text.strip()
     if text.startswith("```"):
         first_newline = text.find("\n")
         if first_newline != -1:
             text = text[first_newline + 1 :]
         if text.rstrip().endswith("```"):
             text = text.rstrip()[:-3]
+    return text.strip()
+
+
+def _first_str(item: dict, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _findings_of(parsed: Any) -> list | None:
+    """The list of findings, wherever the model put it; None when there is none."""
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict):
+        for key in _FINDINGS_KEYS:
+            value = parsed.get(key)
+            if isinstance(value, list):
+                return value
+        if "is_consistent" in parsed:
+            return []
+    return None
+
+
+def _normalise_finding(item: dict) -> dict:
+    """One finding in the canonical keys, keeping everything else the model said."""
+    out = dict(item)
+    a = _first_str(item, _CRITERION_A_KEYS)
+    b = _first_str(item, _CRITERION_B_KEYS)
+    quotes = item.get("quotes")
+    if isinstance(quotes, list):
+        strs = [q.strip() for q in quotes if isinstance(q, str) and q.strip()]
+        if not a and strs:
+            a = strs[0]
+        if not b and len(strs) >= 2:
+            b = strs[1]
+    out["criterion_a"] = a
+    out["criterion_b"] = b
+    out["diverging_situation"] = _first_str(item, _SITUATION_KEYS)
+    category = _first_str(item, _CATEGORY_KEYS)
+    if category:
+        out["category"] = category
+    return out
+
+
+def _parse_analysis(raw: str) -> dict | None:
+    """Parse the analysis JSON, tolerating fenced or prefixed output and, since
+    #2830, a response that carries the findings under another key or at the
+    root, with the two criteria and the diverging situation under other names.
+
+    The result is always canonical: ``conflicts`` holds every finding that
+    quotes two criteria; ``notes`` holds the rest (an undefined term, a
+    non-discriminating test), which are for the operator to read and are never
+    filed; ``is_consistent`` is the model's when it said so and "no conflict"
+    otherwise. None only when there is no findings list anywhere -- the gate
+    does not invent a verdict.
+    """
+    if not raw:
+        return None
     try:
-        parsed = json.loads(text.strip())
+        parsed = json.loads(_strip_fence(raw))
     except ValueError:
         return None
-    if not isinstance(parsed, dict) or "is_consistent" not in parsed:
+    findings = _findings_of(parsed)
+    if findings is None:
         return None
-    return parsed
+    conflicts: list[dict] = []
+    notes: list[dict] = []
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        finding = _normalise_finding(item)
+        if finding["criterion_a"] and finding["criterion_b"]:
+            conflicts.append(finding)
+        else:
+            notes.append(finding)
+    out: dict = dict(parsed) if isinstance(parsed, dict) else {}
+    out["conflicts"] = conflicts
+    out["notes"] = notes
+    if not isinstance(out.get("is_consistent"), bool):
+        out["is_consistent"] = not conflicts
+    return out
 
 
 def _is_timeout(result: Any) -> bool:
@@ -499,6 +588,12 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
             return _halt_unverified(state, answered_by, reason)
 
     conflicts = parsed.get("conflicts") or []
+    # #2830: a finding that quotes fewer than two criteria is not a conflict
+    # and is never filed; it is still worth the operator's eye.
+    for note in parsed.get("notes") or []:
+        label = note.get("category") or "note"
+        text = note.get("diverging_situation") or note.get("term") or ""
+        print(f"  [N0c] noted, not a conflict ({label}): {text[:240]}")
     if parsed.get("is_consistent", True) or not conflicts:
         # CLEAN_MARKER is asserted verbatim by the pre-check's tests, so the
         # drafter goes on its own line rather than into that sentence.

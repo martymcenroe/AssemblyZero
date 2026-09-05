@@ -1,0 +1,14 @@
+```json
+{
+  "issues": [
+    {
+      "type": "CONFLICTING CRITERIA",
+      "description": "The acceptance criterion defines a CPU overhead limit for the overall collector polling interval, but its mandated benchmark test measures only the CPU time of 'the sweep'. Because the text explicitly defines 'the sweep' as excluding the psutil dependency (which is used on every tick for memory and per-row command line reads), the requirement and the test diverge. If the NtQuerySystemInformation sweep takes 2 ms but the psutil reads take 40 ms, the benchmark test will pass (sweep < 20 ms) while the actual collector overhead is > 2%, failing the < 1% requirement.",
+      "quotes": [
+        "< 1% CPU overhead at 2s polling interval — asserted by a benchmark test: the sweep's mean process_time over 8 ticks is < 20 ms",
+        "The sweep is one NtQuerySystemInformation(SystemProcessInformation) call via ctypes... psutil remains for virtual_memory() and for the per-row cmdline of Python interpreter rows. It is a dependency, not the sweep."
+      ]
+    }
+  ]
+}
+```
