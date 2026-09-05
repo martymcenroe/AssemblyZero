@@ -196,9 +196,10 @@ def test_the_wall_backstop_still_exists_for_a_call_that_streams_forever():
 
 
 def test_the_floor_no_longer_sits_at_600():
-    """#2405: 602s killed boostgauge #1 five times. The floor moved past it."""
-    assert FILE_TIMEOUT_FLOOR == 1200
-    assert compute_dynamic_timeout("x" * 2500) == 1200
+    """#2405: 602s killed boostgauge #1 five times. The floor moved past it.
+    #2843: and past 1200, which killed two streaming calls on run 15."""
+    assert FILE_TIMEOUT_FLOOR == 3600
+    assert compute_dynamic_timeout("x" * 2500) == 3600
 
 
 def test_the_scaling_never_reached_the_cap_which_is_why_the_floor_had_to_move():
@@ -208,13 +209,16 @@ def test_the_scaling_never_reached_the_cap_which_is_why_the_floor_had_to_move():
     Reaching the old 1200 cap from a 600 floor needed 600,000 characters.
     """
     old_floor = 600
+    old_cap = 1200
     realistic_prompt_chars = 2500
     assert old_floor + realistic_prompt_chars // 1000 == 602
-    assert (FILE_TIMEOUT_CAP - old_floor) * 1000 == 600_000
+    assert (old_cap - old_floor) * 1000 == 600_000
+    assert FILE_TIMEOUT_CAP >= old_cap
 
 
 def test_the_floor_is_overridable_by_environment(monkeypatch):
     monkeypatch.setenv(ENV_TIMEOUT_FLOOR, "1800")
+    monkeypatch.setenv(ENV_TIMEOUT_CAP, "1800")
     assert compute_dynamic_timeout("x" * 2500) == 1800
 
 
@@ -229,7 +233,7 @@ def test_a_bad_override_falls_back_rather_than_failing_the_call(monkeypatch, bad
     """An operator setting this is rescuing a stalled run. A typo must not
     convert a slow call into a dead one."""
     monkeypatch.setenv(ENV_TIMEOUT_FLOOR, bad)
-    assert compute_dynamic_timeout("x" * 2500) == 1200
+    assert compute_dynamic_timeout("x" * 2500) == FILE_TIMEOUT_FLOOR
 
 
 def test_the_idle_threshold_is_overridable_too(monkeypatch):
