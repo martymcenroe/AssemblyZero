@@ -97,6 +97,34 @@ _RE_EDIT_APPLIED = re.compile(r"\[EDIT-SCRIPT\]\s+Applied\s+(?P<edits>\d+)\s+edi
 _RE_EDIT_FALLBACK = re.compile(
     r"\[EDIT-SCRIPT\]\s+Falling back to full revision:\s*(?P<reason>.*)"
 )
+#: One retry attempt that failed, with the reason it gives. #2810: the cause
+#: table answers "what killed this run", so an infrastructure failure a run
+#: SURVIVES leaves no trace anywhere -- and a run can spend its entire
+#: edit-script allowance on one, recover, and die later of something else.
+_RE_ATTEMPT_FAILED = re.compile(
+    r"\[EDIT-SCRIPT\]\s+attempt\s+(?P<n>\d+)/(?P<of>\d+)\s+failed\s+"
+    r"\((?P<reason>[^)]*)"
+)
+
+#: Which survived reasons are infrastructure, and what to call them. Closed
+#: and authored, never discovered: an unmatched reason counts as
+#: `survived.unclassified` and is printed verbatim rather than folded into a
+#: neighbour -- the same rule the cause table follows.
+SURVIVED_EVENT_KINDS: tuple[tuple[str, str], ...] = (
+    ("drafter call failed", "infra.drafter_unreachable"),
+)
+SURVIVED_UNCLASSIFIED = "survived.unclassified"
+
+
+def classify_survived(reason: str) -> str:
+    """The key for a retry failure a run walked away from (#2810)."""
+    head = (reason or "").strip()
+    for prefix, key in SURVIVED_EVENT_KINDS:
+        if head.startswith(prefix):
+            return key
+    return SURVIVED_UNCLASSIFIED
+
+
 _RE_CAP_GRANT = re.compile(r"\[CAP\]\s+(?P<detail>.*)")
 _RE_REVIEW_ROUND = re.compile(
     r"\[REVIEW\]\s+(?P<what>\S+)\s+review\s+\S+\s+\[(?P<verdict>[^\]]+)\]:"
@@ -521,6 +549,11 @@ class RunLogFacts:
     edit_script_fallbacks: int = 0
     fallback_reasons: list[str] = field(default_factory=list)
     cap_grants: list[str] = field(default_factory=list)
+    #: #2810: (key, reason, attempt, of) for every retry attempt that failed
+    #: and that the run then walked away from. Not a cause of death -- these
+    #: runs continued -- but a budget spent on something the report otherwise
+    #: never mentions.
+    survived_events: list[tuple[str, str, int, int]] = field(default_factory=list)
     review_rounds: dict[str, int] = field(default_factory=dict)
     #: stage -> (max observed elapsed, nominal). The watchdog prints one
     #: line per minute per stage, so the LAST elapsed for a stage is the
@@ -635,6 +668,15 @@ def scan_run_log(path: Path) -> RunLogFacts:
             reason = fallback.group("reason").strip()
             if reason:
                 facts.fallback_reasons.append(reason[:120])
+        attempt = _RE_ATTEMPT_FAILED.search(line)
+        if attempt:
+            reason = attempt.group("reason").strip()
+            facts.survived_events.append((
+                classify_survived(reason),
+                reason[:120],
+                int(attempt.group("n")),
+                int(attempt.group("of")),
+            ))
         cap = _RE_CAP_GRANT.search(line)
         if cap:
             facts.cap_grants.append(cap.group("detail").strip()[:160])
@@ -963,6 +1005,15 @@ def _top(counter: dict[str, int], limit: int = 3) -> list[tuple[str, int]]:
     return sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
 
 
+def _survived_index(runs: list[RunLogFacts]) -> dict[str, list[str]]:
+    """key -> one line per survived retry failure, run id first (#2810)."""
+    index: dict[str, list[str]] = defaultdict(list)
+    for facts in runs:
+        for key, reason, n, of in facts.survived_events:
+            index[key].append(f"{facts.run_id}: attempt {n}/{of} -- {reason}")
+    return {k: sorted(v) for k, v in sorted(index.items())}
+
+
 def build_report(
     repo_root: Path | str,
     *,
@@ -1179,6 +1230,11 @@ def build_report(
             "edit_script_fallbacks": fallback_total,
             "fallback_reasons": _top(fallback_reasons, 5),
         },
+        # #2810: infrastructure a run SURVIVED, keyed the way causes are but
+        # kept out of the cause table on purpose -- these runs did not die of
+        # this, and a non-death in the deaths table would move a distribution
+        # nobody decided to move.
+        "survived": _survived_index(runs),
         "pinning": {
             "refusals": pinning_refusals,
             "regressions": pinning_regressions,
@@ -1414,6 +1470,31 @@ def render_report(data: dict) -> str:
         lines.append("")
 
     loops = data["loops"]
+    # #2810: infrastructure a run SURVIVED. Deliberately its own section and
+    # not a cause row -- these runs did not die of this, and putting a
+    # non-death in the deaths table would move a distribution nobody decided
+    # to move. What it shows is a budget consumed before the work began.
+    survived = data.get("survived", {})
+    lines.append("## Infrastructure a run survived (#2810)")
+    lines.append("")
+    if not survived:
+        lines.append("None recorded.")
+    else:
+        spent = sum(len(v) for v in survived.values())
+        runs_hit = {e.split(":")[0] for v in survived.values() for e in v}
+        lines.append(
+            f"{spent} retry attempt(s) across {len(runs_hit)} run(s) failed "
+            f"for a reason the run then recovered from. These are NOT causes "
+            f"of death and appear in no cause row: a run can spend its whole "
+            f"allowance here, continue, and die later of something else."
+        )
+        lines.append("")
+        for key in sorted(survived):
+            lines.append(f"- `{key}` -- {len(survived[key])} attempt(s)")
+            for entry in survived[key]:
+                lines.append(f"    - {entry}")
+    lines.append("")
+
     lines.append("## Loops: revision rounds, caps, edit-script health")
     lines.append("")
     applied = loops["edit_scripts_applied"]
