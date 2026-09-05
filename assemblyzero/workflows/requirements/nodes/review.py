@@ -623,12 +623,26 @@ def _extract_actionable_feedback(
     Returns:
         Concise actionable feedback string.
     """
-    # Issue #775: Prefer structured feedback_items when available
-    if feedback_result and feedback_result["source"] == "structured":
+    # Issue #775: Prefer structured feedback_items when available.
+    #
+    # #2872: the 0702c template path (#2835, source "markdown_template") is
+    # the same case -- its feedback_items ARE the Tier 1 and Tier 2 bullets.
+    # Left out of this branch, the template path fell through to the bare
+    # `Verdict: BLOCKED` below (response is "" there, and `structured` is a
+    # shell with no items), so the drafter's revision prompt carried no
+    # issues and the two-strike rule compared two identical one-liners and
+    # halted a loop that had just gone from three blocking issues to one.
+    if feedback_result and feedback_result["source"] in ("structured", "markdown_template"):
         items = feedback_result["feedback_items"]
         if items:
             return "\n".join(f"- {item}" for item in items)
-        return ""
+        if feedback_result["source"] == "structured":
+            return ""
+        # A template with no Tier bullets still has a Review Summary and
+        # Tier sections worth more than the bare status: read them below
+        # from the whole text, which the template reader keeps as rationale.
+        verdict_content = verdict_content or feedback_result.get("rationale", "")
+        structured = None
 
     if not verdict_content or not verdict_content.strip():
         return f"Verdict: {lld_status}"

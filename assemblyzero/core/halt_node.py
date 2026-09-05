@@ -152,7 +152,15 @@ def describe_halt_from_state(state: dict, workflow_name: str) -> str:
     the blank it replaces. Every branch names the field it read.
     """
     verdict = state.get("review_verdict") or state.get("lld_status") or ""
-    iteration = state.get("review_iteration") or state.get("iteration_count") or 0
+    # #2873: the requirements workflow counts reviews in `verdict_count`
+    # (#1509 -- iteration_count is bumped by every state-touching node, six
+    # of them per review on run-issue4-184136). Read it before falling back.
+    iteration = (
+        state.get("review_iteration")
+        or state.get("verdict_count")
+        or state.get("iteration_count")
+        or 0
+    )
     cap = state.get("max_iterations", 0)
 
     if verdict and cap and iteration >= cap:
