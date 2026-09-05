@@ -665,21 +665,25 @@ NODE_MODULE_EXEMPTIONS: dict[str, str] = {
         "lazily imported by testing/nodes/implementation/parsers.py at call "
         "time; live code a build-time closure cannot see"
     ),
-    # Genuinely unreachable, tracked in #2811. `workflows/lld/` has no
-    # graph.py at all and nothing outside the package imports it; six node
-    # modules with no builder to declare them. Retiring a whole workflow
-    # package is its own decision with its own evidence, so #2791 names them
-    # here and #2811 owns the work. Every one of these entries should
-    # disappear when it lands.
-    "assembly_node": "workflows/lld/ has no graph; dead, tracked in #2811",
-    "gemini_review_node": "workflows/lld/ has no graph; dead, tracked in #2811",
-    "lld_node": "workflows/lld/ has no graph; dead, tracked in #2811",
-    "lld_tracker_node": "workflows/lld/ has no graph; dead, tracked in #2811",
-    "lld_writer_node": "workflows/lld/ has no graph; dead, tracked in #2811",
-    "spec_node": "workflows/lld/ has no graph; dead, tracked in #2811",
-    "issue_node": (
-        "requirements/nodes/issue_node.py has no importer anywhere; dead, "
-        "tracked in #2811"
+    # #2811 deleted six of the seven entries #2791 parked here. They had no
+    # importer, no test and no graph: `lld_tracker_node`, `lld_writer_node`,
+    # `gemini_review_node`, `lld_node`, `spec_node`, `issue_node`. #2791's
+    # note called them "six modules in workflows/lld/", which was wrong --
+    # they were spread across three packages, and checking that is what
+    # turned up the one below.
+    #
+    # Reachable, and deliberately parked. `assembly_node` is the Librarian's
+    # entry point (#88): `workflows/lld/__init__.py` imports it, it is
+    # `__all__`, and `tests/unit/test_document_assembler.py` covers it. No
+    # graph declares it because the RAG augmentation was never wired -- the
+    # package has no graph.py. That makes it a dormant FEATURE rather than
+    # dead code, and deleting it would remove one, which is not a cleanup
+    # decision. It stays until #88 is answered either way.
+    "assembly_node": (
+        "the Librarian's entry point (#88): imported and exported by "
+        "workflows/lld/__init__.py and covered by test_document_assembler, "
+        "but the RAG augmentation was never given a graph. Dormant feature, "
+        "not dead code -- see #2811"
     ),
 }
 
@@ -727,8 +731,9 @@ class TestEveryNodeModuleIsReachable:
     satisfied by a re-export. `validate_commit_message` was imported by
     `testing/nodes/__init__.py` and by nothing else, so it counted as
     reachable while no graph declared it as a node -- dead code this check
-    would have passed. #2787 retired it and filed the stronger check, which
-    asks whether a module supplies a node rather than whether it is imported.
+    would have passed. #2787 retired it on a measurement built by hand: build
+    every graph and enumerate its node names. The stronger check -- does this
+    module SUPPLY a node, rather than merely get imported -- is #2813.
     """
 
     def test_every_node_module_is_pulled_in_by_some_graph(self):
