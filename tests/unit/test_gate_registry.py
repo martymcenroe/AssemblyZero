@@ -727,8 +727,9 @@ class TestEveryNodeModuleIsReachable:
     satisfied by a re-export. `validate_commit_message` was imported by
     `testing/nodes/__init__.py` and by nothing else, so it counted as
     reachable while no graph declared it as a node -- dead code this check
-    would have passed. #2787 retired it and filed the stronger check, which
-    asks whether a module supplies a node rather than whether it is imported.
+    would have passed. #2787 retired it on a measurement built by hand: build
+    every graph and enumerate its node names. The stronger check -- does this
+    module SUPPLY a node, rather than merely get imported -- is #2813.
     """
 
     def test_every_node_module_is_pulled_in_by_some_graph(self):
