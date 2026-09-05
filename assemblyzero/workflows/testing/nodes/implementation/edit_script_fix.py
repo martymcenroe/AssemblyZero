@@ -62,6 +62,7 @@ wrote for the spec stage, and it is what makes this safe to switch on.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -174,8 +175,10 @@ def _file_tokens(filepath: str) -> set[str]:
     }
 
 
-def _attributed_blocks(failure_summary: str, filepath: str) -> list[str]:
-    """The blank-line-separated blocks of the corpus that name this file.
+def _attributed_blocks(
+    failure_summary: str, filepath: str, repo_root: Path | None = None,
+) -> list[str]:
+    """The blocks of the corpus that name this file.
 
     #2851: attribution is per BLOCK, not per line. A traceback block is a test
     name, a frame, a source line and its `E` lines; the frame is the line that
@@ -184,16 +187,121 @@ def _attributed_blocks(failure_summary: str, filepath: str) -> list[str]:
     filename with no error under it. Lines are slash-normalised before the
     match because pytest prints Windows frames with backslashes and the tokens
     are built with forward slashes.
+
+    #2861: a block the frame rule leaves unattributed, whose innermost frame
+    is a TEST function, is attributed by what that test's body names. An
+    assertion that raises in the test itself (`assert len(calls) == 1`) has
+    no frame under src/, but the test constructed `WindowsCollector({})` and
+    called `.collect()`, and the planned file that defines those names is the
+    file the failure is about. Needs `repo_root` to read the test; without it
+    the frame rule stands alone, as before.
     """
     tokens = _file_tokens(filepath)
     if not tokens:
         return []
+    defined: set[str] | None = None  # parsed lazily, once per file
     kept: list[str] = []
     for block in _blocks(failure_summary):
         haystack = block.replace("\\", "/").lower()
         if any(token in haystack for token in tokens):
             kept.append(block)
+            continue
+        if repo_root is None:
+            continue
+        test_ref = _test_frame_of(block)
+        if test_ref is None:
+            continue
+        if defined is None:
+            defined = _names_defined_in(repo_root / filepath)
+        if not defined:
+            continue
+        used = _names_used_by_test(repo_root / test_ref[0], test_ref[1])
+        if used & defined:
+            kept.append(block)
     return kept
+
+
+def _test_frame_of(block: str) -> tuple[str, str] | None:
+    """(test file path, test function name) from a block's innermost frame,
+    or None when the innermost frame is not a test function."""
+    frame = None
+    for line in block.splitlines():
+        match = _FRAME.match(line.strip().replace("\\", "/"))
+        if match:
+            frame = match
+    if frame is None:
+        return None
+    path, func = frame.group(1), frame.group(2)
+    if not (Path(path).name.startswith("test_") or func.startswith("test_")):
+        return None
+    return path, func
+
+
+#: `path/to/file.py:116: in some_function`, forward slashes, stripped.
+_FRAME = re.compile(r"^(\S+?\.py):\d+: in (\S+)")
+
+#: Names too generic to attribute on: a test that calls `run()` or reads
+#: `.name` says nothing about which planned file it exercises.
+_MIN_NAME_LEN = 4
+
+
+def _names_defined_in(path: Path) -> set[str]:
+    """Top-level classes and functions, and the methods of top-level classes."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        # fail-open: a planned file that cannot be parsed defines nothing
+        # this rule can see, so the block stays unattributed to it and the
+        # frame rule and the whole-corpus fallback decide -- which is exactly
+        # the behaviour before #2861. Attributing on a guess is the failure.
+        return set()
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            names.add(node.name)
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    names.add(item.name)
+    return {
+        n for n in names
+        if len(n) >= _MIN_NAME_LEN and not (n.startswith("__") and n.endswith("__"))
+    }
+
+
+def _names_used_by_test(path: Path, func: str) -> set[str]:
+    """Every Name and Attribute the named test function's body refers to."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        # fail-open: same reasoning as `_names_defined_in` -- an unreadable
+        # test attributes nothing by this rule, and the earlier rules stand.
+        return set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == func
+        ):
+            # Names the test BINDS itself -- locals, its own helpers, its
+            # parameters -- are not references to anything a planned file
+            # defines. `start = time.process_time()` in test_req_8 must not
+            # attribute a planned file that happens to define `start()`.
+            bound: set[str] = {a.arg for a in ast.walk(node.args) if isinstance(a, ast.arg)}
+            used: set[str] = set()
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Name):
+                    if isinstance(sub.ctx, ast.Load):
+                        used.add(sub.id)
+                    else:
+                        bound.add(sub.id)
+                elif isinstance(sub, ast.Attribute):
+                    used.add(sub.attr)
+                elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    if sub is not node:
+                        bound.add(sub.name)
+            return {n for n in used - bound if len(n) >= _MIN_NAME_LEN}
+    return set()
 
 
 def _blocks(failure_summary: str) -> list[str]:
@@ -223,17 +331,23 @@ def _blocks(failure_summary: str) -> list[str]:
     return blocks
 
 
-def is_attributed(failure_summary: str, filepath: str) -> bool:
+def is_attributed(
+    failure_summary: str, filepath: str, repo_root: Path | None = None,
+) -> bool:
     """Does at least one failure in the corpus name this file?
 
     The caller's decision (#2851): when the corpus attributes to SOME file,
     a file it does not attribute to has nothing to fix this iteration and is
     left alone -- not sent the whole corpus with an order to fix all of it.
+    With `repo_root`, a failure raised inside a test body is attributed by
+    the names that test uses (#2861).
     """
-    return bool(_attributed_blocks(failure_summary, filepath))
+    return bool(_attributed_blocks(failure_summary, filepath, repo_root))
 
 
-def failures_for_file(failure_summary: str, filepath: str) -> str:
+def failures_for_file(
+    failure_summary: str, filepath: str, repo_root: Path | None = None,
+) -> str:
     """The failures this file is implicated in, or everything if unattributable.
 
     The issue asks to "scope the prompt to the failing tests rather than the
@@ -252,7 +366,7 @@ def failures_for_file(failure_summary: str, filepath: str) -> str:
     """
     if not failure_summary.strip():
         return failure_summary
-    kept = _attributed_blocks(failure_summary, filepath)
+    kept = _attributed_blocks(failure_summary, filepath, repo_root)
     if not kept:
         return failure_summary
     return "\n\n".join(kept)
