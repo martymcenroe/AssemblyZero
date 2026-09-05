@@ -195,9 +195,24 @@ def test_graph_records_the_mode_and_threads_it_to_the_next_attempt():
 
 
 def test_impl_stage_passes_retry_mode_to_the_sub_workflow():
+    """The mode the graph recorded must reach the sub-workflow's payload.
+
+    #2845 gave this line a second source -- a worktree recovered from a
+    preserved attempt enters as RESUMED whatever the state says -- so the
+    assertion is on the two parts that must survive any such addition: the
+    payload carries the key, and the state's own mode is still what it falls
+    back to. Matching the whole expression made an ADDITION look like a
+    removal. The override itself is tested behaviourally, against the payload
+    the sub-workflow actually receives, in
+    `test_impl_resume_from_preserved_attempt.py`.
+    """
     import inspect
 
     from assemblyzero.workflows.orchestrator import stages
 
     source = inspect.getsource(stages.run_impl_stage)
-    assert '"retry_mode": state.get("retry_mode", "")' in source
+    assert '"retry_mode":' in source
+    assert 'state.get("retry_mode", "")' in source, (
+        "the state's mode must remain the fallback, or an ordinary stage "
+        "retry stops regenerating"
+    )

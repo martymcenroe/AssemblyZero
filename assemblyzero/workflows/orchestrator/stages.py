@@ -14,6 +14,7 @@ from assemblyzero.utils.git import GitBranchError, current_branch
 from assemblyzero.utils.shell import run_command
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -32,6 +33,7 @@ from assemblyzero.workflows.orchestrator.state import (
     update_stage_result,
 )
 from assemblyzero.core.llm_provider import get_provider
+from assemblyzero.core.retry_mode import RESUMED
 from assemblyzero.core import settlement as settlement_mod
 
 import logging
@@ -1350,6 +1352,95 @@ def _classify_leftover_branch(
     )
 
 
+#: A graveyard branch holding one prior implementation attempt for one issue.
+#: Anchored on both ends so `issue-4` never matches `issue-41`'s graves, and
+#: so the hand-made names in a long-lived campaign repo -- `graveyard/arc1-issue-4`,
+#: `graveyard/run11-roll10-issue-4` -- are not mistaken for the machinery's own
+#: (#2845). The stamp is `_disposal_stamp()`'s, which sorts.
+_GRAVEYARD_ATTEMPT = re.compile(r"^graveyard/issue-(\d+)-(\d{8}T\d{6}Z)$")
+
+
+def _recoverable_attempt_branch(
+    target_repo: str, issue_number: int, base_branch: str,
+) -> tuple[str, int] | None:
+    """The newest preserved attempt for #issue worth resuming from, or None.
+
+    #2845: RESTORE removes the implementation worktree on every exit (#2005),
+    so `verify_phases._restore_best`'s snapshot of the best iteration dies
+    with it. What survives is the attempt branch, renamed under `graveyard/`
+    by the #2310 disposal discipline. On boostgauge run 15 that branch held
+    the whole 48-of-52-passing implementation -- eight files, 1,356 lines,
+    across a post-scaffold and five post-impl checkpoints -- and the resume
+    that followed carved a worktree from the base and implemented from zero,
+    repaying two and a half hours of paid work for nothing.
+
+    Two conditions, both measured, before an attempt is offered back:
+
+    * `base_branch` is an ANCESTOR of it. That is what proves the attempt was
+      cut from the base this run is rolling on. A grave from an earlier phase,
+      or from before the base moved, fails the test and is left alone --
+      resuming stale work is worse than an honest start from zero, so the
+      unprovable case falls through to the ordinary path.
+    * it carries commits the base does not. A grave with nothing unique has
+      nothing to give back; `dispose_pipeline_branches` should not have made
+      one, and if it did, it is not this function's to resurrect.
+
+    Every git failure resolves to None, so an unreadable repo keeps the
+    previous behaviour rather than inventing a new one.
+    """
+    if not base_branch:
+        return None
+
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        cmd = ["git"]
+        if target_repo:
+            cmd += ["-C", target_repo]
+        return run_command(
+            [*cmd, *args], check=False, capture_output=True, text=True,
+        )
+
+    listed = _git(
+        "branch", "--list", "--format=%(refname:short)",
+        f"graveyard/issue-{issue_number}-*",
+    )
+    if listed.returncode != 0:
+        return None
+
+    candidates: list[tuple[str, str]] = []
+    for line in listed.stdout.splitlines():
+        branch = line.strip()
+        match = _GRAVEYARD_ATTEMPT.match(branch)
+        # `--list` globs, so `issue-4-*` also matches `issue-41-...`. The
+        # captured number is compared, never the glob's word.
+        if match and int(match.group(1)) == issue_number:
+            candidates.append((match.group(2), branch))
+
+    # Newest disposal first: the stamp is UTC and fixed-width, so it sorts.
+    for _stamp, branch in sorted(candidates, reverse=True):
+        if _git(
+            "merge-base", "--is-ancestor", base_branch, branch,
+        ).returncode != 0:
+            continue
+        counted = _git("rev-list", "--count", f"{base_branch}..{branch}")
+        if counted.returncode != 0:
+            continue
+        try:
+            unique = int(counted.stdout.strip())
+        except ValueError:
+            # fail-open: an unmeasurable candidate is skipped, and a run out
+            # of candidates starts the implementation from the base -- which
+            # is exactly what every resume did before #2845. The failure
+            # direction that matters here is the opposite one: resurrecting a
+            # grave whose ancestry could not be established would build on a
+            # tree the campaign has moved off, silently. Declining is visible
+            # in the log ("No preserved attempt ... is resumable") and costs
+            # only the rebuild that was the status quo.
+            continue
+        if unique > 0:
+            return branch, unique
+    return None
+
+
 def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute implementation workflow (TDD).
 
@@ -1366,6 +1457,10 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     assemblyzero_root = state.get("assemblyzero_root", "")
     worktree_path = worktree_path_for(issue_number, target_repo or None)
     branch_name = f"issue-{issue_number}"
+    # #2845: set only when this entry carved the worktree from a preserved
+    # attempt. Declared out here because a worktree that already exists skips
+    # the creation block entirely and still reaches the sub-workflow invoke.
+    recovered_branch = ""
 
     try:
         # Ensure the worktree exists, carved from the TARGET repo (Issue #1374).
@@ -1424,6 +1519,42 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                     "will be carved from the target repo's current HEAD"
                 )
 
+            # #2845: a RESUME into the implementation stage starts from the
+            # best state the halted attempt reached, not from the base. That
+            # state is on the graveyard branch RESTORE preserved; without
+            # this, the resume rebuilds from zero and repays the whole stage.
+            # Only on a resume -- a fresh draw (`--fresh`, or any first run)
+            # must start from the base, which is what `resumed_from` being
+            # empty means (#2383 makes that field explicit on both paths).
+            if state.get("resumed_from") == "impl":
+                recovered = _recoverable_attempt_branch(
+                    target_repo, issue_number, base_branch,
+                )
+                if recovered:
+                    recovered_branch, recovered_commits = recovered
+                    print(
+                        f"    Resuming from preserved attempt "
+                        f"{recovered_branch} ({recovered_commits} commit(s) "
+                        f"beyond {base_branch})"
+                    )
+                    # Replaces the base as the worktree's commit-ish. `-b
+                    # issue-{N}` still creates the branch, so everything
+                    # downstream -- checkpoints, the pr stage's head, the
+                    # #2310 disposal -- is unchanged. The base was appended
+                    # just above and is the last argument; it is matched
+                    # rather than indexed, so a future edit to the argument
+                    # order cannot silently retarget the worktree.
+                    if add_cmd and add_cmd[-1] == base_branch:
+                        add_cmd[-1] = recovered_branch
+                    else:
+                        add_cmd.append(recovered_branch)
+                else:
+                    print(
+                        f"    No preserved attempt for #{issue_number} is "
+                        f"resumable from '{base_branch}'; starting the "
+                        f"implementation from the base"
+                    )
+
             # #2310: a previous failed roll can leave `issue-{N}` standing.
             # `worktree add -b` then dies with a bare `fatal: a branch named
             # 'issue-7' already exists` (exit 255), which killed a roll whose
@@ -1450,6 +1581,23 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                     f"    Reusing leftover branch '{branch_name}' "
                     f"(pointer-identical to {base_branch or 'the base'})"
                 )
+                if recovered_branch:
+                    # #2845: adopting the leftover means the worktree starts
+                    # at the base after all, so the preserved attempt is not
+                    # in play. Said out loud rather than dropped in silence:
+                    # the run is about to implement from zero and the log
+                    # must be the reason it can be told from a recovery.
+                    # Disposal (#2310) safe-deletes a zero-unique
+                    # `issue-{N}`, so reaching here at all means a previous
+                    # RESTORE did not finish.
+                    print(
+                        f"    [WARN] preserved attempt {recovered_branch} "
+                        f"NOT used: '{branch_name}' is still standing from "
+                        f"an earlier roll, and adopting it starts from the "
+                        f"base. Preserve or free that name to resume from "
+                        f"the attempt."
+                    )
+                    recovered_branch = ""
                 add_cmd = ["git"]
                 if target_repo:
                     add_cmd += ["-C", target_repo]
@@ -1560,7 +1708,16 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # #1941: RESUMED lets the runner reuse a prior attempt's files;
             # REGENERATED forbids it. Absent on a first attempt, which reuses
             # nothing because there is nothing to reuse.
-            "retry_mode": state.get("retry_mode", ""),
+            #
+            # #2845: a worktree carved from a preserved attempt IS a later
+            # attempt, and must say so, or the red phase reads the surviving
+            # implementation as green-at-red and halts the stage as fatal --
+            # `_implementation_already_exists` consults no other signal on a
+            # sub-workflow entering fresh, with retry_mode empty and
+            # iteration_count zero. The recovery would otherwise turn a
+            # from-zero rebuild into a halt, which is worse than the defect
+            # it fixes.
+            "retry_mode": RESUMED if recovered_branch else state.get("retry_mode", ""),
             # #2344: seed the iteration cap explicitly. Left absent, each
             # reader fell back to its own inline default -- 5 in N5's progress
             # message, 3 in the router's decision -- so the run announced a
