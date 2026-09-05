@@ -119,6 +119,20 @@ def narrated(node_id: str, fn, atlas: dict, total: int, stage: str = ""):
         return fn(state, *args, **kwargs)
 
     _wrapped.__name__ = getattr(fn, "__name__", node_id)
+    # #2813: carry enough identity for a node to name the module it came from.
+    # Without these two lines every node callable in every compiled graph
+    # reports `__module__ == "assemblyzero.workflows.narration"`, so nothing
+    # can ask which FILE supplies a node -- and that is the only question that
+    # catches a module which is imported but wired to nothing.
+    # `validate_commit_message` lived in exactly that gap: re-exported by
+    # `testing/nodes/__init__.py` and therefore "reachable", declared as a
+    # node by no graph, dead for six months (#2787).
+    #
+    # Assigned narrowly rather than with `functools.wraps`, which would also
+    # copy `__dict__` and `__qualname__`. This wrapper stands in front of
+    # every node in the fleet; the smaller edit is the safer one.
+    _wrapped.__module__ = getattr(fn, "__module__", _wrapped.__module__)
+    _wrapped.__wrapped__ = fn
     return _wrapped
 
 
