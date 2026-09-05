@@ -845,19 +845,33 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         notes="raised as RuntimeError inside the impl stage; wrapped as 'Implementation stage error'",
     ),
     # ---- pr ----------------------------------------------------------------
-    Gate(
-        "pr.commit_message_guard", "pr", JUDGES_INFRASTRUCTURE, ACTION_HALT,
-        "BLOCKED:",
-        _s(f"{_TS}/nodes/validate_commit_message.py::validate_commit_message::return", 0, 1),
-        justified_by="#2723",
-        notes=(
-            "the only halt row in the whole pr stage. infrastructure since "
-            "#2771 (operator ruling 2026-09-04 on #2723) -- the pipeline "
-            "writes its own commit message, and by the time it is validated "
-            "the graph is past every loop, so a revision request has nowhere "
-            "to go. Answer-key audit: ran 6, refused 0"
-        ),
-    ),
+    # #2787: `pr.commit_message_guard` stood here until 2026-09-04, and it was
+    # the ONLY row in this stage -- the `pr: 1` the ratchet carried was this
+    # row and nothing else. Both its sites lived in
+    # `testing/nodes/validate_commit_message.py`, a function no run enters.
+    #
+    # Measured, not inferred. All four graphs were built and their nodes
+    # enumerated -- testing (16), requirements (12), implementation_spec (11),
+    # orchestrator (4) -- and none declares a commit-message node. Nothing in
+    # `tools/` calls it. The only caller in the package was the answer-key
+    # audit, calling it directly to score itself, which is where its
+    # "ran 6, refused 0" came from.
+    #
+    # The repair #2787 proposed -- compute the trailer instead of halting over
+    # its absence -- turned out to be the live behaviour already:
+    # `orchestrator/stages.py:1814` builds `Closes #{issue_number}` into the
+    # PR title and body itself. So the gate could not be repaired into
+    # usefulness either: on the only path that exists the trailer is an
+    # f-string, not model output, and cannot be missing.
+    #
+    # Retired on #2753's reasoning, which retired two rows with the unwired
+    # `run_tests.py`: a row whose `action` column describes code that cannot
+    # execute is a promise about nothing. This one was counted as the pr
+    # stage's protection since #190.
+    #
+    # `test_gate_registry.py`'s reachability probe did not catch it because it
+    # asks whether a module is IMPORTABLE from a built graph, not whether a
+    # node calls it -- the gap #2791 is about, and this is its second exhibit.
     # ---- orchestrator ------------------------------------------------------
     Gate(
         "orchestrator.mock_outward_effects", "orchestrator", JUDGES_INFRASTRUCTURE,

@@ -1,15 +1,14 @@
 {
   "_comment": "The ratchet (#2720). tests/unit/test_gate_registry.py fails when halt_rows_per_stage rises above this, and when model_output_halt_rows differs from it in EITHER direction (#2759). A row that stops halting, or that leaves the model-output category, lowers the number in the same PR -- so the denominator is never stale. Raise either only with an operator ruling named in the row's created_by or justified_by, in the same PR.",
   "measured_against": {
-    "files_scanned": 185,
-    "halt_sites": 144,
-    "gates": 94
+    "files_scanned": 184,
+    "halt_sites": 142,
+    "gates": 93
   },
   "halt_rows_per_stage": {
     "impl": 33,
     "lld": 15,
     "orchestrator": 16,
-    "pr": 1,
     "spec": 19
   },
   "model_output_halt_rows": 1

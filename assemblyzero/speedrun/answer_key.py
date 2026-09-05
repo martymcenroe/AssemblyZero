@@ -31,7 +31,6 @@ and the operator's judgment is the answer key.
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -95,7 +94,10 @@ RUNNABLE_GATES: tuple[tuple[str, str], ...] = (
     ("impl.path_enforcement", "every shipped file against the LLD's allowed paths"),
     ("lld.mechanical_validation", "the LLD, where one survives on main"),
     ("impl.scenario_ratio_guard", "the LLD's requirements against its test plan"),
-    ("pr.commit_message_guard", "the merged commit's subject line"),
+    # #2787 removed `pr.commit_message_guard` and the merged-commit-subject
+    # arm with it. The gate was retired because no graph runs it, so scoring
+    # it was scoring nothing: six verdicts a year, none of which measured a
+    # check any run performs.
 )
 
 #: Gates that judge model output but need a live loop, a run, or a second
@@ -151,10 +153,8 @@ class AuditCoverage:
     files_examined: int = 0
     files_missing: list[str] = field(default_factory=list)
     llds_examined: int = 0
-    commits_examined: int = 0
-    #: Features whose merged commit could not be asked for: the target is not
-    #: a git checkout, or git is not on PATH. Printed, never silently zero.
-    git_unreadable: int = 0
+    # #2787 removed `commits_examined` and `git_unreadable`. They counted the
+    # merged-commit-subject arm, which went with `pr.commit_message_guard`.
 
 
 # ---------------------------------------------------------------------------
@@ -263,48 +263,16 @@ def _gate_scenario_ratio(lld_content: str) -> tuple[bool, str]:
     return bool(errors), ("; ".join(errors)[:300] + " | " if errors else "") + detail
 
 
-def _gate_commit_message(issue: int, subject: str) -> tuple[bool, str]:
-    """pr.commit_message_guard over the merged commit's subject."""
-    from assemblyzero.workflows.testing.nodes.validate_commit_message import (
-        validate_commit_message,
-    )
-
-    result = validate_commit_message(
-        {"issue_number": issue, "commit_message": subject}
-    )
-    message = result.get("error_message", "")
-    return bool(message), message or subject[:100]
-
-
 # ---------------------------------------------------------------------------
 # The audit
 # ---------------------------------------------------------------------------
 
 
-def merged_subject(repo: Path, issue: int) -> str | None:
-    """The subject of the commit that closed the issue.
-
-    "" when no commit in the last two hundred carries `Closes #N`; None when
-    git could not be asked at all, which the caller counts and the report
-    prints as its own line.
-    """
-    try:
-        out = subprocess.run(
-            ["git", "log", "--format=%s", "-200", "HEAD"],
-            cwd=str(repo), capture_output=True, text=True, check=True,
-            encoding="utf-8", errors="replace",
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        # fail-open: a target that is not a git checkout has no merged commit
-        # to examine. The caller records it in coverage.git_unreadable and the
-        # report prints that count beside commits_examined, so the shortfall
-        # is in the data rather than disguised as "no commit closes this".
-        return None
-    needle = f"closes #{issue}"
-    for line in out.splitlines():
-        if needle in line.lower():
-            return line
-    return ""
+# #2787: `merged_subject` stood here, reading the subject of the commit that
+# closed each issue so `pr.commit_message_guard` could be scored against it.
+# That gate is retired -- no graph ran it -- and it was this function's only
+# caller. Reading an artifact no gate judges would be the same promise about
+# nothing the retirement is removing, so the reader went with the gate.
 
 
 def audit_feature(
@@ -357,14 +325,10 @@ def audit_feature(
             verdicts.append(Verdict(feature.issue, "impl.path_enforcement",
                                     rel, refused, message))
 
-    subject = merged_subject(repo, feature.issue)
-    if subject is None:
-        coverage.git_unreadable += 1
-    elif subject:
-        coverage.commits_examined += 1
-        refused, message = _gate_commit_message(feature.issue, subject)
-        verdicts.append(Verdict(feature.issue, "pr.commit_message_guard",
-                                "merged commit subject", refused, message))
+    # #2787: the merged commit's subject was read here and scored against
+    # `pr.commit_message_guard`. That gate is retired -- no graph ran it --
+    # so nothing judges a commit subject any more, and the reader, the two
+    # coverage counters and the report's line for them went with it.
     return verdicts
 
 
@@ -407,9 +371,6 @@ def render(repo: Path, verdicts: list[Verdict], coverage: AuditCoverage,
         f"- Files examined: {coverage.files_examined}"
         + (f" (missing: {', '.join(coverage.files_missing)})" if coverage.files_missing else ""),
         f"- LLDs examined: {coverage.llds_examined}",
-        f"- Merged commits examined: {coverage.commits_examined}"
-        + (f" (git unreadable for {coverage.git_unreadable} feature(s))"
-           if coverage.git_unreadable else ""),
         f"- Verdicts: {len(verdicts)}; refusals: {len(refusals)}",
         "",
         "## Per gate",

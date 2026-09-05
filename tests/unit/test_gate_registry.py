@@ -385,13 +385,22 @@ class TestRulingTwoOutputNobodyCanRevise:
     """Question 2, answered yes: a gate that judges output nobody in the loop
     can revise is not a `model_output` gate.
 
-    Three of these judge the REVIEWER's output, and the reviewer is not the
+    These three judge the REVIEWER's output, and the reviewer is not the
     drafter -- sending the drafter back to fix a verdict it did not write asks
-    it to repair someone else's mistake. The fourth has no drafter at all: by
-    the time a commit message is validated the graph is past every loop.
+    it to repair someone else's mistake.
 
-    Halting stays legal for all four. The ruling says what the halt is ABOUT,
+    Halting stays legal for all three. The ruling says what the halt is ABOUT,
     which is what `judges` records; it does not say the run should continue.
+
+    **A fourth row was ruled on and is no longer here.** #2771 reclassified
+    `pr.commit_message_guard` on the reasoning that by the time a commit
+    message is validated the graph is past every loop. #2787 measured the
+    stronger fact: no graph validates one at all. All four graphs were built
+    and their nodes enumerated, none declares a commit-message node, and the
+    code that opens the PR computes `Closes #N` itself. The row's two sites
+    lived in a function no run enters, and it was retired with that function.
+    The ruling is not overturned -- it was answered about code that turned
+    out never to run.
     """
 
     #: gate key -> (new judges, the issue that stated the question).
@@ -399,8 +408,21 @@ class TestRulingTwoOutputNobodyCanRevise:
         "impl.reviewer_verdict_unreadable": (JUDGES_INFRASTRUCTURE, "#2768"),
         "spec.reviewer_verdict_unreadable": (JUDGES_INFRASTRUCTURE, "#2769"),
         "spec.review_blocked": (JUDGES_ISSUE_BODY, "#2770"),
-        "pr.commit_message_guard": (JUDGES_INFRASTRUCTURE, "#2771"),
     }
+
+    #: Ruled on by #2771, retired by #2787. Asserted ABSENT, so a future PR
+    #: that resurrects the row has to come back here and answer the wiring
+    #: question in the same change.
+    RETIRED = {"pr.commit_message_guard": "#2787"}
+
+    def test_the_retired_row_stays_retired(self):
+        keys = registry_by_key()
+        for key, issue in self.RETIRED.items():
+            assert key not in keys, (
+                f"{key} was retired by {issue} because no graph runs the "
+                f"function its sites lived in. If it is back, wire it and "
+                f"say so here."
+            )
 
     def test_every_ruled_row_carries_its_new_category(self):
         keys = registry_by_key()
