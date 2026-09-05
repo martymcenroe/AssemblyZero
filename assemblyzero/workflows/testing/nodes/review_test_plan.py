@@ -21,6 +21,7 @@ from typing import Any
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,
+    parse_markdown_verdict,
     parse_structured_verdict,
 )
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
@@ -593,6 +594,12 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     # rejected loudly and the stage retry machinery re-asks. The regex
     # fallback (which silently downgraded garbage to BLOCKED) is retired.
     structured = parse_structured_verdict(verdict_content)
+    if not structured:
+        # #2837: the prompt's own "Output Format" is a markdown template with
+        # one box to mark; when the reviewer follows it, that is a verdict.
+        structured = parse_markdown_verdict(verdict_content)
+        if structured:
+            print("    [N1.5] verdict read from the review's own output template, not JSON (#2837)")
     if not structured:
         excerpt = verdict_content.strip().replace("\n", " ")[:160]
         msg = (

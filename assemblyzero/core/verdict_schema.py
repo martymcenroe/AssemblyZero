@@ -440,7 +440,7 @@ def _template_section_lines(text: str, title: str):
             yield stripped
 
 
-def _checked_verdict(line: str) -> str | None:
+def _checked_verdict(line: str, allowed: tuple[str, ...] = _TEMPLATE_VERDICTS) -> str | None:
     """The verdict word on a checked template line (``[x] **REVISE** - …``)."""
     stripped = line.strip()
     if stripped.startswith("-"):
@@ -448,10 +448,21 @@ def _checked_verdict(line: str) -> str | None:
     if stripped[:3].casefold() != "[x]":
         return None
     rest = stripped[3:].strip().lstrip("*").strip().upper()
-    for verdict in _TEMPLATE_VERDICTS:
+    for verdict in allowed:
         if rest.startswith(verdict):
             return verdict
     return None
+
+
+def _single_checked_verdict(text: str, allowed: tuple[str, ...]) -> str | None:
+    """The one checked box under ``## Verdict``, or None when there is not exactly one."""
+    checked = [
+        verdict for verdict in (
+            _checked_verdict(line, allowed)
+            for line in _template_section_lines(text, "verdict")
+        ) if verdict
+    ]
+    return checked[0] if len(checked) == 1 else None
 
 
 def _template_items(text: str, title: str) -> list[str]:
@@ -507,6 +518,125 @@ def parse_markdown_feedback(raw: str) -> FeedbackResult | None:
         resolved_issues=[],
         source="markdown_template",
     )
+
+
+#: The spec review template (``review_spec._get_output_format``) and the
+#: test-plan review template (``review_test_plan``) scaffold these boxes.
+_TEMPLATE_VERDICTS_SPEC = ("APPROVED", "REVISE", "BLOCKED")
+_TEMPLATE_VERDICTS_PLAN = ("APPROVED", "BLOCKED", "REVISE")
+
+#: What those templates write in a section that has nothing to report.
+_TEMPLATE_EMPTY = frozenset({
+    "no issues found",
+    "no blocking issues found",
+    "no high-priority issues found",
+    "no high priority issues found",
+    "none",
+})
+
+
+def _template_entries(text: str, title: str) -> list[str]:
+    """The numbered or bulleted entries under a template section, each with
+    its continuation lines and code fences, minus the "No … found" placeholders.
+
+    An entry begins at ``1.`` / ``2.`` / ``- `` outside a code fence and runs
+    to the next such line or the end of the section. Continuation lines keep
+    their text (the section walk strips indentation), which is what the
+    revision lock needs: the cited names and spans, verbatim.
+    """
+    entries: list[str] = []
+    current: list[str] = []
+    in_fence = False
+
+    def flush() -> None:
+        body = "\n".join(current).strip()
+        current.clear()
+        if not body:
+            return
+        bare = body.strip("*_`").strip().rstrip(".!").casefold()
+        if bare in _TEMPLATE_EMPTY or is_none_placeholder(body):
+            return
+        entries.append(body)
+
+    for line in _template_section_lines(text, title):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            current.append(line)
+            continue
+        if in_fence:
+            current.append(line)
+            continue
+        head = line.split(".", 1)[0]
+        starts_entry = line.startswith("- ") or (
+            head.isdigit() and line[len(head):][:1] == "."
+        )
+        if starts_entry:
+            flush()
+            current.append(line[2:].strip() if line.startswith("- ") else line.split(".", 1)[1].strip())
+        elif current:
+            current.append(line)
+        elif line:
+            # Prose before any entry ("No blocking issues found.") is one entry
+            # of its own, so the placeholder filter can see it.
+            current.append(line)
+            flush()
+    flush()
+    return entries
+
+
+def parse_markdown_review_spec(raw: str) -> ReviewSpecResult | None:
+    """Read a spec review written in ``review_spec``'s own output template
+    (#2837): ``## Summary``, ``## Blocking Issues``, ``## High Priority
+    Issues``, ``## Suggestions``, ``## Verdict`` with one box marked ``[X]``.
+
+    The reviewer is told "You MUST structure your review as follows" and
+    shown that template, while the transport asks for a JSON object; on
+    2026-09-05 run 15 it followed the template and the run ended on a verdict
+    that named run 11's tolerance defect on round 1. Standard 0028 §3: a
+    deterministic walk of our own format is a parse. None when there is not
+    exactly one checked verdict.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    verdict = _single_checked_verdict(text, _TEMPLATE_VERDICTS_SPEC)
+    if verdict is None:
+        return None
+    summary = "\n".join(
+        line for line in _template_section_lines(text, "summary") if line
+    ).strip()
+    return ReviewSpecResult(
+        verdict=verdict,
+        rationale=summary or text,
+        feedback_items=(
+            _template_entries(text, "blocking issues")
+            + _template_entries(text, "high priority issues")
+        ),
+        source="markdown_template",
+    )
+
+
+def parse_markdown_verdict(raw: str) -> dict | None:
+    """Read a test-plan review written in ``review_test_plan``'s own template
+    (#2837): ``## Coverage Analysis``, ``## Test Reality Issues``,
+    ``## Verdict`` with one box marked ``[X]``, ``## Required Changes``.
+
+    Same shape as ``parse_structured_verdict``'s result, so the node reads it
+    unchanged. None when there is not exactly one checked verdict.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    verdict = _single_checked_verdict(text, _TEMPLATE_VERDICTS_PLAN)
+    if verdict is None:
+        return None
+    return {
+        "verdict": verdict,
+        "rationale": text,
+        "blocking_issues": [],
+        "suggestions": _template_entries(text, "required changes"),
+        "source": "markdown_template",
+    }
 
 
 def scan_residual_questions(text: str) -> FinalizeQuestionsResult:

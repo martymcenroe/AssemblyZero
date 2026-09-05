@@ -1,0 +1,29 @@
+## Readiness Review: Issue #4
+
+## Summary
+The revised spec correctly implements the architectural structure, API boundaries, and resolves the test scoping issues from the prior iteration. However, two test cases introduce assertion traceability violations by enforcing looser bounds than the requirements explicitly dictate, meaning an incorrect implementation could falsely pass the test suite. 
+
+## Blocking Issues
+No blocking issues found.
+
+## High Priority Issues
+1. **Test Assertion Contradicts Specification (REQ-2):** In `tests/integration/test_windows_collector.py`, `test_req_020` enforces a ±5 process tolerance and a 5% handle tolerance:
+   ```python
+   proc_match = abs(proc_ps - proc_sw) <= 5
+   hand_match = hand_ps > 0 and abs(hand_ps - hand_sw) / hand_ps <= 0.05 
+   ```
+   This directly contradicts the behaviour text in **REQ-2**, which explicitly dictates: *"Collector returns accurate process count (±1 against psutil) and handle count (within 1% of psutil's num_handles sum)"*. The assertions must be tightened to `<= 1` and `<= 0.01` respectively to trace accurately to the requirement.
+
+2. **Test Assertion Contradicts Specification (REQ-7):** In `tests/integration/test_windows_collector.py`, `test_req_070` asserts:
+   ```python
+   assert mock_ntdll.NtQuerySystemInformation.call_count >= 1
+   ```
+   This contradicts the explicit behaviour text in **Section 10.0 and 10.1 (T070)** which dictates: *"Call count to NtQuerySystemInformation == 1 per tick"*. Because the mock is set to return `0` (success on the first call, meaning no buffer resize loop is triggered), the test must assert exactly `== 1` to strictly enforce the "single sweep" constraint.
+
+## Suggestions
+- None. The rest of the implementation spec is very solid and provides concrete JSON/YAML examples alongside well-handled `ctypes` implementation logic.
+
+## Verdict
+[ ] **APPROVED** - Spec is ready for implementation
+[X] **REVISE** - Fix blocking/high-priority issues first
+[ ] **BLOCKED** - Fundamental issues prevent implementation

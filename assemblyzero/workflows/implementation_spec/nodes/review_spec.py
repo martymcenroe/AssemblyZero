@@ -32,6 +32,7 @@ from assemblyzero.core.verdict_schema import (
     REVIEW_SPEC_SCHEMA,
     ReviewSpecResult,
     StructuredContractError,
+    parse_markdown_review_spec,
     parse_structured_review_spec,
 )
 from assemblyzero.workflows.requirements.audit import (
@@ -178,8 +179,53 @@ def _invoke_reviewer_with_spec_schema(
     # surfaces it and the stage retry re-asks. No regex fallback exists.
     try:
         return parse_structured_review_spec(raw), ""
-    except StructuredContractError as e:
-        return None, str(e)
+    except StructuredContractError as first:
+        # #2837: the prompt's own "Required Output Format" is a markdown
+        # template; when the reviewer follows it (run 15, 2026-09-05) the
+        # verdict is fully legible and is read as our own format (0028 §3).
+        template = parse_markdown_review_spec(raw)
+        if template is not None:
+            print(
+                "    [N5] verdict read from the review's own output template, "
+                f"not JSON (#2837): {template['verdict']}"
+            )
+            return template, ""
+        # Neither shape. One re-ask naming the defect; then the rejection.
+        print(
+            "    [N5] reviewer answered in neither the JSON contract nor the "
+            "output template; asking once more for the JSON object (#2837)."
+        )
+        retry = provider.invoke(system + _REASK_FOR_JSON, prompt, **schema_kwargs)
+        if not getattr(retry, "success", False):
+            detail = getattr(retry, "error_message", None) or "LLM call failed with no error detail"
+            return None, str(detail)
+        raw_retry = getattr(retry, "response", None) or ""
+        try:
+            return parse_structured_review_spec(raw_retry), ""
+        except StructuredContractError as second:
+            # fail-open: not open -- the rejection is returned as (None, error)
+            # for the caller to surface, exactly as the first handler above
+            # does; the node halts on it. Declared so the audit sees the pair.
+            template = parse_markdown_review_spec(raw_retry)
+            if template is not None:
+                print(
+                    "    [N5] re-asked verdict read from the review's own output "
+                    f"template (#2837): {template['verdict']}"
+                )
+                return template, ""
+            return None, (
+                f"unreadable twice -- first: {first.reason}; re-ask: {second.reason}"
+                f" | response begins: {second.excerpt!r}"
+            )
+
+
+#: Appended to the system prompt for the one re-ask (#2837).
+_REASK_FOR_JSON = (
+    "\n\nYour previous answer was neither the JSON object the Response Format "
+    "section requires nor the Required Output Format template. Answer again "
+    "with ONLY that JSON object: keys verdict (APPROVED, REVISE or BLOCKED), "
+    "rationale, feedback_items."
+)
 
 
 # =============================================================================
