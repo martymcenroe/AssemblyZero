@@ -42,7 +42,11 @@ from assemblyzero.workflows.testing.exit_code_router import (
     describe_exit_code,
     describe_run_outcome,
 )
-from assemblyzero.workflows.testing.framework_detector import CoverageType, TestFramework
+from assemblyzero.workflows.testing.framework_detector import (
+    CoverageType,
+    TestFramework,
+    source_extensions,
+)
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     DETERMINISTIC_FAILURE,
     count_stub_tests,
@@ -798,7 +802,9 @@ def read_red_marker(state: TestingWorkflowState) -> dict | None:
         return None
 
 
-def _implementation_already_exists(state: TestingWorkflowState) -> bool:
+def _implementation_already_exists(
+    state: TestingWorkflowState, suffixes: tuple[str, ...] = (".py",),
+) -> bool:
     """True when THIS RUN's own prior work explains passing tests (#2337, #2542).
 
     Two signals, either sufficient once this is a later attempt (a retry sets
@@ -828,16 +834,23 @@ def _implementation_already_exists(state: TestingWorkflowState) -> bool:
         return True
 
     repo_root = Path(state.get("repo_root", "") or ".")
+    # #2805: which extensions count as "the implementation" is a property of
+    # the framework, not a constant. It was `.py` outright, so this helper
+    # selected nothing -- and therefore always returned False -- on every
+    # Playwright, Jest and Vitest target. `suffixes` defaults to `.py`, so
+    # the pytest path behaves exactly as before.
     targets = [
         f.get("path", "") for f in (state.get("files_to_modify") or [])
-        if f.get("path", "").endswith(".py")
+        if f.get("path", "").endswith(suffixes)
     ]
     if not targets:
         return False
     return any((repo_root / path).is_file() for path in targets)
 
 
-def _base_ships_the_implementation(state: TestingWorkflowState) -> bool:
+def _base_ships_the_implementation(
+    state: TestingWorkflowState, suffixes: tuple[str, ...] = (".py",),
+) -> bool:
     """True when the PLAN says the implementation predates this run (#2670).
 
     A Modify issue's base legitimately satisfies conjunction-partner and
@@ -854,9 +867,10 @@ def _base_ships_the_implementation(state: TestingWorkflowState) -> bool:
     explains nothing.
     """
     repo_root = Path(state.get("repo_root", "") or ".")
+    # #2805: framework-derived, for the same reason as the helper above.
     planned = [
         f for f in (state.get("files_to_modify") or [])
-        if f.get("path", "").endswith(".py")
+        if f.get("path", "").endswith(suffixes)
     ]
     if not planned:
         return False
@@ -2690,33 +2704,75 @@ def _verify_red_non_pytest(
 
     # Red phase: ALL tests must fail
     if passed > 0:
-        # #2796. The pytest path (#2337, #2542, #2670) tells three situations
-        # apart here: this run's own prior writes or a red-entry marker
-        # explain the passes; the plan says every file is Modify and the base
-        # ships them; or nothing explains them. This path tells none of them
-        # apart, and saying otherwise would be a sentence about work it did
-        # not do -- so it says what is true instead.
+        # #2805 ports #2337/#2542/#2670 here. #2796 could not, because the
+        # two deciding helpers filtered planned files on `.py` and this
+        # path's are .ts/.tsx/.js/.jsx -- so both selected nothing and could
+        # never return True. What was missing was not effort but a fact:
+        # which extensions a framework's IMPLEMENTATION uses.
+        # `framework_detector.SOURCE_EXTENSIONS` is that fact, enumerated per
+        # `TestFramework` member and enforced closed by its own test.
         #
-        # The two helpers that decide it, `_implementation_already_exists`
-        # and `_base_ships_the_implementation`, both select planned files
-        # with `endswith(".py")`. On a Playwright, Jest or Vitest target the
-        # planned files are .ts/.tsx/.js/.jsx, so both select nothing and
-        # return False. Porting them needs a framework-to-source-extension
-        # table this repo does not have -- `framework_detector` carries
-        # `test_file_extension`, which is the extension of the TEST file and
-        # says nothing about the implementation's. Authoring one for a path
-        # no recorded run has executed would be policy invented against zero
-        # evidence, so the port is filed rather than guessed.
-        #
-        # What IS true on every framework: an unchanged worktree reproduces
-        # this exactly, so it is deterministic under the #2298 rule and
-        # carries the token. Without it the orchestrator retried a
-        # reproducible result -- the twelve-second, three-attempt loop
-        # #2337 removed from the pytest path and left live on this one.
+        # Same three readings as the pytest twin, in the same order.
+        suffixes = source_extensions(framework)
+        if _implementation_already_exists(state, suffixes):
+            marker = read_red_marker(state)
+            if marker:
+                print(
+                    f"    [N3] {passed} test(s) pass -- red was verified at "
+                    f"this stage entry ({marker.get('verified_at', '?')}), so "
+                    f"the passing tests are this run's own progress."
+                )
+            else:
+                print(
+                    f"    [N3] {passed} test(s) pass, and files this run's "
+                    f"prior attempt wrote are present in the worktree."
+                )
+            log_workflow_execution(
+                target_repo=repo_root,
+                issue_number=state.get("issue_number", 0),
+                workflow_type="testing",
+                event="red_phase_implementation_present",
+                details={"passed": passed, "failed": failed + errors,
+                         "retry": True, "red_marker": bool(marker)},
+            )
+            return {
+                "red_phase_output": output,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "error_message": "",
+                "next_node": "N5_verify_green",
+            }
+
+        if _base_ships_the_implementation(state, suffixes) and (failed + errors) > 0:
+            print(
+                f"    [N3] {passed} test(s) pass at entry on a Modify issue "
+                f"-- the base ships every planned file, so they are "
+                f"base-satisfied regression guards, not an anomaly (#2670)."
+            )
+            log_workflow_execution(
+                target_repo=repo_root,
+                issue_number=state.get("issue_number", 0),
+                workflow_type="testing",
+                event="red_phase_base_satisfied",
+                details={"passed": passed, "failed": failed, "errors": errors},
+            )
+            return {
+                "red_phase_output": output,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "error_message": "",
+                "next_node": "N4_implement_code",
+            }
+
+        # Nothing explains them: the implementation predates the stage. That
+        # is deterministic on an unchanged worktree, which is why it carries
+        # the token -- without it the orchestrator retried a reproducible
+        # result, the twelve-second three-attempt loop #2337 removed from the
+        # pytest path and #2796 stopped here.
         print(f"    [GUARD] WARNING: {passed} tests passed unexpectedly!")
         print(
-            "    This path cannot tell whether this run's own earlier writes "
-            "explain them, so it treats both readings as deterministic."
+            "    No red-entry marker and no prior-attempt writes explain "
+            "them: the implementation existed BEFORE this stage entered."
         )
         return {
             "red_phase_output": output,
@@ -2724,12 +2780,10 @@ def _verify_red_non_pytest(
             "test_run_result": dict(result),
             "error_message": (
                 f"{DETERMINISTIC_FAILURE}: Red phase failed: {passed} tests "
-                f"passed unexpectedly. The {framework.value} red phase cannot "
-                f"tell this run's own prior writes from an implementation "
-                f"that predates the stage, so it treats the result as "
-                f"deterministic: the same stage against an unchanged worktree "
-                f"reproduces it. Tests should fail before implementation "
-                f"exists (#2542)."
+                f"passed unexpectedly, and neither a red-entry marker nor "
+                f"this run's own prior writes explain them -- the "
+                f"implementation existed before this stage entered. Tests "
+                f"should fail before implementation exists (#2542)."
             ),
             "next_node": "END",
         }

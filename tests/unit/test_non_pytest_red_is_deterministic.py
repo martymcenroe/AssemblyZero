@@ -100,22 +100,28 @@ class TestTheHaltSaysItIsDeterministic:
         result = _roll(tmp_path, _Runner(passed=3))
         assert result["next_node"] == "END"
 
-    def test_it_names_the_framework_and_the_count(self, tmp_path):
+    def test_it_names_the_count(self, tmp_path):
         message = _roll(tmp_path, _Runner(passed=3))["error_message"]
         assert "3 tests passed unexpectedly" in message, message
-        assert "playwright" in message, message
 
-    def test_it_does_not_claim_a_check_this_path_never_ran(self, tmp_path):
-        """The pytest twin's sentence would be a lie here.
+    def test_it_now_claims_the_check_because_it_performs_it(self, tmp_path):
+        """Superseded by #2805, deliberately rather than deleted.
 
+        This test asserted the opposite: that the message must NOT say
+        "neither a red-entry marker ... explain them", because
         `_implementation_already_exists` and `_base_ships_the_implementation`
-        are never called on this path, so a message asserting that neither a
-        marker nor prior writes explain the passes would describe work that
-        did not happen. It says what it actually knows instead.
+        were never called on this path and the sentence would have described
+        work that did not happen.
+
+        #2805 made the path perform that check, so the sentence became true
+        and the old assertion became false. The claim is kept pointing the
+        other way, because "the message must not describe a check the code
+        skipped" is the rule worth holding either way -- it is only the code
+        that moved.
         """
         message = _roll(tmp_path, _Runner(passed=3))["error_message"]
-        assert "neither a red-entry marker" not in message, message
-        assert "cannot tell" in message, message
+        assert "neither a red-entry marker" in message, message
+        assert "cannot tell" not in message, message
 
     def test_a_properly_red_run_is_untouched(self, tmp_path):
         result = _roll(tmp_path, _Runner(passed=0, failed=4))
