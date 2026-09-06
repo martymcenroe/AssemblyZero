@@ -132,6 +132,36 @@ class TestRun32sCollector:
         assert "DataCollector" in problems[0]
 
 
+class TestSubmodules:
+    """#2904: `from package import submodule` is an import the package answers for."""
+
+    def test_run_39s_import_of_a_submodule_is_accepted(self, repo: Path):
+        test_source = "from boostgauge import collector\n\n\ndef test_it():\n    assert collector\n"
+
+        assert validate_test_imports(test_source, repo) == []
+
+    def test_a_misspelt_submodule_is_still_refused_with_the_submodule_as_the_hint(self, repo: Path):
+        test_source = "from boostgauge import collecter\n"
+
+        problems = validate_test_imports(test_source, repo)
+
+        assert len(problems) == 1
+        assert "boostgauge has no 'collecter'" in problems[0]
+        assert "collector" in problems[0]
+
+    def test_a_package_directory_counts_as_a_submodule(self, repo: Path):
+        (repo / "src" / "boostgauge" / "collectors").mkdir()
+        (repo / "src" / "boostgauge" / "collectors" / "__init__.py").write_text("", encoding="utf-8")
+
+        assert validate_test_imports("from boostgauge import collectors\n", repo) == []
+
+    def test_a_module_file_offers_no_submodules(self, repo: Path):
+        from assemblyzero.workflows.testing.symbol_validator import submodule_names
+
+        assert submodule_names(repo / "src" / "boostgauge" / "collector.py") == set()
+        assert "collector" in submodule_names(repo / "src" / "boostgauge" / "__init__.py")
+
+
 class TestCompoundStatements:
     def test_try_except_else_finally(self, tmp_path: Path):
         names = exported_names(_module(tmp_path, (

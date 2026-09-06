@@ -150,9 +150,15 @@ def validate_test_imports(test_source: str, repo_root: Path) -> list[str]:
         available = exported_names(source_path)
         if available is None:
             continue  # could not read it; not evidence of a fault
+        # #2904: `from package import submodule` binds the submodule whatever
+        # the package's __init__ says. boostgauge's is empty, and
+        # `from boostgauge import collector` was refused with nothing to offer.
+        available = available | submodule_names(source_path)
 
         for alias in node.names:
             if alias.name == "*" or alias.name in available:
+                continue
+            if module_source_path(f"{module}.{alias.name}", repo_root) is not None:
                 continue
             close = difflib.get_close_matches(alias.name, sorted(available), n=3)
             hint = (
@@ -163,3 +169,20 @@ def validate_test_imports(test_source: str, repo_root: Path) -> list[str]:
                 f"{module} has no '{alias.name}'.{hint}"
             )
     return errors
+
+
+def submodule_names(source_path: Path) -> set[str]:
+    """The submodules a package offers, when `source_path` is its __init__ (#2904).
+
+    A module file offers none. A package offers every sibling `.py` (minus
+    `__init__`) and every sibling directory that is a package.
+    """
+    if source_path.name != "__init__.py":
+        return set()
+    names: set[str] = set()
+    for entry in source_path.parent.iterdir():
+        if entry.is_file() and entry.suffix == ".py" and entry.stem != "__init__":
+            names.add(entry.stem)
+        elif entry.is_dir() and (entry / "__init__.py").is_file():
+            names.add(entry.name)
+    return names
