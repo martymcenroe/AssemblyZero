@@ -45,6 +45,7 @@ from .claude_client import (
     call_claude_for_file,
 )
 from .context import estimate_context_tokens
+from .keep_passing_tests import keep_passing_tests_as_written, passing_test_names
 from .parsers import (
     detect_summary_response,
     extract_code_block,
@@ -1073,6 +1074,30 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 )
             # Note: generate_file_with_retry raises ImplementationError on
             # failure, so if we get here, code is valid
+
+        # #2905: a passing test is the contract. run-issue4-042724's patches to
+        # the test file fixed two failing coverage tests and rewrote three
+        # passing ones -- the loop then spent its iterations undoing its own
+        # edits to its own contract. In a revision, every test that passed at
+        # the measurement the worktree reflects keeps its prior text; the
+        # failing tests and any new ones are the patch's to change.
+        prior_text = edit_script_content or existing_content
+        if (
+            iteration_count > 0
+            and prior_text
+            and filepath.replace("\\", "/").split("/")[0] in ("tests", "test")
+        ):
+            contract = set(state.get("contract_tests") or []) or passing_test_names(
+                green_phase_output
+            )
+            kept = keep_passing_tests_as_written(prior_text, code, contract)
+            if kept.restored or kept.returned:
+                code = kept.source
+                names = ", ".join(sorted(kept.restored + kept.returned))
+                print(
+                    f"        [N4] kept {len(kept.restored) + len(kept.returned)} "
+                    f"passing test(s) as written in {filepath}: {names} (#2905)"
+                )
 
         # Write file (atomic: write to temp, then rename)
         temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
