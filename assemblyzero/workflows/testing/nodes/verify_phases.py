@@ -29,6 +29,9 @@ from assemblyzero.workflows.testing.audit import (
 from assemblyzero.workflows.testing.checkpoints import record_measurement
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
+from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+    passing_test_names,
+)
 # `route_by_exit_code` is deliberately NOT imported here (#2671). It was, and
 # was never called: the exit-code branching that actually runs is inline below
 # on these same constants. Removing the import is the lint fix; the two
@@ -1548,7 +1551,7 @@ COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
 
 def _hill_climb(
     state, repo_root, passed_count, coverage_achieved, current_green_failures,
-    updates,
+    updates, passing_tests: list[str] | None = None,
 ) -> None:
     """Never revise from a state worse than the best one seen (#2050).
 
@@ -1576,6 +1579,10 @@ def _hill_climb(
 
     best = state.get("best_iteration") or None
     score = (passed_count, coverage_achieved)
+    # #2905: the tests N4 must keep as written are the ones that passed at
+    # the measurement the worktree reflects -- this one, unless the restore
+    # below puts the best iteration's files back, in which case the best's.
+    updates["contract_tests"] = sorted(passing_tests or [])
     best_score = (
         (best.get("passed", -1), best.get("coverage", -1.0)) if best else None
     )
@@ -1601,6 +1608,7 @@ def _hill_climb(
             "passed": passed_count,
             "coverage": coverage_achieved,
             "green_failures": list(current_green_failures or []),
+            "passing": sorted(passing_tests or []),
             "files": manifest,
         }
         print(
@@ -1621,6 +1629,7 @@ def _hill_climb(
         updates["previous_passed"] = best.get("passed", passed_count)
         updates["previous_coverage"] = best.get("coverage", coverage_achieved)
         updates["previous_green_failures"] = best.get("green_failures", [])
+        updates["contract_tests"] = list(best.get("passing") or [])
         print(
             f"    [N5] iteration regressed ({passed_count} passing at "
             f"{coverage_achieved:.1f}% vs best {best.get('passed')} at "
@@ -2610,6 +2619,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "count_plateau_strikes": plateau_strikes,
                 "identity_plateau_strikes": identity_strikes,
                 "freeze_tests": True,
+                # #2905: no restore on this path; the latest output governs.
+                "contract_tests": [],
             }
 
         # Stagnation check: one shared decision, see coverage_has_stagnated,
@@ -2691,7 +2702,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         # #2841: a granted cap must reach the routers, which read it from state.
         updates["max_iterations"] = max_iterations
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
-                    current_green_failures, updates)
+                    current_green_failures, updates,
+                    passing_tests=sorted(passing_test_names(output)))
         return updates
 
     # Check coverage
@@ -2808,7 +2820,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "max_iterations": max_iterations,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
-                    current_green_failures, updates)
+                    current_green_failures, updates,
+                    passing_tests=sorted(passing_test_names(output)))
         return updates
 
     # Success: all tests pass and coverage meets target

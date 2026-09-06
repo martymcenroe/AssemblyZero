@@ -220,6 +220,11 @@ class TestingWorkflowState(TypedDict, total=False):
     # when True, N4 must not rewrite test files; they are the frozen contract.
     identity_plateau_strikes: int
     freeze_tests: bool
+    # #2905: the tests that passed at the measurement the worktree reflects --
+    # the best iteration's after a hill-climb restore, else the latest run's.
+    # N4 keeps each of them as written when it revises a test file. Empty
+    # means "read the latest green output".
+    contract_tests: list[str]
     # #2546: green-phase iterations where pytest collected ZERO tests. A zero
     # needs a denominator: one zero-collection routes to the implement loop
     # as a named collection-repair task; a second halts naming the collection
