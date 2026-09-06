@@ -251,6 +251,12 @@ _TRACEBACK_FRAME = re.compile(r"^\S+?\.py:\d+: in \S+")
 
 _FRAME_LINE_RE = re.compile(r"^(?P<path>[^\s:]+\.py):(?P<line>\d+): in (?P<where>\S+)\s*$")
 _CIRCULAR_MARKERS = ("partially initialized module", "circular import")
+# #2922: the name and module of a circular-import error line, which reads
+# `cannot import name 'X' from partially initialized module 'M'`.
+_CIRCULAR_IMPORT_NAME_RE = re.compile(
+    r"cannot import name ['\"](?P<name>[\w.]+)['\"] from "
+    r"(?:partially initialized module )?['\"](?P<module>[\w.]+)['\"]"
+)
 
 
 def collection_error_blocks(output: str) -> str:
@@ -308,13 +314,25 @@ def collection_error_blocks(output: str) -> str:
         seen.add(key)
         circular = any(marker in key for marker in _CIRCULAR_MARKERS)
         if circular and innermost:
+            # #2922: the import at the innermost frame is, on the shape this
+            # was built for, a RE-EXPORT the tests depend on -- "move it
+            # inside a function" removed the name and the spec suite died.
+            # State the constraint and the one repair that satisfies it.
+            imported = _CIRCULAR_IMPORT_NAME_RE.search(key)
+            name = imported.group("name") if imported else "the name"
+            source_module = imported.group("module") if imported else "the other module"
             heading = (
-                f"Collection failed with a circular import (#2914): "
-                f"{innermost[0]}:{innermost[1]} imports at module level from a "
-                f"module that imports this file back at module level, so "
-                f"whichever loads first, the other fails. Move the import at "
-                f"{innermost[0]}:{innermost[1]} inside the function that uses it. "
-                f"Only that file changes; the test files are the contract."
+                f"Collection failed with a circular import (#2914, #2922): "
+                f"{innermost[0]}:{innermost[1]} imports `{name}` from "
+                f"{source_module} at module level, and {source_module} imports "
+                f"this file back at module level, so whichever loads first, "
+                f"the other fails. `{name}` must stay importable from this "
+                f"module -- tests import it from here -- so do NOT remove or "
+                f"move that import. Replace it with a lazy re-export: a "
+                f"module-level `def __getattr__(attr):` that imports `{name}` "
+                f"from {source_module} on first access and raises "
+                f"AttributeError for any other attr. Only {innermost[0]} "
+                f"changes; every other file named here answers NO-EDIT."
             )
         elif innermost:
             heading = (

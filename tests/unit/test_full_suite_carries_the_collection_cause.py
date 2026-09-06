@@ -66,7 +66,14 @@ class TestRun41sCircularImport:
 
         assert "circular import" in blocks
         assert "src/boostgauge/collector.py:114" in blocks
-        assert "Move the import at src/boostgauge/collector.py:114" in blocks
+        # #2922: the name is a re-export the tests depend on; the block says
+        # so and names the one repair that keeps it.
+        assert "`WindowsCollector` must stay importable from this module" in blocks
+        assert "do NOT remove or move that import" in blocks
+        assert "def __getattr__(attr):" in blocks
+        assert "imports `WindowsCollector` from boostgauge.collectors.windows" in blocks
+        assert "Only src/boostgauge/collector.py changes; every other file named here answers NO-EDIT" in blocks
+        assert "inside the function that uses it" not in blocks
         assert "E   ImportError: cannot import name 'WindowsCollector'" in blocks
 
     def test_two_test_files_tripping_on_one_cause_is_one_block(self):
