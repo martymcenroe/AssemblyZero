@@ -293,8 +293,10 @@ def _planned_set(planned_paths: Iterable[str] | None) -> frozenset[str]:
     """The plan's paths as posix-relative strings, for membership tests."""
     if not planned_paths:
         return frozenset()
+    # Backslashes are separators on the machine the plan was read on, and a
+    # POSIX `Path` keeps them as characters -- normalise them by hand.
     return frozenset(
-        Path(str(p)).as_posix() for p in planned_paths if p
+        Path(str(p).replace("\\", "/")).as_posix() for p in planned_paths if p
     )
 
 
