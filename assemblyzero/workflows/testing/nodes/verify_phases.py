@@ -740,7 +740,12 @@ def run_pytest(
         Dict with returncode, stdout, stderr, and parsed results.
     """
     # Issue #268: Use poetry run to ensure correct virtualenv with dependencies
-    cmd = ["poetry", "run", "pytest", "-v", "--tb=short"]
+    # #2924: -vv, not -v. At verbosity 1 pytest truncates the reprs in an
+    # assertion's comparison -- run-issue4-145211 handed N4
+    # `Thresholds(co...0, red=50000)) == Thresholds(co...0, red=20000))` for a
+    # regression whose only fix was the four elided bands, and N4 guessed.
+    # At -vv the comparison is printed whole.
+    cmd = ["poetry", "run", "pytest", "-vv", "--tb=short"]
     if continue_on_collection_errors:
         cmd.append("--continue-on-collection-errors")
     cmd.extend(test_files)
