@@ -30,6 +30,7 @@ from assemblyzero.workflows.testing.checkpoints import record_measurement
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
 from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+    align_spec_twins,
     passing_test_names,
 )
 # `route_by_exit_code` is deliberately NOT imported here (#2671). It was, and
@@ -2033,6 +2034,61 @@ def _coverage_stagnant_message(
     )
 
 
+def _align_plan_files_with_the_spec(
+    state: TestingWorkflowState, repo_root: Path, test_files: list[str],
+) -> list[str]:
+    """Every plan-owned test file's twins carry the spec suite's text (#2912).
+
+    run-issue4-135112: #2910 had released the plan file's `test_req_13` to
+    the implementer, and the implementer read its failure -- `DID NOT RAISE
+    OSError` -- as the implementation's fault, rewrote `make_collector` to
+    raise `OSError`, failed the spec's copy, and was restored; twice. The
+    copy is the spec's test by construction; the verifier makes it so before
+    it measures, and reports what it aligned. Returns the relative paths it
+    rewrote.
+    """
+    spec_suite = repo_root / "tests" / f"test_issue_{state.get('issue_number', 0)}.py"
+    if not spec_suite.is_file():
+        return []
+    try:
+        spec_source = spec_suite.read_text(encoding="utf-8")
+    except OSError:
+        # fail-open: a spec suite that cannot be read aligns nothing; the
+        # run measures the plan files as they are, and the suite's own
+        # collection reports a suite that cannot be read.
+        return []
+    rewritten: list[str] = []
+    for file_str in test_files or []:
+        path = Path(file_str)
+        if not path.is_file() or path.resolve() == spec_suite.resolve():
+            continue
+        try:
+            plan_source = path.read_text(encoding="utf-8")
+        except OSError:
+            # fail-open: an unreadable plan file is measured as it is; the
+            # collection reports it if it cannot be read there either.
+            continue
+        aligned = align_spec_twins(plan_source, spec_source)
+        if not aligned.aligned:
+            continue
+        try:
+            path.write_text(aligned.source, encoding="utf-8")
+        except OSError as exc:
+            # fail-open: a file that cannot be written is measured as it
+            # was; said aloud so the drift it leaves is explained.
+            print(f"    [N5] could not align {path.name}: {exc}")
+            continue
+        rel = str(path.relative_to(repo_root)).replace("\\", "/") if path.is_relative_to(repo_root) else str(path)
+        print(
+            f"    [N5] aligned {len(aligned.aligned)} test(s) in {rel} with the spec "
+            f"suite's copies: {', '.join(aligned.aligned)} (#2912)"
+        )
+        if aligned.imports_added:
+            print(f"    [N5] copied {len(aligned.imports_added)} import(s) from the spec suite into {rel}")
+        rewritten.append(rel)
+    return rewritten
+
+
 def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """N5: Verify all tests pass with coverage target.
 
@@ -2065,6 +2121,10 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
     iteration_count = state.get("iteration_count", 0)
+
+    # #2912: a plan file's copy of a spec test carries the spec's text before
+    # anything is measured, so a drifted copy is never reported to N4.
+    _align_plan_files_with_the_spec(state, repo_root, test_files)
 
     print(f"    Running pytest with coverage target: {coverage_target}%")
 
