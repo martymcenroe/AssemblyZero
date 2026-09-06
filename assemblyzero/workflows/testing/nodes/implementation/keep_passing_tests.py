@@ -148,3 +148,31 @@ def keep_passing_tests_as_written(before: str, after: str, passing: set[str]) ->
     if after.endswith("\n"):
         source = source.rstrip("\n") + "\n"
     return Kept(source, restored, returned)
+
+
+def release_spec_twins(
+    contract: set[str], spec_suite_source: str | None,
+) -> tuple[set[str], set[str]]:
+    """The contract without the names the spec suite defines, and those names (#2910).
+
+    A plan-owned test file's `test_req_N` tests are copies of the spec's
+    requirements: the LLD plans a unit file per module and the spec suite is
+    generated from the same spec, which is the contract (#2709). On
+    run-issue4-131639 the plan file's copy of `test_req_13` asserted
+    `OSError` (run 39's rewrite) while the spec's asserted
+    `NotImplementedError`; the copy passed first, #2905 held it while N4
+    chased the spec's, and the loop ended at the cap raising neither. For a
+    name both files carry, the spec's copy governs and the plan file's is
+    the implementer's to change.
+    """
+    if not contract or not spec_suite_source:
+        return set(contract), set()
+    try:
+        tree = ast.parse(spec_suite_source)
+    except SyntaxError:
+        # fail-open: a spec suite that does not parse is the scaffold gate's
+        # finding; nothing is released and the #2905 keep stands as before.
+        return set(contract), set()
+    twins = {node.name for node, _ in _test_functions(tree).values()}
+    released = set(contract) & twins
+    return set(contract) - released, released

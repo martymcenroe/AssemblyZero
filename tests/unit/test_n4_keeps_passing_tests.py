@@ -348,3 +348,87 @@ def test_the_implementer_keeps_passing_tests_before_it_writes():
     write = source.index("# Write file (atomic: write to temp, then rename)")
     assert guard < write
     assert "(#2905)" in source
+
+
+SPEC_SUITE = '''\
+"""Spec suite for #4."""
+import pytest
+
+from boostgauge.collector import make_collector
+
+
+def test_req_13_mac_linux_raises_notimplemented(monkeypatch):
+    # Mac/Linux (REQ-13)
+    monkeypatch.setattr("sys.platform", "linux")
+    with pytest.raises(NotImplementedError):
+        make_collector()
+'''
+
+
+class TestTheSpecSuiteGovernsASharedName:
+    """#2910: run 40's plan-file copy of test_req_13 asserted OSError against
+    the spec's NotImplementedError; held as the contract it walled the loop."""
+
+    def test_run_40s_twin_is_released_and_the_rest_are_kept(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            release_spec_twins,
+        )
+
+        contract, released = release_spec_twins(PASSING, SPEC_SUITE)
+
+        assert released == {"test_req_13_mac_linux_raises_notimplemented"}
+        assert contract == {
+            "test_req_9_buffer_growth_on_mismatch", "test_req_10_oserror_fallback",
+        }
+
+    def test_the_released_copy_is_the_patchs_to_change(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            release_spec_twins,
+        )
+        contract, _ = release_spec_twins(PASSING, SPEC_SUITE)
+
+        kept = keep_passing_tests_as_written(RUN_32, RUN_39, contract)
+
+        assert sorted(kept.restored) == [
+            "test_req_10_oserror_fallback", "test_req_9_buffer_growth_on_mismatch",
+        ]
+        body = _function_text(kept.source, "test_req_13_mac_linux_raises_notimplemented")
+        assert "pytest.raises(OSError)" in body
+
+    def test_no_spec_suite_releases_nothing(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            release_spec_twins,
+        )
+
+        assert release_spec_twins(PASSING, None) == (PASSING, set())
+        assert release_spec_twins(PASSING, "") == (PASSING, set())
+        assert release_spec_twins(set(), SPEC_SUITE) == (set(), set())
+
+    def test_an_unparseable_spec_suite_releases_nothing(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            release_spec_twins,
+        )
+
+        assert release_spec_twins(PASSING, "def broken(:\n") == (PASSING, set())
+
+    def test_a_method_in_the_spec_suite_counts(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            release_spec_twins,
+        )
+        suite = "class TestReq:\n    def test_req_9_buffer_growth_on_mismatch(self):\n        assert 1\n"
+
+        _, released = release_spec_twins(PASSING, suite)
+
+        assert released == {"test_req_9_buffer_growth_on_mismatch"}
+
+    def test_the_implementer_releases_before_it_keeps(self):
+        source = (
+            Path(__file__).resolve().parents[2]
+            / "assemblyzero" / "workflows" / "testing" / "nodes" / "implementation"
+            / "orchestrator.py"
+        ).read_text(encoding="utf-8")
+
+        release = source.index("release_spec_twins(contract, spec_source)")
+        keep = source.index("keep_passing_tests_as_written(prior_text, code, contract)")
+        assert release < keep
+        assert "(#2910)" in source

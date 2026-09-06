@@ -45,7 +45,11 @@ from .claude_client import (
     call_claude_for_file,
 )
 from .context import estimate_context_tokens
-from .keep_passing_tests import keep_passing_tests_as_written, passing_test_names
+from .keep_passing_tests import (
+    keep_passing_tests_as_written,
+    passing_test_names,
+    release_spec_twins,
+)
 from .parsers import (
     detect_summary_response,
     extract_code_block,
@@ -1090,6 +1094,26 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             contract = set(state.get("contract_tests") or []) or passing_test_names(
                 green_phase_output
             )
+            # #2910: the spec suite governs a name both files carry. On
+            # run-issue4-131639 the plan file's copy of test_req_13 asserted
+            # OSError against the spec's NotImplementedError; held as the
+            # contract, the copy walled the loop at the cap raising neither.
+            spec_suite = repo_root / "tests" / f"test_issue_{state.get('issue_number', 0)}.py"
+            if spec_suite.is_file() and target_path.resolve() != spec_suite.resolve():
+                try:
+                    spec_source = spec_suite.read_text(encoding="utf-8")
+                except OSError:
+                    # fail-open: an unreadable spec suite releases nothing and
+                    # the #2905 keep stands as before; the suite's own gate
+                    # reports a suite that cannot be read.
+                    spec_source = ""
+                contract, released = release_spec_twins(contract, spec_source)
+                if released:
+                    print(
+                        f"        [N4] {len(released)} test(s) also in the spec suite "
+                        f"are the spec's to define; this file's copy is free to "
+                        f"change: {', '.join(sorted(released))} (#2910)"
+                    )
             kept = keep_passing_tests_as_written(prior_text, code, contract)
             if kept.restored or kept.returned:
                 code = kept.source
