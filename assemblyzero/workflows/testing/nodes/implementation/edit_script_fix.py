@@ -113,17 +113,22 @@ class EditScriptOutcome:
         blocks: int = 0,
         preserved: float = 0.0,
         failures: list[str] | None = None,
+        no_edit: str | None = None,
     ) -> None:
         self.code = code
         self.blocks = blocks
         self.preserved = preserved
         self.failures = failures or []
+        #: #2915: the model's stated reason that this file needs no change.
+        self.no_edit = no_edit
 
     @property
     def ok(self) -> bool:
         return self.code is not None
 
     def describe(self) -> str:
+        if self.no_edit is not None:
+            return f"[EDIT-SCRIPT] no edits; the model says: {self.no_edit} (#2915)"
         if self.ok:
             return (
                 f"[EDIT-SCRIPT] Applied {self.blocks} edit(s); "
@@ -423,7 +428,11 @@ def build_code_edit_script_prompt(
         "name in a SEARCH block cannot and must not change, and the passing "
         "tests depend on that.\n"
         "4. No preamble, no explanation, no markdown fences around the "
-        "blocks -- edit blocks only."
+        "blocks -- edit blocks only.\n"
+        "5. If nothing in THIS file needs to change for the failures listed "
+        "-- the fix belongs in another file -- output exactly one line and "
+        "nothing else: NO-EDIT: <why>. Never rewrite a file to have "
+        "something to say."
     ]
 
     if failure_context:
@@ -445,6 +454,25 @@ def build_code_edit_script_prompt(
     return "\n\n".join(sections)
 
 
+_NO_EDIT_RE = re.compile(r"^\s*NO-EDIT\s*:?\s*(?P<reason>.*)$", re.IGNORECASE)
+
+
+def _no_edit_reason(response: str) -> str | None:
+    """The reason given on a `NO-EDIT: <why>` answer, or None (#2915).
+
+    Only a response that IS the declaration counts -- one line, optionally
+    fenced -- so a stray mention inside an edit block never silences a patch.
+    """
+    lines = [line for line in response.strip().splitlines() if line.strip()]
+    lines = [line for line in lines if not line.strip().startswith("```")]
+    if len(lines) != 1:
+        return None
+    match = _NO_EDIT_RE.match(lines[0])
+    if match is None:
+        return None
+    return match.group("reason").strip() or "no reason given"
+
+
 def apply_code_edit_script(
     response: str, existing_content: str
 ) -> EditScriptOutcome:
@@ -455,6 +483,15 @@ def apply_code_edit_script(
     at all, so it cannot be quietly rewritten. That is the property #1528 was
     built for and the one this issue asks the implementation stage to inherit.
     """
+    declined = _no_edit_reason(response or "")
+    if declined is not None:
+        # #2915: a file the failures name but that has nothing to fix -- on
+        # run-issue4-135112 windows.py was named by a circular import whose
+        # fix was in collector.py -- answered with no blocks, and the caller
+        # regenerated it whole. "Nothing to change here" is an answer, and
+        # the file it is about stays exactly as it is.
+        return EditScriptOutcome(existing_content, preserved=1.0, no_edit=declined)
+
     blocks = parse_edit_blocks(response or "")
     if not blocks:
         return EditScriptOutcome(None, failures=["no edit blocks in response"])

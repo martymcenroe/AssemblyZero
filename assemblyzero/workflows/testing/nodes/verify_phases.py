@@ -249,6 +249,84 @@ def _build_failure_summary(output: str) -> str:
 _TRACEBACK_FRAME = re.compile(r"^\S+?\.py:\d+: in \S+")
 
 
+_FRAME_LINE_RE = re.compile(r"^(?P<path>[^\s:]+\.py):(?P<line>\d+): in (?P<where>\S+)\s*$")
+_CIRCULAR_MARKERS = ("partially initialized module", "circular import")
+
+
+def collection_error_blocks(output: str) -> str:
+    """The cause of each collection error in pytest's ERRORS section, as blocks
+    the implementer can attribute (#2914).
+
+    run-issue4-135112: the first green pass of boostgauge #4, and the full-suite
+    check found `Interrupted: 2 errors during collection`. What N4 was handed
+    was the short summary's `ERROR tests/integration/...` -- a file name and
+    nothing under it -- so attribution matched the test files and windows.py
+    (the importer), and the file that closes the cycle, collector.py:114,
+    was left alone. The ERRORS section had the whole chain.
+
+    Each distinct error becomes one block: the frames from the first source
+    frame onward (the importing test file's own frame is omitted, since the
+    fix is never there), the `E` lines, and for a circular import a sentence
+    naming the innermost source frame as the import to move. One block per
+    distinct error line, however many test files tripped over it.
+    """
+    match = re.search(
+        r"^=+ ERRORS =+$(?P<body>.*?)(?=^=+ (?:short test summary|warnings summary|"
+        r"FAILURES|[\w ]*coverage)|\Z)",
+        output or "", re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return ""
+    blocks: list[str] = []
+    seen: set[str] = set()
+    for section in re.split(r"^_+ ERROR collecting \S+ _+$", match.group("body"), flags=re.MULTILINE)[1:]:
+        lines = section.splitlines()
+        frames: list[str] = []
+        errors: list[str] = []
+        innermost: tuple[str, str] | None = None
+        i = 0
+        while i < len(lines):
+            frame = _FRAME_LINE_RE.match(lines[i].strip())
+            if frame:
+                path = frame.group("path").replace("\\", "/")
+                is_test = path.startswith("tests/") or path.startswith("test/") or "/tests/" in path
+                if not is_test:
+                    frames.append(lines[i].rstrip())
+                    if i + 1 < len(lines) and not _FRAME_LINE_RE.match(lines[i + 1].strip()) and not lines[i + 1].startswith("E "):
+                        frames.append(lines[i + 1].rstrip())
+                    innermost = (path, frame.group("line"))
+                i += 1
+                continue
+            if lines[i].startswith("E "):
+                errors.append(lines[i].rstrip())
+            i += 1
+        if not errors:
+            continue
+        key = "\n".join(errors)
+        if key in seen:
+            continue
+        seen.add(key)
+        circular = any(marker in key for marker in _CIRCULAR_MARKERS)
+        if circular and innermost:
+            heading = (
+                f"Collection failed with a circular import (#2914): "
+                f"{innermost[0]}:{innermost[1]} imports at module level from a "
+                f"module that imports this file back at module level, so "
+                f"whichever loads first, the other fails. Move the import at "
+                f"{innermost[0]}:{innermost[1]} inside the function that uses it. "
+                f"Only that file changes; the test files are the contract."
+            )
+        elif innermost:
+            heading = (
+                f"Collection failed (#2914): the test suite could not be imported; "
+                f"the failing import is at {innermost[0]}:{innermost[1]}."
+            )
+        else:
+            heading = "Collection failed (#2914): the test suite could not be imported."
+        blocks.append("\n".join([heading, *frames, *errors]))
+    return "\n\n".join(blocks)
+
+
 def _extract_traceback_blocks(output: str) -> str:
     """Pull distinct failure tracebacks out of pytest's FAILURES section.
 
@@ -2919,6 +2997,16 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             full_output = full_result["stdout"] + "\n" + full_result["stderr"]
             regression_summary = _build_failure_summary(full_output)
             regression_names = _extract_failed_test_names(full_output)
+            # #2914: a collection error's cause leads the summary, so
+            # attribution reaches the file that owns it rather than the test
+            # files that tripped over it.
+            collection_cause = collection_error_blocks(full_output)
+            if collection_cause:
+                regression_summary = (collection_cause + "\n\n" + regression_summary).strip()
+                print(
+                    f"    [N5] Full suite: collection failed ({full_errors} error(s)); "
+                    f"nothing ran -- routing the cause to N4 (#2914)"
+                )
 
             # Check for stagnation: same regressions across 2 iterations → halt
             previous_regressions = state.get("full_suite_regressions", [])
