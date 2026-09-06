@@ -198,6 +198,7 @@ def call_claude_for_file(
     model: str | None = None,
     system_prompt: str = "",
     timeout_seconds: float | None = None,
+    effort: str | None = None,
 ) -> tuple[str, str]:
     """Call Claude for a single file implementation.
 
@@ -209,7 +210,11 @@ def call_claude_for_file(
     #2899: `timeout_seconds`, when given, is the call's ceiling in place of
     the prompt-sized dynamic timeout. The provider gate has no output-token
     knob, so wall-clock is the only bound a caller can put on a generation
-    that will not stop -- N4c's ran 3,335 s for nine tests.
+    that will not stop -- N4c's ran 3,335 s for nine tests. `effort`, when
+    given, rides to the CLI as `--effort` (Issue #773's plumbing, which no
+    caller here used): measured on N4c's own prompt, the default effort
+    thinks past a fifteen-minute ceiling on Opus and Sonnet alike, and
+    `low` returns the tests in ten seconds.
 
     Returns (response, error).
     NO RETRIES - if it fails, it fails.
@@ -228,7 +233,7 @@ def call_claude_for_file(
 
     # Issue #783: Use unified provider — respects API policy gate
     try:
-        provider = get_provider(f"claude:{model or 'opus'}")
+        provider = get_provider(f"claude:{model or 'opus'}", effort=effort)
         result = provider.invoke(
             system_prompt=effective_system_prompt,
             content=prompt,

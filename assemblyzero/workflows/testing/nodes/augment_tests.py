@@ -58,6 +58,15 @@ MAX_GENERATION_ATTEMPTS = 2
 #: honest case; a generation that needs more is not writing tests.
 AUGMENT_TIMEOUT_SECONDS = 900
 
+#: #2899, the cause: at the CLI's default effort this prompt is one the model
+#: thinks about past the ceiling -- 1,201 events and no text on Opus (run 35),
+#: 1,244 on Sonnet (run 36), sixty redacted thinking deltas and no text in a
+#: ninety-second probe, and MAX_THINKING_TOKENS=2000 in the environment
+#: changed nothing. `--effort low` on the same prompt returned the tests in
+#: ten seconds. The provider has carried the flag since #773; nothing on this
+#: path passed it.
+AUGMENT_EFFORT = "low"
+
 
 def parse_uncovered_lines(output: str) -> dict[str, list[str]]:
     """Map source file -> uncovered line ranges from `--cov-report=term-missing`.
@@ -276,7 +285,7 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     model = select_model_for_file(str(test_path))
     print(
         f"    [N4c] generation ceiling {AUGMENT_TIMEOUT_SECONDS:.0f} s per "
-        f"attempt, model {model} (#2899)"
+        f"attempt, model {model}, effort {AUGMENT_EFFORT} (#2899)"
     )
 
     # #2336: validate BEFORE writing, and revise in place.
@@ -296,7 +305,7 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         response, error = call_claude_for_file(
             prompt, file_path=str(test_path), model=model,
-            timeout_seconds=AUGMENT_TIMEOUT_SECONDS,
+            timeout_seconds=AUGMENT_TIMEOUT_SECONDS, effort=AUGMENT_EFFORT,
         )
         suffix = f"-retry{attempt}" if attempt > 1 else ""
         _audit(f"augment-response{suffix}.md", response or f"(no response: {error})")

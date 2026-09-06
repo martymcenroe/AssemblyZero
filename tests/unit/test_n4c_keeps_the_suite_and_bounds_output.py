@@ -163,6 +163,39 @@ class TestTheCeiling:
         assert AUGMENT_TIMEOUT_SECONDS == 900
         assert "[N4c] generation ceiling 900 s per attempt, model " in capsys.readouterr().out
 
+    def test_the_call_runs_at_low_effort(self, worktree):
+        """The measured cause: at the default effort this prompt thinks past
+        fifteen minutes on Opus and Sonnet alike; at low it returns in ten
+        seconds. The flag has been in the provider since #773."""
+        with patch.object(
+            augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, ""),
+        ) as call:
+            augment_tests_for_coverage(_state(worktree))
+
+        assert call.call_args.kwargs["effort"] == "low"
+
+    def test_call_claude_for_file_hands_effort_to_the_provider(self):
+        seen: dict = {}
+
+        class _Result:
+            success = True
+            response = "ok"
+
+        class _Provider:
+            def invoke(self, **kwargs):
+                return _Result()
+
+        def fake_get_provider(spec, effort=None):
+            seen["spec"] = spec
+            seen["effort"] = effort
+            return _Provider()
+
+        with patch.object(claude_client, "get_provider", fake_get_provider):
+            claude_client.call_claude_for_file("p", file_path="t.py", effort="low")
+            assert seen["effort"] == "low"
+            claude_client.call_claude_for_file("p", file_path="t.py")
+            assert seen["effort"] is None
+
     def test_the_model_is_routed_as_n4_routes_it_not_bare_opus(self, worktree):
         """The cause of the 3,335-second call: bare `opus` runs with extended
         thinking and no ceiling on it. N4 routes through select_model_for_file
