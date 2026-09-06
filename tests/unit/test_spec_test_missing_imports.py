@@ -103,20 +103,16 @@ def _module_imports(source: str) -> list[str]:
 
 class TestMissingModuleImports:
     def test_run_28s_body_names_psutil_and_the_function_that_uses_it(self, target):
-        content = generate_spec_test_file_content(
-            _suite(REQ_1, REQ_6, REQ_7), 4, PLAN,
-        )  # unrepaired: repo_root not given, psutil not in the known set
+        source = "\n\n".join((REQ_1, REQ_6, REQ_7))  # the bodies, before emission
 
         assert ("psutil", "test_req_6_cmdline_access_denied_handled") in \
-            missing_module_imports(content, target)
+            missing_module_imports(source, target)
 
     def test_an_import_inside_another_function_binds_nothing_here(self, target):
         """req_1's local `import psutil` is why the file LOOKED fine."""
-        only_req_1 = generate_spec_test_file_content(_suite(REQ_1), 4, PLAN)
-        assert missing_module_imports(only_req_1, target) == []
+        assert missing_module_imports(REQ_1, target) == []
 
-        both = generate_spec_test_file_content(_suite(REQ_1, REQ_6), 4, PLAN)
-        assert missing_module_imports(both, target) == [
+        assert missing_module_imports("\n\n".join((REQ_1, REQ_6)), target) == [
             ("psutil", "test_req_6_cmdline_access_denied_handled"),
         ]
 
@@ -137,9 +133,10 @@ class TestMissingModuleImports:
 
         assert missing_module_imports(source, None) == [("pytest", "test_raises")]
 
-    def test_an_undeclared_third_party_module_is_not_guessed(self, tmp_path):
-        """No pyproject declares `requests`: nothing says it is a module."""
-        source = "def test_gets():\n    assert requests.get\n"
+    def test_a_name_neither_declared_nor_installed_is_not_guessed(self, tmp_path):
+        """No pyproject declares it and no finder knows it: nothing says
+        `notinstalledanywhere_xyz` is a module, so no import is invented."""
+        source = "def test_gets():\n    assert notinstalledanywhere_xyz.get\n"
 
         assert missing_module_imports(source, tmp_path) == []
 
@@ -209,7 +206,7 @@ class TestTheEmittedFile:
         )
 
         assert content.index("import os") < content.index("import psutil")
-        assert content.index("import psutil") < content.index("from boostgauge.collector import *")
+        assert content.index("import psutil") < content.index("from boostgauge.collector import")
 
     def test_nothing_is_added_when_nothing_is_missing(self, target, capsys):
         content = generate_spec_test_file_content(
@@ -217,20 +214,22 @@ class TestTheEmittedFile:
         )
 
         assert "#2887" not in content
-        assert "[N2]" not in capsys.readouterr().out
+        assert "#2887" not in capsys.readouterr().out
 
     def test_the_red_phase_import_is_still_the_only_link_to_the_implementation(self, target):
+        """#2888 names the symbols on that one line; nothing else imports them."""
         content = generate_spec_test_file_content(
             _suite(REQ_6), 4, PLAN, repo_root=target,
         )
 
-        assert "from boostgauge.collector import *" in content
+        assert content.count("\nfrom boostgauge.collector import _psutil_cmdline") == 1
         assert "import WindowsCollector" not in content
-        assert "import _psutil_cmdline" not in content
 
-    def test_without_repo_root_the_declared_dependency_is_not_known(self, capsys):
-        """The caller must pass the target: without it only stdlib and the
-        validator's known set can be repaired, and psutil is neither."""
-        content = generate_spec_test_file_content(_suite(REQ_6), 4, PLAN)
+    def test_a_module_neither_declared_nor_installed_is_not_repaired(self, tmp_path):
+        """The three module signals are the target's declaration, the stdlib,
+        and a spec this interpreter can find. A name that is none of them is
+        not a module the emitter knows, so no `import` is invented for it."""
+        body = REQ_6.replace("psutil", "notinstalledanywhere_xyz")
+        content = generate_spec_test_file_content(_suite(body), 4, PLAN, repo_root=tmp_path)
 
-        assert "import psutil" not in content
+        assert "import notinstalledanywhere_xyz" not in content
