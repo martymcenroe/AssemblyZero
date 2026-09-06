@@ -161,7 +161,23 @@ class TestTheCeiling:
 
         assert call.call_args.kwargs["timeout_seconds"] == AUGMENT_TIMEOUT_SECONDS
         assert AUGMENT_TIMEOUT_SECONDS == 900
-        assert "[N4c] generation ceiling 900 s per attempt (#2899)" in capsys.readouterr().out
+        assert "[N4c] generation ceiling 900 s per attempt, model " in capsys.readouterr().out
+
+    def test_the_model_is_routed_as_n4_routes_it_not_bare_opus(self, worktree):
+        """The cause of the 3,335-second call: bare `opus` runs with extended
+        thinking and no ceiling on it. N4 routes through select_model_for_file
+        and returns in twenty seconds; N4c now does the same."""
+        from assemblyzero.workflows.testing.nodes.implementation.routing import (
+            select_model_for_file,
+        )
+        with patch.object(
+            augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, ""),
+        ) as call:
+            augment_tests_for_coverage(_state(worktree))
+
+        routed = select_model_for_file(str(worktree / "tests" / "test_issue_4.py"))
+        assert call.call_args.kwargs["model"] == routed
+        assert call.call_args.kwargs["model"] != "opus"
 
     def test_call_claude_for_file_honours_an_explicit_ceiling(self):
         seen: dict = {}

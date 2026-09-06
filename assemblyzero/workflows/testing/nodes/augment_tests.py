@@ -35,6 +35,9 @@ from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
 from assemblyzero.workflows.testing.nodes.implementation.parsers import (
     extract_code_block,
 )
+from assemblyzero.workflows.testing.nodes.implementation.routing import (
+    select_model_for_file,
+)
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 from assemblyzero.workflows.testing.symbol_validator import validate_test_imports
 
@@ -262,9 +265,18 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
             save_audit_file(audit_dir, next_file_number(audit_dir), name, content)
 
     _audit("augment-prompt.md", prompt)
+
+    # #2899, the cause: this call went out as bare `opus`, which the CLI runs
+    # with extended thinking and no ceiling on it. Reproduced on
+    # 2026-09-06 03:40 with run 35's own prompt: sixty `thinking_tokens`
+    # events in ninety seconds and not one character of text. Run 34's
+    # 187,699 "output" tokens were thinking. N4 routes every file through
+    # `select_model_for_file` -- Sonnet by default, Haiku for scaffolds --
+    # and its calls return in twenty seconds. N4c now routes the same way.
+    model = select_model_for_file(str(test_path))
     print(
         f"    [N4c] generation ceiling {AUGMENT_TIMEOUT_SECONDS:.0f} s per "
-        f"attempt (#2899)"
+        f"attempt, model {model} (#2899)"
     )
 
     # #2336: validate BEFORE writing, and revise in place.
@@ -283,7 +295,7 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     addition = ""
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         response, error = call_claude_for_file(
-            prompt, file_path=str(test_path),
+            prompt, file_path=str(test_path), model=model,
             timeout_seconds=AUGMENT_TIMEOUT_SECONDS,
         )
         suffix = f"-retry{attempt}" if attempt > 1 else ""
