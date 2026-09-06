@@ -26,6 +26,22 @@ _EDIT_BLOCK_RE = re.compile(
     r"^<{7} SEARCH[ \t]*\r?\n(.*?)\r?\n={7}[ \t]*\r?\n(.*?)\r?\n>{7} REPLACE[ \t]*$",
     re.DOTALL | re.MULTILINE,
 )
+# #2918: the three marker lines, matched whole. `parse_edit_blocks` reads
+# the response line by line against these rather than with the regex above,
+# which is kept only as documentation of the format.
+_SEARCH_MARKER_RE = re.compile(r"<{7} SEARCH[ \t]*\r?")
+_SEPARATOR_RE = re.compile(r"={7}[ \t]*\r?")
+_REPLACE_MARKER_RE = re.compile(r">{7} REPLACE[ \t]*\r?")
+
+
+def _has_marker_line(section: str) -> bool:
+    """Does an edit section carry one of the three markers as a line (#2918)?"""
+    return any(
+        _SEARCH_MARKER_RE.fullmatch(line)
+        or _SEPARATOR_RE.fullmatch(line)
+        or _REPLACE_MARKER_RE.fullmatch(line)
+        for line in section.splitlines()
+    )
 
 EDIT_SCRIPT_SYSTEM_PROMPT = (
     "You are a precision patch engine. You NEVER rewrite documents — you "
@@ -136,7 +152,33 @@ def parse_edit_blocks(response: str) -> list[tuple[str, str]]:
             if "<<<<<<< SEARCH" in inner:
                 text = inner
 
-    return [(m.group(1), m.group(2)) for m in _EDIT_BLOCK_RE.finditer(text)]
+    # #2918: line by line, so an EMPTY section is a section. The regex this
+    # replaces required a newline on both sides of each section's text, so a
+    # block whose REPLACE was empty -- a deletion -- did not match at its own
+    # `>>>>>>> REPLACE` and the lazy `(.*?)` ran on to the NEXT block's
+    # closing marker, capturing that marker and the next block's SEARCH as
+    # the replacement text. run-issue4-141929 wrote `>>>>>>> REPLACE` into
+    # line 13 of windows.py, reported `Applied 2 edit(s); 100% preserved`,
+    # and every test in the suite died on the SyntaxError.
+    blocks: list[tuple[str, str]] = []
+    section: str | None = None
+    search: list[str] = []
+    replace: list[str] = []
+    for line in text.splitlines():
+        if _SEARCH_MARKER_RE.fullmatch(line):
+            if section is not None:
+                return []  # a block opened inside a block: malformed
+            section, search, replace = "search", [], []
+        elif section == "search" and _SEPARATOR_RE.fullmatch(line):
+            section = "replace"
+        elif section == "replace" and _REPLACE_MARKER_RE.fullmatch(line):
+            blocks.append(("\n".join(search), "\n".join(replace)))
+            section = None
+        elif section == "search":
+            search.append(line)
+        elif section == "replace":
+            replace.append(line)
+    return blocks
 
 
 def apply_edit_blocks(
@@ -153,6 +195,16 @@ def apply_edit_blocks(
     failures: list[str] = []
     text = draft
     for i, (search, replace) in enumerate(blocks, start=1):
+        if _has_marker_line(search) or _has_marker_line(replace):
+            # #2918: a marker inside a section can only come from a
+            # malformed response, and written into a file it is a
+            # SyntaxError on every test. Never applied, whatever the parser
+            # in front of this did.
+            failures.append(
+                f"block {i}: an edit marker inside a section; the response "
+                f"is malformed"
+            )
+            continue
         count = text.count(search)
         if count == 0:
             failures.append(
