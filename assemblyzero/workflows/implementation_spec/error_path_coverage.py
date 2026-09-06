@@ -169,12 +169,19 @@ def format_report(report: ErrorPathReport) -> str:
             f"{len(report.untested)} exception type(s) the spec raises have no "
             f"test asserting them. Section 10 owes each a test:"
         )
+        # The exception name and the demanded form are backticked on purpose
+        # (#2875): revision pinning names draft lines by the backticked spans
+        # a failure carries, and this line is the only address the check
+        # gives. Written bare, `except OSError:` in the previous draft was
+        # unnamed, the region was locked, and the drafter's conversion to
+        # `pytest.raises(OSError)` was refused three rounds running on
+        # run-issue4-190442 -- the #2555 deadlock in one more check.
         for name in report.untested:
             times = report.raised[name]
             occurrence = "once" if times == 1 else f"{times} times"
             lines.append(
-                f"  - {name}: raised {occurrence} by the spec's own code, and no "
-                f"test uses pytest.raises({name})"
+                f"  - `{name}`: raised {occurrence} by the spec's own code, and no "
+                f"test uses `pytest.raises({name})`"
             )
 
     if report.platform_gap:
