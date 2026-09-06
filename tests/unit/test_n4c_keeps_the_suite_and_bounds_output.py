@@ -288,7 +288,10 @@ class TestAdditionsAreRun:
     """#2902: N4c runs what it adds and keeps only what passes."""
 
     def test_failing_additions_are_dropped_and_the_passing_kept(self, worktree, capsys):
-        with patch.object(augment_tests, "call_claude_for_file", return_value=(THREE_TESTS, "")), \
+        # The repair pass (#2903) is exercised in its own class; here it
+        # returns nothing, so what is measured is the vetting alone.
+        with patch.object(augment_tests, "call_claude_for_file",
+                          side_effect=[(THREE_TESTS, ""), ("", "no repair")]), \
              patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
                    return_value=_pytest_says(RUN_37_OUTPUT, 2, 2)):
             result = augment_tests_for_coverage(_state(worktree))
@@ -351,13 +354,189 @@ class TestAdditionsAreRun:
         output = "FAILED tests/test_issue_4.py::test_drops_me - assert False\n1 passed, 1 failed\n"
         with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
                    return_value=_pytest_says(output, 1, 1)):
-            kept, dropped = _keep_passing_additions(
+            vetted = _keep_passing_additions(
                 worktree / "tests" / "test_issue_4.py", "", addition, worktree,
             )
 
-        assert dropped == [("test_drops_me", "assert False")]
-        assert "import pytest" in kept
-        assert "def _make" in kept
-        assert "def test_keeps_me" in kept
-        assert "test_drops_me" not in kept
-        assert "skipif" not in kept, "the dropped test's decorator goes with it"
+        assert vetted.dropped == [("test_drops_me", "assert False")]
+        assert "import pytest" in vetted.kept
+        assert "def _make" in vetted.kept
+        assert "def test_keeps_me" in vetted.kept
+        assert "test_drops_me" not in vetted.kept
+        assert "skipif" not in vetted.kept, "the dropped test's decorator goes with it"
+        assert "def test_drops_me" in vetted.dropped_source["test_drops_me"]
+        assert "skipif" in vetted.dropped_source["test_drops_me"]
+
+
+# =============================================================================
+# #2903: the function around the line, and a repair pass that remembers
+# =============================================================================
+
+NORMALIZE_SOURCE = '''\
+"""Collector."""
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Band:
+    yellow: float
+    red: float
+
+
+def normalize(value: float, band: Band) -> float:
+    """0-100: 0 below yellow, 30-60 across the band, 100 at red (#438)."""
+    if value < band.yellow:
+        return 30.0
+    if value >= band.red:
+        return 100.0
+    return 60.0
+
+
+CONSTANT = 1
+'''
+
+
+class TestContext:
+    def test_the_whole_function_is_quoted_with_the_uncovered_lines_marked(self, tmp_path):
+        from assemblyzero.workflows.testing.nodes.augment_tests import _read_context
+        path = tmp_path / "collector.py"
+        path.write_text(NORMALIZE_SOURCE, encoding="utf-8")
+
+        quoted = _read_context(path, ["15-16", "17"])
+
+        assert "# normalize, lines 11-17; uncovered lines marked >>" in quoted
+        assert "   11: def normalize(value: float, band: Band) -> float:" in quoted
+        assert '   12:     """0-100: 0 below yellow' in quoted
+        assert ">> 15:     if value >= band.red:" in quoted
+        assert ">> 16:         return 100.0" in quoted
+        assert ">> 17:     return 60.0" in quoted
+        assert "   13:     if value < band.yellow:" in quoted, "the branch the model kept guessing"
+        assert "CONSTANT" not in quoted, "only the function, not the file"
+
+    def test_a_module_level_line_gets_its_neighbours(self, tmp_path):
+        from assemblyzero.workflows.testing.nodes.augment_tests import _read_context
+        path = tmp_path / "collector.py"
+        path.write_text(NORMALIZE_SOURCE, encoding="utf-8")
+
+        quoted = _read_context(path, ["20"])
+
+        assert "# module level; uncovered lines marked >>" in quoted
+        assert ">> 20: CONSTANT = 1" in quoted
+        assert "   17:     return 60.0" in quoted
+
+    def test_a_file_that_does_not_parse_falls_back_to_bare_lines(self, tmp_path):
+        from assemblyzero.workflows.testing.nodes.augment_tests import _read_context
+        path = tmp_path / "broken.py"
+        path.write_text("def broken(:\n    pass\n", encoding="utf-8")
+
+        assert _read_context(path, ["2"]) == "2:     pass"
+
+
+REPAIRED = (
+    "```python\n"
+    "def test_covers_the_platform_branch():\n"
+    "    assert DataCollector is not None\n"
+    "```\n"
+)
+
+
+class TestTheRepairPass:
+    def test_dropped_tests_go_back_with_their_reasons_and_the_fixes_are_kept(self, worktree, capsys):
+        calls: list[str] = []
+
+        def two_calls(prompt, **kwargs):
+            calls.append(prompt)
+            return (THREE_TESTS, "") if len(calls) == 1 else (REPAIRED, "")
+
+        # First vetting run: two of three fail. Second (the repair): all pass.
+        runs = iter([_pytest_says(RUN_37_OUTPUT, 2, 2), _pytest_says("2 passed", 2, rc=0)])
+        with patch.object(augment_tests, "call_claude_for_file", side_effect=two_calls), \
+             patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+                   side_effect=lambda *a, **k: next(runs)):
+            result = augment_tests_for_coverage(_state(worktree))
+
+        assert len(calls) == 2
+        repair_prompt = calls[1]
+        assert "Your previous attempt was RUN on this machine" in repair_prompt
+        assert "- test_covers_the_platform_branch: assert 0.0 == 30.0" in repair_prompt
+        assert ("- test_nt_sweep_returns_empty_list_on_zero_length: OSError: exception: "
+                "access violation writing 0x0000000000000000") in repair_prompt
+        assert "def test_covers_the_platform_branch():" in repair_prompt, "its source travels too"
+        scaffold = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        assert "def test_covers_the_error_path" in scaffold
+        assert "assert DataCollector is not None" in scaffold, "the repaired test is in"
+        assert scaffold.count("def test_covers_the_platform_branch") == 1
+        out = capsys.readouterr().out
+        assert "[N4c] repair pass for 2 dropped test(s) (#2903)" in out
+        assert "[N4c] repair kept 1 test(s): test_covers_the_platform_branch" in out
+        assert "[N4c] added 2 test(s)" in out
+        assert len(result["test_files"]) == 4
+
+    def test_a_repair_that_repeats_a_kept_name_is_not_added_twice(self, worktree, capsys):
+        calls: list[str] = []
+
+        def two_calls(prompt, **kwargs):
+            calls.append(prompt)
+            return (THREE_TESTS, "") if len(calls) == 1 else (THREE_TESTS, "")
+
+        runs = iter([_pytest_says(RUN_37_OUTPUT, 2, 2), _pytest_says("3 passed", 3, rc=0)])
+        with patch.object(augment_tests, "call_claude_for_file", side_effect=two_calls), \
+             patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+                   side_effect=lambda *a, **k: next(runs)):
+            augment_tests_for_coverage(_state(worktree))
+
+        scaffold = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        assert scaffold.count("def test_covers_the_error_path") == 1
+        assert scaffold.count("def test_covers_the_platform_branch") == 1
+        assert "repair returned test_covers_the_error_path, which the file already has" in capsys.readouterr().out
+
+    def test_no_repair_pass_when_nothing_was_dropped(self, worktree):
+        with patch.object(
+            augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, ""),
+        ) as call:
+            augment_tests_for_coverage(_state(worktree))
+
+        assert call.call_count == 1
+
+    def test_a_repair_that_still_fails_adds_nothing(self, worktree, capsys):
+        calls: list[str] = []
+
+        def two_calls(prompt, **kwargs):
+            calls.append(prompt)
+            return (THREE_TESTS, "") if len(calls) == 1 else (REPAIRED, "")
+
+        still_failing = (
+            "FAILED tests/test_issue_4.py::test_covers_the_platform_branch - assert False\n"
+            "1 passed, 1 failed\n"
+        )
+        runs = iter([_pytest_says(RUN_37_OUTPUT, 2, 2), _pytest_says(still_failing, 1, 1)])
+        with patch.object(augment_tests, "call_claude_for_file", side_effect=two_calls), \
+             patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+                   side_effect=lambda *a, **k: next(runs)):
+            augment_tests_for_coverage(_state(worktree))
+
+        scaffold = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        assert "assert DataCollector is not None" not in scaffold
+        assert "def test_covers_the_error_path" in scaffold
+        out = capsys.readouterr().out
+        assert "[N4c] repair dropped test_covers_the_platform_branch: assert False (#2903)" in out
+        assert "[N4c] added 1 test(s)" in out
+
+
+class TestReached:
+    def test_reached_counts_the_targeted_lines_the_run_no_longer_reports(self):
+        from assemblyzero.workflows.testing.nodes.augment_tests import _reached
+        before = {"src/boostgauge/collector.py": ["56-58", "63"], "src/boostgauge/collectors/windows.py": ["86"]}
+        after_output = (
+            "src\\boostgauge\\collector.py               82      2    97%   56, 63\n"
+            "src\\boostgauge\\collectors\\windows.py     119      1    99%   86\n"
+        )
+
+        assert _reached(before, after_output) == (2, 5)
+
+    def test_a_file_missing_from_the_report_counts_nothing_as_reached(self):
+        from assemblyzero.workflows.testing.nodes.augment_tests import _reached
+        before = {"src/boostgauge/collector.py": ["56-58"]}
+
+        assert _reached(before, "3 passed") == (0, 3)
+        assert _reached(before, "") == (0, 3)
