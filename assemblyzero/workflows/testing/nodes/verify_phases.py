@@ -941,6 +941,69 @@ def _implementation_already_exists(
     return any((repo_root / path).is_file() for path in targets)
 
 
+def _is_test_path(path: str) -> bool:
+    """N4's rule for which written files are tests, plus the TS shapes (#2897)."""
+    posix = path.replace("\\", "/")
+    name = Path(posix).name
+    in_test_dir = any(part in ("tests", "test", "__tests__") for part in Path(posix).parts)
+    return (in_test_dir and name.startswith("test_")) or ".test." in name or ".spec." in name
+
+
+def _register_prior_attempt_files(
+    state: TestingWorkflowState, suffixes: tuple[str, ...] = (".py",),
+) -> dict[str, list[str]]:
+    """The planned files present in the worktree, registered as N4 would have (#2897).
+
+    `test_files` is N2's scaffold until N4 grows it, and `implementation_files`
+    is empty until N4 writes. The #2337/#2542 branch of the red phase --
+    "the prior attempt's files are present; resume via the green gate" --
+    routes to N5 without N4, so on run-issue4-020617 the green gate measured
+    the scaffold's 13 tests at 83 % over one module while 38 tests and two
+    modules sat on disk, and N4c set out to close a gap that did not exist.
+
+    Every planned file present joins the list N4 would have put it in --
+    tests through `merge_test_files`, so the scaffold rule keeps its one
+    home. Nothing present, nothing registered: an empty dict leaves the
+    state as it was.
+    """
+    repo_root = Path(state.get("repo_root", "") or ".")
+    planned = [
+        str(f.get("path", "") or "")
+        for f in (state.get("files_to_modify") or [])
+    ]
+    present = [
+        p for p in planned
+        if p and p.endswith(suffixes) and (repo_root / p).is_file()
+    ]
+    if not present:
+        return {}
+
+    absolute = [str(repo_root / p) for p in present]
+    tests = [p for p in absolute if _is_test_path(p)]
+    sources = [p for p in absolute if not _is_test_path(p)]
+
+    from assemblyzero.workflows.testing.nodes.implementation.orchestrator import (
+        merge_test_files,
+    )
+
+    issue_number = state.get("issue_number", 0)
+    merged_tests = merge_test_files(
+        scaffold_path=repo_root / "tests" / f"test_issue_{issue_number}.py",
+        scaffold_is_spec_suite=bool(
+            (state.get("spec_test_suite") or {}).get("functions")
+        ),
+        real_test_files=tests,
+        prior_test_files=list(state.get("test_files", []) or []),
+    )
+    prior_sources = list(state.get("implementation_files", []) or [])
+    merged_sources = prior_sources + [p for p in sources if p not in prior_sources]
+    print(
+        f"    [N3] registered the prior attempt's {len(tests)} test file(s) and "
+        f"{len(sources)} source file(s) from the plan, as N4 would have (#2897)"
+    )
+    return {"test_files": merged_tests, "implementation_files": merged_sources}
+
+
 def _base_ships_the_implementation(
     state: TestingWorkflowState, suffixes: tuple[str, ...] = (".py",),
 ) -> bool:
@@ -1357,6 +1420,9 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "pytest_exit_code": exit_code,
                 "error_message": "",
                 "next_node": "N5_verify_green",
+                # #2897: this route skips N4, which is where the plan's files
+                # would have joined the lists the green gate measures.
+                **_register_prior_attempt_files(state),
             }
 
         if _base_ships_the_implementation(state) and total_red > 0:
@@ -3022,6 +3088,8 @@ def _verify_red_non_pytest(
                 "test_run_result": dict(result),
                 "error_message": "",
                 "next_node": "N5_verify_green",
+                # #2897: same as the pytest twin -- this route skips N4.
+                **_register_prior_attempt_files(state, suffixes),
             }
 
         if _base_ships_the_implementation(state, suffixes) and (failed + errors) > 0:
