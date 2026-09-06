@@ -361,7 +361,18 @@ def validate_files_to_modify(
     paths immediately so we don't waste tokens on invalid paths.
 
     Rules:
-    - Modify/Delete: file must exist on disk (hard fail)
+    - Modify whose target is absent: implemented as an Add (#2879). The
+      plan's change type is its guess about the base, and the truth is on
+      disk -- the operator's #2736 ruling that the LLD's file list is a plan,
+      not a contract, applied to the type as well as the path. This is the
+      inverse of `resolve_change_type` (#2032/#2033), which turns an Add whose
+      file the base ships into a Modify. On run-issue4-193821 the design
+      called all five of #4's deliverables Modify against a from-seed base
+      that had none of them, and this guard ended a run that had just cleared
+      the gate, the design and the spec, in five seconds. The spec dict is
+      coerced in place so the loop implements it as an Add, and the coercion
+      is printed.
+    - Delete: file must exist on disk (hard fail)
     - Add: auto-create parent directory if missing (Issue #468)
 
     Args:
@@ -378,7 +389,16 @@ def validate_files_to_modify(
         change_type = file_spec.get("change_type", "Add")
         full_path = repo_root / file_path
 
-        if change_type.lower() in ("modify", "delete"):
+        if change_type.lower() == "modify" and not full_path.exists():
+            print(
+                f"    [PLAN] says Modify but the base has no {file_path}; "
+                f"implementing as Add (#2736: the file list is a plan, not a "
+                f"contract)"
+            )
+            file_spec["change_type"] = "Add"
+            change_type = "Add"
+
+        if change_type.lower() == "delete":
             if not full_path.exists():
                 errors.append(
                     f"{change_type} target does not exist: {file_path}"
