@@ -17,7 +17,10 @@ Previous behavior (stubs) caused infinite loops in the TDD workflow
 because stub tests always fail regardless of implementation.
 """
 
+import ast
+import builtins
 import re
+import sys
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -622,6 +625,7 @@ def generate_spec_test_file_content(
     spec_test_suite: dict,
     issue_number: int,
     files_to_modify: list[dict] | None = None,
+    repo_root: Path | str | None = None,
 ) -> str:
     """Emit the spec's executable test functions verbatim (#2316).
 
@@ -630,9 +634,11 @@ def generate_spec_test_file_content(
     "improves" is a place the emitted suite can drift from the contract the
     spec set.
 
-    The only additions are a provenance docstring and, when the spec's own
+    The only additions are a provenance docstring; when the spec's own
     import block does not already import the implementation module, the TDD
-    red-phase import that makes the suite fail before implementation exists.
+    red-phase import that makes the suite fail before implementation exists;
+    and (#2887) a module-level `import <module>` for each module a body uses
+    without importing -- `repo_root` says which modules the target declares.
     """
     impl_module = _extract_impl_module(files_to_modify)
     imports = (spec_test_suite.get("imports") or "").strip()
@@ -650,6 +656,9 @@ def generate_spec_test_file_content(
     if imports:
         lines.append(imports)
         lines.append("")
+    # Where a repaired import goes: after the spec's own import block, before
+    # the red-phase trigger, so the file reads imports-first like any other.
+    repair_at = len(lines)
 
     # The red-phase trigger, only when the spec's imports do not already
     # reach the implementation module. A duplicate import is harmless but
@@ -669,7 +678,118 @@ def generate_spec_test_file_content(
         lines.append("")
         lines.append("")
 
-    return "\n".join(lines).rstrip() + "\n"
+    content = "\n".join(lines).rstrip() + "\n"
+
+    # #2887: a body that uses a module it never imports fails on NameError in
+    # every iteration, and nothing downstream can touch a scaffold file.
+    repairs = missing_module_imports(content, repo_root)
+    if repairs:
+        for module, used_by in repairs:
+            print(
+                f"    [N2] {used_by} uses {module} without importing it; "
+                f"added 'import {module}' (#2887)"
+            )
+        block = [
+            "# #2887: modules the spec's bodies use without importing them",
+            *[f"import {module}" for module, _ in repairs],
+            "",
+        ]
+        lines[repair_at:repair_at] = block
+        content = "\n".join(lines).rstrip() + "\n"
+
+    return content
+
+
+def _names_bound_in(node: ast.AST) -> set[str]:
+    """Every name a statement (or a whole function) binds, at any depth."""
+    bound: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+            bound.add(sub.id)
+        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+            for alias in sub.names:
+                if alias.name != "*":
+                    bound.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if not isinstance(sub, ast.Lambda):
+                bound.add(sub.name)
+            args = sub.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                bound.add(arg.arg)
+            if args.vararg:
+                bound.add(args.vararg.arg)
+            if args.kwarg:
+                bound.add(args.kwarg.arg)
+        elif isinstance(sub, ast.ClassDef):
+            bound.add(sub.name)
+        elif isinstance(sub, ast.ExceptHandler) and sub.name:
+            bound.add(sub.name)
+        elif isinstance(sub, (ast.Global, ast.Nonlocal)):
+            bound.update(sub.names)
+        elif isinstance(sub, ast.MatchAs) and sub.name:
+            bound.add(sub.name)
+    return bound
+
+
+def missing_module_imports(
+    source: str, repo_root: Path | str | None,
+) -> list[tuple[str, str]]:
+    """Modules the file's test functions use without any binding in scope (#2887).
+
+    Each entry is `(module, first_function_using_it)`, sorted by module. A
+    name counts as unbound in a function when it is loaded there and bound
+    neither in that function (its parameters, assignments, its own imports)
+    nor at module level (the module's imports, defs and assignments) and is
+    not a builtin. `import psutil` inside `test_req_1` binds nothing for
+    `test_req_6` -- which is the case run-issue4-005046 spent three
+    iterations on.
+
+    Only IMPORTABLE MODULE NAMES are reported: stdlib modules, the target's
+    declared dependencies (`_read_third_party_packages` on `repo_root`), and
+    the validator's known third-party set. The red-phase star-import supplies
+    the implementation's classes and helpers, so an unbound `WindowsCollector`
+    is never touched -- the emitter transcribes; it does not guess.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        # fail-open: this is a repair, not the verdict. A file that does not
+        # parse is refused by the mechanical validation that follows the
+        # emitter (`validate_tests_mechanical`, syntax first), and that
+        # refusal names the line; repairing nothing here leaves the file
+        # exactly as legible to that check as it was.
+        return []
+
+    from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
+        _KNOWN_THIRD_PARTY,
+        _read_third_party_packages,
+    )
+
+    importable: set[str] = set(sys.stdlib_module_names) | set(_KNOWN_THIRD_PARTY)
+    if repo_root:
+        importable |= _read_third_party_packages(Path(repo_root))
+
+    module_bound: set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            module_bound.add(stmt.name)
+        else:
+            module_bound |= _names_bound_in(stmt)
+    builtin_names = set(dir(builtins))
+
+    found: dict[str, str] = {}
+    for stmt in tree.body:
+        if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        bound = module_bound | _names_bound_in(stmt) | builtin_names
+        for sub in ast.walk(stmt):
+            if not (isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load)):
+                continue
+            name = sub.id
+            if name in bound or name in found or name not in importable:
+                continue
+            found[name] = stmt.name
+    return sorted(found.items())
 
 
 def _generate_test_function(
@@ -996,7 +1116,8 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     module_name = f"issue_{issue_number}"
     if use_spec_bodies:
         content = generate_spec_test_file_content(
-            spec_test_suite, issue_number, files_to_modify
+            spec_test_suite, issue_number, files_to_modify,
+            repo_root=repo_root,
         )
         emitted = len(spec_test_suite["functions"])
     else:
