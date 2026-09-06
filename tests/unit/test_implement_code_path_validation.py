@@ -6,7 +6,6 @@ Add behavior to auto-create parent directories instead of erroring.
 """
 
 import pytest
-from pathlib import Path
 
 from assemblyzero.workflows.testing.nodes.implement_code import (
     validate_files_to_modify,
@@ -35,15 +34,23 @@ def test_all_paths_valid_returns_empty(tmp_repo):
     assert errors == []
 
 
-def test_modify_file_missing_returns_error(tmp_repo):
-    """Wrong path for Modify -> error."""
+def test_modify_file_missing_is_implemented_as_an_add(tmp_repo, capsys):
+    """#2879: a Modify whose target is absent is an Add, not an error.
+
+    This case asserted the refusal from #445 until run-issue4-193821, when
+    the refusal ended a run that had cleared the gate, the design and the
+    spec, five seconds into the implementation stage. The operator's #2736
+    ruling -- the file list is a plan, not a contract -- governs the change
+    type as it governs the path.
+    """
     files = [
         {"path": "src/workflows/tdd/runner.py", "change_type": "Modify"},
     ]
     errors = validate_files_to_modify(files, tmp_repo)
-    assert len(errors) == 1
-    assert "Modify target does not exist" in errors[0]
-    assert "src/workflows/tdd/runner.py" in errors[0]
+    assert errors == []
+    assert files[0]["change_type"] == "Add"
+    assert (tmp_repo / "src" / "workflows" / "tdd").is_dir()
+    assert "says Modify but the base has no src/workflows/tdd/runner.py" in capsys.readouterr().out
 
 
 def test_delete_file_missing_returns_error(tmp_repo):
@@ -83,8 +90,12 @@ def test_multiple_errors_collected(tmp_repo):
         {"path": "src/no_parent/file3.py", "change_type": "Add"},
     ]
     errors = validate_files_to_modify(files, tmp_repo)
-    # Modify + Delete both error; Add auto-creates parent (Issue #468)
-    assert len(errors) == 2
+    # Delete errors; the Modify is coerced to an Add (#2879); both Adds
+    # auto-create their parents (Issue #468).
+    assert len(errors) == 1
+    assert "Delete target does not exist" in errors[0]
+    assert files[0]["change_type"] == "Add"
+    assert (tmp_repo / "src" / "bad_path").is_dir()
     assert (tmp_repo / "src" / "no_parent").is_dir()
 
 

@@ -26,6 +26,7 @@ from assemblyzero.workflows.testing.audit import (
     parse_pytest_output,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.checkpoints import record_measurement
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
 # `route_by_exit_code` is deliberately NOT imported here (#2671). It was, and
@@ -2111,6 +2112,16 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
           f"Coverage: {parsed.get('coverage', 0):.1f}% | Exit: {exit_code} "
           f"({describe_run_outcome(exit_code, parsed.get('failed'))})")
 
+    # #2867: the measurement rides the checkpoint it describes -- HEAD is the
+    # post-impl commit N4 just cut -- so a later resume can prefer the best
+    # preserved attempt over the newest.
+    _n5_passed = int(parsed.get("passed", 0) or 0)
+    _n5_failed = int(parsed.get("failed", 0) or 0)
+    record_measurement(
+        repo_root, _n5_passed, _n5_passed + _n5_failed,
+        float(parsed.get("coverage", 0) or 0.0),
+    )
+
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")
     audit_dir = Path(audit_dir_str) if audit_dir_str else None
@@ -3148,6 +3159,12 @@ def _verify_green_non_pytest(
 
     print(f"    [N5] Results: {passed} passed, {failed} failed | "
           f"Coverage: {coverage_achieved:.1f}% | Exit: {exit_code} ({framework.value})")
+
+    # #2867: same as the pytest path -- the measurement rides the checkpoint.
+    record_measurement(
+        repo_root, int(passed or 0), int(passed or 0) + int(failed or 0),
+        float(coverage_achieved or 0.0),
+    )
 
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")
