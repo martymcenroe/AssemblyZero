@@ -17,7 +17,11 @@ Previous behavior (stubs) caused infinite loops in the TDD workflow
 because stub tests always fail regardless of implementation.
 """
 
+import ast
+import builtins
+import importlib.util
 import re
+import sys
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -622,6 +626,7 @@ def generate_spec_test_file_content(
     spec_test_suite: dict,
     issue_number: int,
     files_to_modify: list[dict] | None = None,
+    repo_root: Path | str | None = None,
 ) -> str:
     """Emit the spec's executable test functions verbatim (#2316).
 
@@ -630,15 +635,19 @@ def generate_spec_test_file_content(
     "improves" is a place the emitted suite can drift from the contract the
     spec set.
 
-    The only additions are a provenance docstring and, when the spec's own
+    The only additions are a provenance docstring; when the spec's own
     import block does not already import the implementation module, the TDD
-    red-phase import that makes the suite fail before implementation exists.
+    red-phase import that makes the suite fail before implementation exists
+    -- by NAME, for the implementation symbols the bodies use (#2888), and
+    `import *` only when they use none; and (#2887) a module-level
+    `import <module>` for each module a body uses without importing --
+    `repo_root` says which modules the target declares.
     """
     impl_module = _extract_impl_module(files_to_modify)
     imports = (spec_test_suite.get("imports") or "").strip()
     functions = spec_test_suite.get("functions") or []
 
-    lines = [
+    head = [
         f'"""Test file for Issue #{issue_number}.',
         "",
         "Emitted by AssemblyZero from the implementation spec's Section 10",
@@ -646,30 +655,202 @@ def generate_spec_test_file_content(
         '"""',
         "",
     ]
-
     if imports:
-        lines.append(imports)
-        lines.append("")
+        head.append(imports)
+        head.append("")
+
+    body = [""]
+    for fn in functions:
+        body.append(fn["source"].rstrip())
+        body.append("")
+        body.append("")
 
     # The red-phase trigger, only when the spec's imports do not already
     # reach the implementation module. A duplicate import is harmless but
     # noisy, and a missing one costs the RED signal entirely.
-    if impl_module and f"import {impl_module}" not in imports and (
-        f"from {impl_module}" not in imports
-    ):
-        lines.extend([
-            "# TDD: this import fails until the implementation exists (RED phase)",
-            f"from {impl_module} import *  # noqa: F401, F403",
+    needs_red_phase = bool(impl_module) and (
+        f"import {impl_module}" not in imports
+        and f"from {impl_module}" not in imports
+    )
+
+    # One reading of the bodies decides both repairs. The draft carries the
+    # star form so the analysis sees exactly the file the bodies live in;
+    # a star-import binds nothing to the analysis either way.
+    draft = "\n".join([*head, *body]).rstrip() + "\n"
+    unbound = unbound_names(draft, repo_root)
+    repairs = unbound["modules"]
+    symbols = unbound["symbols"]
+
+    # #2887: a body that uses a module it never imports fails on NameError in
+    # every iteration, and nothing downstream can touch a scaffold file.
+    repair_block: list[str] = []
+    if repairs:
+        for module, used_by in repairs:
+            print(
+                f"    [N2] {used_by} uses {module} without importing it; "
+                f"added 'import {module}' (#2887)"
+            )
+        repair_block = [
+            "# #2887: modules the spec's bodies use without importing them",
+            *[f"import {module}" for module, _ in repairs],
             "",
-        ])
+        ]
 
-    lines.append("")
-    for fn in functions:
-        lines.append(fn["source"].rstrip())
-        lines.append("")
-        lines.append("")
+    # #2888: the bodies name the implementation's symbols, so the red-phase
+    # import names them too. `import *` drops every underscore name by
+    # Python's own rule -- run-issue4-011019's `_psutil_cmdline` could never
+    # arrive through it -- and hides a missing symbol as a NameError three
+    # iterations later, when a named import fails at collection with the
+    # module and the symbol in the message. The star form remains for a
+    # suite whose bodies use no implementation name at all: the RED signal
+    # must still come from somewhere.
+    red_block: list[str] = []
+    if needs_red_phase:
+        if symbols:
+            names = ", ".join(symbol for symbol, _ in symbols)
+            print(
+                f"    [N2] red-phase import names {len(symbols)} symbol(s) "
+                f"from {impl_module}: {names} (#2888)"
+            )
+            red_block = [
+                "# TDD: this import fails until the implementation exists (RED phase)",
+                f"from {impl_module} import {names}  # noqa: F401",
+                "",
+            ]
+        else:
+            red_block = [
+                "# TDD: this import fails until the implementation exists (RED phase)",
+                f"from {impl_module} import *  # noqa: F401, F403",
+                "",
+            ]
 
-    return "\n".join(lines).rstrip() + "\n"
+    return "\n".join([*head, *repair_block, *red_block, *body]).rstrip() + "\n"
+
+
+def _names_bound_in(node: ast.AST) -> set[str]:
+    """Every name a statement (or a whole function) binds, at any depth."""
+    bound: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+            bound.add(sub.id)
+        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+            for alias in sub.names:
+                if alias.name != "*":
+                    bound.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if not isinstance(sub, ast.Lambda):
+                bound.add(sub.name)
+            args = sub.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                bound.add(arg.arg)
+            if args.vararg:
+                bound.add(args.vararg.arg)
+            if args.kwarg:
+                bound.add(args.kwarg.arg)
+        elif isinstance(sub, ast.ClassDef):
+            bound.add(sub.name)
+        elif isinstance(sub, ast.ExceptHandler) and sub.name:
+            bound.add(sub.name)
+        elif isinstance(sub, (ast.Global, ast.Nonlocal)):
+            bound.update(sub.names)
+        elif isinstance(sub, ast.MatchAs) and sub.name:
+            bound.add(sub.name)
+    return bound
+
+
+def unbound_names(
+    source: str, repo_root: Path | str | None,
+) -> dict[str, list[tuple[str, str]]]:
+    """Names the file's test functions use with no binding in scope, in two kinds.
+
+    A name counts as unbound in a function when it is loaded there and bound
+    neither in that function (its parameters, assignments, its own imports)
+    nor at module level (the module's imports, defs and assignments) and is
+    not a builtin. `import psutil` inside `test_req_1` binds nothing for
+    `test_req_6` -- which is the case run-issue4-005046 spent three
+    iterations on (#2887). A star-import binds nothing here: it is exactly
+    the link this analysis exists to replace (#2888).
+
+    Returns `{"modules": [...], "symbols": [...]}`, each a list of
+    `(name, first_function_using_it)` sorted by name:
+
+    * `modules` -- IMPORTABLE MODULE NAMES: stdlib, the target's declared
+      dependencies (`_read_third_party_packages` on `repo_root`), the
+      validator's known third-party set, and any name this environment can
+      find a module spec for. The emitter adds `import <name>`.
+    * `symbols` -- everything else: the implementation's classes and helpers
+      the bodies exercise. The emitter imports them by name from the
+      implementation module.
+    """
+    empty: dict[str, list[tuple[str, str]]] = {"modules": [], "symbols": []}
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        # fail-open: this is a repair, not the verdict. A file that does not
+        # parse is refused by the mechanical validation that follows the
+        # emitter (`validate_tests_mechanical`, syntax first), and that
+        # refusal names the line; repairing nothing here leaves the file
+        # exactly as legible to that check as it was.
+        return empty
+
+    from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
+        _KNOWN_THIRD_PARTY,
+        _read_third_party_packages,
+    )
+
+    importable: set[str] = set(sys.stdlib_module_names) | set(_KNOWN_THIRD_PARTY)
+    if repo_root:
+        importable |= _read_third_party_packages(Path(repo_root))
+
+    module_bound: set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            module_bound.add(stmt.name)
+        else:
+            module_bound |= _names_bound_in(stmt)
+    builtin_names = set(dir(builtins))
+
+    found: dict[str, str] = {}
+    for stmt in tree.body:
+        if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        bound = module_bound | _names_bound_in(stmt) | builtin_names
+        for sub in ast.walk(stmt):
+            if not (isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load)):
+                continue
+            name = sub.id
+            if name in bound or name in found:
+                continue
+            found[name] = stmt.name
+
+    def _is_module(name: str) -> bool:
+        if name in importable:
+            return True
+        # A name this interpreter can find a module spec for is a module,
+        # declared or not -- `psutil` on a machine that has it. `find_spec`
+        # searches the finders without executing anything.
+        try:
+            return importlib.util.find_spec(name) is not None
+        except (ImportError, ValueError):
+            # fail-open: a name the finders choke on is not evidence of a
+            # module, so it stays a symbol and is imported by name from the
+            # implementation module -- where a wrong guess fails at
+            # collection with the name in the message (#2888). Halting the
+            # scaffold on a finder error would cost the whole suite to
+            # protect one import line.
+            return False
+
+    return {
+        "modules": sorted((n, f) for n, f in found.items() if _is_module(n)),
+        "symbols": sorted((n, f) for n, f in found.items() if not _is_module(n)),
+    }
+
+
+def missing_module_imports(
+    source: str, repo_root: Path | str | None,
+) -> list[tuple[str, str]]:
+    """The `modules` half of `unbound_names` (#2887): what `import <name>` repairs."""
+    return unbound_names(source, repo_root)["modules"]
 
 
 def _generate_test_function(
@@ -996,7 +1177,8 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     module_name = f"issue_{issue_number}"
     if use_spec_bodies:
         content = generate_spec_test_file_content(
-            spec_test_suite, issue_number, files_to_modify
+            spec_test_suite, issue_number, files_to_modify,
+            repo_root=repo_root,
         )
         emitted = len(spec_test_suite["functions"])
     else:
