@@ -24,7 +24,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from assemblyzero.workflows.testing.audit import gate_log
+from assemblyzero.workflows.testing.audit import (
+    gate_log,
+    next_file_number,
+    save_audit_file,
+)
 from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
     call_claude_for_file,
 )
@@ -43,6 +47,13 @@ MAX_TARGET_LINES = 40
 #: produce an importable file in two tries is not going to on the third, and
 #: the passing suite is worth more than another 194-second call.
 MAX_GENERATION_ATTEMPTS = 2
+
+#: #2899: the wall-clock ceiling on one coverage generation. The first live
+#: N4c call took 194 s for twelve tests; boostgauge run-issue4-021938's took
+#: 3,335 s and 187,699 output tokens for nine, and the provider gate has no
+#: output-token knob to stop it sooner. Fifteen minutes is five times the
+#: honest case; a generation that needs more is not writing tests.
+AUGMENT_TIMEOUT_SECONDS = 900
 
 
 def parse_uncovered_lines(output: str) -> dict[str, list[str]]:
@@ -240,6 +251,22 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
         str(test_path), existing, targets, coverage_achieved, coverage_target,
     )
 
+    # #2899: this node saved nothing, so a 3,335-second generation could not
+    # be examined afterwards. The prompt and every attempt's response go to
+    # the audit dir the way N4's do, and the call carries a ceiling.
+    audit_dir = Path(state.get("audit_dir", "") or "")
+    audit_ok = bool(state.get("audit_dir")) and audit_dir.is_dir()
+
+    def _audit(name: str, content: str) -> None:
+        if audit_ok:
+            save_audit_file(audit_dir, next_file_number(audit_dir), name, content)
+
+    _audit("augment-prompt.md", prompt)
+    print(
+        f"    [N4c] generation ceiling {AUGMENT_TIMEOUT_SECONDS:.0f} s per "
+        f"attempt (#2899)"
+    )
+
     # #2336: validate BEFORE writing, and revise in place.
     #
     # The first live N4c run spent 194s producing 12 good tests whose import
@@ -255,7 +282,12 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     merged = ""
     addition = ""
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
-        response, error = call_claude_for_file(prompt, file_path=str(test_path))
+        response, error = call_claude_for_file(
+            prompt, file_path=str(test_path),
+            timeout_seconds=AUGMENT_TIMEOUT_SECONDS,
+        )
+        suffix = f"-retry{attempt}" if attempt > 1 else ""
+        _audit(f"augment-response{suffix}.md", response or f"(no response: {error})")
         if error or not response:
             print(f"    [N4c] no new tests generated: {error or 'empty response'}")
             return {"next_node": "N5_verify_green", "error_message": ""}
@@ -303,8 +335,14 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     added = len(re.findall(r"^def\s+test_\w+", addition, re.MULTILINE))
     print(f"    [N4c] added {added} test(s) targeting {total_lines} uncovered range(s)")
 
+    # #2900: the list this node was given, with the extended file still in its
+    # place. It used to hand back `[test_path]` alone -- on run-issue4-021938
+    # that dropped the plan's three test files (25 tests) from the next
+    # measurement, N5 read 20 of 22 as a regression against 38, the
+    # best-iteration restore put the pre-N4c scaffold back, and the nine tests
+    # this call had just spent 3,335 s producing were gone.
     return {
-        "test_files": [str(test_path)],
+        "test_files": [str(p) for p in test_files],
         "generated_tests": merged,
         "coverage_augment_attempts": int(
             state.get("coverage_augment_attempts", 0) or 0

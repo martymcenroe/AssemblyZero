@@ -197,6 +197,7 @@ def call_claude_for_file(
     file_path: str = "",
     model: str | None = None,
     system_prompt: str = "",
+    timeout_seconds: float | None = None,
 ) -> tuple[str, str]:
     """Call Claude for a single file implementation.
 
@@ -205,6 +206,10 @@ def call_claude_for_file(
     Issue #643: Added system_prompt parameter. When provided, this stable
     system prompt is used instead of the per-file build_system_prompt().
     For SDK path, it's passed as the ``system=`` kwarg to enable caching.
+    #2899: `timeout_seconds`, when given, is the call's ceiling in place of
+    the prompt-sized dynamic timeout. The provider gate has no output-token
+    knob, so wall-clock is the only bound a caller can put on a generation
+    that will not stop -- N4c's ran 3,335 s for nine tests.
 
     Returns (response, error).
     NO RETRIES - if it fails, it fails.
@@ -213,7 +218,10 @@ def call_claude_for_file(
     rolling its own CLI/SDK fallback. Respects --no-api policy.
     """
     # Issue #373: Dynamic timeout based on prompt size
-    timeout = compute_dynamic_timeout(prompt)
+    timeout = (
+        float(timeout_seconds) if timeout_seconds
+        else compute_dynamic_timeout(prompt)
+    )
 
     # Issue #643: Use provided stable system prompt, fall back to per-file prompt
     effective_system_prompt = system_prompt or build_system_prompt(file_path)
