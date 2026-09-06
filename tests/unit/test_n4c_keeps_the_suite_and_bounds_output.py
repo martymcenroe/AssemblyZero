@@ -101,6 +101,26 @@ def _state(worktree: Path, **overrides) -> dict:
     return state
 
 
+def _pytest_says(output: str, passed: int, failed: int = 0, errors: int = 0, rc: int = 1):
+    return {
+        "returncode": rc, "stdout": output, "stderr": "",
+        "parsed": {"passed": passed, "failed": failed, "errors": errors, "coverage": 91.0},
+    }
+
+
+ALL_PASS = _pytest_says("3 passed", 3, rc=0)
+
+
+@pytest.fixture(autouse=True)
+def _additions_pass():
+    """#2902: N4c runs what it adds. Unless a test says otherwise, they pass."""
+    with patch(
+        "assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+        return_value=ALL_PASS,
+    ):
+        yield
+
+
 class TestTheSuiteIsKept:
     def test_run_34s_four_files_come_back_with_the_scaffold_extended(self, worktree):
         with patch.object(augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, "")):
@@ -241,3 +261,103 @@ class TestTheCeiling:
         assert result["next_node"] == "N5_verify_green"
         assert (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8") == before
         assert "no new tests generated: timed out after 900s" in capsys.readouterr().out
+
+
+# Run 37's shape: nine additions, two of which fault the interpreter under a
+# null-buffer mock of the native call, one of which asserts the wrong number.
+THREE_TESTS = NEW_TESTS.replace(
+    "```\n",
+    "\n\ndef test_nt_sweep_returns_empty_list_on_zero_length():\n"
+    "    assert DataCollector\n```\n",
+)
+
+RUN_37_OUTPUT = (
+    "tests/test_issue_4.py::test_existing PASSED\n"
+    "tests/test_issue_4.py::test_covers_the_error_path PASSED\n"
+    "tests/test_issue_4.py::test_covers_the_platform_branch FAILED\n"
+    "tests/test_issue_4.py::test_nt_sweep_returns_empty_list_on_zero_length FAILED\n"
+    "==================== short test summary info ====================\n"
+    "FAILED tests/test_issue_4.py::test_covers_the_platform_branch - assert 0.0 == 30.0\n"
+    "FAILED tests/test_issue_4.py::test_nt_sweep_returns_empty_list_on_zero_length - "
+    "OSError: exception: access violation writing 0x0000000000000000\n"
+    "==================== 2 passed, 2 failed in 0.9s ====================\n"
+)
+
+
+class TestAdditionsAreRun:
+    """#2902: N4c runs what it adds and keeps only what passes."""
+
+    def test_failing_additions_are_dropped_and_the_passing_kept(self, worktree, capsys):
+        with patch.object(augment_tests, "call_claude_for_file", return_value=(THREE_TESTS, "")), \
+             patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+                   return_value=_pytest_says(RUN_37_OUTPUT, 2, 2)):
+            result = augment_tests_for_coverage(_state(worktree))
+
+        scaffold = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        assert "def test_existing" in scaffold
+        assert "def test_covers_the_error_path" in scaffold
+        assert "def test_covers_the_platform_branch" not in scaffold
+        assert "def test_nt_sweep_returns_empty_list_on_zero_length" not in scaffold
+        out = capsys.readouterr().out
+        assert (
+            "[N4c] dropped test_nt_sweep_returns_empty_list_on_zero_length: "
+            "OSError: exception: access violation writing 0x0000000000000000 (#2902)"
+        ) in out
+        assert "[N4c] dropped test_covers_the_platform_branch: assert 0.0 == 30.0 (#2902)" in out
+        assert "[N4c] added 1 test(s)" in out
+        assert len(result["test_files"]) == 4
+
+    def test_when_none_pass_the_file_is_restored(self, worktree, capsys):
+        before = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        all_fail = RUN_37_OUTPUT.replace(
+            "test_covers_the_error_path PASSED", "test_covers_the_error_path FAILED",
+        ) + "FAILED tests/test_issue_4.py::test_covers_the_error_path - assert False\n"
+        with patch.object(augment_tests, "call_claude_for_file", return_value=(THREE_TESTS, "")), \
+             patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+                   return_value=_pytest_says(all_fail, 1, 3)):
+            result = augment_tests_for_coverage(_state(worktree))
+
+        assert (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8") == before
+        assert "none of the added tests pass on this machine" in capsys.readouterr().out
+        assert len(result["test_files"]) == 4
+
+    def test_when_the_file_no_longer_collects_everything_is_dropped(self, worktree, capsys):
+        before = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        broken = "E   ImportError: cannot import name 'gone' from 'boostgauge.collector'\n"
+        with patch.object(augment_tests, "call_claude_for_file", return_value=(THREE_TESTS, "")), \
+             patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+                   return_value=_pytest_says(broken, 0, 0, 0, rc=2)):
+            augment_tests_for_coverage(_state(worktree))
+
+        assert (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8") == before
+        assert "ImportError: cannot import name 'gone'" in capsys.readouterr().out
+
+    def test_the_helper_keeps_imports_and_helpers_with_the_survivors(self, worktree):
+        from assemblyzero.workflows.testing.nodes.augment_tests import _keep_passing_additions
+        addition = (
+            "import pytest\n"
+            "from boostgauge.collector import DataCollector\n"
+            "\n\n"
+            "def _make():\n"
+            "    return DataCollector()\n"
+            "\n\n"
+            "def test_keeps_me():\n"
+            "    assert _make()\n"
+            "\n\n"
+            "@pytest.mark.skipif(False, reason='')\n"
+            "def test_drops_me():\n"
+            "    assert False\n"
+        )
+        output = "FAILED tests/test_issue_4.py::test_drops_me - assert False\n1 passed, 1 failed\n"
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
+                   return_value=_pytest_says(output, 1, 1)):
+            kept, dropped = _keep_passing_additions(
+                worktree / "tests" / "test_issue_4.py", "", addition, worktree,
+            )
+
+        assert dropped == [("test_drops_me", "assert False")]
+        assert "import pytest" in kept
+        assert "def _make" in kept
+        assert "def test_keeps_me" in kept
+        assert "test_drops_me" not in kept
+        assert "skipif" not in kept, "the dropped test's decorator goes with it"

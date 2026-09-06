@@ -171,6 +171,87 @@ def build_augment_prompt(
     return "\n".join(sections)
 
 
+_OUTCOME_LINE = re.compile(
+    r"^(?:FAILED|ERROR)\s+\S+::(?P<name>\w+)(?:\s+-\s+(?P<reason>.*))?$", re.MULTILINE
+)
+
+
+def _keep_passing_additions(
+    test_path: Path, existing: str, addition: str, repo_root: Path,
+) -> tuple[str, list[tuple[str, str]]]:
+    """(the added source with only the tests that pass, [(dropped name, reason)]) (#2902).
+
+    Runs pytest on the merged file alone -- the file is already written --
+    and reads the outcome lines for the added test names. A file that
+    collects nothing drops every addition, with the collection error as
+    the reason: the additions broke the file, whatever the cause. Helpers
+    and imports the addition carries are kept whenever any test survives.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(addition)
+    except SyntaxError:
+        # fail-open: the caller compiled the merged file before writing it,
+        # so this cannot happen; if it did, keeping nothing is the safe side.
+        return "", [("(addition)", "does not parse")]
+    added_tests = {
+        node.name for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+    }
+    if not added_tests:
+        return addition, []
+
+    from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
+
+    result = run_pytest([str(test_path)], repo_root=repo_root)
+    output = (result.get("stdout") or "") + "\n" + (result.get("stderr") or "")
+    parsed = result.get("parsed") or {}
+    ran = int(parsed.get("passed", 0) or 0) + int(parsed.get("failed", 0) or 0) \
+        + int(parsed.get("errors", 0) or 0)
+
+    dropped: list[tuple[str, str]] = []
+    if ran == 0:
+        reason = next(
+            (line.strip() for line in output.splitlines()
+             if re.match(r"(?:E\s+)?[\w.]*(?:Error|Exception)\b\s*:", line.strip())),
+            f"pytest ran nothing (exit {result.get('returncode')})",
+        )
+        return "", [(name, reason) for name in sorted(added_tests)]
+
+    for match in _OUTCOME_LINE.finditer(output):
+        name = match.group("name")
+        if name in added_tests and name not in {n for n, _ in dropped}:
+            dropped.append((name, (match.group("reason") or "failed").strip()))
+    if not dropped:
+        return addition, []
+
+    failed_names = {n for n, _ in dropped}
+    lines = addition.splitlines()
+    kept_segments: list[str] = []
+    for node in tree.body:
+        start = min(
+            [node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])]
+        )
+        end = node.end_lineno or node.lineno
+        segment = "\n".join(lines[start - 1:end])
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in failed_names
+        ):
+            continue
+        kept_segments.append(segment)
+    survivors = [
+        node.name for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_") and node.name not in failed_names
+    ]
+    if not survivors:
+        return "", dropped
+    return "\n\n\n".join(kept_segments) + "\n", dropped
+
+
 def build_revision_prompt(
     original_prompt: str, rejected: str, problems: list[str],
 ) -> str:
@@ -353,7 +434,35 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
         prompt = build_revision_prompt(prompt, addition, problems)
 
     test_path.write_text(merged, encoding="utf-8")
-    added = len(re.findall(r"^def\s+test_\w+", addition, re.MULTILINE))
+
+    # #2902: run what was added, keep what passes. The node's own premise is
+    # that the implementation is correct and the tests are the gap, so an
+    # addition that fails is a wrong test -- and one that faults the
+    # interpreter (run-issue4-040614: two of nine, `OSError: exception:
+    # access violation` under a null-buffer mock of the native call) is not
+    # a test at all. Appended unverified, they became the contract and N4
+    # was sent to fix collector.py for failures no edit of it can touch.
+    kept, dropped = _keep_passing_additions(test_path, existing, addition, repo_root)
+    for name, reason in dropped:
+        print(f"    [N4c] dropped {name}: {reason} (#2902)")
+    if not kept.strip():
+        test_path.write_text(existing, encoding="utf-8")
+        print(
+            "    [N4c] none of the added tests pass on this machine; suite "
+            "left as it was (#2902)"
+        )
+        return {
+            "test_files": [str(p) for p in test_files],
+            "coverage_augment_attempts": int(
+                state.get("coverage_augment_attempts", 0) or 0
+            ) + 1,
+            "next_node": "N5_verify_green",
+            "error_message": "",
+        }
+    if dropped:
+        merged = existing.rstrip() + "\n\n\n" + kept.strip() + "\n"
+        test_path.write_text(merged, encoding="utf-8")
+    added = len(re.findall(r"^def\s+test_\w+", kept, re.MULTILINE))
     print(f"    [N4c] added {added} test(s) targeting {total_lines} uncovered range(s)")
 
     # #2900: the list this node was given, with the extended file still in its
