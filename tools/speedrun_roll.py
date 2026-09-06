@@ -164,6 +164,8 @@ from assemblyzero.speedrun.restore import (  # noqa: E402
     restore_artifact as _restore_artifact,
 )
 from assemblyzero.speedrun.worktrees import (  # noqa: E402
+    discover_pipeline_worktrees,
+    registered_worktrees,
     sweep_pipeline_worktrees,
 )
 
@@ -2819,14 +2821,21 @@ def restore_repo(
     if current != base:
         failures.append(f"expected to end on '{base}', ended on '{current}'")
 
-    worktrees = [
-        line for line in _run(
-            ["git", "worktree", "list", "--porcelain"], cwd=repo_root
-        ).stdout.splitlines() if line.startswith("worktree ")
-    ]
-    if len(worktrees) != 1:
+    # #2885: count the PIPELINE's worktrees, by the sweep's own predicate.
+    # Every registered worktree beyond the checkout used to count, so the
+    # campaign's `boostgauge-seed` (an operator's worktree, on the base
+    # branch for the whole of Phase 2) ended every exit with `RESTORE
+    # INCOMPLETE: 1 pipeline worktree(s) still registered` -- a line the
+    # reader learns to skip, in the block where a real leaving is reported.
+    # The sweep at launch already tells the two apart; RESTORE now asks it.
+    pipeline = {p.resolve() for p in discover_pipeline_worktrees(repo_root)}
+    leftover = sorted(
+        str(p) for p in registered_worktrees(repo_root) & pipeline
+    )
+    if leftover:
         failures.append(
-            f"{len(worktrees) - 1} pipeline worktree(s) still registered"
+            f"{len(leftover)} pipeline worktree(s) still registered: "
+            + ", ".join(leftover)
         )
 
     tracked = [

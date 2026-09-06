@@ -80,6 +80,37 @@ class TestRestoreHandsTheRepoBack:
         sr.restore_repo(repo, [7], log)
         assert sr.attempt.local_branch_exists(repo, "hardening-run-12")
 
+    def test_an_operators_worktree_is_not_a_leaving(self, repo, tmp_path, log):
+        """#2885: boostgauge carries `boostgauge-seed` on the base branch for
+        the whole of Phase 2. It is not the pipeline's, the sweep leaves it
+        alone, and RESTORE must not report it on every exit -- that line was
+        in every banner since the seed was cut, including the ones whose
+        real cause sat three lines up."""
+        _git(repo, "worktree", "add", str(tmp_path / "boostgauge-seed"),
+             "-b", "seed", "hardening-run-12")
+
+        failures = sr.restore_repo(repo, [7], log)
+
+        assert failures == [], failures
+        worktrees = subprocess.run(
+            ["git", "worktree", "list"], cwd=str(repo),
+            capture_output=True, text=True,
+        ).stdout.strip().splitlines()
+        assert len(worktrees) == 2, "the operator's worktree stays registered"
+
+    def test_a_pipeline_worktree_left_registered_is_still_reported_by_name(
+        self, repo, tmp_path, log
+    ):
+        """A sibling `<repo>-<issue>` the pipeline made for an issue this roll
+        did not restore is a real leaving, and the report names it."""
+        _git(repo, "worktree", "add", str(tmp_path / "boostgauge-9"), "-b", "issue-9")
+
+        failures = sr.restore_repo(repo, [7], log)
+
+        assert len(failures) == 1, failures
+        assert failures[0].startswith("1 pipeline worktree(s) still registered: ")
+        assert "boostgauge-9" in failures[0]
+
     def test_default_branch_is_read_not_assumed(self, tmp_path, log):
         r = _make_repo(tmp_path, name="trunkrepo", default="trunk")
         _git(r, "checkout", "-b", "attempt-1")
