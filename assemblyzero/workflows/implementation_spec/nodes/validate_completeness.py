@@ -27,7 +27,7 @@ import sys
 import textwrap
 import tomllib
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 from assemblyzero.workflows.implementation_spec.state import (
     CompletenessCheck,
@@ -3319,6 +3319,7 @@ def _flag_calls(
     facts: list[_FenceFacts],
     symbol_set: set[str],
     first_party_tops: frozenset[str] = frozenset(),
+    importable: Callable[[list[str]], set[str]] | None = None,
 ) -> dict[str, list[str]]:
     """Judge every collected call against the target repo's symbol table.
 
@@ -3383,6 +3384,39 @@ def _flag_calls(
     foreign_roots: set[str] = set(framework_roots)
     foreign_roots |= imported_roots - first_party_tops
     foreign_roots |= set(_STDLIB_MODULE_NAMES) - first_party_tops
+
+    # #2876: a chain rooted in a name NOTHING in the spec binds -- not an
+    # import, a definition, an assignment, a parameter, a class -- that the
+    # target repo does not own and that is not a gathered symbol. A spec's
+    # excerpts routinely omit their import header, so `psutil.Process(pid)`
+    # and `pytest.mark.skipif(...)` arrived with roots the checker had never
+    # seen bound and fell through to the symbol test as though the repo owned
+    # them (run-issue4-190442: two of three spec rounds spent dodging correct
+    # calls; run-issue4-193821 opened the same way with `pytest.raises`).
+    #
+    # The discriminator is the target environment, the authority #1904 uses
+    # for third-party imports: an unbound root that IMPORTS there is a module
+    # the excerpt elided the import of, and is foreign. One that does not --
+    # `win` in `def f(win): win.model_dump()` -- stays judged, so #1527's
+    # founding true positive is untouched. Asked once, batched, and only about
+    # roots nothing binds; a probe that cannot answer adds no exemption.
+    if importable is not None:
+        bound: set[str] = set(imported_roots) | spec_defined | framework_roots
+        for fence in facts:
+            bound |= fence.classes | fence.opaque
+            bound |= {name for name, _root in fence.annotated}
+            for bound_names, _source in fence.assignments:
+                bound |= bound_names
+        candidates = sorted({
+            call.root for fence in facts for call in fence.calls
+            if call.root is not None
+            and call.root not in bound
+            and call.root not in foreign_roots
+            and call.root not in first_party_tops
+            and call.root not in symbol_set
+        })
+        if candidates:
+            foreign_roots |= set(importable(candidates)) - first_party_tops
 
     # Exemption propagates through bindings to a fixed point rather than the
     # single level the old regex managed: `self.root = tk.Tk()` exempts `root`,
@@ -3568,6 +3602,7 @@ def detect_unknown_method_calls(
     text: str,
     symbol_set: set[str],
     repo_root_str: str = "",
+    importable: Callable[[list[str]], set[str]] | None = None,
 ) -> dict[str, list[str]]:
     """Scan code fences in ``text`` for method calls absent from ``symbol_set``.
 
@@ -3589,8 +3624,30 @@ def detect_unknown_method_calls(
         Empty when every call resolves to a known or allowlisted symbol.
     """
     return _flag_calls(
-        _scan_fences(text).facts, symbol_set, _first_party_tops_for(repo_root_str)
+        _scan_fences(text).facts, symbol_set, _first_party_tops_for(repo_root_str),
+        importable=importable if importable is not None else _importable_probe_for(repo_root_str),
     )
+
+
+def _importable_probe_for(repo_root_str: str):
+    """A batched "which of these names import in the target env" probe (#2876).
+
+    Returns a callable ``roots -> set of importable roots``, or None when
+    there is no repo root to probe. The probe is `_probe_target_env`, the
+    same authority #1904 uses for third-party imports; when IT cannot answer
+    (no venv, timeout) the callable returns an empty set, which adds no
+    exemption -- the check behaves exactly as before rather than guessing.
+    """
+    if not repo_root_str:
+        return None
+
+    def _probe(roots: list[str]) -> set[str]:
+        answer = _probe_target_env(Path(repo_root_str), sorted(roots))
+        if not answer:
+            return set()
+        return {name for name, ok in answer.items() if ok}
+
+    return _probe
 
 
 def _first_party_tops_for(repo_root_str: str) -> frozenset[str]:
@@ -3700,7 +3757,8 @@ def check_api_symbols_exist(
         )
 
     flagged = _flag_calls(
-        scan.facts, symbol_set, _first_party_tops_for(repo_root_str)
+        scan.facts, symbol_set, _first_party_tops_for(repo_root_str),
+        importable=_importable_probe_for(repo_root_str),
     )
 
     # #1870's honesty rule applied to the scan itself: say what was NOT read,
@@ -3768,6 +3826,8 @@ _API_SYMBOL_ALLOWLIST: frozenset[str] = frozenset({
     "copy", "clear", "fromkeys",
     # ---- built-in type methods — list ----
     "append", "extend", "insert", "remove", "reverse", "sort", "count",
+    # ---- threading.Thread (#2876: `t.is_alive()` on run-issue4-190442) ----
+    "is_alive",
     # ---- built-in type methods — str ----
     "strip", "lstrip", "rstrip", "split", "rsplit", "splitlines",
     "join", "replace", "startswith", "endswith", "upper", "lower",
