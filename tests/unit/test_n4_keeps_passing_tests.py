@@ -432,3 +432,148 @@ class TestTheSpecSuiteGovernsASharedName:
         keep = source.index("keep_passing_tests_as_written(prior_text, code, contract)")
         assert release < keep
         assert "(#2910)" in source
+
+
+# The spec suite as run 41's scaffold emitted it, reduced to the twin and
+# an import the plan file lacks.
+RUN_41_SPEC_SUITE = '''\
+"""Spec suite for #4."""
+import pytest
+
+from boostgauge.collector import make_collector
+from boostgauge.thresholds import Thresholds
+
+
+def test_req_13_mac_linux_raises_notimplemented(monkeypatch):
+    # Mac/Linux (REQ-13)
+    monkeypatch.setattr("sys.platform", "linux")
+    with pytest.raises(NotImplementedError):
+        make_collector()
+
+
+def test_req_14_thresholds_default():
+    assert Thresholds()
+'''
+
+
+class TestTheVerifierAlignsTwins:
+    """#2912: before a measurement, a plan file's copy of a spec test carries
+    the spec's text. run-issue4-135112's implementer read the drifted copy's
+    `DID NOT RAISE OSError` as the implementation's fault, twice."""
+
+    def test_run_41s_twin_takes_the_specs_text(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            align_spec_twins,
+        )
+
+        aligned = align_spec_twins(RUN_39, RUN_41_SPEC_SUITE)
+
+        assert aligned.aligned == ["test_req_13_mac_linux_raises_notimplemented"]
+        body = _function_text(aligned.source, "test_req_13_mac_linux_raises_notimplemented")
+        assert body == _function_text(RUN_41_SPEC_SUITE, "test_req_13_mac_linux_raises_notimplemented")
+        assert "pytest.raises(OSError)" not in body
+
+    def test_the_other_tests_are_untouched(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            align_spec_twins,
+        )
+
+        aligned = align_spec_twins(RUN_39, RUN_41_SPEC_SUITE)
+
+        for name in (
+            "test_req_9_buffer_growth_on_mismatch", "test_req_10_oserror_fallback",
+            "test_collect_with_thresholds_computes_composite",
+        ):
+            assert _function_text(aligned.source, name) == _function_text(RUN_39, name)
+        assert "def test_req_14_thresholds_default" not in aligned.source
+
+    def test_the_imports_the_copy_needs_are_carried_over(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            align_spec_twins,
+        )
+
+        aligned = align_spec_twins(RUN_39, RUN_41_SPEC_SUITE)
+
+        assert aligned.imports_added == ["from boostgauge.thresholds import Thresholds"]
+        tree = ast.parse(aligned.source)
+        imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+        assert imports[-1].lineno < next(
+            n.lineno for n in tree.body if isinstance(n, ast.FunctionDef)
+        )
+        assert aligned.source.count("import pytest") == 1
+
+    def test_an_aligned_file_is_a_fixed_point(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            align_spec_twins,
+        )
+        once = align_spec_twins(RUN_39, RUN_41_SPEC_SUITE)
+
+        again = align_spec_twins(once.source, RUN_41_SPEC_SUITE)
+
+        assert again == (once.source, [], [])
+
+    def test_a_copy_already_matching_aligns_nothing(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            align_spec_twins,
+        )
+        spec = _function_text(RUN_32, "test_req_13_mac_linux_raises_notimplemented")
+
+        assert align_spec_twins(RUN_32, spec + "\n") == (RUN_32, [], [])
+
+    def test_a_method_is_never_aligned_with_a_function(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            align_spec_twins,
+        )
+        plan = "class TestReq:\n    def test_req_13_mac_linux_raises_notimplemented(self):\n        assert 1\n"
+
+        assert align_spec_twins(plan, RUN_41_SPEC_SUITE) == (plan, [], [])
+
+    def test_an_unparseable_side_aligns_nothing(self):
+        from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
+            align_spec_twins,
+        )
+
+        assert align_spec_twins(RUN_39, "def broken(:\n") == (RUN_39, [], [])
+        assert align_spec_twins("def broken(:\n", RUN_41_SPEC_SUITE) == ("def broken(:\n", [], [])
+
+    def test_the_verifier_rewrites_the_plan_file_and_says_so(self, tmp_path, capsys):
+        from assemblyzero.workflows.testing.nodes.verify_phases import (
+            _align_plan_files_with_the_spec,
+        )
+        (tmp_path / "tests" / "unit").mkdir(parents=True)
+        suite = tmp_path / "tests" / "test_issue_4.py"
+        plan = tmp_path / "tests" / "unit" / "test_collector.py"
+        suite.write_text(RUN_41_SPEC_SUITE, encoding="utf-8")
+        plan.write_text(RUN_39, encoding="utf-8")
+
+        rewritten = _align_plan_files_with_the_spec(
+            {"issue_number": 4}, tmp_path, [str(suite), str(plan)],
+        )
+
+        assert rewritten == ["tests/unit/test_collector.py"]
+        assert "pytest.raises(NotImplementedError)" in plan.read_text(encoding="utf-8")
+        assert suite.read_text(encoding="utf-8") == RUN_41_SPEC_SUITE
+        out = capsys.readouterr().out
+        assert "[N5] aligned 1 test(s) in tests/unit/test_collector.py" in out
+        assert "test_req_13_mac_linux_raises_notimplemented (#2912)" in out
+
+    def test_without_a_spec_suite_nothing_is_touched(self, tmp_path):
+        from assemblyzero.workflows.testing.nodes.verify_phases import (
+            _align_plan_files_with_the_spec,
+        )
+        (tmp_path / "tests" / "unit").mkdir(parents=True)
+        plan = tmp_path / "tests" / "unit" / "test_collector.py"
+        plan.write_text(RUN_39, encoding="utf-8")
+
+        assert _align_plan_files_with_the_spec({"issue_number": 4}, tmp_path, [str(plan)]) == []
+        assert plan.read_text(encoding="utf-8") == RUN_39
+
+    def test_the_verifier_aligns_before_it_measures(self):
+        source = (
+            Path(__file__).resolve().parents[2]
+            / "assemblyzero" / "workflows" / "testing" / "nodes" / "verify_phases.py"
+        ).read_text(encoding="utf-8")
+        node = source.index("def verify_green_phase(")
+        align = source.index("_align_plan_files_with_the_spec(state, repo_root, test_files)", node)
+        measure = source.index("Running pytest with coverage target", node)
+        assert align < measure

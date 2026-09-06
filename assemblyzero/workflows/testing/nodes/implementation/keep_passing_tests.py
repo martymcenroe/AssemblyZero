@@ -176,3 +176,94 @@ def release_spec_twins(
     twins = {node.name for node, _ in _test_functions(tree).values()}
     released = set(contract) & twins
     return set(contract) - released, released
+
+
+class Aligned(NamedTuple):
+    source: str
+    #: Tests whose text was replaced with the spec suite's copy.
+    aligned: list[str]
+    #: Import statements copied from the spec suite so those copies resolve.
+    imports_added: list[str]
+
+
+def align_spec_twins(plan_source: str, spec_source: str) -> Aligned:
+    """`plan_source` with every module-level test the spec suite also defines
+    carrying the spec's text (#2912).
+
+    #2910 released a plan file's twin to the implementer; on run-issue4-135112
+    the implementer still read the twin's failure -- `DID NOT RAISE OSError`
+    -- as the implementation's fault and rewrote `make_collector` to raise
+    `OSError`, which failed the spec's copy, which the hill-climb restored,
+    twice. The twin is a copy of the spec's test by construction, so the
+    honest state is the spec's text, and the verifier writes that state
+    before it measures: a drifted copy is never measured, never reported,
+    never chased.
+
+    Module-level functions only: a method's indentation is not a function's,
+    and the plan's `test_req_N` copies are module-level as the spec's are.
+    Import statements the spec suite has and the plan file lacks (verbatim)
+    are copied in after the plan file's imports, so a copied body resolves
+    the names its own file resolved. Either side failing to parse aligns
+    nothing: that is the syntax gate's finding.
+    """
+    if not spec_source or plan_source == spec_source:
+        return Aligned(plan_source, [], [])
+    try:
+        plan_tree = ast.parse(plan_source)
+        spec_tree = ast.parse(spec_source)
+    except SyntaxError:
+        # fail-open: an unparseable side is the syntax gate's finding; the
+        # plan file is left exactly as it is and measured as it is.
+        return Aligned(plan_source, [], [])
+
+    plan_lines = plan_source.splitlines()
+    spec_lines = spec_source.splitlines()
+    spec_tests = {
+        node.name: node for node, owner in _test_functions(spec_tree).values()
+        if owner is None
+    }
+
+    edits: list[tuple[int, int, list[str]]] = []
+    aligned: list[str] = []
+    for node, owner in _test_functions(plan_tree).values():
+        if owner is not None or node.name not in spec_tests:
+            continue
+        spec_text = _text(spec_lines, _span(spec_tests[node.name]))
+        span = _span(node)
+        if _text(plan_lines, span) != spec_text:
+            edits.append((span[0] - 1, span[1], spec_text.splitlines()))
+            aligned.append(node.name)
+    if not aligned:
+        return Aligned(plan_source, [], [])
+
+    plan_imports = [
+        node for node in plan_tree.body if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    present = set(plan_lines)
+    imports_added = [
+        _text(spec_lines, _span(node))
+        for node in spec_tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        and _text(spec_lines, _span(node)) not in present
+    ]
+    if imports_added:
+        if plan_imports:
+            at = max(node.end_lineno or node.lineno for node in plan_imports)
+        elif (
+            plan_tree.body
+            and isinstance(plan_tree.body[0], ast.Expr)
+            and isinstance(getattr(plan_tree.body[0], "value", None), ast.Constant)
+            and isinstance(plan_tree.body[0].value.value, str)
+        ):
+            at = plan_tree.body[0].end_lineno or plan_tree.body[0].lineno
+        else:
+            at = 0
+        edits.append((at, at, imports_added))
+
+    out = list(plan_lines)
+    for start, end, lines in sorted(edits, key=lambda e: e[0], reverse=True):
+        out[start:end] = lines
+    source = "\n".join(out)
+    if plan_source.endswith("\n"):
+        source = source.rstrip("\n") + "\n"
+    return Aligned(source, aligned, imports_added)
