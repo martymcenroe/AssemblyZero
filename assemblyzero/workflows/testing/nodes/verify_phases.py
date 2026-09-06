@@ -2277,6 +2277,26 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # Issue #498: Build concise failure summary for N4 feedback
     failure_summary = _build_failure_summary(output)
 
+    # #2893: with --continue-on-collection-errors the suite runs past a broken
+    # file and pytest exits 1 -- and then the short summary says only
+    # `ERROR tests/test_issue_4.py`, while `_extract_traceback_blocks` reads
+    # the FAILURES section and never ERRORS. Run 31 of boostgauge #4 spent an
+    # iteration rewriting every file without the one line it needed. The
+    # owned collection failure rides the summary as the same one-block repair
+    # task the exit-2 route hands N4, ahead of everything else, so #2851's
+    # attribution sends it to the file that owns the module.
+    owned_collection, _ = collection_failures_the_plan_owns(
+        output, state.get("files_to_modify") or []
+    )
+    if owned_collection:
+        print(
+            "    [N5] collection failed on a symbol the plan owns: "
+            + ", ".join(item for item, _ in owned_collection)
+            + " -- carried in the repair task (#2893)"
+        )
+        task = plan_owned_collection_summary(owned_collection, output)
+        failure_summary = f"{task}\n\n{failure_summary}" if failure_summary else task
+
     # Issue #501: Extract failed test names for identity-based stagnation
     current_green_failures = _extract_failed_test_names(output)
 

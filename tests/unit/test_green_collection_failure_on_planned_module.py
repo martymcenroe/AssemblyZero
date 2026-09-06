@@ -257,3 +257,82 @@ class TestContinueOnCollectionErrors:
             verify_green_phase(_state(tmp_path, RUN_30_PLAN))
 
         assert mock_pytest.call_args.kwargs.get("continue_on_collection_errors") is True
+
+
+# What pytest printed on run 31 (`run-issue4-013300`), once the flag let the
+# other three files run: 25 passed, one file uncollectable, exit 1. The short
+# summary names the file and nothing else; the cause is in the ERRORS section
+# that the traceback extractor never reads.
+RUN_31_OUTPUT = """\
+tests/unit/test_collector.py::test_req_6_cmdline_access_denied_handled PASSED
+tests/benchmark/test_sweep_cost.py::test_full_collect_tick_is_under_one_percent_of_a_core PASSED
+==================== ERRORS ====================
+____________ ERROR collecting tests/test_issue_4.py ____________
+ImportError while importing test module 'C:\\Users\\mcwiz\\Projects\\boostgauge\\data\\worktrees\\4\\tests\\test_issue_4.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+tests\\test_issue_4.py:12: in <module>
+    from boostgauge.collector import Band, CollectorThread, ProcessRow, WindowsCollector, _psutil_cmdline, make_collector, normalize  # noqa: F401
+E   ImportError: cannot import name '_psutil_cmdline' from 'boostgauge.collector' (C:\\Users\\mcwiz\\Projects\\boostgauge\\data\\worktrees\\4\\src\\boostgauge\\collector.py)
+---------- coverage: platform win32, python 3.14.7-final-0 ----------
+Name                                   Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------
+src\\boostgauge\\collector.py               82      6    93%   56-58, 63, 96, 106
+src\\boostgauge\\collectors\\windows.py     119     11    91%   86, 153-158, 165-166, 198-199
+--------------------------------------------------------------------
+TOTAL                                    201     17    91%
+FAIL Required test coverage of 95% not reached. Total coverage: 91.54%
+==================== short test summary info ====================
+ERROR tests/test_issue_4.py
+==================== 25 passed, 1 error in 0.64s ====================
+"""
+
+
+class TestExitOneWithAnUncollectableFile:
+    """The flag's other half: the run that reached N4 with nothing to go on."""
+
+    def _exit_1(self) -> dict:
+        return {
+            "returncode": 1, "stdout": RUN_31_OUTPUT, "stderr": "",
+            "parsed": {"passed": 25, "failed": 0, "errors": 1, "coverage": 91.0},
+        }
+
+    def test_the_repair_task_leads_the_failure_summary(self, tmp_path, capsys):
+        with patch.object(verify_phases, "run_pytest", return_value=self._exit_1()):
+            result = verify_green_phase(_state(tmp_path, RUN_30_PLAN))
+
+        assert result["next_node"] == "N4_implement_code"
+        summary = result["test_failure_summary"]
+        assert summary.startswith("Collection failed on a symbol this plan owns (#2893)")
+        assert "Provide `_psutil_cmdline` in src/boostgauge/collector.py" in summary
+        assert "cannot import name '_psutil_cmdline' from 'boostgauge.collector'" in summary
+        assert (
+            "[N5] collection failed on a symbol the plan owns: "
+            "boostgauge.collector._psutil_cmdline -- carried in the repair task (#2893)"
+        ) in capsys.readouterr().out
+
+    def test_the_task_attributes_to_collector_py_alone(self, tmp_path):
+        with patch.object(verify_phases, "run_pytest", return_value=self._exit_1()):
+            result = verify_green_phase(_state(tmp_path, RUN_30_PLAN))
+
+        summary = result["test_failure_summary"]
+        assert is_attributed(summary, "src/boostgauge/collector.py")
+        assert not is_attributed(summary, "src/boostgauge/collectors/windows.py")
+        assert not is_attributed(summary, "tests/benchmark/test_sweep_cost.py")
+
+    def test_the_short_summary_still_follows(self, tmp_path):
+        """The task is prefixed; nothing #498 collected is lost."""
+        with patch.object(verify_phases, "run_pytest", return_value=self._exit_1()):
+            result = verify_green_phase(_state(tmp_path, RUN_30_PLAN))
+
+        assert "ERROR tests/test_issue_4.py" in result["test_failure_summary"]
+
+    def test_an_unowned_collection_error_adds_no_task(self, tmp_path, capsys):
+        unowned = dict(self._exit_1(), stdout=RUN_31_OUTPUT.replace(
+            "from 'boostgauge.collector'", "from 'boostgauge.gauge'",
+        ))
+        with patch.object(verify_phases, "run_pytest", return_value=unowned):
+            result = verify_green_phase(_state(tmp_path, RUN_30_PLAN))
+
+        assert "#2893" not in result["test_failure_summary"]
+        assert "#2893" not in capsys.readouterr().out
