@@ -262,7 +262,7 @@ class TestProviderGate:
         ) as mock_get:
             response, error = call_claude_for_file("write code")
 
-            mock_get.assert_called_once_with("claude:opus")
+            mock_get.assert_called_once_with("claude:opus", effort=None)
             mock_provider.invoke.assert_called_once()
             assert response == "```python\nprint('hello')\n```"
             assert error == ""
@@ -292,7 +292,7 @@ class TestProviderGate:
         ) as mock_get:
             call_claude_for_file("prompt", model="haiku")
 
-            mock_get.assert_called_once_with("claude:haiku")
+            mock_get.assert_called_once_with("claude:haiku", effort=None)
 
     def test_no_direct_anthropic_import(self):
         """claude_client.py must not import anthropic directly."""

@@ -209,12 +209,15 @@ def test_node_never_names_an_implementation_file_as_its_output() -> None:
     ).read_text(encoding="utf-8")
 
     assert "write_text" in source
-    # The only write target is the test path.
+    # The only write target is the test path. #2902's vetting writes it
+    # more than once (candidate, restore, merged); every write is still to
+    # test_path.
     writes = [
         line.strip() for line in source.splitlines()
         if ".write_text(" in line
     ]
-    assert writes == ["test_path.write_text(merged, encoding=\"utf-8\")"], (
+    targets = {line.split(".write_text(")[0] for line in writes}
+    assert writes and targets == {"test_path"}, (
         f"N4c must write only the test file, found: {writes}"
     )
 
