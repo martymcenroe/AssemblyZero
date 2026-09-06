@@ -144,6 +144,7 @@ def generate_file_with_retry(
     is_test_scaffold: bool = False,
     system_prompt: str = "",
     repo_root: Path | None = None,
+    planned_paths: list[str] | None = None,
 ) -> tuple[str, bool]:
     """Generate code for a single file with retry on validation failure and model routing.
 
@@ -313,10 +314,13 @@ def generate_file_with_retry(
                     response_preview=response[:500]
                 )
 
-        # Validate code mechanically (Issue #842: pass repo_root for import validation)
+        # Validate code mechanically (Issue #842: pass repo_root for import
+        # validation; #2883: and the plan, so a planned sibling's import is
+        # not refused before the sibling is written)
         validation_result = validate_code_response(
             code, filepath, existing_content,
             repo_root=str(repo_root) if repo_root else "",
+            planned_paths=planned_paths,
         )
 
         # Handle both tuple (valid, error_msg) and bare bool returns
@@ -548,6 +552,13 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     # Limit files to prevent runaway
     files_to_modify = files_to_modify[:50]
 
+    # #2883: the whole plan, captured before the batch split below, so the
+    # validator can tell a planned sibling from a hallucination. Run 27 of
+    # boostgauge #4 halted because collector.py -- file [1/5] -- imported
+    # collectors/windows.py -- file [2/5] -- and the import validator only
+    # knew what was on disk.
+    planned_paths = [f["path"] for f in files_to_modify if f.get("path")]
+
     print(f"    Files to implement: {len(files_to_modify)}")
     for f in files_to_modify:
         print(f"      - {f['path']} ({f.get('change_type', 'Add')})")
@@ -661,6 +672,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 # exactly this way, validated for syntax alone.
                 valid, val_error = validate_code_response(
                     code, fp, repo_root=str(repo_root),
+                    planned_paths=planned_paths,
                 )
                 if not valid:
                     print(
@@ -1037,6 +1049,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                     existing_content=existing_content,
                     system_prompt=stable_system_prompt,
                     repo_root=repo_root,
+                    planned_paths=planned_paths,
                 )
             # Note: generate_file_with_retry raises ImplementationError on
             # failure, so if we get here, code is valid

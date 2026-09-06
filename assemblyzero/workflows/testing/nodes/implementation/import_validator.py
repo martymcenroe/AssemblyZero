@@ -8,6 +8,7 @@ project modules that exist on disk. Catches hallucinated imports like
 
 import ast
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 # Python stdlib module names (Python 3.10+)
@@ -204,6 +205,7 @@ def validate_imports(
     code: str,
     filepath: str,
     repo_root: Path,
+    planned_paths: Iterable[str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Validate that all imports in generated code resolve to real modules.
 
@@ -211,6 +213,12 @@ def validate_imports(
         code: Python source code to validate.
         filepath: Relative path of the file being generated (for context).
         repo_root: Repository root for resolving internal imports.
+        planned_paths: Repo-relative paths the plan will write (#2883). The
+            plan is implemented one file at a time, so a file that imports a
+            planned sibling is validated before the sibling is on disk. An
+            internal import that maps to a planned path resolves; one that
+            is neither on disk nor in the plan is still refused, which is
+            the hallucination #842 exists to catch.
 
     Returns:
         Tuple of (valid, list_of_unresolvable_imports).
@@ -245,6 +253,7 @@ def validate_imports(
 
     # Load third-party package names
     third_party = _read_third_party_packages(repo_root) | _KNOWN_THIRD_PARTY
+    planned = _planned_set(planned_paths)
 
     bad_imports: list[str] = []
     checked: set[str] = set()
@@ -269,11 +278,66 @@ def validate_imports(
         # (ast.ImportFrom with level > 0 has module=None or partial)
         # We already skip those since node.module would be partial
 
-        # 4. Internal imports — verify the target exists on disk
-        if not _resolve_internal_import(module_path, repo_root):
-            bad_imports.append(f"{module_path} (line {lineno})")
+        # 4. Internal imports — verify the target exists on disk, or is a
+        #    file the plan is about to write (#2883)
+        if _resolve_internal_import(module_path, repo_root):
+            continue
+        if _resolves_in_plan(module_path, planned):
+            continue
+        bad_imports.append(f"{module_path} (line {lineno})")
 
     return len(bad_imports) == 0, bad_imports
+
+
+def _planned_set(planned_paths: Iterable[str] | None) -> frozenset[str]:
+    """The plan's paths as posix-relative strings, for membership tests."""
+    if not planned_paths:
+        return frozenset()
+    return frozenset(
+        Path(str(p)).as_posix() for p in planned_paths if p
+    )
+
+
+def _resolves_in_plan(module_path: str, planned: frozenset[str]) -> bool:
+    """Whether a file the plan will write satisfies this import (#2883).
+
+    boostgauge #4, run-issue4-003342: the plan's first file, collector.py,
+    imports `boostgauge.collectors.windows`, the plan's second file. The
+    disk probe refused it twice and the stage halted -- the design required
+    the import and the second file was forty seconds from being written.
+
+    The candidates are the disk probe's, matched against the plan instead of
+    the tree. One more form: a planned file anywhere under the module's own
+    directory satisfies the package import (`boostgauge.collectors` when
+    `src/boostgauge/collectors/windows.py` is planned) -- Python 3 imports
+    the directory as a namespace package the moment the file exists. That
+    rule applies to the full module path only, never to its parent, so
+    `boostgauge.collectors.linux` is not resolved by a planned windows.py.
+    """
+    if not planned:
+        return False
+    parts = module_path.split(".")
+    candidates: list[Path] = [
+        Path(*parts).with_suffix(".py"),
+        Path(*parts) / "__init__.py",
+    ]
+    if len(parts) > 1:
+        candidates.extend([
+            Path(*parts[:-1]).with_suffix(".py"),
+            Path(*parts[:-1]) / "__init__.py",
+        ])
+    package_dir = Path(*parts)
+
+    for prefix in _SOURCE_ROOT_PREFIXES:
+        for candidate in candidates:
+            rel = Path(prefix) / candidate if prefix else candidate
+            if rel.as_posix() in planned:
+                return True
+        head = (Path(prefix) / package_dir if prefix else package_dir).as_posix() + "/"
+        if any(p.startswith(head) for p in planned):
+            return True
+
+    return False
 
 
 # Closes #1500: src-layout repos place importable modules under a
