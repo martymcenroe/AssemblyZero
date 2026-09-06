@@ -2431,14 +2431,14 @@ typing-extensions = ">=4.14.1"
 
 [[package]]
 name = "pygithub"
-version = "2.8.1"
+version = "2.10.0"
 description = "Use the full Github API v3"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "pygithub-2.8.1-py3-none-any.whl", hash = "sha256:23a0a5bca93baef082e03411bf0ce27204c32be8bfa7abc92fe4a3e132936df0"},
-    {file = "pygithub-2.8.1.tar.gz", hash = "sha256:341b7c78521cb07324ff670afd1baa2bf5c286f8d9fd302c1798ba594a5400c9"},
+    {file = "pygithub-2.10.0-py3-none-any.whl", hash = "sha256:192ada2a76e4afc7d6b37e500c9bfeba1731e6506697445a5ba1c4af8bf0b924"},
+    {file = "pygithub-2.10.0.tar.gz", hash = "sha256:90ff24ef1cd1bd57124c2a3869cafee9d7b066909129ecdaba2c2d1903bc118d"},
 ]
 
 [package.dependencies]
@@ -3611,4 +3611,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "b421d136667072e6fcb902226c4485a0824004045e388266c0ba764309bc265f"
+content-hash = "905840c5abd0a4e35cced330ae1c86451672f8d441d43fad06fc7e0cf5cfe16e"
