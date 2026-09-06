@@ -496,6 +496,30 @@ def build_revision_prompt(
     ])
 
 
+def coverage_target_file(
+    test_files: list[str], repo_root: Path, issue_number: int | None,
+) -> Path:
+    """The file N4c appends to: the first plan-owned test file (#2908).
+
+    Never the spec's suite while there is any other. The scaffold re-emits
+    `tests/test_issue_<N>.py` from the spec on every resume (#2709 keeps it
+    as the contract), so an addition there lasts exactly until the next
+    resume: run-issue4-131639 measured 38 of the 51 tests run 39 left,
+    because run 39's N4c had appended its thirteen to the suite. A
+    plan-owned file survives a resume (#2897 registers it) and #2905 keeps
+    its passing tests as written. Without an issue number the suite cannot
+    be named, and the first file stands as before; with only the suite in
+    the list, the suite is the only place there is.
+    """
+    if issue_number is None or not test_files:
+        return Path(test_files[0])
+    suite = (Path(repo_root) / "tests" / f"test_issue_{issue_number}.py").resolve()
+    for candidate in test_files:
+        if Path(candidate).resolve() != suite:
+            return Path(candidate)
+    return Path(test_files[0])
+
+
 def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     """N4c: append tests targeting uncovered lines (#2327).
 
@@ -551,7 +575,8 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     for path, ranges in uncovered.items():
         print(f"      {path}: {', '.join(ranges)}")
 
-    test_path = Path(test_files[0])
+    test_path = coverage_target_file(test_files, repo_root, state.get("issue_number"))
+    print(f"    [N4c] appending to {test_path.name} (#2908)")
     try:
         existing = test_path.read_text(encoding="utf-8")
     except OSError as err:

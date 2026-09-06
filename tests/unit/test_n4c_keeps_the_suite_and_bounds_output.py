@@ -33,6 +33,7 @@ from assemblyzero.workflows.testing.nodes import augment_tests
 from assemblyzero.workflows.testing.nodes.augment_tests import (
     AUGMENT_TIMEOUT_SECONDS,
     augment_tests_for_coverage,
+    coverage_target_file,
 )
 from assemblyzero.workflows.testing.nodes.implementation import claude_client
 
@@ -540,3 +541,69 @@ class TestReached:
 
         assert _reached(before, "3 passed") == (0, 3)
         assert _reached(before, "") == (0, 3)
+
+
+class TestThePlanOwnedFileIsTheTarget:
+    """#2908: N4c appends to the first plan-owned test file, never the spec's
+    suite while there is any other. The scaffold re-emits the suite on every
+    resume (#2709), and `run-issue4-131639` measured 38 of the 51 tests run 39
+    left because run 39's thirteen had gone into the suite."""
+
+    def test_run_40s_additions_land_in_the_plan_file_not_the_suite(self, worktree):
+        with patch.object(augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, "")):
+            result = augment_tests_for_coverage(_state(worktree, issue_number=4))
+
+        suite = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        plan_file = (worktree / "tests" / "unit" / "test_collector.py").read_text(encoding="utf-8")
+        assert "test_covers_the_error_path" not in suite
+        assert "def test_existing" in plan_file
+        assert "def test_covers_the_error_path" in plan_file
+        assert [Path(p).name for p in result["test_files"]] == [
+            "test_issue_4.py", "test_collector.py",
+            "test_windows_sweep_crosscheck.py", "test_sweep_cost.py",
+        ]
+
+    def test_the_addition_survives_the_scaffold_re_emitting_the_suite(self, worktree):
+        original_suite = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        with patch.object(augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, "")):
+            augment_tests_for_coverage(_state(worktree, issue_number=4))
+
+        # What the resume's scaffold stage does to the suite (#2709).
+        (worktree / "tests" / "test_issue_4.py").write_text(original_suite, encoding="utf-8")
+
+        plan_file = (worktree / "tests" / "unit" / "test_collector.py").read_text(encoding="utf-8")
+        assert "def test_covers_the_error_path" in plan_file
+
+    def test_with_only_the_suite_the_suite_is_extended(self, worktree):
+        state = _state(
+            worktree, issue_number=4,
+            test_files=[str(worktree / "tests" / "test_issue_4.py")],
+        )
+        with patch.object(augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, "")):
+            augment_tests_for_coverage(state)
+
+        suite = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
+        assert "def test_covers_the_error_path" in suite
+
+    def test_the_suite_is_skipped_wherever_it_sits(self, worktree):
+        files = [
+            str(worktree / "tests" / "unit" / "test_collector.py"),
+            str(worktree / "tests" / "test_issue_4.py"),
+        ]
+
+        assert coverage_target_file(files, worktree, 4).name == "test_collector.py"
+        assert coverage_target_file(files[::-1], worktree, 4).name == "test_collector.py"
+
+    def test_without_an_issue_number_the_first_file_stands(self, worktree):
+        files = [
+            str(worktree / "tests" / "test_issue_4.py"),
+            str(worktree / "tests" / "unit" / "test_collector.py"),
+        ]
+
+        assert coverage_target_file(files, worktree, None).name == "test_issue_4.py"
+
+    def test_it_says_which_file(self, worktree, capsys):
+        with patch.object(augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, "")):
+            augment_tests_for_coverage(_state(worktree, issue_number=4))
+
+        assert "[N4c] appending to test_collector.py (#2908)" in capsys.readouterr().out
