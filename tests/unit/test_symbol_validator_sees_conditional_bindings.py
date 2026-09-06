@@ -1,6 +1,6 @@
 """A name bound under a module-level `if` is exported (#2895).
 
-boostgauge #4, `run-issue4-014544` (2026-09-06 01:45): the first fully green
+boostgauge #4, `run-issue4-014551` (2026-09-06 01:45): the first fully green
 measurement of the campaign -- 38 of 38 at 91 % -- and N4c set out to close
 the 4-point gap to the 95 % target:
 
