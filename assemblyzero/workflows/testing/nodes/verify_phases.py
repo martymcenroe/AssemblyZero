@@ -26,6 +26,7 @@ from assemblyzero.workflows.testing.audit import (
     parse_pytest_output,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.checkpoints import record_measurement
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
 # `route_by_exit_code` is deliberately NOT imported here (#2671). It was, and
@@ -618,6 +619,7 @@ def run_pytest(
     coverage_module: str | list[str] | None = None,
     coverage_target: int | None = None,
     repo_root: Path | None = None,
+    continue_on_collection_errors: bool = False,
 ) -> dict:
     """Run pytest on the specified test files.
 
@@ -628,12 +630,19 @@ def run_pytest(
             is a one-entry list.
         coverage_target: Coverage threshold percentage.
         repo_root: Repository root for running pytest.
+        continue_on_collection_errors: #2893 -- run the files that collect
+            when one does not, so a single broken import does not silence
+            the rest of the suite. The green phase asks for it; the red
+            phase keeps pytest's default, where a collection error IS the
+            signal.
 
     Returns:
         Dict with returncode, stdout, stderr, and parsed results.
     """
     # Issue #268: Use poetry run to ensure correct virtualenv with dependencies
     cmd = ["poetry", "run", "pytest", "-v", "--tb=short"]
+    if continue_on_collection_errors:
+        cmd.append("--continue-on-collection-errors")
     cmd.extend(test_files)
 
     # Issue #789: Only add --cov flags if pytest-cov is installed.
@@ -1804,6 +1813,110 @@ def describe_collection_failures(output: str, limit: int = 3) -> str:
     return f"Imports that no longer resolve: {shown}"
 
 
+#: Source-root prefixes a planned path may carry, in dotted form -- the same
+#: list `_classify_import_errors` strips (#1492, #1477).
+_PLANNED_SOURCE_ROOTS = ("src.", "lib.", "source.", "python.", "apps.")
+
+
+def _module_forms_of(planned_path: str) -> set[str]:
+    """The module names a planned file answers to: raw and source-root-stripped.
+
+    `src/boostgauge/collector.py` -> {`src.boostgauge.collector`,
+    `boostgauge.collector`}; a package's `__init__.py` answers to the package.
+    Parents are NOT included: `boostgauge` is not owned by a plan that adds
+    `boostgauge/collector.py`, and a failure to import the package is not this
+    plan's to repair.
+    """
+    dotted = planned_path.replace("/", ".").replace("\\", ".")
+    if dotted.endswith(".py"):
+        dotted = dotted[:-3]
+    if dotted.endswith(".__init__"):
+        dotted = dotted[: -len(".__init__")]
+    forms = {dotted}
+    for prefix in _PLANNED_SOURCE_ROOTS:
+        if dotted.startswith(prefix):
+            forms.add(dotted[len(prefix):])
+    return forms
+
+
+def collection_failures_the_plan_owns(
+    output: str, files_to_modify: list[dict],
+) -> tuple[list[tuple[str, str]], bool]:
+    """(the broken imports a planned file owns, whether that is all of them) (#2893).
+
+    Each owned entry is `("module.symbol" or "module", planned path)`. A
+    `cannot import name S from M` is owned when M is a planned file's module;
+    a `No module named M` is owned when M is a planned file's module (the
+    file was never written). The boolean says whether EVERY collection
+    failure in the output is owned -- the caller routes to the implementer
+    only then, because a failure outside the plan is #2035's case and must
+    still halt.
+    """
+    owners: dict[str, str] = {}
+    for spec in files_to_modify or []:
+        path = str(spec.get("path", "") or "")
+        if not path.endswith(".py"):
+            continue
+        for form in _module_forms_of(path):
+            owners[form] = path
+
+    broken: list[tuple[str, str]] = []  # (item, module)
+    seen: set[str] = set()
+    for match in _MISSING_NAME_RE.finditer(output or ""):
+        item = f"{match.group('module')}.{match.group('name')}"
+        if item not in seen:
+            seen.add(item)
+            broken.append((item, match.group("module")))
+    for match in _MISSING_MODULE_RE.finditer(output or ""):
+        item = match.group("module")
+        if item not in seen:
+            seen.add(item)
+            broken.append((item, item))
+
+    owned = [(item, owners[module]) for item, module in broken if module in owners]
+    return owned, bool(broken) and len(owned) == len(broken)
+
+
+def plan_owned_collection_summary(
+    owned: list[tuple[str, str]], output: str,
+) -> str:
+    """The repair task for N4, as one block the edit script can attribute (#2893).
+
+    Names the module, the symbol and the planned path in the same block as
+    pytest's own error line, so #2851's per-block attribution hands it to the
+    file that owns the module and to no other.
+    """
+    importing = [m.group("path") for m in _COLLECT_ERROR_RE.finditer(output or "")]
+    importer = list(dict.fromkeys(importing))[0] if importing else "the test suite"
+    error_lines = [
+        line.strip() for line in (output or "").splitlines()
+        if _MISSING_NAME_RE.search(line) or _MISSING_MODULE_RE.search(line)
+    ]
+    lines: list[str] = []
+    for item, path in owned:
+        module, _, symbol = item.rpartition(".")
+        if symbol and module in _module_forms_of(path):
+            lines.append(
+                f"Collection failed on a symbol this plan owns (#2893): "
+                f"{importer} imports `{symbol}` from {module} ({path}), and "
+                f"the module does not provide it."
+            )
+            lines.append(
+                f"  Provide `{symbol}` in {path} -- define it there, or "
+                f"re-export it from the module that defines it. The test "
+                f"file is the contract; do not edit it."
+            )
+        else:
+            lines.append(
+                f"Collection failed on a module this plan owns (#2893): "
+                f"{importer} imports {item} ({path}), and the file is not "
+                f"there. Write {path} as the plan says."
+            )
+    for line in dict.fromkeys(error_lines):
+        lines.append(f"  {line}")
+    return "\n".join(lines)
+
+
 def coverage_has_stagnated(
     coverage_achieved: float,
     previous_coverage: float,
@@ -2054,6 +2167,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         coverage_module=coverage_targets or None,
         coverage_target=coverage_target,
         repo_root=repo_root,
+        # #2893: one uncollectable file must not zero the measurement.
+        continue_on_collection_errors=True,
     )
     exit_code = result["returncode"]
     output = result["stdout"] + "\n" + result["stderr"]
@@ -2062,6 +2177,16 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    [N5] Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed | "
           f"Coverage: {parsed.get('coverage', 0):.1f}% | Exit: {exit_code} "
           f"({describe_run_outcome(exit_code, parsed.get('failed'))})")
+
+    # #2867: the measurement rides the checkpoint it describes -- HEAD is the
+    # post-impl commit N4 just cut -- so a later resume can prefer the best
+    # preserved attempt over the newest.
+    _n5_passed = int(parsed.get("passed", 0) or 0)
+    _n5_failed = int(parsed.get("failed", 0) or 0)
+    record_measurement(
+        repo_root, _n5_passed, _n5_passed + _n5_failed,
+        float(parsed.get("coverage", 0) or 0.0),
+    )
 
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")
@@ -2099,6 +2224,39 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     if exit_code in (EXIT_INTERRUPTED, EXIT_INTERNALERROR):
         reason = describe_exit_code(exit_code)
+
+        # #2893: a collection failure on a symbol the plan OWNS is the loop's
+        # own work, not #2035's regression. run-issue4-012341: the scaffold's
+        # named red-phase import (#2888) asked boostgauge.collector for
+        # `_psutil_cmdline`, the plan's collector.py did not provide it, and
+        # pytest said so with the module, the symbol and the path -- which is
+        # exactly what the edit script needs to add a one-line re-export.
+        # Ending the workflow there threw that away. When EVERY broken import
+        # resolves to a planned file, the failure is handed to N4 as a named
+        # repair; one outside the plan still halts below, as #2035 intends.
+        owned, all_owned = collection_failures_the_plan_owns(
+            output, state.get("files_to_modify") or []
+        )
+        if exit_code == EXIT_INTERRUPTED and owned and all_owned:
+            names = ", ".join(item for item, _ in owned)
+            print(
+                f"    [N5] collection failed on a symbol the plan owns: "
+                f"{names} -- handing it to the implementer (#2893)"
+            )
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": 0,
+                "previous_coverage": 0,
+                "previous_passed": 0,
+                "previous_green_failures": [],
+                "test_failure_summary": plan_owned_collection_summary(owned, output),
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "N4_implement_code",
+                "error_message": "",
+            }
+
         print(f"    [EXIT CODE {exit_code}] {reason} — stopping workflow")
 
         # #2035: exit 2 is usually a COLLECTION failure, and pytest has already
@@ -2195,6 +2353,26 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Issue #498: Build concise failure summary for N4 feedback
     failure_summary = _build_failure_summary(output)
+
+    # #2893: with --continue-on-collection-errors the suite runs past a broken
+    # file and pytest exits 1 -- and then the short summary says only
+    # `ERROR tests/test_issue_4.py`, while `_extract_traceback_blocks` reads
+    # the FAILURES section and never ERRORS. Run 31 of boostgauge #4 spent an
+    # iteration rewriting every file without the one line it needed. The
+    # owned collection failure rides the summary as the same one-block repair
+    # task the exit-2 route hands N4, ahead of everything else, so #2851's
+    # attribution sends it to the file that owns the module.
+    owned_collection, _ = collection_failures_the_plan_owns(
+        output, state.get("files_to_modify") or []
+    )
+    if owned_collection:
+        print(
+            "    [N5] collection failed on a symbol the plan owns: "
+            + ", ".join(item for item, _ in owned_collection)
+            + " -- carried in the repair task (#2893)"
+        )
+        task = plan_owned_collection_summary(owned_collection, output)
+        failure_summary = f"{task}\n\n{failure_summary}" if failure_summary else task
 
     # Issue #501: Extract failed test names for identity-based stagnation
     current_green_failures = _extract_failed_test_names(output)
@@ -3049,6 +3227,12 @@ def _verify_green_non_pytest(
 
     print(f"    [N5] Results: {passed} passed, {failed} failed | "
           f"Coverage: {coverage_achieved:.1f}% | Exit: {exit_code} ({framework.value})")
+
+    # #2867: same as the pytest path -- the measurement rides the checkpoint.
+    record_measurement(
+        repo_root, int(passed or 0), int(passed or 0) + int(failed or 0),
+        float(coverage_achieved or 0.0),
+    )
 
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")
