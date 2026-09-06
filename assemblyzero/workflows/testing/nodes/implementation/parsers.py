@@ -61,8 +61,12 @@ def extract_code_block(response: str, file_path: str = "") -> str | None:
 
 def validate_code_response(
     code: str, filepath: str, existing_content: str = "", repo_root: str = "",
+    planned_paths: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Mechanically validate code. No LLM judgment.
+
+    `planned_paths` is the plan's file list (#2883): an import of a file the
+    plan is about to write resolves even though it is not on disk yet.
 
     Returns (valid, error_message).
     """
@@ -108,7 +112,9 @@ def validate_code_response(
             from .import_validator import validate_imports
             from pathlib import Path
 
-            imports_ok, bad_imports = validate_imports(code, filepath, Path(repo_root))
+            imports_ok, bad_imports = validate_imports(
+                code, filepath, Path(repo_root), planned_paths=planned_paths,
+            )
             if not imports_ok:
                 return False, f"Unresolvable imports: {', '.join(bad_imports)}"
 
