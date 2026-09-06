@@ -234,6 +234,9 @@ class TestingWorkflowState(TypedDict, total=False):
     e2e_failure_summary: str  # Issue #498: Structured E2E failure feedback for N4
     full_suite_validated: bool  # Issue #842: True after full test suite passes regression check
     full_suite_regressions: list[str]  # Issue #842: Failed test names from last full suite run (for stagnation)
+    # #2920: repair passes a full-suite regression found after green has been
+    # granted past the targeted loop's cap; the cap holds again at the limit.
+    full_suite_repair_passes: int
 
     # Review artifacts
     test_plan_review_prompt: str

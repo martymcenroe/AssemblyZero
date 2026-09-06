@@ -833,6 +833,46 @@ def restore_best_on_failure(state: TestingWorkflowState) -> str:
     return description
 
 
+#: Repair passes a full-suite regression found after green may have past the
+#: targeted loop's cap (#2920).
+MAX_FULL_SUITE_REPAIR_PASSES = 2
+
+
+def _full_suite_repair_grace(
+    state: dict, iteration_count: int, max_iterations: int,
+) -> int | None:
+    """The cap a full-suite regression found at the cap may run under (#2920).
+
+    run-issue4-141929 went green at 50 tests / 97 % on its fourth iteration;
+    the full-suite check then found a collection error and routed it to N4
+    with `iteration_count + 1`, the router read 5/5 and stopped the loop
+    "with its last result standing", the stage failed, and the orchestrator
+    regenerated the scaffold from a tree that was green a minute earlier.
+    A regression found after green is a new task; it gets a small budget of
+    its own -- ``MAX_FULL_SUITE_REPAIR_PASSES`` passes -- and the cap holds
+    again once that is spent. Returns the new cap, or None when the route
+    is not at the cap or the passes are spent; the caller writes the cap
+    into state so the graph's routers honour it.
+    """
+    if iteration_count + 1 < max_iterations:
+        return None
+    passes = int(state.get("full_suite_repair_passes", 0) or 0)
+    if passes >= MAX_FULL_SUITE_REPAIR_PASSES:
+        print(
+            f"    [N5] full-suite regression at the cap and "
+            f"{MAX_FULL_SUITE_REPAIR_PASSES} repair pass(es) already spent; "
+            f"the cap holds (#2920)"
+        )
+        return None
+    granted = iteration_count + 2
+    print(
+        f"    [N5] full-suite regression at the cap ({iteration_count + 1}/"
+        f"{max_iterations}): repair pass {passes + 1} of "
+        f"{MAX_FULL_SUITE_REPAIR_PASSES} granted, cap now {granted} (#2920)"
+    )
+    return granted
+
+
 def _cap_grace(
     state: dict,
     iteration_count: int,
@@ -2965,6 +3005,18 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # Success: all tests pass and coverage meets target
     print(f"    [N5] Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
 
+    # #2919: the green state is the best state, and it is snapshotted before
+    # anything downstream can regress from it. run-issue4-141929 went green
+    # at 48 tests / 97 %, the full-suite check routed a collection error to
+    # N4, N4's patch broke the suite, and the hill-climb restored the best
+    # it knew -- 38 tests at 90 %, from before the coverage stage -- because
+    # this path never called it. The ten coverage tests were re-derived on
+    # every pass through here.
+    green_updates: dict[str, Any] = {}
+    _hill_climb(state, repo_root, passed_count, coverage_achieved,
+                current_green_failures, green_updates,
+                passing_tests=sorted(passing_test_names(output)))
+
     # --------------------------------------------------------------------------
     # Issue #842: Full suite regression gate — run ONCE after new tests pass.
     # Catches regressions in existing 4000+ tests that the targeted test run misses.
@@ -3043,7 +3095,12 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 },
             )
 
+            # #2920: a regression found after green is a new task with a
+            # small budget of its own, not the last breath of the loop's.
+            repair_cap = _full_suite_repair_grace(state, iteration_count, max_iterations)
+            repair_passes = int(state.get("full_suite_repair_passes", 0) or 0)
             return {
+                **green_updates,
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
@@ -3052,6 +3109,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "test_failure_summary": regression_summary,
                 "full_suite_validated": False,
                 "full_suite_regressions": regression_names,
+                "full_suite_repair_passes": repair_passes + 1,
+                "max_iterations": repair_cap if repair_cap is not None else max_iterations,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -3116,6 +3175,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # Check if E2E should be skipped
     if state.get("skip_e2e"):
         return {
+            **green_updates,
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
@@ -3132,6 +3192,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         }
 
     return {
+        **green_updates,
         "green_phase_output": output,
         "coverage_achieved": coverage_achieved,
         "previous_coverage": coverage_achieved,
