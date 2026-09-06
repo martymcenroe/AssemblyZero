@@ -144,6 +144,7 @@ def generate_file_with_retry(
     is_test_scaffold: bool = False,
     system_prompt: str = "",
     repo_root: Path | None = None,
+    planned_paths: list[str] | None = None,
 ) -> tuple[str, bool]:
     """Generate code for a single file with retry on validation failure and model routing.
 
@@ -313,10 +314,13 @@ def generate_file_with_retry(
                     response_preview=response[:500]
                 )
 
-        # Validate code mechanically (Issue #842: pass repo_root for import validation)
+        # Validate code mechanically (Issue #842: pass repo_root for import
+        # validation; #2883: and the plan, so a planned sibling's import is
+        # not refused before the sibling is written)
         validation_result = validate_code_response(
             code, filepath, existing_content,
             repo_root=str(repo_root) if repo_root else "",
+            planned_paths=planned_paths,
         )
 
         # Handle both tuple (valid, error_msg) and bare bool returns
@@ -361,7 +365,18 @@ def validate_files_to_modify(
     paths immediately so we don't waste tokens on invalid paths.
 
     Rules:
-    - Modify/Delete: file must exist on disk (hard fail)
+    - Modify whose target is absent: implemented as an Add (#2879). The
+      plan's change type is its guess about the base, and the truth is on
+      disk -- the operator's #2736 ruling that the LLD's file list is a plan,
+      not a contract, applied to the type as well as the path. This is the
+      inverse of `resolve_change_type` (#2032/#2033), which turns an Add whose
+      file the base ships into a Modify. On run-issue4-193821 the design
+      called all five of #4's deliverables Modify against a from-seed base
+      that had none of them, and this guard ended a run that had just cleared
+      the gate, the design and the spec, in five seconds. The spec dict is
+      coerced in place so the loop implements it as an Add, and the coercion
+      is printed.
+    - Delete: file must exist on disk (hard fail)
     - Add: auto-create parent directory if missing (Issue #468)
 
     Args:
@@ -378,7 +393,16 @@ def validate_files_to_modify(
         change_type = file_spec.get("change_type", "Add")
         full_path = repo_root / file_path
 
-        if change_type.lower() in ("modify", "delete"):
+        if change_type.lower() == "modify" and not full_path.exists():
+            print(
+                f"    [PLAN] says Modify but the base has no {file_path}; "
+                f"implementing as Add (#2736: the file list is a plan, not a "
+                f"contract)"
+            )
+            file_spec["change_type"] = "Add"
+            change_type = "Add"
+
+        if change_type.lower() == "delete":
             if not full_path.exists():
                 errors.append(
                     f"{change_type} target does not exist: {file_path}"
@@ -548,6 +572,13 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     # Limit files to prevent runaway
     files_to_modify = files_to_modify[:50]
 
+    # #2883: the whole plan, captured before the batch split below, so the
+    # validator can tell a planned sibling from a hallucination. Run 27 of
+    # boostgauge #4 halted because collector.py -- file [1/5] -- imported
+    # collectors/windows.py -- file [2/5] -- and the import validator only
+    # knew what was on disk.
+    planned_paths = [f["path"] for f in files_to_modify if f.get("path")]
+
     print(f"    Files to implement: {len(files_to_modify)}")
     for f in files_to_modify:
         print(f"      - {f['path']} ({f.get('change_type', 'Add')})")
@@ -661,6 +692,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 # exactly this way, validated for syntax alone.
                 valid, val_error = validate_code_response(
                     code, fp, repo_root=str(repo_root),
+                    planned_paths=planned_paths,
                 )
                 if not valid:
                     print(
@@ -1037,6 +1069,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                     existing_content=existing_content,
                     system_prompt=stable_system_prompt,
                     repo_root=repo_root,
+                    planned_paths=planned_paths,
                 )
             # Note: generate_file_with_retry raises ImplementationError on
             # failure, so if we get here, code is valid

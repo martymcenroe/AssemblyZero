@@ -35,6 +35,7 @@ from assemblyzero.workflows.orchestrator.state import (
 from assemblyzero.core.llm_provider import get_provider
 from assemblyzero.core.retry_mode import RESUMED
 from assemblyzero.core import settlement as settlement_mod
+from assemblyzero.workflows.testing.checkpoints import Measurement, read_measurement
 
 import logging
 
@@ -1441,6 +1442,105 @@ def _recoverable_attempt_branch(
     return None
 
 
+class _MeasuredAttempt(NamedTuple):
+    """The preserved checkpoint a resume should start from (#2867)."""
+
+    branch: str          #: the grave that carries the checkpoint
+    commit: str          #: the checkpoint commit itself
+    commits: int         #: commits from the base to the checkpoint
+    measurement: Measurement
+    is_tip: bool         #: the checkpoint is the grave's tip
+    is_newest: bool      #: ... and the grave is the newest resumable one
+
+    @property
+    def commit_ish(self) -> str:
+        """What `git worktree add` starts from: the branch when the checkpoint
+        is its tip (the readable form), else the commit."""
+        return self.branch if self.is_tip else self.commit
+
+
+def _best_measured_attempt(
+    target_repo: str, issue_number: int, base_branch: str,
+) -> _MeasuredAttempt | None:
+    """The preserved checkpoint with the best N5 measurement, or None.
+
+    #2867: `_recoverable_attempt_branch` takes the NEWEST grave, and after a
+    degrading run the newest is the worst. boostgauge #4 on 2026-09-05
+    preserved, in order, 44 of 47 passing at 91% (`a7a387e`), then 41 of 44
+    (`d49f78a`), then 37 of 41 (`26b169b`) -- one chain, each grave the last
+    plus one iteration -- and the next resume was going to start from the
+    tail. Nothing compared them because nothing recorded the passing count
+    where a resume could read it.
+
+    N5 now notes its result on each checkpoint (`checkpoints.record_measurement`).
+    Every grave the #2845 rules accept is walked, newest first; every commit it
+    carries beyond the base is read for a note; the best score (most passing,
+    then coverage) wins. A tie between two sightings of the same commit goes
+    to the grave whose tip it is, so the log names the branch that ended
+    there. A grave with no note contributes nothing, and when no grave carries
+    one the answer is None and the caller resumes the newest, exactly as
+    before -- the measurement is a preference the run can express, never a
+    condition it must meet.
+    """
+    if not base_branch:
+        return None
+
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        cmd = ["git"]
+        if target_repo:
+            cmd += ["-C", target_repo]
+        return run_command(
+            [*cmd, *args], check=False, capture_output=True, text=True,
+        )
+
+    listed = _git(
+        "branch", "--list", "--format=%(refname:short)",
+        f"graveyard/issue-{issue_number}-*",
+    )
+    if listed.returncode != 0:
+        return None
+    candidates: list[tuple[str, str]] = []
+    for line in listed.stdout.splitlines():
+        branch = line.strip()
+        match = _GRAVEYARD_ATTEMPT.match(branch)
+        if match and int(match.group(1)) == issue_number:
+            candidates.append((match.group(2), branch))
+
+    best: _MeasuredAttempt | None = None
+    newest_seen = False
+    for _stamp, branch in sorted(candidates, reverse=True):
+        if _git("merge-base", "--is-ancestor", base_branch, branch).returncode != 0:
+            continue
+        chain = _git("rev-list", f"{base_branch}..{branch}")
+        if chain.returncode != 0:
+            continue
+        shas = [s.strip() for s in chain.stdout.splitlines() if s.strip()]
+        if not shas:
+            continue
+        # This is the first grave that passed the #2845 rules: the one the
+        # newest-first fallback would resume from.
+        is_newest_grave = not newest_seen
+        newest_seen = True
+        # rev-list is newest first, so the tip is shas[0] and the count from
+        # the base to shas[i] is len(shas) - i.
+        for index, sha in enumerate(shas):
+            measurement = read_measurement(target_repo, sha)
+            if measurement is None:
+                continue
+            found = _MeasuredAttempt(
+                branch=branch, commit=sha, commits=len(shas) - index,
+                measurement=measurement, is_tip=index == 0,
+                is_newest=is_newest_grave and index == 0,
+            )
+            if best is None or found.measurement.score > best.measurement.score:
+                best = found
+            elif (
+                found.commit == best.commit and found.is_tip and not best.is_tip
+            ):
+                best = found
+    return best
+
+
 def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute implementation workflow (TDD).
 
@@ -1543,16 +1643,37 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # must start from the base, which is what `resumed_from` being
             # empty means (#2383 makes that field explicit on both paths).
             if state.get("resumed_from") == "impl":
-                recovered = _recoverable_attempt_branch(
+                # #2867: the best MEASURED checkpoint first; the newest grave
+                # (#2845) only when no grave carries a measurement.
+                best = _best_measured_attempt(
                     target_repo, issue_number, base_branch,
                 )
-                if recovered:
+                recovered = None if best else _recoverable_attempt_branch(
+                    target_repo, issue_number, base_branch,
+                )
+                start_from = ""
+                if best:
+                    recovered_branch = best.branch
+                    start_from = best.commit_ish
+                    qualifier = (
+                        "" if best.is_newest
+                        else "; newer preserved attempts did not measure higher"
+                    )
+                    print(
+                        f"    Resuming from preserved attempt {best.branch} "
+                        f"at {best.commit[:7]} ({best.measurement.describe()}, "
+                        f"{best.commits} commit(s) beyond {base_branch}; the "
+                        f"best measured checkpoint{qualifier})"
+                    )
+                elif recovered:
                     recovered_branch, recovered_commits = recovered
+                    start_from = recovered_branch
                     print(
                         f"    Resuming from preserved attempt "
                         f"{recovered_branch} ({recovered_commits} commit(s) "
                         f"beyond {base_branch})"
                     )
+                if start_from:
                     # Replaces the base as the worktree's commit-ish. `-b
                     # issue-{N}` still creates the branch, so everything
                     # downstream -- checkpoints, the pr stage's head, the
@@ -1561,9 +1682,9 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                     # rather than indexed, so a future edit to the argument
                     # order cannot silently retarget the worktree.
                     if add_cmd and add_cmd[-1] == base_branch:
-                        add_cmd[-1] = recovered_branch
+                        add_cmd[-1] = start_from
                     else:
-                        add_cmd.append(recovered_branch)
+                        add_cmd.append(start_from)
                 else:
                     print(
                         f"    No preserved attempt for #{issue_number} is "
