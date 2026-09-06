@@ -147,6 +147,23 @@ jobs:
       - name: Install
         run: poetry install --no-interaction
 
+      # `poetry install` installs the Playwright PACKAGE. It does not download
+      # a browser, and two tests launch a real headless one on purpose: the
+      # defect they cover is what the browser does with scrollIntoView under
+      # `scroll-behavior: smooth`, which stopped the first live run on field one
+      # of twenty-five. A fake locator would test nothing but the test, so a
+      # browser-driving product's CI is exactly where they belong.
+      #
+      # ~130 MB cold, near-instant once the cache is warm.
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~\\AppData\\Local\\ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install the Playwright browser
+        run: poetry run playwright install chromium
+
       - name: ruff
         run: poetry run ruff check .
 
