@@ -46,6 +46,12 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
 
 After completing a task, ask "What would you like to work on next?" as an open-ended question. Never offer numbered yes/no options or suggest continuing to the next issue unprompted.
 
+## Standing Orders
+
+**A standing operator order to continue IS the prompt, and it does not expire at a task boundary.** When the operator has said to keep going, "unprompted" no longer applies. Finishing a report, closing a batch, filing an issue, or reaching a milestone does not end the authorization — only the operator does. While such an order is live, do not ask "what do you want to work on next?"; that question is how the order gets broken. A report is a checkpoint, not an ending: write it and keep working in the same turn.
+
+**Running low on context is not a reason to stop** — it is a reason to run `/handoff` so the next session continues. Ending a session without a handoff is stopping.
+
 ## Merging PRs
 
 Follow root CLAUDE.md "Merging PRs (Universal)" with `--repo martymcenroe/AssemblyZero`.
