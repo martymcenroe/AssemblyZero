@@ -538,6 +538,15 @@
 
 **Context:** The twentieth launch of the gauge face halted in under a minute, on a day when Om had drawn down savings again and the mood had been foul since morning. Om answered the halt not with a kill command but with Meister Eckhart: *"if you are frustrated it's your expectations that are out of order."* The reply named Eckhart's own word for the discipline — *Gelassenheit*, releasement, letting the thing be what it is instead of what you ordered it to be — and re-read the week by its light: the expectation out of order was "the twentieth launch should succeed"; the contract the campaign actually runs on is "the twentieth launch should fail better than the nineteenth," and by that measure the day was obedient. Om's own instrument already held the counter-image — the main needle reads where you are, the telltale reads where you've been, and insanity is driving by the main needle alone; so is despair. Vimes got the last word, above, because watchmen and factory-keepers share a trade: the street is never quiet, and the ones who last are the ones who walk it anyway. The word was then carved into the Well of Names beside Fünklein — two of the preacher's words now, the spark and the letting-go.
 
+### 2026-09-09
+
+---
+
+**21:14** — *On shipping a fix that taught the next agent to start without being asked*
+> "The most dangerous book in L-space is the one that rewrites the shelf it sits on. Every fix is a small act of vandalism against the problem you didn't know you had."
+
+**Context:** The day began with an audit that would not stay running. The agent kept stopping mid-work despite a standing order, delivered twice in capitals, that it must not — and the cause turned out to be written down. Three CLAUDE.md layers each told it to halt at a task boundary; `STOP` appears eleven times across eight lines of the universal file, and a search of all three for any instruction to *continue* returned nothing at all. Every halt rule named the damage that earned it. None was ever earned by an agent doing too little, because that failure looks like politeness and leaves no wreckage to write a rule from. Om shipped the counterweight the same day: a Standing Orders section in two files, saying an order survives a task boundary and a report is a checkpoint rather than an ending. Within the hour a freshly spawned session read a handoff written in the imperative, mistook it for a live order, and began auditing with nobody having asked it to. Om killed it. The fix had removed two brakes and only one had been examined — the other was quietly holding the door shut against exactly this. The lesson went into the record before the thread was closed: enumerate what a brake is holding before you take it off, and state both directions in whatever replaces it, because a rule that suppresses one failure mode usually suppresses several, and the ones nobody named are the ones that come back first.
+
 ---
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
