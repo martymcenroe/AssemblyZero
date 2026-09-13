@@ -448,7 +448,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
                     ),
                     apply_failure=failure_context,
                 ),
-                timeout_seconds=600,
+                timeout_seconds=1800,
             )
             node_cost_usd += get_cumulative_cost() - cost_before
             if not edit_result.success:
@@ -573,7 +573,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         result = drafter.invoke(
             system_prompt=_drafter_system_prompt(state.get("lld_content", "")),
             content=prompt,
-            timeout_seconds=600,  # 10 min — impl specs are large
+            timeout_seconds=1800,  # 30 min — impl specs are large
         )
         node_cost_usd = get_cumulative_cost() - cost_before
 
