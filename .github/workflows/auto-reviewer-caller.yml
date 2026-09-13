@@ -17,6 +17,10 @@ permissions:
   pull-requests: write
   checks: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   auto-review:
     uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
