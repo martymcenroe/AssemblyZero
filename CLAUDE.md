@@ -60,10 +60,12 @@ Follow root CLAUDE.md "Merging PRs (Universal)" with `--repo martymcenroe/Assemb
 
 **Important: Archival must happen BEFORE creating the PR, inside the worktree.**
 
+**Agent Actions Budget (Use `[skip ci]`):** Since we cannot edit the CI workflow's concurrency settings without a highly-scoped token, EVERY intermediate commit pushed by an agent MUST include `[skip ci]` in the commit message (e.g., `git commit -m "fix typo [skip ci]"`). Only the final commit meant to be merged should omit `[skip ci]` so the required checks can run and pass Cerberus.
+
 ```bash
 # Inside the worktree:
 poetry run python tools/archive_worktree_lineage.py --worktree . --issue {ID} --main-repo .
-git commit -m "chore: archive workflow lineage (Closes #{ID})"
+git commit -m "chore: archive workflow lineage (Closes #{ID}) [skip ci]"
 # Then push and create the PR
 ```
 
@@ -72,3 +74,7 @@ After merging the PR, simply delete the worktree and branch:
 git worktree remove ../AssemblyZero-{ID}
 git branch -d {ID}-fix && git checkout main && git pull
 ```
+
+## Banned Practices (Agent Limitations)
+
+**NEVER USE REGEX.** You must never use regular expressions (e.g., in Python scripts, grep, re.search, etc.) to scan, parse, or process code in place of manual reading and comprehension. Regex is permanently banned for auditing and review tasks.
