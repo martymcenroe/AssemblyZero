@@ -37,9 +37,6 @@ permissions:
   pull-requests: write
   checks: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   auto-review:
