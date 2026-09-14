@@ -11,10 +11,10 @@ When auditing a repository's lifecycle state across the fleet, we need a precise
 We define the term **"Fully Landed"** to describe a repository that meets five strict criteria:
 
 1. **Working Directory Clean:** `git status` shows no modified tracked files and no untracked files (excluding properly gitignored artifacts).
-2. **No Dangling Worktrees:** `git worktree list` shows only the `main` branch worktree. There are no active feature worktrees.
+2. **No Dangling Worktrees:** `git worktree list` shows only the `main` branch worktree. There are no active feature worktrees. (This implicitly guarantees that the operator's local `~/Projects/` directory remains free of orphaned worktree subdirectories.)
 3. **No Local Stashes:** `git stash list` is empty.
 4. **No Open Pull Requests:** `gh pr list` returns 0 open pull requests. All in-flight work has been merged or explicitly closed.
-5. **Main Branch Synced:** The local `main` branch is exactly up to date with `origin/main` (`git fetch origin && git status` confirms parity).
+5. **Main Branch Synced:** The local `main` branch is exactly up to date with `origin/main` (`git fetch origin && git status` confirms parity). **Crucially: the agent (not the operator) is responsible for executing the final `git pull` on `main` to achieve this state.**
 
 If all five conditions are met, the repo is **Fully Landed**.
 
