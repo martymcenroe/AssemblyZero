@@ -1129,6 +1129,12 @@ data/unleashed/
 # that explains the convention.
 data-dl/*
 !data-dl/README.md
+!data-dl/audio/
+!data-dl/audio/.gitkeep
+!data-dl/transcripts/
+!data-dl/transcripts/.gitkeep
+!data-dl/reference/
+!data-dl/reference/.gitkeep
 
 # NOT ignored, deliberately: data-g/ is source-of-truth the runtime depends on
 # and is meant to be committed. Do not "tidy" this into a `data-*/` glob -- that
@@ -1246,7 +1252,12 @@ three-way split in #2485.)
 Anything fetched from somewhere else lives here: papers, report drafts,
 spreadsheets, exports, images, meeting recordings.
 
-**This directory is gitignored.** Nothing in it is committed except this README.
+**This directory is gitignored.** Nothing in it is committed except this README and the empty substructure `.gitkeep` files.
+
+Please organize your downloads into the appropriate subfolders:
+- `audio/` (for .m4a, .mp3, etc.)
+- `transcripts/` (for raw Whisper outputs)
+- `reference/` (for heavy PDFs, spreadsheets, and reference materials)
 That is deliberate -- downloaded material is usually bulk, usually binary, and
 usually reproducible by downloading it again. Git is a poor store for it and the
 cost is permanent, because every clone pays for it forever.
