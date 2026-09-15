@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "Canonical project structure for AssemblyZero-governed projects. This is the single source of truth — when this schema and 0009-canonical-project-structure.md disagree, the schema is authoritative.",
+  "description": "Canonical project structure for AssemblyZero-governed projects. This is the single source of truth \u2014 when this schema and 0009-canonical-project-structure.md disagree, the schema is authoritative.",
   "directories": {
     "docs": {
       "required": true,
@@ -171,6 +171,24 @@
         "gemini-prompts": {
           "required": false,
           "description": "Gemini review templates"
+        }
+      }
+    },
+    "data-dl": {
+      "required": true,
+      "description": "Universally gitignored drop-zone for heavy media, PDFs, and downloads. -- AZ #2485",
+      "children": {
+        "audio": {
+          "required": true,
+          "description": "Meeting recordings (.m4a, .mp3, etc.)"
+        },
+        "transcripts": {
+          "required": true,
+          "description": "Raw whisper/transcript outputs"
+        },
+        "reference": {
+          "required": true,
+          "description": "PDFs, spreadsheets, and heavy reference materials"
         }
       }
     }
