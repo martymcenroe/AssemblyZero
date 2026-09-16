@@ -1,3 +1,4 @@
 # Encrypt ideas folder (git-crypt)
 ideas/** filter=git-crypt diff=git-crypt
 ideas/**/* filter=git-crypt diff=git-crypt
+*.sh text eol=lf
