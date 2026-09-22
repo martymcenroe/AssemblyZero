@@ -63,9 +63,19 @@ markers = [
 # about a generator's output, worth keeping and arguably worth investigating; it
 # is not a lint defect in this repo's source.
 #
+# `tests/fixtures/issue7_run*/` is captured generator output -- what the
+# scaffolding workflow emitted on the run named by the directory. Nothing
+# imports it; five test modules read it BY PATH as text and assert on its
+# contents (#3479). Editing an import line there edits the input a test
+# measures, so a "fix" would either silently change what is being tested or
+# fail and invite someone to edit the fixture further.
+#
+# Only the recorded-run directories. `tests/fixtures/` as a whole stays linted:
+# it also holds real importable helpers, `tests/fixtures/scraper` among them.
+#
 # This narrows WHAT IS LINTED, never what counts as an error. No rule is
 # disabled and no severity lowered -- see #3471 for the rule-by-rule work.
-extend-exclude = ["docs/lineage"]
+extend-exclude = ["docs/lineage", "tests/fixtures/issue7_run*"]
 
 [tool.poetry]
 packages = [{include = "assemblyzero"}]
