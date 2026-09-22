@@ -10,7 +10,6 @@ Tests for:
 """
 
 import pytest
-from pathlib import Path
 
 from assemblyzero.workflows.requirements.config import (
     GateConfig,

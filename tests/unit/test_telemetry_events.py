@@ -1,6 +1,6 @@
 """Tests for telemetry emit calls in Two-Strikes / Size Gate (#614)."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import pytest
 
 from assemblyzero.workflows.testing.nodes.implement_code import (

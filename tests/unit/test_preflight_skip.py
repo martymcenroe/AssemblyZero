@@ -4,9 +4,8 @@ When mechanical gates pass AND coverage is 100%, Gemini call is skipped.
 """
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
 
 from assemblyzero.workflows.testing.nodes.review_test_plan import (
     check_requirement_coverage,

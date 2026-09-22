@@ -8,7 +8,6 @@ TDD: These tests are written before implementation and should initially fail (RE
 
 import pytest
 from pathlib import Path
-from unittest.mock import patch
 
 # Import will fail until implementation exists - that's expected for TDD
 try:
@@ -18,14 +17,12 @@ try:
         parse_files_changed_table,
         validate_file_paths,
         detect_placeholder_prefixes,
-        extract_files_from_section,
         cross_reference_sections,
         extract_mitigations_from_risks,
         extract_function_names,
         trace_mitigations_to_functions,
         extract_keywords,
         ValidationSeverity,
-        ValidationError,
         # Issue #306: Title issue number validation
         validate_title_issue_number,
         extract_title_issue_number,

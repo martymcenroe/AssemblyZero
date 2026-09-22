@@ -3,7 +3,7 @@
 Issue #381: Tests T120, T130, T200, T240 from LLD Section 10.0.
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

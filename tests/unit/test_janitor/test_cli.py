@@ -4,9 +4,6 @@ Issue #94: Lu-Tze: The Janitor
 Test IDs: T240-T260, T360-T380
 """
 
-import io
-import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest

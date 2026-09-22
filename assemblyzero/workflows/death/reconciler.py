@@ -11,7 +11,6 @@ import os
 import shutil
 from datetime import datetime, timezone
 
-from assemblyzero.workflows.death.constants import ADR_OUTPUT_PATH
 from assemblyzero.workflows.death.models import (
     DriftFinding,
     DriftReport,

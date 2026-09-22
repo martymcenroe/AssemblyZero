@@ -10,14 +10,12 @@ import subprocess
 from pathlib import Path
 from unittest import mock
 
-import pytest
 
 # Import under test — we need to add tools/ to sys.path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
 
 from modernize_dependencies import (
-    commit_update,
     discover_outdated,
     modernize,
     restore_lockfiles,

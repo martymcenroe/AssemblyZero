@@ -41,7 +41,6 @@ Usage:
 
 import argparse
 import atexit
-import json
 import os
 import re
 import subprocess
@@ -902,7 +901,7 @@ def main():
     speedrun_logger = None
     if getattr(args, "speedrun", False):
         from assemblyzero.utils.speedrun import (
-            LapSplitWriter, RunLogger, classify_halt,
+            LapSplitWriter, RunLogger,
         )
         speedrun_splits = LapSplitWriter.start(repo_root, args.issue)
         speedrun_logger = RunLogger(repo_root)

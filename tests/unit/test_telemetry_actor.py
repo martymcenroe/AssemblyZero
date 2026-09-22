@@ -3,7 +3,6 @@
 import os
 from unittest.mock import patch
 
-import pytest
 
 from assemblyzero.telemetry.actor import detect_actor, detect_github_user, get_machine_id
 

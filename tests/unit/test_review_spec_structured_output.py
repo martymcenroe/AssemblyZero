@@ -6,7 +6,7 @@ Tests for _invoke_reviewer_with_spec_schema and related review_spec node behavio
 
 import json
 import pathlib
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

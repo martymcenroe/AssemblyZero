@@ -11,7 +11,6 @@ import pytest
 from assemblyzero.core.verdict_schema import (
     FEEDBACK_SCHEMA,
     FeedbackResult,
-    parse_structured_feedback,
 )
 
 

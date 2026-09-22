@@ -4,7 +4,6 @@ Validates that _run_mechanical_gates catches structural issues
 before expensive Gemini API calls in review_test_plan.
 """
 
-import pytest
 
 from assemblyzero.workflows.testing.nodes.review_test_plan import (
     _run_mechanical_gates,

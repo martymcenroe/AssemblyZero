@@ -4,7 +4,7 @@ This module defines the AgentState TypedDict that travels through
 the governance pipeline: Issue -> LLD Review -> Implementation -> Code Review -> Merge
 """
 
-from typing import Annotated, Literal, TypedDict
+from typing import Literal, TypedDict
 
 from assemblyzero.core.workspace_context import WorkspaceContext
 

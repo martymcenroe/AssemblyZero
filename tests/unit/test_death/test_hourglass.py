@@ -8,9 +8,8 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from assemblyzero.workflows.death.hourglass import (
     _node_rest,
@@ -18,7 +17,7 @@ from assemblyzero.workflows.death.hourglass import (
     run_death,
     should_death_arrive,
 )
-from assemblyzero.workflows.death.models import AgeMeterState, HourglassState
+from assemblyzero.workflows.death.models import HourglassState
 
 
 def _make_state(**overrides) -> HourglassState:

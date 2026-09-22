@@ -8,7 +8,6 @@ Tests cover:
 - Graph routing functions handle N2_scaffold_tests target
 """
 
-import pytest
 
 from assemblyzero.workflows.testing.exit_code_router import (
     EXIT_OK,

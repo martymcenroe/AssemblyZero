@@ -54,10 +54,8 @@ atexit.register(flush)
 from assemblyzero.workflows.requirements.audit import (
     AUDIT_ACTIVE_DIR,
     IDEAS_ACTIVE_DIR,
-    LLD_ACTIVE_DIR,
     check_existing_lld,
     generate_slug,
-    next_file_number,
     shift_lineage_versions,
 )
 from assemblyzero.utils.git import current_branch, validate_integration_branch

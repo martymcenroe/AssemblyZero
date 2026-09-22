@@ -10,7 +10,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from enable_dependabot import (  # noqa: E402
-    EnableResult,
     enable_dependabot_for_repo,
     list_fleet_repos,
 )

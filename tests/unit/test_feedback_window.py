@@ -6,7 +6,6 @@ Issue #497: Bounded Verdict History in LLD Revision Loop
 import json
 import logging
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 

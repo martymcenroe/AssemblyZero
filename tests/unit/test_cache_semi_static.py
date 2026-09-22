@@ -4,9 +4,8 @@ Verifies that get_repo_structure() is computed once in load_input / analyze_code
 and read from state in generate_draft / generate_spec, with inline fallback.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------

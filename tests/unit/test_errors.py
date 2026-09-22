@@ -6,7 +6,6 @@ Issue #542: Unified error handling.
 import subprocess
 from unittest.mock import MagicMock
 
-import pytest
 
 from assemblyzero.core.errors import (
     APIError,

@@ -10,7 +10,6 @@ import json
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,

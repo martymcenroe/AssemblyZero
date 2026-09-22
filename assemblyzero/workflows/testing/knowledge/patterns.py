@@ -4,7 +4,6 @@ Provides detection logic for inferring which types of tests are needed
 based on LLD content. This becomes the retrieval corpus when RAG is implemented.
 """
 
-import re
 from pathlib import Path
 from typing import Any
 

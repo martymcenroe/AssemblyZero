@@ -17,7 +17,6 @@ Fourth organ of the two-trees disease: #2021 clean-check, #2033 spec planning,
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 

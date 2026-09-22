@@ -5,9 +5,7 @@ Issue #101: Unified Requirements Workflow
 Tests for the parameterized StateGraph that connects all nodes.
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 class TestRequirementsGraph:

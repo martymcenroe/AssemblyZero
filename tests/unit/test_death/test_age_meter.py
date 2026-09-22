@@ -5,11 +5,9 @@ Issue #535: T010–T080.
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 
-import pytest
 
 from assemblyzero.workflows.death.age_meter import (
     check_meter_threshold,

@@ -6,7 +6,6 @@ Test Scenarios from LLD:
 - 060: Viewer formats table (covered implicitly)
 """
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -14,7 +13,6 @@ import pytest
 
 from assemblyzero.core.audit import (
     ReviewAuditLog,
-    ReviewLogEntry,
     create_log_entry,
 )
 

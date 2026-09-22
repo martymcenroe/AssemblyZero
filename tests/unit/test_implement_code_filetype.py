@@ -4,7 +4,6 @@ Tests that extract_code_block, build_system_prompt, and build_single_file_prompt
 correctly handle non-Python files.
 """
 
-import pytest
 from pathlib import Path
 
 from assemblyzero.workflows.testing.nodes.implement_code import (

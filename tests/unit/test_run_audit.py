@@ -4,10 +4,8 @@ Issue #343: Standalone CLI Audit Runner
 """
 
 import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from tools.run_audit import (
     AUDIT_REGISTRY,
@@ -381,7 +379,6 @@ class TestCLIArgumentParsing:
     """Test CLI argument parsing."""
 
     def test_no_args_runs_all(self):
-        from tools.run_audit import main
         # Just verify the parser accepts empty args
         import argparse
         parser = argparse.ArgumentParser()

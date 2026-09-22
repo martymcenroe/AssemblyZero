@@ -6,7 +6,6 @@ on system prompt and user content blocks.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 class TestAnthropicCacheControl:

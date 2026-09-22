@@ -10,10 +10,8 @@ Tests for:
 - finalize (issue filing or LLD saving)
 """
 
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
-import tempfile
+from unittest.mock import Mock, patch
 
 
 class TestLoadInputNode:

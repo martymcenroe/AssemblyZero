@@ -4,7 +4,6 @@ Validates that iteration 3+ prompts use skeleton references for
 static sections (template, input) to reduce token waste.
 """
 
-import pytest
 
 from assemblyzero.workflows.requirements.nodes.generate_draft import _build_prompt
 

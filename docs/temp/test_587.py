@@ -1,6 +1,5 @@
 """Tests for the Mechanical Size Gate (Issue #587)."""
 
-import pytest
 
 from assemblyzero.workflows.testing.nodes.implement_code import validate_code_response
 

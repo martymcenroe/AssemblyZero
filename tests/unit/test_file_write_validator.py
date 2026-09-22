@@ -3,10 +3,8 @@
 Issue #188: Test IDs match LLD Section 10.0.
 """
 
-import pytest
 
 from assemblyzero.hooks.file_write_validator import (
-    PathValidationResult,
     find_closest_lld_path,
     validate_file_write,
 )

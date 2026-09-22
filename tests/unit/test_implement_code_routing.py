@@ -5,7 +5,7 @@ and the routing integration in generate_file_with_retry().
 """
 
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +13,6 @@ from assemblyzero.workflows.testing.nodes.implementation.routing import (
     select_model_for_file,
     HAIKU_MODEL,
     SMALL_FILE_LINE_THRESHOLD,
-    _get_default_model,
 )
 
 

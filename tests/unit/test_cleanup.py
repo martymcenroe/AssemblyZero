@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from assemblyzero.workflows.testing.nodes.cleanup import (
     cleanup,

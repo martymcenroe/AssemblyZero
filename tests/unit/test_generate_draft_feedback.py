@@ -5,7 +5,6 @@ Issue #497: Bounded Verdict History in LLD Revision Loop
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ── Test ID 110: generate_draft uses bounded feedback (REQ-1) ──
@@ -25,9 +24,6 @@ class TestGenerateDraftBoundedFeedback:
     ):
         """Test ID 110: generate_draft calls build_feedback_block with verdict_history."""
         from assemblyzero.workflows.requirements.feedback_window import FeedbackWindow
-        from assemblyzero.workflows.requirements.verdict_summarizer import (
-            VerdictSummary,
-        )
 
         # Set up mock return values
         mock_window = FeedbackWindow(

@@ -3,7 +3,6 @@
 Validates that _truncate_prompt and the prompt-size cap work correctly.
 """
 
-import pytest
 
 from assemblyzero.workflows.requirements.nodes.generate_draft import (
     MAX_TOTAL_PROMPT_CHARS,

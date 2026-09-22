@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
 from backfill_issue_audit import (
     AUDIT_ACTIVE_DIR,
     AUDIT_DONE_DIR,
-    MANAGED_FILES,
     BackfillResult,
     Comment,
     Issue,

@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.workflows.janitor.probes.inventory_drift import (
     probe_inventory_drift,

@@ -8,10 +8,9 @@ straight through without pausing for human input.
 Fix: Implement actual input() prompts in interactive mode.
 """
 
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
-from assemblyzero.workflows.requirements.state import create_initial_state, HumanDecision
+from assemblyzero.workflows.requirements.state import create_initial_state
 
 
 class TestDraftGateInteractive:

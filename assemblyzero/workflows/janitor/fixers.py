@@ -8,7 +8,6 @@ from __future__ import annotations
 from assemblyzero.utils.shell import run_command
 import os
 from collections import defaultdict
-from datetime import datetime
 
 from assemblyzero.workflows.janitor.state import Finding, FixAction
 

@@ -3,13 +3,11 @@
 Tests the file extension → language tag / content descriptor mapping.
 """
 
-import pytest
 
 from assemblyzero.utils.file_type import (
     get_file_type_info,
     get_language_tag,
     get_content_descriptor,
-    FILE_TYPE_REGISTRY,
 )
 
 

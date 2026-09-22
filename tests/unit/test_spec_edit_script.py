@@ -8,7 +8,6 @@ drift impossible by construction.
 
 from unittest.mock import MagicMock, Mock, patch
 
-import pytest
 
 from assemblyzero.workflows.implementation_spec.nodes.edit_script import (
     apply_edit_blocks,

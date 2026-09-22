@@ -32,12 +32,10 @@ Test IDs map to LLD Section 10.0/10.1:
 """
 
 import json
-import os
 import pytest
 import textwrap
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 # =============================================================================
@@ -2457,10 +2455,6 @@ class TestPackageImports:
             create_implementation_spec_graph,
             route_after_review,
             route_after_validation,
-            ImplementationSpecState,
-            FileToModify,
-            PatternRef,
-            CompletenessCheck,
         )
 
         assert create_implementation_spec_graph is not None

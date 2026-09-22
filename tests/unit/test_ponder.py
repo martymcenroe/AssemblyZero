@@ -3,11 +3,8 @@
 Issue #307: Tests for mechanical auto-fix rules and the Ponder node.
 """
 
-import pytest
-from pathlib import Path
 
 from assemblyzero.workflows.requirements.nodes.ponder_rules import (
-    AutoFix,
     apply_all_rules,
     fix_title_issue_number,
     fix_section_heading_format,

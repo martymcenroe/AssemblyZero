@@ -5,7 +5,7 @@ Issue #381: Tests T140, T150, T180, T220, T250 from LLD Section 10.0.
 
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

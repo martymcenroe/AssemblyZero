@@ -7,9 +7,7 @@ Tests for the CLI interface and argument parsing.
 
 import pytest
 import json
-import sys
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 class TestArgumentParsing:

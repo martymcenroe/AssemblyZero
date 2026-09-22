@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -32,7 +31,6 @@ from assemblyzero.workflows.testing.completeness.ast_analyzer import (
     run_ast_analysis,
 )
 from assemblyzero.workflows.testing.completeness.report_generator import (
-    ReviewMaterials,
     extract_lld_requirements,
     generate_implementation_report,
     prepare_review_materials,

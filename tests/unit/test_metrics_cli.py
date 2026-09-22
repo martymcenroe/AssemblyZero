@@ -7,11 +7,9 @@ Tests: T280, T290
 from __future__ import annotations
 
 import importlib.util
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from assemblyzero.metrics.collector import CollectionError
 from assemblyzero.metrics.models import RepoMetrics

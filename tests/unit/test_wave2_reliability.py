@@ -4,7 +4,6 @@ Issue #504: E2E stagnation detection by failed test name identity
 Issue #505: Completeness gate AST stagnation detection
 """
 
-import pytest
 
 
 # ===========================================================================
@@ -73,9 +72,6 @@ class TestE2EIdentityStagnation:
 
     def test_same_failures_triggers_stagnation(self):
         """Same failed test set → stagnation even if pass count increased."""
-        from assemblyzero.workflows.testing.nodes.e2e_validation import (
-            _extract_failed_test_names,
-        )
 
         # Simulate: pass count went from 3 to 4 (looks like progress),
         # but same 2 tests still failing

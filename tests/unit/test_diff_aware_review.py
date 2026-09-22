@@ -7,9 +7,7 @@ Verifies that:
 4. previous_draft is preserved across iterations
 """
 
-import difflib
 
-import pytest
 
 
 class TestDiffAwareReviewContent:

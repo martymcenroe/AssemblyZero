@@ -4,11 +4,9 @@ Validates that first_pass flag is correctly computed and logged
 in both requirements and testing workflow finalize nodes.
 """
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 
 class TestRequirementsFirstPass:
@@ -16,7 +14,6 @@ class TestRequirementsFirstPass:
 
     def _run_finalize(self, state_overrides: dict) -> dict:
         """Run finalize with given state overrides and return the state."""
-        from assemblyzero.workflows.requirements.nodes.finalize import finalize
 
         base_state = {
             "workflow_type": "lld",

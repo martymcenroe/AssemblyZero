@@ -7,7 +7,6 @@ docs/standards/0008-documentation-convention.md
 """
 
 import re
-from datetime import datetime
 from pathlib import Path
 
 

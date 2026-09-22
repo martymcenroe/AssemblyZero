@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from assemblyzero.hooks.types import CascadeDetectionResult, CascadeRiskLevel
 
 if TYPE_CHECKING:
-    from assemblyzero.telemetry.cascade_events import create_cascade_event, log_cascade_event
+    pass
 
 
 def handle_cascade_detection(

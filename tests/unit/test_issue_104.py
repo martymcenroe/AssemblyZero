@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
-import logging
 
 import pytest
 
@@ -1130,20 +1125,6 @@ class TestLogging:
 def test_module_imports() -> None:
     """Verify all modules can be imported."""
     from tools.verdict_analyzer import (
-        VerdictRecord,
-        BlockingIssue,
-        parse_verdict,
-        VerdictDatabase,
-        normalize_pattern,
-        map_category_to_section,
-        CATEGORY_TO_SECTION,
-        parse_template_sections,
-        generate_recommendations,
-        atomic_write_template,
-        validate_template_path,
-        scan_repos,
-        find_registry,
-        discover_verdicts,
         PARSER_VERSION,
     )
     

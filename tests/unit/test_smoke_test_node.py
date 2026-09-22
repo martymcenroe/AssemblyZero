@@ -3,15 +3,11 @@
 Reference: Issue #172, LLD docs/LLDs/active/172-smoke-test-node.md
 """
 
-import subprocess
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from assemblyzero.nodes.smoke_test_node import (
-    SmokeTestResult,
     SmokeTestState,
     discover_entry_points,
     integration_smoke_test,

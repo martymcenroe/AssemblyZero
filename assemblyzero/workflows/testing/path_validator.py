@@ -4,7 +4,6 @@ Issue #289: Prevents directory traversal, secret file exposure,
 and oversized file injection into LLM prompts.
 """
 
-import os
 import re
 from pathlib import Path
 

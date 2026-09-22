@@ -18,7 +18,6 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 

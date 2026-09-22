@@ -15,7 +15,6 @@ Tests cover:
 
 from unittest.mock import patch
 
-import pytest
 
 from assemblyzero.workflows.testing.exit_code_router import (
     EXIT_INTERNALERROR,

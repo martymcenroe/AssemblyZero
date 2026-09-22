@@ -10,9 +10,7 @@ These tests verify the credential cooldown behavior:
 
 import time
 import threading
-from unittest.mock import patch
 
-import pytest
 
 from assemblyzero.workflows.parallel import CredentialCoordinator
 

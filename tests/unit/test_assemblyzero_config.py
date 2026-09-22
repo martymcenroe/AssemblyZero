@@ -70,7 +70,6 @@ class TestAssemblyZeroConfig:
         }
         config_file.write_text(json.dumps(custom_config))
 
-        import importlib
         import assemblyzero_config
         # Patch the module-level constant directly
         original_path = assemblyzero_config.CONFIG_PATH

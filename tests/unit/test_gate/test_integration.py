@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tools.test_gate.models import SkippedTest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _GATE_SCRIPT = _PROJECT_ROOT / "tools" / "test-gate.py"

@@ -10,7 +10,6 @@ Tests verify SQLite database operations including:
 - Context manager support
 """
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest

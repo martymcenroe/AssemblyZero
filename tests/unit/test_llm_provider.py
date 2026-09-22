@@ -40,7 +40,6 @@ from assemblyzero.core.llm_provider import (
     reset_circuit_breakers,
     reset_cumulative_cost,
     set_api_policy,
-    _load_anthropic_api_key,
 )
 
 

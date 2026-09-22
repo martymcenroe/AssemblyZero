@@ -21,7 +21,6 @@ from assemblyzero.workflows.death.age_meter import (
     save_age_meter_state,
 )
 from assemblyzero.workflows.death.constants import (
-    AGE_METER_STATE_PATH,
     CRITICAL_DRIFT_THRESHOLD,
     DEFAULT_THRESHOLD,
     HISTORY_PATH,
@@ -31,7 +30,6 @@ from assemblyzero.workflows.death.drift_scorer import (
     check_critical_drift,
 )
 from assemblyzero.workflows.death.models import (
-    AgeMeterState,
     HourglassState,
     ReconciliationReport,
 )

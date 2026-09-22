@@ -3,7 +3,6 @@
 Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 """
 
-import pytest
 
 from assemblyzero.workflows.testing.nodes.adversarial_validator import (
     _check_assertions,

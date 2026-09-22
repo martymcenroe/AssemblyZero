@@ -17,7 +17,6 @@ This tests the behavior where:
 """
 
 import pytest
-import logging
 
 # TDD: This import fails until implementation exists (RED phase)
 # Once implemented, tests can run (GREEN phase)

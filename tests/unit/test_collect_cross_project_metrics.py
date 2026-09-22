@@ -6,10 +6,8 @@ Tests: T170, T180, T190, T200, T210, T220, T270, T280, T290, T300
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import pytest

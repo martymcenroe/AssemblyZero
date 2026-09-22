@@ -7,7 +7,6 @@ Requires:
 - Network access to Gemini API
 """
 
-import json
 import os
 
 import pytest

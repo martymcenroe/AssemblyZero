@@ -6,7 +6,6 @@ Issue #225: Hard gate wrapper for skipped test enforcement.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +15,7 @@ from tools.test_gate.auditor import (
     parse_audit_block,
     validate_audit,
 )
-from tools.test_gate.models import AuditBlock, AuditEntry, SkippedTest
+from tools.test_gate.models import AuditEntry, SkippedTest
 
 
 # --- Sample data ---

@@ -5,18 +5,12 @@ Tests automatic commit and push functionality in requirements workflow.
 """
 
 import pytest
-import subprocess
 from pathlib import Path
-from unittest.mock import Mock, patch, call
+from unittest.mock import Mock, patch
 from assemblyzero.workflows.requirements.git_operations import (
     format_commit_message,
     commit_and_push,
     GitOperationError,
-)
-from assemblyzero.workflows.requirements.state import create_initial_state
-from assemblyzero.workflows.requirements.nodes.finalize import (
-    finalize,
-    _commit_and_push_files,
 )
 
 

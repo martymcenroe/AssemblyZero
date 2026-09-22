@@ -18,7 +18,6 @@ import pytest
 from pathlib import Path
 
 from assemblyzero.utils.codebase_reader import (
-    FileReadResult,
     is_sensitive_file,
     parse_project_metadata,
     read_file_with_budget,

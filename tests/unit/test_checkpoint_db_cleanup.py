@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 
 def _make_args(resume: bool = False, issue: int = 999) -> SimpleNamespace:

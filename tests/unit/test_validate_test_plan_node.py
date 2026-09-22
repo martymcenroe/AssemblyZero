@@ -5,7 +5,6 @@ Issue #166: Test IDs match LLD Section 10.0 (T110-T130).
 
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.workflows.requirements.nodes.validate_test_plan import (
     validate_test_plan_node,
