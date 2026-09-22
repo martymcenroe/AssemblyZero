@@ -14,7 +14,8 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / ".github/dependabot.yml"
+ENABLED = ROOT / ".github/dependabot.yml"
+DISABLED = ROOT / ".github/dependabot.yml.disabled"
 
 EXPECTED = {
     ("npm", "/sentinel"): "weekly",
@@ -23,15 +24,39 @@ EXPECTED = {
 }
 
 
+def _config() -> Path:
+    """The config, wherever it currently lives.
+
+    Dependabot is switched off by renaming this file to `.disabled` (#3415), so
+    these checks follow it instead of pinning one filename. Pinning the enabled
+    name turned the whole file red the moment the switch was thrown — a test
+    reporting on a rename rather than on the config (#3443).
+
+    Skipping while disabled would be worse than following it: the config would
+    sit unchecked for the entire disabled window, which is exactly when nobody
+    is looking at it, and be re-enabled unexamined.
+    """
+    present = [p for p in (ENABLED, DISABLED) if p.is_file()]
+    assert present, (
+        "neither .github/dependabot.yml nor its .disabled twin exists — "
+        "the config was not renamed, it was lost"
+    )
+    assert len(present) == 1, (
+        f"both {ENABLED.name} and {DISABLED.name} exist — "
+        "ambiguous which one GitHub reads"
+    )
+    return present[0]
+
+
 def _loaded() -> dict:
-    return yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    return yaml.safe_load(_config().read_text(encoding="utf-8"))
 
 
 # --- "exists with exactly the three ecosystems, dirs and schedules" -----
 
 
 def test_config_exists_and_is_valid_yaml():
-    assert CONFIG.is_file()
+    assert _config().is_file()
     data = _loaded()
     assert isinstance(data, dict), "a parse error here is invisible until the tab is opened"
     assert data.get("version") == 2
@@ -75,8 +100,9 @@ def test_each_ecosystem_points_at_a_directory_that_has_its_manifest(
 def test_the_config_is_not_a_workflow_file():
     """It lives in .github/ but outside .github/workflows/, which is why it
     lands by ordinary push with no elevated token."""
-    assert CONFIG.parent.name == ".github"
-    assert "workflows" not in CONFIG.parts, (
+    config = _config()
+    assert config.parent.name == ".github"
+    assert "workflows" not in config.parts, (
         "a file under .github/workflows/ needs the classic-PAT landing path"
     )
 
