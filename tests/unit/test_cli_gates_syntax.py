@@ -10,11 +10,8 @@ These tests verify:
 4. Deprecation warning is printed when --auto or --gates is used
 """
 
-import argparse
 import io
-import sys
 from contextlib import redirect_stderr
-from unittest.mock import patch
 
 import pytest
 

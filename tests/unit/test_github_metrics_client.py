@@ -10,7 +10,7 @@ import os
 import time
 from datetime import datetime, timezone
 from unittest import mock
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from github import GithubException, UnknownObjectException

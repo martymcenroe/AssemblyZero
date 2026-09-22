@@ -6,9 +6,8 @@ Test IDs: T020-T100, T150-T220
 
 import os
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from assemblyzero.workflows.janitor.probes import run_probe_safe
 from assemblyzero.workflows.janitor.probes.harvest import (
@@ -19,7 +18,6 @@ from assemblyzero.workflows.janitor.probes.harvest import (
 from assemblyzero.workflows.janitor.probes.links import (
     extract_internal_links,
     find_likely_target,
-    find_markdown_files,
     probe_links,
     resolve_link,
 )

@@ -11,7 +11,6 @@ When gates are disabled or auto_mode is enabled, gates are skipped.
 When gates are enabled and not in auto_mode, prompts user for input.
 """
 
-from pathlib import Path
 from typing import Any
 
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState, HumanDecision

@@ -7,7 +7,7 @@ in GitHub issues on Windows.
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 

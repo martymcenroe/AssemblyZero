@@ -3,8 +3,6 @@
 Issue #188: Test IDs match LLD Section 10.0.
 """
 
-import pytest
-from pathlib import Path
 
 from assemblyzero.utils.lld_path_enforcer import (
     LLDPathSpec,

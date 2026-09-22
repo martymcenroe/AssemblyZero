@@ -4,10 +4,7 @@ Tests validate_context_path, is_secret_file, check_file_size,
 and load_context_files.
 """
 
-import os
 import pytest
-from pathlib import Path
-from unittest.mock import patch
 
 from assemblyzero.workflows.testing.path_validator import (
     check_file_size,

@@ -6,7 +6,6 @@ Issue #534: Spelunking Audits
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from assemblyzero.spelunking.models import (
     DriftReport,

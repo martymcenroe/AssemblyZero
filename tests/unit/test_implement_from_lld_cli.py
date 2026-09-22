@@ -10,8 +10,7 @@ TDD: These tests are written FIRST to expose unused arguments.
 
 import json
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 class TestArgumentParsing:
@@ -30,7 +29,6 @@ class TestArgumentParsing:
     def test_parse_issue_number(self):
         """Test parsing issue number."""
         import argparse
-        from tools.run_implement_from_lld import main
 
         # We can't easily test main() args parsing without running the full workflow
         # Instead verify the parser accepts the argument

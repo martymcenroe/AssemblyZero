@@ -18,7 +18,6 @@ the transport the pipeline uses.
 """
 
 import json
-import os
 import re
 import shutil
 import subprocess

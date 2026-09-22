@@ -24,10 +24,8 @@ Run with:
     poetry run pytest tests/e2e/test_lld_workflow_mock.py -v -m e2e
 """
 
-import os
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 

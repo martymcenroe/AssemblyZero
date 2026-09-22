@@ -9,7 +9,6 @@ where chiron.provenance lives at src/chiron/provenance.py.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 
 def test_resolves_flat_layout(tmp_path):

@@ -4,16 +4,12 @@ Issue #381: Defines the interface all test runners must implement.
 """
 
 from assemblyzero.utils.shell import run_command
-import json
 import logging
 import subprocess
 from abc import ABC, abstractmethod
-from typing import Any
 
 from assemblyzero.workflows.testing.framework_detector import (
-    CoverageType,
     FrameworkConfig,
-    TestFramework,
     TestRunResult,
 )
 

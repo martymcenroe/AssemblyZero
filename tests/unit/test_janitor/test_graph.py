@@ -4,7 +4,7 @@ Issue #94: Lu-Tze: The Janitor
 Test IDs: T190-T230, T310-T350
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from assemblyzero.workflows.janitor.graph import (
     build_janitor_graph,

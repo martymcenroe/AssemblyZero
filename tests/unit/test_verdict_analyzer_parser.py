@@ -12,12 +12,9 @@ Tests verify parsing of verdict markdown files including:
 
 from pathlib import Path
 
-import pytest
 
 from tools.verdict_analyzer.parser import (
     PARSER_VERSION,
-    BlockingIssue,
-    VerdictRecord,
     _infer_category,
     compute_content_hash,
     parse_verdict,

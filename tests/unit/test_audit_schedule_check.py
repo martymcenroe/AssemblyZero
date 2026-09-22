@@ -2,9 +2,7 @@
 
 import textwrap
 from datetime import datetime
-from pathlib import Path
 
-import pytest
 
 from tools.audit_schedule_check import (
     check_audit_schedule,

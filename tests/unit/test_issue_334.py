@@ -6,9 +6,6 @@ Real TDD tests - not stubs. These test:
 3. Validation error saving to lineage
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 
 # =============================================================================

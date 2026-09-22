@@ -3,19 +3,12 @@
 Reference: Issue #172, LLD docs/LLDs/active/172-smoke-test-node.md
 """
 
-import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from assemblyzero.nodes.smoke_test_node import (
-    SmokeTestResult,
     SmokeTestState,
-    discover_entry_points,
     integration_smoke_test,
-    parse_import_error,
-    run_smoke_test,
     should_run_smoke_test,
 )
 

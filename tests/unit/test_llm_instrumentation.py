@@ -22,7 +22,6 @@ from assemblyzero.telemetry.llm_call_record import (
 )
 from assemblyzero.telemetry.instrumentation import InstrumentedCall
 from assemblyzero.telemetry.store import CallStore
-from assemblyzero.telemetry.cost import estimate_cost
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────

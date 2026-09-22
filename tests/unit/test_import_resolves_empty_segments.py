@@ -8,7 +8,6 @@ error after the LLD reached APPROVED.
 
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
     _import_resolves,

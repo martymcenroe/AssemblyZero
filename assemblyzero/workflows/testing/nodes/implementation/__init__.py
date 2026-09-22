@@ -50,7 +50,6 @@ from .claude_client import (
 
 # --- orchestrator.py ---
 from .orchestrator import (
-    BATCH_SIZE,
     CODE_GEN_PROMPT_CAP,
     generate_file_with_retry,
     implement_code,

@@ -6,12 +6,10 @@ when both verdicts are JSON, falling back to line-overlap heuristic.
 
 import json
 
-import pytest
 
 from assemblyzero.core.verdict_schema import (
     same_blocking_issues,
     _structured_stagnation,
-    _line_overlap_stagnation,
 )
 
 

@@ -5,15 +5,12 @@ Issue #381: Tests that framework detection is wired into the workflow nodes
 """
 
 import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
     TestFramework,
-    TestRunResult,
 )
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     validate_tests_mechanical_node,

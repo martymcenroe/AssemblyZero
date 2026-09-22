@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 
 def patch_shell_middleware():

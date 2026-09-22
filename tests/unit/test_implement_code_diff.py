@@ -7,9 +7,7 @@ TDD: These tests are written BEFORE implementation and should initially fail (RE
 """
 
 import pytest
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # =============================================================================
@@ -529,7 +527,6 @@ class TestDiffIntegration:
         """End-to-end: parse diff response and apply to large file."""
         from assemblyzero.workflows.testing.nodes.implement_code import (
             parse_diff_response,
-            apply_diff_changes,
             is_large_file,
             select_generation_strategy,
         )

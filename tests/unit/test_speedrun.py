@@ -6,7 +6,6 @@ import json
 import time
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.utils.speedrun import (
     HALT_CLASSIFICATIONS,

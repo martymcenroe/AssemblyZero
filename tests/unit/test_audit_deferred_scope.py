@@ -8,7 +8,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 # Make tools/ importable without poetry's package install
 ROOT = Path(__file__).resolve().parent.parent

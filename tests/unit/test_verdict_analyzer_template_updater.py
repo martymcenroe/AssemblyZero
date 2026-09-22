@@ -10,7 +10,6 @@ Tests verify template modification functionality including:
 - Statistics formatting
 """
 
-from pathlib import Path
 
 import pytest
 

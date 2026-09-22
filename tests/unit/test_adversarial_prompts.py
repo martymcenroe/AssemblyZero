@@ -3,7 +3,6 @@
 Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 """
 
-import pytest
 
 from assemblyzero.workflows.testing.adversarial_prompts import (
     build_adversarial_analysis_prompt,

@@ -5,7 +5,6 @@ Issue #774: Tests for cost lookup, edge cases, model normalization.
 
 import logging
 
-import pytest
 
 from assemblyzero.telemetry.cost import (
     MODEL_ALIASES,

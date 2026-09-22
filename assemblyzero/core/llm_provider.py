@@ -43,12 +43,7 @@ from typing import Optional
 
 from assemblyzero.core import provider_storm, retry_gate
 from assemblyzero.core.errors import (
-    APIError,
-    AuthenticationError,
-    BillingError,
     RateLimitError,
-    ServerError,
-    TimeoutError_,
     classify_anthropic_error,
 )
 from assemblyzero.core.text_sanitizer import strip_emoji

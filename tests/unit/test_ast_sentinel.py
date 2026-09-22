@@ -2,18 +2,11 @@
 
 from __future__ import annotations
 
-import sys
 import textwrap
-from io import StringIO
-from unittest.mock import patch
-from pathlib import Path
 
-import pytest
 
 from assemblyzero.utils.ast_sentinel import (
-    SentinelError,
     SentinelResult,
-    SymbolSentinel,
     analyze_file,
     analyze_source,
     main,

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.spelunking.extractors import (
     extract_claims_from_markdown,

@@ -12,11 +12,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.verdict_analyzer import (
-    PARSER_VERSION,
     VerdictDatabase,
     parse_verdict,
     find_registry,
-    scan_repos,
     parse_template_sections,
     generate_recommendations,
     atomic_write_template,

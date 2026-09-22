@@ -32,14 +32,13 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     save_audit_file,
 )
-from assemblyzero.workflows.testing.knowledge.patterns import get_test_type_info
 from assemblyzero.workflows.testing.state import TestingWorkflowState, TestScenario
 
 from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
     FrameworkConfig,
 )
-from assemblyzero.workflows.testing.runner_registry import get_framework_config, get_runner
+from assemblyzero.workflows.testing.runner_registry import get_runner
 
 
 # =============================================================================

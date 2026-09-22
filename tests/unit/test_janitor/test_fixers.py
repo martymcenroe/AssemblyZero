@@ -1,4 +1,3 @@
-from assemblyzero.utils.shell import run_command
 """Tests for janitor fixers.
 
 Issue #94: Lu-Tze: The Janitor

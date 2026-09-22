@@ -5,7 +5,6 @@ Issue #272: These maintain old API while new code uses file-by-file approach.
 
 import re
 from pathlib import Path
-from typing import Any
 
 from assemblyzero.workflows.testing.audit import get_repo_root
 from assemblyzero.workflows.testing.state import TestingWorkflowState

@@ -7,11 +7,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tools.test_gate.models import SkippedTest
 from tools.test_gate.parser import (
-    CRITICAL_KEYWORDS,
     detect_critical_tests,
     ensure_verbose_flag,
     parse_skipped_tests,

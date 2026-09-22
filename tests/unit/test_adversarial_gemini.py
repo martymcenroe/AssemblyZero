@@ -3,7 +3,7 @@
 Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 """
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel, ValidationError as PydanticValidationError

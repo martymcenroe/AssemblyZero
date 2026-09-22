@@ -3,7 +3,6 @@
 Verifies extract_sections, identify_changed_sections, and build_targeted_prompt.
 """
 
-import pytest
 
 from assemblyzero.core.section_utils import (
     Section,

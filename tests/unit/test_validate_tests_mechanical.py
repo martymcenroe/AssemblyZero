@@ -4,7 +4,6 @@ Real TDD tests - NOT stubs. Tests the validation node that catches
 stub tests and other structural issues before the green phase.
 """
 
-import pytest
 
 
 # =============================================================================
@@ -212,7 +211,6 @@ def test_example():
         """Accepts different valid assertion styles."""
         from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             detect_stub_patterns,
-            validate_test_structure,
         )
 
         valid_tests = [

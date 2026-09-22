@@ -6,13 +6,12 @@ Tests will fail with ImportError until implementation exists (TDD RED phase).
 
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from assemblyzero.nodes.check_type_renames import (
     OrphanedUsage,
-    TypeRenameCheckResult,
     TypeRenameIssue,
     check_type_renames,
     extract_removed_types,

@@ -11,9 +11,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 
 # ── Validation utility ──
@@ -217,7 +215,6 @@ class TestFullPipeline:
     def test_end_to_end_block(self, tmp_path: Path) -> None:
         """Full pipeline: cascade input → detection → block → log event."""
         from assemblyzero.hooks.cascade_detector import detect_cascade_risk
-        from assemblyzero.hooks.cascade_action import handle_cascade_detection
         from assemblyzero.hooks.types import CascadeRiskLevel
         from assemblyzero.telemetry.cascade_events import get_cascade_stats, log_cascade_event, create_cascade_event
 

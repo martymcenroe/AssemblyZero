@@ -7,7 +7,6 @@ Issue: #25
 
 import json
 import os
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -236,7 +235,6 @@ class TestMigration:
 
     def test_migrate_to_keychain_raises_when_unavailable(self):
         """Migration should fail gracefully when keychain unavailable."""
-        import keyring.errors
 
         manager = CredentialManager()
 

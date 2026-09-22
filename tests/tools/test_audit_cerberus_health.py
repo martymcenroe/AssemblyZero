@@ -17,7 +17,6 @@ sys.path.insert(0, str(_TOOLS))
 
 from audit_cerberus_health import (  # noqa: E402
     HEALTHY,
-    NOT_DEPLOYED,
     UNCERTAIN,
     UNKNOWN,
     classify,

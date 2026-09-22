@@ -17,7 +17,6 @@ from assemblyzero.spelunking.models import (
     ProbeResult,
     SpelunkingCheckpoint,
     VerificationResult,
-    VerificationStatus,
 )
 from assemblyzero.spelunking.verifiers import verify_claim
 

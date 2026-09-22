@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from assemblyzero.utils.lld_section_extractor import (
-    ExtractedSection,
     _score_section_for_file,
     _split_lld_into_sections,
     extract_file_spec_section,

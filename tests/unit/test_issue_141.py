@@ -5,9 +5,8 @@ Tests for archival of LLD and report files from active/ to done/.
 """
 
 import logging
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

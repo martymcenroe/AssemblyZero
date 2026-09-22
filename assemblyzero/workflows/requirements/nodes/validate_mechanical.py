@@ -39,7 +39,6 @@ from pathlib import Path
 from typing import Any, Dict
 
 from assemblyzero.utils.ast_sentinel import analyze_file as ast_analyze_file
-from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 
 logger = logging.getLogger(__name__)
 

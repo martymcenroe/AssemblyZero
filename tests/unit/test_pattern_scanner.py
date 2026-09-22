@@ -13,7 +13,6 @@ Tests for:
 import pytest
 
 from assemblyzero.utils.pattern_scanner import (
-    PatternAnalysis,
     scan_patterns,
     detect_frameworks,
     extract_conventions_from_claude_md,

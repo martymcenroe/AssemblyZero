@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 REPO = "martymcenroe/AssemblyZero"
 TODAY = datetime.now().strftime("%Y-%m-%d")

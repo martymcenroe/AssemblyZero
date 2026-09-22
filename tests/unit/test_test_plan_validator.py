@@ -3,13 +3,8 @@
 Issue #166: Test IDs match LLD Section 10.0.
 """
 
-import pytest
 
 from assemblyzero.core.validation.test_plan_validator import (
-    COVERAGE_THRESHOLD,
-    Requirement,
-    LLDTestScenario,
-    ValidationResult,
     check_human_delegation,
     check_requirement_coverage,
     check_type_consistency,

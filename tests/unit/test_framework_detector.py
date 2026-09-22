@@ -7,10 +7,8 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.workflows.testing.framework_detector import (
-    CoverageType,
     TestFramework,
     detect_framework_from_lld,
     detect_framework_from_project,

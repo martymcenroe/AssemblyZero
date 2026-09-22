@@ -11,10 +11,7 @@ import pytest
 
 from assemblyzero.utils.lld_verification import (
     LLDVerificationError,
-    LLDVerificationResult,
-    detect_false_approval,
     extract_review_log_verdicts,
-    has_gemini_approved_footer,
     run_verification_gate,
     validate_lld_path,
     verify_lld_approval,
@@ -581,7 +578,6 @@ def test_180(temp_project_dir, monkeypatch):
     run_verification_gate with read error | Auto | File read raises OSError |
     Raises LLDVerificationError with read_error error_type
     """
-    import builtins
 
     # TDD: Arrange
     project_root = temp_project_dir

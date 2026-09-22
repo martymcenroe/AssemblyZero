@@ -5,9 +5,7 @@ Issue #535: T220, T280–T350.
 
 from __future__ import annotations
 
-import os
-import tempfile
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

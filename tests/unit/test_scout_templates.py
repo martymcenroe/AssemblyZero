@@ -7,9 +7,7 @@ Target coverage: >95%
 """
 
 from datetime import datetime
-from unittest.mock import patch
 
-import pytest
 
 from assemblyzero.workflows.scout.prompts import (
     build_gap_analysis_prompt,

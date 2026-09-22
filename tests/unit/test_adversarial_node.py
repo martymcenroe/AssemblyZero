@@ -4,8 +4,6 @@ Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 """
 
 import json
-import os
-import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest

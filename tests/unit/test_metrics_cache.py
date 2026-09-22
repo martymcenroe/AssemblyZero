@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.metrics.cache import (
     get_cache_path,

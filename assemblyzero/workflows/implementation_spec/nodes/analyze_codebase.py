@@ -408,8 +408,6 @@ def extract_relevant_excerpt(
 # aliases preserve this module's historical import surface — internal
 # callers and existing tests are untouched.
 from assemblyzero.core.interface_surface import (  # noqa: E402
-    summarize_class as _summarize_class,
-    summarize_function as _summarize_function,
     summarize_python_file as _summarize_python_file,
 )
 

@@ -5,7 +5,6 @@ Issue #189: Add pre-worktree-removal cleanup protocol to save audit artifacts.
 TDD: Tests written first to define expected behavior.
 """
 
-import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import sys

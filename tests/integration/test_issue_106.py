@@ -8,7 +8,7 @@ import os
 import signal
 import time
 import threading
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import pytest
 
 from assemblyzero.workflows.parallel import (
@@ -17,7 +17,6 @@ from assemblyzero.workflows.parallel import (
     OutputPrefixer,
     sanitize_identifier,
 )
-from assemblyzero.workflows.parallel.coordinator import WorkflowResult, ProgressStats
 
 # Timing/threading + SIGINT perf assertions — gated to the integration run (#1580).
 pytestmark = pytest.mark.integration

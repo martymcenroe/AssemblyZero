@@ -3,14 +3,12 @@
 Issue #381: Tests T270, T280 from LLD Section 10.0.
 """
 
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
 from assemblyzero.workflows.testing.framework_detector import (
-    CoverageType,
     TestFramework,
 )
 from assemblyzero.workflows.testing.runner_registry import get_framework_config

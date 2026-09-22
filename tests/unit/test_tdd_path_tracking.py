@@ -3,7 +3,6 @@
 Tests for Issue #311: TDD workflow path tracking functions.
 """
 
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch

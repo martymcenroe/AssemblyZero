@@ -6,7 +6,6 @@ Issue #775: Verify that ClaudeCLIProvider.invoke() correctly appends
 
 import json
 from unittest.mock import MagicMock, patch
-import pytest
 
 from assemblyzero.core.verdict_schema import FEEDBACK_SCHEMA, VERDICT_SCHEMA
 

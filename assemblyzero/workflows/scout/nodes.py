@@ -5,14 +5,13 @@ Implements Explorer, Extractor, Analyst, and Scribe nodes.
 
 from assemblyzero.utils.shell import run_command
 import json
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from github import Github, GithubException
 
-from assemblyzero.workflows.scout.budget import adaptive_truncate, check_and_update_budget
+from assemblyzero.workflows.scout.budget import check_and_update_budget
 from assemblyzero.workflows.scout.graph import ExternalRepo, ScoutState
 from assemblyzero.workflows.scout.security import sanitize_external_content
 

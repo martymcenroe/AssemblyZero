@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.spelunking.models import VerificationStatus
 from assemblyzero.spelunking.verifiers import (

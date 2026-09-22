@@ -4,7 +4,6 @@ Usage:
     poetry run python -m assemblyzero.telemetry.sync
 """
 
-import sys
 
 from assemblyzero.telemetry.emitter import flush
 

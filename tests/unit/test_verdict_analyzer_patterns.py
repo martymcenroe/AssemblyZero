@@ -8,7 +8,6 @@ Tests verify pattern extraction and normalization including:
 - Pattern extraction from issues
 """
 
-import pytest
 
 from tools.verdict_analyzer.parser import BlockingIssue
 from tools.verdict_analyzer.patterns import (

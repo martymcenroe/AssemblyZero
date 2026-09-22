@@ -4,7 +4,6 @@ Tests the WorkflowTimeout context manager and add_timeout_argument helper.
 """
 
 import argparse
-import time
 
 from assemblyzero.utils.workflow_timeout import (
     WorkflowTimeout,
