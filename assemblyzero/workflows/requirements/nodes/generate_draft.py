@@ -177,7 +177,9 @@ def _generate_best_of_n(
     file_num = state.get("file_counter", 0)
     last_result = None
     for index in range(1, candidates + 1):
-        result = drafter.invoke(system_prompt=system_prompt, content=prompt)
+        result = drafter.invoke(
+            system_prompt=system_prompt, content=prompt, timeout_seconds=1800
+        )
         last_result = result
         if not result.success:
             # A failed candidate is scored unusable, not fatal: the point of
@@ -551,10 +553,14 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
             revision_context=edit_context,
         )
         result = drafter.invoke(
-            system_prompt=EDIT_SCRIPT_SYSTEM_PROMPT, content=edit_prompt
+            system_prompt=EDIT_SCRIPT_SYSTEM_PROMPT,
+            content=edit_prompt,
+            timeout_seconds=1800,
         )
     else:
-        result = drafter.invoke(system_prompt=system_prompt, content=prompt)
+        result = drafter.invoke(
+            system_prompt=system_prompt, content=prompt, timeout_seconds=1800
+        )
     node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
