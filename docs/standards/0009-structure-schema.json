@@ -229,6 +229,10 @@
     ".unleashed.json": {
       "required": true,
       "description": "Unleashed wrapper configuration (model, effort, onboard settings)"
+    },
+    "data-dl/README.md": {
+      "required": true,
+      "description": "Explanation of data-dl usage"
     }
   }
 }
