@@ -493,7 +493,7 @@ class TestExtractConventionsFromClaudeMd:
         """Extracted conventions should not contain empty strings."""
         result = extract_conventions_from_claude_md(claude_md_with_conventions)
         for conv in result:
-            assert conv.strip() != "", f"Found empty convention string"
+            assert conv.strip() != "", "Found empty convention string"
 
 
 # ---------------------------------------------------------------------------

@@ -324,7 +324,7 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     if is_revision:
         print(f"\n[N1] Generating revision (draft #{draft_count})...")
     else:
-        print(f"\n[N1] Generating initial draft...")
+        print("\n[N1] Generating initial draft...")
 
     # Use mock provider in mock mode, otherwise use configured drafter
     if mock_mode:

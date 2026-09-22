@@ -673,11 +673,11 @@ def render_report(
 
     lines: list[str] = []
     lines.append(f"# {audit_id} - {title}\n")
-    lines.append(f"**Auditor:** Claude Opus 4.7 (1M context) via `tools/audit_deferred_scope.py`")
+    lines.append("**Auditor:** Claude Opus 4.7 (1M context) via `tools/audit_deferred_scope.py`")
     lines.append(f"**Date:** {TODAY}")
     lines.append(f"**Corpus:** all closed AssemblyZero issues (snapshot {CORPUS_CACHE.name})")
-    lines.append(f"**Method:** regex first-pass + LLM (`claude --print`) classification per candidate")
-    lines.append(f"**Issue:** [#930](https://github.com/martymcenroe/AssemblyZero/issues/930)\n")
+    lines.append("**Method:** regex first-pass + LLM (`claude --print`) classification per candidate")
+    lines.append("**Issue:** [#930](https://github.com/martymcenroe/AssemblyZero/issues/930)\n")
     lines.append("## Summary\n")
     lines.append("| Category | Meaning | Count |")
     lines.append("|---|---|---|")

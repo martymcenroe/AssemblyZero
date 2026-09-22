@@ -1227,7 +1227,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
 
     # Save extracted test plan
     file_num = next_file_number(audit_dir)
-    test_plan_content = f"# Extracted Test Plan\n\n## Scenarios\n\n"
+    test_plan_content = "# Extracted Test Plan\n\n## Scenarios\n\n"
     for scenario in test_scenarios:
         test_plan_content += f"### {scenario['name']}\n"
         test_plan_content += f"- Type: {scenario['test_type']}\n"

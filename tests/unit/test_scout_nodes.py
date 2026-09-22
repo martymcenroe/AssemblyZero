@@ -442,7 +442,7 @@ class TestExplorerNode:
     def test_respects_repo_limit(self, tmp_path):
         """Test that repo_limit is respected."""
         fixture_data = [
-            {"full_name": f"owner/repo{i}", "html_url": f"#", "stargazers_count": 100 - i, "description": ""}
+            {"full_name": f"owner/repo{i}", "html_url": "#", "stargazers_count": 100 - i, "description": ""}
             for i in range(10)
         ]
 

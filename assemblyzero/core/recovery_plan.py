@@ -141,7 +141,7 @@ class RecoveryPlan:
         """Print a human-readable summary to stdout."""
         border = "=" * 60
         print(f"\n{border}")
-        print(f"  HALT — Workflow stopped")
+        print("  HALT — Workflow stopped")
         print(f"{border}")
         print(f"  Issue:     #{self.issue_number}")
         print(f"  Workflow:  {self.workflow}")

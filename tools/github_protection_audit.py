@@ -913,7 +913,7 @@ def run_hook_verification(projects_root: Path) -> list[HookCheck]:
                     results.append(HookCheck(
                         check_id=check_id,
                         setting=f"[{project_name}] {desc}",
-                        expected=f"Pattern in secret-guard.sh",
+                        expected="Pattern in secret-guard.sh",
                         actual="Present" if found else "MISSING",
                         status="PASS" if found else "FAIL",
                     ))
@@ -938,7 +938,7 @@ def run_hook_verification(projects_root: Path) -> list[HookCheck]:
                     results.append(HookCheck(
                         check_id=check_id,
                         setting=f"[{project_name}] {desc}",
-                        expected=f"Pattern in bash-gate.sh",
+                        expected="Pattern in bash-gate.sh",
                         actual="Present" if found else "MISSING",
                         status="PASS" if found else "FAIL",
                     ))
@@ -986,7 +986,7 @@ def run_hook_verification(projects_root: Path) -> list[HookCheck]:
                 results.append(HookCheck(
                     check_id=check_id,
                     setting=f"[GLOBAL] {desc}",
-                    expected=f"Pattern in global deny list",
+                    expected="Pattern in global deny list",
                     actual="Present" if found else "MISSING",
                     status="PASS" if found else "FAIL",
                 ))
@@ -1179,7 +1179,7 @@ def format_report(
     lines.append("")
     lines.append(f"- **Timestamp:** {now.isoformat()}")
     lines.append(f"- **Token type at time of scan:** {token_type}")
-    lines.append(f"- **Script:** `AssemblyZero/tools/github_protection_audit.py`")
+    lines.append("- **Script:** `AssemblyZero/tools/github_protection_audit.py`")
     lines.append(f"- **Repos scanned:** {len(repos)}")
 
     if probe_results:

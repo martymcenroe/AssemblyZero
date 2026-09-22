@@ -177,7 +177,7 @@ class AssemblyZeroConfig:
         # Final safety check: if '..' still present anywhere, path is suspicious
         if '..' in sanitized:
             logger.warning(
-                f"Path still contains '..' after sanitization, using empty string"
+                "Path still contains '..' after sanitization, using empty string"
             )
             sanitized = ""
 

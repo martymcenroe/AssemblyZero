@@ -97,16 +97,16 @@ for repo in repos:
     status_str = "✅ **FULLY LANDED**" if is_fully_landed else "❌ **ACTION REQUIRED**"
     print(status_str)
     
-    print(f"- [x] Directory Clean" if clean else f"- [ ] Directory Clean (`{len(status_out.splitlines())}` files modified/untracked)")
-    print(f"- [x] No Dangling Worktrees" if not dangling_wts else f"- [ ] No Dangling Worktrees (`{len(wt_lines)}` total worktrees found)")
-    print(f"- [x] No Local Stashes" if not has_stashes else f"- [ ] No Local Stashes (`{len(stashes)}` stashes found)")
+    print("- [x] Directory Clean" if clean else f"- [ ] Directory Clean (`{len(status_out.splitlines())}` files modified/untracked)")
+    print("- [x] No Dangling Worktrees" if not dangling_wts else f"- [ ] No Dangling Worktrees (`{len(wt_lines)}` total worktrees found)")
+    print("- [x] No Local Stashes" if not has_stashes else f"- [ ] No Local Stashes (`{len(stashes)}` stashes found)")
     
     if open_prs == -1:
         print("- [ ] No Open Pull Requests (Error querying `gh`)")
     else:
-        print(f"- [x] No Open Pull Requests" if open_prs == 0 else f"- [ ] No Open Pull Requests (`{open_prs}` open PRs)")
+        print("- [x] No Open Pull Requests" if open_prs == 0 else f"- [ ] No Open Pull Requests (`{open_prs}` open PRs)")
         
-    print(f"- [x] Main Branch Synced" if synced else "- [ ] Main Branch Synced (Ahead/Behind origin/main)")
+    print("- [x] Main Branch Synced" if synced else "- [ ] Main Branch Synced (Ahead/Behind origin/main)")
     print()
 
 print("## Worktree Directory Audit")

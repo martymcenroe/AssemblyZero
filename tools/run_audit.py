@@ -141,8 +141,8 @@ def check_0832_cost_optimization(repo_root: Path) -> AuditResult:
                 severity="MEDIUM",
                 audit_id="0832",
                 message=f"Oversized command: {name} ({size:,} bytes, {lines} lines)",
-                details=f"Commands >4KB (~1,000 tokens) cost more per invocation. "
-                        f"Consider extracting mechanical logic to a Python script.",
+                details="Commands >4KB (~1,000 tokens) cost more per invocation. "
+                        "Consider extracting mechanical logic to a Python script.",
             ))
     else:
         result.findings.append(AuditFinding(
@@ -656,7 +656,7 @@ def format_markdown_report(
     lines = [
         f"# CLI Audit Results - {date_str}",
         "",
-        f"**Runner:** tools/run_audit.py",
+        "**Runner:** tools/run_audit.py",
         f"**Project:** {repo_root.name}",
         f"**Timestamp:** {now.isoformat()}",
         "",

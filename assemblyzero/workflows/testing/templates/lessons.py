@@ -63,7 +63,7 @@ def generate_lessons_learned(
         f"# Lessons Learned: Issue #{issue_number}",
         "",
         f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"**Workflow:** TDD Testing Workflow",
+        "**Workflow:** TDD Testing Workflow",
         "",
         "---",
         "",

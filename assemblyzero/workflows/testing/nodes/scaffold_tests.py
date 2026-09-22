@@ -276,12 +276,12 @@ def generate_test_code(scenarios: ParsedLLDTests) -> str:
         req_id = scenario.get("requirement_id", "")
 
         lines.append(f"def {test_name}():")
-        lines.append(f'    """')
+        lines.append('    """')
         lines.append(f"    {description}")
         if req_id:
-            lines.append(f"")
+            lines.append("")
             lines.append(f"    Requirement: {req_id}")
-        lines.append(f'    """')
+        lines.append('    """')
 
         # Try to generate real assertion from expected behavior
         assertion = _generate_assertion_from_expected(expected)
@@ -545,7 +545,7 @@ def generate_test_file_content(
     if impl_module:
         lines.extend([
             "# TDD: This import fails until implementation exists (RED phase)",
-            f"# Once implemented, tests can run (GREEN phase)",
+            "# Once implemented, tests can run (GREEN phase)",
             f"from {impl_module} import *  # noqa: F401, F403",
             "",
         ])
@@ -904,7 +904,7 @@ def _generate_test_function(
         lines.append(f"def {name}():")
 
     # Docstring
-    docstring_lines = [f'    """']
+    docstring_lines = ['    """']
     if description:
         # Wrap description at 70 chars
         wrapped = _wrap_text(description, 70)
@@ -914,16 +914,16 @@ def _generate_test_function(
         docstring_lines.append(f"    Test: {name}")
 
     if requirement_ref:
-        docstring_lines.append(f"")
+        docstring_lines.append("")
         docstring_lines.append(f"    Requirement: {requirement_ref}")
 
     if assertions:
-        docstring_lines.append(f"")
-        docstring_lines.append(f"    Assertions:")
+        docstring_lines.append("")
+        docstring_lines.append("    Assertions:")
         for assertion in assertions[:3]:  # Limit to 3
             docstring_lines.append(f"    - {assertion}")
 
-    docstring_lines.append(f'    """')
+    docstring_lines.append('    """')
     lines.extend(docstring_lines)
 
     # Test body - TDD style

@@ -145,7 +145,7 @@ def _build_complete_spec():
         lines.append("```\n")
         lines.append(f"import module_{i}\n")
         lines.append(f"class Widget{i}:\n")
-        lines.append(f"    pass\n")
+        lines.append("    pass\n")
 
     return "\n".join(lines)
 
@@ -2898,7 +2898,7 @@ class TestStateSchemaCompleteness:
                     missing.append(f"{py_file.name}: state.get('{field}')")
 
         assert not missing, (
-            f"Fields used by nodes but missing from ImplementationSpecState:\n"
+            "Fields used by nodes but missing from ImplementationSpecState:\n"
             + "\n".join(f"  - {m}" for m in missing)
         )
 

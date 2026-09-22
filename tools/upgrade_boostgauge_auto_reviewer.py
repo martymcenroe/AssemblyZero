@@ -335,13 +335,13 @@ def main() -> int:
                 print(f"  Disabling classic enforce_admins on {BRANCH}...")
                 disable_enforce_admins(pat)
                 classic_disabled = True
-                print(f"    disabled.")
+                print("    disabled.")
             for rs in rulesets:
                 rs_id = rs["id"]
                 print(f"  Adding admin bypass to ruleset {rs_id} ({rs.get('name')})...")
                 original = add_admin_bypass(rs_id, pat)
                 restorations.append((rs_id, original))
-                print(f"    added.")
+                print("    added.")
             print("  PUT file via Contents API...")
             put_file(blob_sha, pat)
             print("    PUT succeeded.")
@@ -351,20 +351,20 @@ def main() -> int:
                 try:
                     print(f"  Restoring bypass_actors on ruleset {rs_id}...")
                     restore_bypass(rs_id, original, pat)
-                    print(f"    restored.")
+                    print("    restored.")
                 except Exception as e:
                     print(f"    WARNING: restore failed: {e}")
-                    print(f"    Manually restore via:")
+                    print("    Manually restore via:")
                     print(f"      GH API GET /repos/{GITHUB_USER}/{REPO}/rulesets/{rs_id}")
                     print(f"      then PUT with bypass_actors={original!r}")
             if classic_disabled:
                 try:
                     print(f"  Restoring classic enforce_admins on {BRANCH}...")
                     enable_enforce_admins(pat)
-                    print(f"    restored.")
+                    print("    restored.")
                 except Exception as e:
                     print(f"    WARNING: enforce_admins restore failed: {e}")
-                    print(f"    Manually restore via:")
+                    print("    Manually restore via:")
                     print(f"      POST /repos/{GITHUB_USER}/{REPO}/branches/{BRANCH}/protection/enforce_admins")
 
     print()

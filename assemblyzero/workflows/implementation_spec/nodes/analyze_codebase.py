@@ -856,7 +856,7 @@ def _build_project_context(repo_root: Path) -> str:
                     break
             if meta_lines:
                 parts.append(
-                    f"### Project Metadata\n\n```toml\n"
+                    "### Project Metadata\n\n```toml\n"
                     + "\n".join(meta_lines)
                     + "\n```"
                 )

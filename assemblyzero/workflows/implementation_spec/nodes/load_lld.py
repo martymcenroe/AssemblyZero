@@ -243,7 +243,7 @@ def load_lld(state: ImplementationSpecState) -> dict[str, Any]:
     # --------------------------------------------------------------------------
     if not lld_path_obj or not lld_path_obj.exists():
         expected = repo_root / LLD_ACTIVE_DIR / f"LLD-{issue_number:03d}.md"
-        print(f"    [GUARD] BLOCKED: LLD file not found")
+        print("    [GUARD] BLOCKED: LLD file not found")
         return {
             "error_message": (
                 f"LLD not found for issue #{issue_number}. "

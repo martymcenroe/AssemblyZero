@@ -357,7 +357,7 @@ def invoke_gemini(prompt: str, model: str, no_tools: bool = False) -> GeminiResu
                 # If exit=0 and we have stdout, treat it as success with plain text response
                 if result.returncode == 0 and result.stdout.strip():
                     if os.environ.get("GEMINI_RETRY_DEBUG"):
-                        print(f"[DEBUG] No JSON, but exit=0 - treating as plain text success", file=sys.stderr)
+                        print("[DEBUG] No JSON, but exit=0 - treating as plain text success", file=sys.stderr)
                     return GeminiResult(
                         success=True,
                         response=result.stdout.strip(),
@@ -366,7 +366,7 @@ def invoke_gemini(prompt: str, model: str, no_tools: bool = False) -> GeminiResu
                         exit_code=result.returncode
                     )
                 if os.environ.get("GEMINI_RETRY_DEBUG"):
-                    print(f"[DEBUG] No JSON found in output", file=sys.stderr)
+                    print("[DEBUG] No JSON found in output", file=sys.stderr)
                 return GeminiResult(
                     success=False,
                     response="",
@@ -602,7 +602,7 @@ def retry_gemini(prompt: str, model: str, logger: RetryLogger, no_tools: bool = 
                     error_type=classification.error_type
                 )
                 print(
-                    f"[GEMINI-RETRY] Quota exhausted - attempting credential rotation...",
+                    "[GEMINI-RETRY] Quota exhausted - attempting credential rotation...",
                     file=sys.stderr
                 )
 
