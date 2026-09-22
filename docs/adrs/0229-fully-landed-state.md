@@ -22,3 +22,4 @@ If all five conditions are met, the repo is **Fully Landed**.
 
 - When an operator or agent performs a fleet-wide inspection and asks "Is this repo fully landed?", the agent must explicitly evaluate all five criteria (status, worktrees, stashes, PRs, and sync) rather than just looking at the local directory.
 - This term gives us a binary, non-ambiguous diagnostic target for repository hygiene.
+- Reaching this state from a checkout that carries another session's uncommitted work, with `main` behind origin and the fast-forward blocked, is ADR 0230. It lands the work by copy and PR, clears the primary with a named-path stash, and leaves the one destructive command (the stash drop) to the operator.
