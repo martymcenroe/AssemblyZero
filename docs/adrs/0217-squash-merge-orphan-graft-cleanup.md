@@ -52,16 +52,39 @@ BASE_SHA=$(git rev-parse <SQUASH_SHA>^)
 #    (creates a new replace ref; no force needed because no existing replace ref to overwrite)
 git replace --graft <SQUASH_SHA> $BASE_SHA <ORPHAN_TIP_SHA>
 
+# 2b. (Parked checkout) `git branch -d` proves "merged" against the branch's
+#     UPSTREAM when it has one and against HEAD when it does not. The platform
+#     deleted the remote branch on merge and the prune dropped the upstream, so
+#     the check falls back to HEAD -- and HEAD is not the default branch when
+#     the checkout is parked on another lane's branch, which the branch guard
+#     (#1852) says to leave exactly where it is. The orphan is reachable from
+#     the default branch through the graft and from nothing HEAD can see, so
+#     step 3 refuses and git's hint points straight at -D. Point the upstream
+#     at the ref the graft made the orphan reachable from. The proof is still
+#     the graft from step 2; the upstream only tells -d where to look for it.
+if [ "$(git branch --show-current)" != "<DEFAULT_BRANCH>" ]; then
+  git branch --set-upstream-to=origin/<DEFAULT_BRANCH> <ORPHAN_BRANCH_NAME>
+fi
+
 # 3. Standard non-force delete; succeeds because the orphan tip is now reachable from main
-#    via the grafted parent edge
+#    via the grafted parent edge. From a parked checkout (step 2b) git prints
+#      warning: deleting branch '<orphan>' that has been merged to
+#               'refs/remotes/origin/<default>', but not yet merged to HEAD
+#    and that is the expected, honest outcome -- see "Two warnings that look
+#    alike" below before reading it as the step-4e hazard.
 git branch -d <ORPHAN_BRANCH_NAME>
 
-# 4. Remove the temporary graft; original commit and main are restored to pristine state
+# 4. Remove the temporary graft; original commit and main are restored to pristine state.
+#    Runs whether or not step 3 succeeded: never chain it behind step 3 with
+#    `&&`. A refused delete that also skips this line leaves the graft in
+#    place, which is the residue step 5 exists to catch -- and a chain skips
+#    step 5 too, in exactly the case it is needed.
 git replace -d <SQUASH_SHA>
 
 # 5. (Post-flight) Verify no residue. The replace-ref count must match the
 #    pre-flight count. If it does not, an earlier step deviated from the
 #    recipe — surface the residue and remove it manually before continuing.
+#    Runs whether or not step 3 succeeded, for the reason given at step 4.
 POST_REPLACE_COUNT=$(git replace --list | wc -l)
 if [ "$POST_REPLACE_COUNT" -ne "$PRE_REPLACE_COUNT" ]; then
   echo "ERROR: replace-ref residue after ADR-0217 recipe. Inspect:"
@@ -73,6 +96,16 @@ fi
 After step 4: local main is unchanged, the squash commit's parents are restored to their original single-parent form, no replace refs remain, and the orphan local branch ref is gone. The orphan commit itself becomes unreachable from any ref and is collected by `git gc` on its normal schedule.
 
 After step 5: the recipe is verified to have run to completion with no residue. This step is the load-bearing detection of a specific failure mode observed in the wild: a subagent (or an operator running the recipe partially) creates a non-standard replace ref — e.g., mapping the orphan tip to a synthetic commit instead of grafting the squash commit — abandons the sequence before step 3 or step 4, and reports success. Step 4 only removes the exact key it was told about; it cannot detect residue at a different key. Step 5 closes that gap.
+
+### Two warnings that look alike
+
+Step 3 can print `warning: deleting branch 'X' that has been merged to 'refs/remotes/origin/<default>', but not yet merged to HEAD` in two situations that are opposites, and a reader who conflates them will either dismiss a real hazard or refuse a safe deletion.
+
+**The hazard (the universal instruction file's step 4e).** A stale `refs/remotes/origin/X` — the branch's *own* name, left behind by the platform's squash-and-delete flow — lets `-d` find the branch "merged" against a cached upstream that would have matched just as well had the merge failed. The evidence proves nothing. The remedy is `git fetch --prune` first, so `-d` judges against HEAD and refuses honestly, which sends you to this recipe.
+
+**The honest case (step 2b above).** The upstream is `origin/<default>`, where step 0b's scoped equivalence gate proved the content is and step 2's graft made the orphan reachable. The warning is git saying the branch is merged to the default branch and not to the parked HEAD — which is true and is the whole point. The proof is the graft; the upstream only told `-d` where to look.
+
+The tell is the ref named in the warning: the branch's own name is the hazard; `origin/<default>` after a completed step 0b and step 2 is the recipe working from a parked checkout. Running the cleanup from a throwaway worktree on the default branch avoids the question entirely and is the cleaner answer when a parked checkout is not the one you are already in.
 
 ### Scoping the equivalence gate
 
