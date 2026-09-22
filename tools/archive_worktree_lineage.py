@@ -166,7 +166,7 @@ def main():
     # Evict poetry venvs that lock the worktree directory on Windows
     evict_poetry_venv(worktree)
 
-    print(f"\nDone. You can now remove the worktree:")
+    print("\nDone. You can now remove the worktree:")
     print(f"  git worktree remove {worktree}")
 
 

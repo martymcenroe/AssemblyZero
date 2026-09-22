@@ -212,11 +212,11 @@ def repair_settings(dry_run: bool = True) -> dict:
                         print(f"    Restored from backup: {backup_path}")
                         results['repaired'].append(str(path))
                 else:
-                    print(f"    Backup also invalid! Manual intervention required.")
+                    print("    Backup also invalid! Manual intervention required.")
                     print(f"    File: {path}")
                     results['failed'].append(str(path))
             else:
-                print(f"    No backup available! Manual intervention required.")
+                print("    No backup available! Manual intervention required.")
                 print(f"    File: {path}")
                 results['failed'].append(str(path))
         else:
@@ -823,7 +823,7 @@ def merge_up(projects: list[str], dry_run: bool = True) -> dict:
     master_settings["permissions"]["deny"] = deduped_deny
     save_settings(master_path, master_settings)
 
-    print(f"\n## Merged into master:")
+    print("\n## Merged into master:")
     print(f"  +{len(to_merge_allow)} allow patterns merged")
     print(f"  +{len(to_merge_deny)} deny patterns merged")
     if removed_vends:

@@ -1914,8 +1914,8 @@ def _build_provider(spec: str, effort: str | None = None) -> "LLMProvider":
     elif provider == "anthropic":
         if not _api_allowed:
             raise ValueError(
-                f"Anthropic API usage is blocked (default). "
-                f"Use --allow-api to enable paid API calls."
+                "Anthropic API usage is blocked (default). "
+                "Use --allow-api to enable paid API calls."
             )
         return AnthropicProvider(model=model)
     elif provider == "gemini":

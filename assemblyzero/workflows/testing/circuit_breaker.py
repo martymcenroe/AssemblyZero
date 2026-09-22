@@ -125,8 +125,8 @@ def budget_summary(state: "TestingWorkflowState") -> str:
         return ""
 
     lines = ["## Token Budget Summary", ""]
-    lines.append(f"| Metric | Value |")
-    lines.append(f"|--------|-------|")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
     lines.append(f"| Estimated tokens used | {estimated_used:,} |")
 
     if token_budget > 0:
@@ -134,6 +134,6 @@ def budget_summary(state: "TestingWorkflowState") -> str:
         lines.append(f"| Token budget | {token_budget:,} |")
         lines.append(f"| Budget used | {pct:.1f}% |")
     else:
-        lines.append(f"| Token budget | unlimited |")
+        lines.append("| Token budget | unlimited |")
 
     return "\n".join(lines)

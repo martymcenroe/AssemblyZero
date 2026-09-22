@@ -346,8 +346,8 @@ def format_markdown(report: HarvestReport, candidates: list) -> str:
         "",
         "## Summary",
         "",
-        f"| Category | Count | High Priority |",
-        f"|----------|-------|---------------|",
+        "| Category | Count | High Priority |",
+        "|----------|-------|---------------|",
     ]
 
     for cat, stats in report.summary.items():

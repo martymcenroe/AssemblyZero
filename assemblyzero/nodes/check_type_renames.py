@@ -212,7 +212,7 @@ def log_scan_summary(removed_types_count: int, files_scanned: int, issues_found:
         files_scanned: Number of files scanned
         issues_found: Number of orphaned usage issues found
     """
-    logger.info(f"Type rename check summary:")
+    logger.info("Type rename check summary:")
     logger.info(f"  - Removed types detected: {removed_types_count}")
     logger.info(f"  - Files scanned: {files_scanned}")
     logger.info(f"  - Orphaned usage issues: {issues_found}")

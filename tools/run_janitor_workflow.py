@@ -118,7 +118,7 @@ def _print_summary(state: JanitorState) -> None:
     unfixable_count = len(state.get("unfixable_findings", []))
     report_url = state.get("report_url")
 
-    print(f"\n Janitor Summary:")
+    print("\n Janitor Summary:")
     print(f"   Findings:  {findings_count}")
     print(f"   Fixed:     {fix_count}")
     print(f"   Unfixable: {unfixable_count}")

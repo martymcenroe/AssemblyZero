@@ -297,7 +297,7 @@ def select_approved_lld(repo_root: Path) -> int | None:
         print(f"        Status: {status}{date_str}")
 
     print()
-    print(f"  [ 0] Cancel")
+    print("  [ 0] Cancel")
     print()
 
     # Prompt for selection
@@ -790,8 +790,8 @@ def main():
 
     # Startup banner (Issue #380: visible diagnostics for cross-repo debugging)
     print()
-    print(f"[implement] AssemblyZero TDD Testing Workflow")
-    print(f"[implement] ============================")
+    print("[implement] AssemblyZero TDD Testing Workflow")
+    print("[implement] ============================")
     print(f"[implement] Issue: #{args.issue}")
     print(f"[implement] Repository: {repo_root}")
     if worktree_path:
@@ -799,13 +799,13 @@ def main():
     print(f"[implement] Database: {db_path}")
     print(f"[implement] Mode: {'auto' if args.auto_mode else 'interactive'}")
     if args.skip_e2e:
-        print(f"[implement] E2E: skipped")
+        print("[implement] E2E: skipped")
     if args.scaffold_only:
-        print(f"[implement] Mode: scaffold-only")
+        print("[implement] Mode: scaffold-only")
     if args.issue_only:
-        print(f"[implement] Mode: issue-only (no LLD)")
+        print("[implement] Mode: issue-only (no LLD)")
     if args.dry_run:
-        print(f"[implement] Mode: DRY RUN")
+        print("[implement] Mode: DRY RUN")
     if args.token_budget > 0:
         print(f"[implement] Token budget: {args.token_budget:,}")
     if args.timeout > 0:
@@ -1066,7 +1066,7 @@ def main():
             preview = getattr(e, 'response_preview', None)
             if preview:
                 print(f"\nResponse preview:\n{preview[:500]}")
-            print(f"\nThis is a hard failure. The implementation node could not produce valid code.")
+            print("\nThis is a hard failure. The implementation node could not produce valid code.")
             print("Check the LLD specification and try again.")
             return 1
 

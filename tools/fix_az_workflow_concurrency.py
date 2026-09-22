@@ -76,7 +76,7 @@ def do_put_workflow(repo: str, branch: str, pat: str) -> tuple[bool, str | None]
         r = requests.put(f"{GH_API}/repos/{GITHUB_USER}/{repo}/contents/{path}", json=payload, headers=headers)
         if r.status_code >= 300:
             return False, f"Failed to PUT {path}: {r.status_code} {r.text}"
-        print(f"    succeeded.")
+        print("    succeeded.")
         
     return True, None
 

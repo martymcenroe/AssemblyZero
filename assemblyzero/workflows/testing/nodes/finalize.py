@@ -216,7 +216,7 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
     archived_files = archival_result["archived"]
 
     if archived_files:
-        print(f"\n    Archived artifacts:")
+        print("\n    Archived artifacts:")
         for file_path in archived_files:
             print(f"      - {file_path}")
 

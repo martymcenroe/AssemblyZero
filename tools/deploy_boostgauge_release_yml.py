@@ -266,7 +266,7 @@ def main() -> int:
         if existing_pr_num is not None:
             print(f"  Open PR already exists: #{existing_pr_num}")
             print(f"  URL: {existing_pr_url}")
-            print(f"  No-op. Merge through normal flow.")
+            print("  No-op. Merge through normal flow.")
             return 0
 
         # Idempotency: if branch exists but file doesn't, drop the file
@@ -279,17 +279,17 @@ def main() -> int:
                 put_file_on_branch(pat)
                 print(f"    PUT contents/{WORKFLOW_PATH} succeeded.")
             else:
-                print(f"  File already present on branch.")
+                print("  File already present on branch.")
         else:
             main_sha = get_main_head_sha(pat)
             print(f"  Creating branch {BRANCH} from main@{main_sha[:7]}...")
             create_branch(pat, main_sha)
             print(f"  PUT contents/{WORKFLOW_PATH} on branch...")
             put_file_on_branch(pat)
-            print(f"    succeeded.")
+            print("    succeeded.")
 
         # Open the PR.
-        print(f"  Opening PR...")
+        print("  Opening PR...")
         pr_num, pr_url = create_pr(pat)
         print()
         print(f"PR #{pr_num} opened: {pr_url}")

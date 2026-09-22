@@ -205,7 +205,7 @@ def select_brief_file(target_repo: Path) -> str | None:
         print(f"  [{i}] {brief.name}")
         print(f"      {title}")
 
-    print(f"\n  [q] Quit")
+    print("\n  [q] Quit")
     print()
 
     # Test mode: auto-select first
@@ -281,7 +281,7 @@ def select_github_issue(target_repo: Path) -> int | None:
         label_str = f" [{labels}]" if labels else ""
         print(f"  [{i}] #{issue['number']}: {issue['title']}{label_str}")
 
-    print(f"\n  [q] Quit")
+    print("\n  [q] Quit")
     print()
 
     # Test mode: auto-select first
@@ -863,7 +863,7 @@ def run_resume_review(
         return 1
 
     print_header(args)
-    print(f"[RESUME] Resuming at review with existing draft from:")
+    print("[RESUME] Resuming at review with existing draft from:")
     print(f"  {resume_info['draft_path'].relative_to(target_repo)}")
     print(f"  Draft iterations: {resume_info['draft_count']}")
     print()
@@ -1120,7 +1120,7 @@ def run_all_briefs(
 
         if exit_code == 0:
             processed += 1
-            print(f"        Result: SUCCESS")
+            print("        Result: SUCCESS")
         else:
             failed += 1
             print(f"        Result: FAILED (exit code {exit_code})")

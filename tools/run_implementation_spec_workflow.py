@@ -502,7 +502,7 @@ def print_result(final_state: dict[str, Any]) -> None:
     print("=" * 60)
 
     if final_state.get("error_message"):
-        print(f"Status:   ERROR")
+        print("Status:   ERROR")
         print(f"Error:    {final_state['error_message']}")
     else:
         verdict = final_state.get("review_verdict", "UNKNOWN")

@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print()
     print("=" * 60)
-    print(f"patent-general migrated to classic Branch Protection (Closes AZ#1203)")
+    print("patent-general migrated to classic Branch Protection (Closes AZ#1203)")
     print("=" * 60)
     print("Next: file a comment on AZ#1203 with the verification output,")
     print("then close. Follow-up: AZ#1211 (rewrite runbook 0926).")

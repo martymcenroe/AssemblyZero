@@ -130,8 +130,8 @@ def main():
     from assemblyzero.core.llm_provider import set_api_policy
     set_api_policy(args.allow_api)
 
-    print(f"Scout Workflow - External Intelligence Gathering")
-    print(f"=" * 50)
+    print("Scout Workflow - External Intelligence Gathering")
+    print("=" * 50)
     print(f"Topic: {args.topic}")
     print(f"Mode: {'offline' if args.offline else 'live'}")
     if args.internal:

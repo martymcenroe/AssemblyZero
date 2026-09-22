@@ -82,7 +82,7 @@ def _apply_resolutions(
         )
         
         if not oq_section_match:
-            warnings.append(f"No Open Questions section found in draft")
+            warnings.append("No Open Questions section found in draft")
             continue
         
         section_start = oq_section_match.start()

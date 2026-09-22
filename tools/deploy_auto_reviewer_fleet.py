@@ -256,8 +256,8 @@ def write_report(results: list[RepoResult]) -> Path:
         "# Auto-Reviewer Fleet Deployment Report",
         "",
         f"**Date:** {now.isoformat()}",
-        f"**Script:** `tools/deploy_auto_reviewer_fleet.py`",
-        f"**Method:** Contents API (workflow) + Branch Protection API (reviews)",
+        "**Script:** `tools/deploy_auto_reviewer_fleet.py`",
+        "**Method:** Contents API (workflow) + Branch Protection API (reviews)",
         "",
         "## Summary",
         "",
@@ -340,7 +340,7 @@ def main():
 
         # Skip forks (no branch protection on free plan, not our code)
         if is_fork:
-            print(f"    Skipped — fork")
+            print("    Skipped — fork")
             results.append(RepoResult(
                 repo=name, default_branch=branch,
                 workflow_ok=True, workflow_detail="Skipped (fork)",
@@ -350,7 +350,7 @@ def main():
 
         # Skip repos with rulesets that block Contents API
         if name in skip_entirely:
-            print(f"    Skipped — ruleset blocks deployment")
+            print("    Skipped — ruleset blocks deployment")
             results.append(RepoResult(
                 repo=name, default_branch=branch,
                 workflow_ok=True, workflow_detail="Skipped (ruleset)",

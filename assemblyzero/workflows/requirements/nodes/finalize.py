@@ -551,7 +551,7 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
         review_info=review_info,
         target_repo=target_repo,
     )
-    print(f"    Updated lld-status.json tracking")
+    print("    Updated lld-status.json tracking")
 
     # Add to created_files for commit
     created_files = list(state.get("created_files", []))

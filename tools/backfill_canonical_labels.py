@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Label apply failures: {total_failed}")
     print(f"  Repo errors: {total_errors}")
     if not args.apply and (total_created + total_updated) > 0:
-        print(f"\nRe-run with --apply to actually create/update labels.")
+        print("\nRe-run with --apply to actually create/update labels.")
     if total_failed or total_errors:
         return 2
     return 0
