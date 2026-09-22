@@ -137,6 +137,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -146,7 +150,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.14'
 
@@ -213,8 +217,43 @@ jobs:
           retention-days: 30"""
 
 
+#: Lines this change removes ON PURPOSE. Everything else that is on main and not
+#: in the embed means the embed has gone stale, which `would_drop` treats as a
+#: hard stop rather than a diff to eyeball.
+INTENDED_REMOVALS = {
+    "# CI Workflow - Unit tests on every push/PR, integration tests on main",
+    "# Issues #325, #116, #225",
+    "        if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+    "        run: poetry run python tools/test-gate.py tests/integration/"
+    " -v --tb=short -m integration",
+}
+
+
 def local_content() -> bytes:
     return WORKFLOW_YAML.encode("utf-8")
+
+
+def would_drop(remote: bytes, local: bytes) -> list[str]:
+    """Lines present on main that the embed lacks and does not mean to remove.
+
+    This script embeds the workflow, so it carries a copy of main that ages.
+    It sat unlanded for five weeks while main gained a `concurrency:` block and
+    an action bump; landing it then would have reverted both -- the concurrency
+    block being an active Actions-cost measure. Nothing in the flow would have
+    said so, because a PUT through the Contents API replaces the file wholesale.
+
+    Comparing line sets rather than diffing means a reordering does not trip it;
+    only genuinely absent content does.
+    """
+    remote_lines = remote.decode("utf-8").splitlines()
+    local_lines = set(local.decode("utf-8").splitlines())
+    return [
+        line
+        for line in remote_lines
+        if line.strip()
+        and line not in local_lines
+        and line not in INTENDED_REMOVALS
+    ]
 
 
 def remote_file(pat: str) -> tuple[bytes | None, str | None]:
@@ -368,6 +407,19 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         else:
             print(f"  main differs ({len(remote)} bytes) -- this is an UPDATE.")
+
+        if remote is not None:
+            dropped = would_drop(remote, local)
+            if dropped:
+                print("\nABORT: the embedded workflow would DROP lines that are on main:")
+                for line in dropped:
+                    print(f"    {line}")
+                print(
+                    "\nThe embed has drifted behind main. Refresh it from the current\n"
+                    "origin/main ci.yml plus the tier steps, then re-run. Landing as-is\n"
+                    "would silently revert whoever added those lines."
+                )
+                return 2
 
         if args.dry_run:
             print("\nDRY RUN -- nothing was written. Would:")
