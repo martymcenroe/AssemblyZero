@@ -407,7 +407,17 @@ def extract_relevant_excerpt(
 # stage and this spec stage extract with one yardstick. The `_`-prefixed
 # aliases preserve this module's historical import surface — internal
 # callers and existing tests are untouched.
-from assemblyzero.core.interface_surface import (  # noqa: E402
+#
+# F401 is suppressed deliberately (#3483). Two of these three are unused
+# *within* this module and exist only to be importable from it, which is what
+# "preserve the historical import surface" means. An automated unused-import
+# sweep removed them and broke
+# `test_spec_stage_aliases_are_the_core_functions`, whose whole point is that
+# the move was aliasing rather than copying. The noqa named E402 but not F401,
+# so the sweep had no signal to stop at.
+from assemblyzero.core.interface_surface import (  # noqa: E402, F401
+    summarize_class as _summarize_class,
+    summarize_function as _summarize_function,
     summarize_python_file as _summarize_python_file,
 )
 

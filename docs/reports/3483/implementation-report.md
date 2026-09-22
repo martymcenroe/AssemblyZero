@@ -53,6 +53,45 @@ The module exists now, and the handler is `pass` — it swallows the error rathe
 than skipping, so the probe asserts nothing. The other names in the block are
 used; these two are not. Removed.
 
+## A Fourth Re-Export Site, Found by CI Rather Than by Reading
+
+The sweep broke one test, and the break is the most useful thing in this change.
+
+`assemblyzero/workflows/implementation_spec/nodes/analyze_codebase.py` carries:
+
+```python
+# The three signature summarizers moved to core (Tiphys, #1688) ... The
+# `_`-prefixed aliases preserve this module's historical import surface
+from assemblyzero.core.interface_surface import (  # noqa: E402
+    summarize_class as _summarize_class,
+    summarize_function as _summarize_function,
+    summarize_python_file as _summarize_python_file,
+)
+```
+
+Two of the three are unused *within* the module. Ruff removed them and kept the
+third, which is used internally. The result:
+
+```
+ImportError: cannot import name '_summarize_class' from
+  assemblyzero.workflows.implementation_spec.nodes.analyze_codebase
+```
+
+in `test_spec_stage_aliases_are_the_core_functions`, whose docstring is *"The
+move must be aliasing, not copying — one yardstick."* The test exists precisely
+to assert that surface.
+
+**The comment above the import said what it was for, and the `noqa` named E402
+but not F401** — so nothing machine-readable told the sweep to stop. The same
+one-rule-short mistake as the shim in #3480, in a different file.
+
+Restored, with `# noqa: E402, F401` and a comment recording why, so the next
+sweep has the signal this one lacked.
+
+The lesson for the parent: three re-export sites were found by reading before
+the sweep (#3479, #3480, `BATCH_SIZE`), and the fourth was found only by running
+the whole suite. Reading found most of them; it did not find all of them.
+
 ## Effect
 
 | | before | after |

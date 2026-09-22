@@ -12,19 +12,51 @@ import would do the most damage: the provider layer, the package whose
 re-export shim was declared one change earlier (#3480), and the two modules
 whose imports were edited by hand rather than by ruff.
 
-## The Full Tier Ran on CI, Not Locally
+## The Full Tier Caught a Regression the Targeted Run Did Not
 
-Two local full-tier runs were started and neither returned inside the session's
-command window — pytest buffers its output, so a run in progress is
-indistinguishable from a stalled one until it finishes. Rather than report a
-number I did not see, the full-tier verification for this change is **the CI run
-on this PR**, which executes the same `tests/unit` tier on Linux with a cold
-virtualenv.
+This is the entry that matters. The first push of this change **failed CI**, and
+the local full tier — which returned after the PR was opened — found the same
+single new failure:
 
-That is stated rather than glossed because this is the change that most needs it:
-358 imports removed across 193 files, where the failure mode is an `ImportError`
-or a missing side effect in a module the diff does not obviously implicate. The
-merge is gated on that run.
+```
+FAILED tests/unit/test_interface_surface.py::TestSummarizers::test_spec_stage_aliases_are_the_core_functions
+3 failed, 10524 passed, 21 skipped, 7 deselected, 5 xfailed in 621.56s
+```
+
+```
+ImportError: cannot import name '_summarize_class' from
+  assemblyzero.workflows.implementation_spec.nodes.analyze_codebase
+```
+
+A fourth re-export site — `analyze_codebase.py` aliases three core summarizers
+to preserve its historical import surface, two of which are unused inside the
+module. Its `noqa` named E402 but not F401, so the sweep had no signal to stop
+at, exactly as in #3480.
+
+**The 292-test targeted selection did not contain it.** That selection was
+chosen for the modules most likely to break, and it missed the one that did.
+Recorded plainly: a selection chosen by judgement is a hypothesis about where
+breakage will be, and this one was wrong.
+
+Fixed by restoring the two aliases with `# noqa: E402, F401`.
+`tests/unit/test_interface_surface.py` → **27 passed**. Lint total unchanged at
+123, F401 still 0.
+
+The other two failures are the known #3468 pair. `test_create_initial_state_defaults_to_assemblyzero`
+did **not** fail here, because this worktree is named `AssemblyZero-3483` and
+contains the string — consistent with #3475.
+
+## The PR Was Pushed Before the Full Tier Returned, and That Was the Wrong Order
+
+The local full tier was started before the PR was opened and returned after.
+pytest buffers its output, so a run in progress is indistinguishable from a
+stalled one until it finishes; the PR went out on the strength of the targeted
+selection, and CI failed first. Both then agreed on the same single new failure.
+
+Recorded rather than glossed: this is the change that most needed the full tier
+first — 358 imports across 193 files, where the failure mode is an `ImportError`
+in a module the diff does not obviously implicate. The bug was caught, but by CI
+being fast rather than by the verification running in the right order.
 
 An earlier full-tier run in this same sequence (#3474, ten minutes, 10,519
 passed) established the three known failures, all unrelated and filed: #3475
