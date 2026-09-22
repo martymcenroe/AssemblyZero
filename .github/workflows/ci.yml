@@ -1,5 +1,14 @@
-# CI Workflow - Unit tests on every push/PR, integration tests on main
-# Issues #325, #116, #225
+# CI Workflow - every test tier on every push/PR
+# Issues #325, #116, #225, #2283
+#
+# pyproject's addopts deselects integration, e2e and adversarial, so each tier
+# needs its own step naming its marker. Until #2283 only unit ran on a PR and
+# integration ran after merge to main, which is how the e2e tier silently
+# stopped reaching the loop it exists to exercise (#2280): nothing ran it.
+#
+# Tier selectors use `tests/` plus the marker, never a directory alone -- two
+# e2e-marked tests live in tests/unit/test_issue_257.py, and `tests/e2e/` would
+# quietly run 17 of 19.
 
 name: CI
 
@@ -47,12 +56,37 @@ jobs:
         env:
           LANGSMITH_TRACING: "false"
 
+      # #2283: was `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`,
+      # so it landed AFTER merge -- detecting a break at the point where
+      # reverting is most expensive. It runs before merge now. Six of its
+      # seventy tests skip without a GitHub token or Gemini access; that is a
+      # reason to tolerate skips here, not to defer the other sixty-four.
       - name: Run integration tests
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: poetry run python tools/test-gate.py tests/integration/ -v --tb=short -m integration
+        run: poetry run python tools/test-gate.py tests/ -v --tb=short -m integration
         env:
           LANGSMITH_TRACING: "false"
           ASSEMBLYZERO_MOCK_MODE: "1"
+
+      # Fully mock-driven and needs no credentials -- the whole tier runs in
+      # about six seconds, so there was never a cost argument for excluding it.
+      - name: Run e2e tests
+        run: poetry run python tools/test-gate.py tests/ -v --tb=short -m e2e
+        env:
+          LANGSMITH_TRACING: "false"
+          ASSEMBLYZERO_MOCK_MODE: "1"
+
+      # One test, and it needs live Gemini access. With no credential in the
+      # environment its autouse fixture skips before constructing a client, so
+      # this step passes with `1 skipped` rather than failing or erroring.
+      # Deliberately NOT continue-on-error: a skip is already the quiet
+      # outcome, and swallowing a genuine failure on top of that would recreate
+      # exactly the blind spot #2283 exists to close. When the credential in
+      # #2285 is settled this step starts asserting instead of skipping, with
+      # no workflow change.
+      - name: Run adversarial tests
+        run: poetry run python tools/test-gate.py tests/ -v --tb=short -m adversarial
+        env:
+          LANGSMITH_TRACING: "false"
 
       - name: Upload coverage report
         if: always()
