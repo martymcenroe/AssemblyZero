@@ -26,9 +26,26 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
+# pywinpty is Windows-only, and this module must stay IMPORTABLE everywhere even
+# when it cannot RUN. Exiting here instead killed any process that imported the
+# file -- pytest collecting `tests/tools/` on Linux died with
+# `INTERNALERROR ... SystemExit: 1` before a single test executed (#3452).
+#
+# A guard clause may refuse to run. It must not refuse to import.
 try:
     import winpty
-except ImportError:
+except ImportError:  # pragma: no cover - depends on the host OS
+    winpty = None
+
+
+def _require_winpty() -> None:
+    """Exit with the original message and status when pywinpty is missing.
+
+    Called from `main()`, so the CLI behaves exactly as before: same JSON on
+    stdout, same exit code 1. The only thing that changed is WHEN it happens.
+    """
+    if winpty is not None:
+        return
     print(json.dumps({
         "status": "error",
         "error": "pywinpty not installed. Run: poetry add pywinpty",
@@ -348,6 +365,7 @@ def append_to_log(log_path: Path, data: dict):
 
 
 def main():
+    _require_winpty()
     parser = argparse.ArgumentParser(
         description="Scrape Claude Code usage quota data via terminal automation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
