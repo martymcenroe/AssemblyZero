@@ -52,6 +52,21 @@ markers = [
     "windows_paths: exercises Windows-only code the fleet actually runs (#2431). CI's ubuntu job never reaches these, so a windows-latest job selects them with '-m windows_paths'.",
 ]
 
+[tool.ruff]
+# The lint target is the code under maintenance. `docs/lineage/` is the
+# design-review trail: generated `NNN-test-scaffold.py` and friends, recording
+# what a workflow produced on a given run. Nothing imports them and nothing runs
+# them, and editing them to satisfy a linter would rewrite the record -- which is
+# the opposite of what a lineage trail is for (#3472).
+#
+# All 14 of the repo's invalid-syntax findings are in there. That is evidence
+# about a generator's output, worth keeping and arguably worth investigating; it
+# is not a lint defect in this repo's source.
+#
+# This narrows WHAT IS LINTED, never what counts as an error. No rule is
+# disabled and no severity lowered -- see #3471 for the rule-by-rule work.
+extend-exclude = ["docs/lineage"]
+
 [tool.poetry]
 packages = [{include = "assemblyzero"}]
 
