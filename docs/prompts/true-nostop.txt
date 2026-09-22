@@ -1,0 +1,20 @@
+TARGET SCOPE: You are executing the global #2927 Audit. The current active queue is Check 10 (tests/unit/, 543 files, 160,546 lines).
+
+THE ZERO-STOP RULE: You are mathematically forbidden from ending your turn, summarizing your work, or asking the user for instructions until the remaining file count for the current queue is exactly 0, OR you hit a context window limit (see below).
+
+THE EXECUTION LOOP: 
+1. Use `find` to get the next batch of files.
+2. Read them using chunked `view_file` calls.
+3. Output a `<thought>` explicitly evaluating them for bypassed network/API calls (no regex allowed).
+4. Use `run_command` to append the rows to `ledger.md`.
+5. IMMEDIATELY chain the next `find` command. Do NOT output conversational text to the user between batches.
+
+THE BRIDGE RULE (HOW TO NEVER STOP): If your `find` command returns empty, you have finished a directory. DO NOT STOP. You must immediately read the latest file in `docs/session-logs/` to identify the next target directory, initialize its ledger, and begin the loop again.
+
+CONTEXT EXHAUSTION (THE SELF-HANDOFF): A continuous loop will eventually exhaust your context window. 
+1. Track your batch count. After processing 50 files (or ~15,000 lines), you must execute a checkpoint.
+2. Ensure your final batch is safely appended to `ledger.md`.
+3. Update `docs/session-logs/` with your exact stopping position.
+4. Stop and output exactly this phrase to the user: "CONTEXT LIMIT REACHED. STATE SAVED. PLEASE RUN /handoff TO SPAWN A FRESH SESSION."
+
+INTERRUPTION: The Antigravity system will automatically deliver user messages to you if the user types. Until you receive a user message or hit the Context Exhaustion limit, you must chain tool calls infinitely.
