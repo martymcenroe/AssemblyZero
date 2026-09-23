@@ -69,11 +69,14 @@ git commit -m "chore: archive workflow lineage (Closes #{ID}) [skip ci]"
 # Then push and create the PR
 ```
 
-After merging the PR, simply delete the worktree and branch:
+After merging the PR, remove the worktree, prune, delete the branch, and update `main` without switching anyone's checkout (every `git checkout` is denied by the shell guard):
 ```bash
 git worktree remove ../AssemblyZero-{ID}
-git branch -d {ID}-fix && git checkout main && git pull
+git fetch --prune origin
+git branch -d {ID}-fix
+git fetch origin main:main
 ```
+After a squash merge `git branch -d` refuses; use the ADR-0217 graft, never `-D`. `git fetch origin main:main` refuses when `main` is checked out; there, if `git branch --show-current` prints `main`, run `git merge --ff-only origin/main` instead.
 
 ## Banned Practices (Agent Limitations)
 
