@@ -10,6 +10,7 @@ Tests verify SQLite database operations including:
 - Context manager support
 """
 
+import sqlite3
 from unittest.mock import patch
 
 import pytest
@@ -375,9 +376,12 @@ class TestContextManager:
         with VerdictDatabase(db_path) as db:
             conn = db.conn
 
-        # Connection should be closed (operations will fail)
-        # Note: SQLite connections don't have an obvious "is_closed" check
-        # but the close() was called in __exit__
+        # #3490: this asserted nothing. Its comment said SQLite has no obvious
+        # "is_closed" check — but a closed connection raises ProgrammingError on
+        # use, which is exactly the check. Without this the test constructed a
+        # database and verified no part of its own name.
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")
 
     def test_context_manager_with_exception(self, tmp_path):
         """Should close connection even when exception occurs."""

@@ -5,7 +5,8 @@ and the routing integration in generate_file_with_retry().
 """
 
 import logging
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -138,13 +139,57 @@ def test_deeply_nested_init_py_routes_to_haiku():
 
 
 def test_call_claude_explicit_model():
-    """T080: When model is provided, call_claude_for_file receives it."""
-    with patch(
-        "assemblyzero.workflows.testing.nodes.implementation.claude_client.call_claude_for_file"
-    ) as mock_call:
-        mock_call.return_value = ("generated content", {"input_tokens": 10, "output_tokens": 20})
-        result = mock_call("prompt text", model=HAIKU_MODEL)
-        mock_call.assert_called_once_with("prompt text", model=HAIKU_MODEL)
+    """T080: a supplied model reaches the provider (REQ-7).
+
+    #3490: this previously patched `call_claude_for_file` and then called the
+    MOCK, asserting the mock had been called — a tautology that never reached
+    the code under test and would have passed with the routing deleted.
+
+    The real seam is `get_provider`: `call_claude_for_file` builds the provider
+    spec from the model it is handed, so patching that and reading the spec back
+    is what tests the stated requirement.
+    """
+    from assemblyzero.workflows.testing.nodes.implementation import claude_client
+
+    provider = MagicMock()
+    provider.invoke.return_value = SimpleNamespace(
+        success=True, response="generated content", error_message=None, retryable=False
+    )
+
+    with patch.object(
+        claude_client, "get_provider", return_value=provider
+    ) as mock_get_provider:
+        response, error = claude_client.call_claude_for_file(
+            "prompt text", model=HAIKU_MODEL
+        )
+
+    spec = mock_get_provider.call_args.args[0]
+    assert spec == f"claude:{HAIKU_MODEL}", (
+        f"the supplied model must reach the provider spec; got {spec!r}"
+    )
+    assert response == "generated content"
+    assert error == ""
+
+
+def test_call_claude_default_model_when_none_supplied():
+    """The other half of REQ-7: no model means the default spec, not an empty one.
+
+    Without this, a regression that dropped the model argument entirely would
+    still satisfy the test above by never reaching it.
+    """
+    from assemblyzero.workflows.testing.nodes.implementation import claude_client
+
+    provider = MagicMock()
+    provider.invoke.return_value = SimpleNamespace(
+        success=True, response="x", error_message=None, retryable=False
+    )
+
+    with patch.object(
+        claude_client, "get_provider", return_value=provider
+    ) as mock_get_provider:
+        claude_client.call_claude_for_file("prompt text")
+
+    assert mock_get_provider.call_args.args[0] == "claude:opus"
 
 
 # ---------------------------------------------------------------------------

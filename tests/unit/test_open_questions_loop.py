@@ -273,13 +273,46 @@ class TestPreReviewValidationRemoved:
         """validate_draft_structure exists but is no longer used in flow."""
         from assemblyzero.workflows.requirements.nodes.generate_draft import validate_draft_structure
 
-        # Function still exists for backward compatibility
+        # #3490: this called the function, discarded the result, and asserted
+        # nothing — including the property its own comment named ("what matters
+        # is it's not called in generate_draft"), which is checkable.
+        #
+        # Both halves of the name are now asserted: it is still importable and
+        # callable (kept for compat), and the flow does not call it.
         draft = """### Open Questions
 - [ ] Question?"""
 
-        # It returns a message, but generate_draft doesn't call it anymore
         result = validate_draft_structure(draft)
-        # The result doesn't matter - what matters is it's not called in generate_draft
+        assert result is not None
+
+        # The flow no longer calls it. Parsed rather than string-searched, so a
+        # mention in a comment or docstring cannot satisfy or break this.
+        import ast
+        from pathlib import Path
+
+        source = Path(
+            "assemblyzero/workflows/requirements/nodes/generate_draft.py"
+        )
+        if not source.is_file():  # running from a different cwd
+            import assemblyzero.workflows.requirements.nodes.generate_draft as gd
+
+            source = Path(gd.__file__)
+
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        called_names = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        # Guard against the vacuous pass: if the parse found no calls at all —
+        # wrong path, empty file — the membership test below would succeed while
+        # measuring nothing, which is the defect this whole issue is about.
+        assert called_names, f"parsed no calls from {source}; the check is inert"
+
+        assert "validate_draft_structure" not in called_names, (
+            "generate_draft calls validate_draft_structure again; this function "
+            "is retained for backward compatibility only"
+        )
 
 
 class TestPromptFile:

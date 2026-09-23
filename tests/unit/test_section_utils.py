@@ -142,9 +142,16 @@ class TestIdentifyChangedFromFreetext:
         feedback = "The document needs more detail overall."
 
         result = identify_changed_sections(feedback, sections)
-        # "Details" has only 7 chars but "detail" appears in feedback
-        # This is OK — conservative matching is fine
-        # The important thing is it doesn't crash
+
+        # #3490: this asserted nothing. Its comment worried that "detail" in the
+        # feedback might match the "Details" heading and concluded "the important
+        # thing is it doesn't crash" — so a test named `..._returns_empty` never
+        # checked what was returned.
+        #
+        # Measured: it returns []. The worry was unfounded and the name was right.
+        # Asserting it means a future change that starts matching "Details" here
+        # is reported rather than silently accepted.
+        assert result == []
 
     def test_empty_feedback(self):
         sections = [Section(heading="Test", content="...", level=2)]
