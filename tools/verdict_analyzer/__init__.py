@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-# Define PARSER_VERSION here first, before any imports
-PARSER_VERSION = "1.4.0"
-
 from tools.verdict_analyzer.parser import (
+    PARSER_VERSION as _PARSER_VERSION,
     BlockingIssue,
     VerdictRecord,
     compute_content_hash,
@@ -33,6 +31,17 @@ from tools.verdict_analyzer.scanner import (
     scan_repos,
     validate_verdict_path,
 )
+
+# Re-exported from the parser rather than redefined (#3484). It used to be
+# assigned above the imports, with the comment "define here first, before any
+# imports" -- which made every import below it E402. The circular-import problem
+# that justified the early assignment was solved differently: `parser.py`
+# defines its own copy, and `database.py` reads that one for cache
+# invalidation, so nothing in this import chain needed the name early.
+#
+# Sourcing it from the parser also removes a second definition that could drift
+# from the one actually used. See the sibling issue on that duplication.
+PARSER_VERSION = _PARSER_VERSION
 
 __all__ = [
     "PARSER_VERSION",
