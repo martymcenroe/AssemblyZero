@@ -64,16 +64,22 @@ right and the comment's hedge was unnecessary.
 
 ## The Full Tier
 
-A local full-tier run was started before this report and had not returned when
-the PR was opened. **CI runs the same tier on this PR and gates the merge**,
-which is the governing check.
+```
+poetry run pytest tests/unit
+2 failed, 10526 passed, 21 skipped, 7 deselected, 5 xfailed in 609.73s
+```
 
-The previous tranche (#3484) established the current baseline: 2 failed, 10525
-passed, both failures the known #3468 pair. Nothing here touches those.
+Both failures are the known `TestAgainstEveryRecordedDraft` pair (#3468) — a
+class that reads another repository's working tree and asserts hardcoded counts,
+`skipif`-ed in CI and never enforced there. **No new failure.**
 
-Said plainly rather than glossed: #3483 was pushed on a targeted selection while
-its full tier was still running, and CI found a regression that selection had
-missed. The same exposure applies here, mitigated only by CI gating the merge.
+Passing count is 10526 against #3484's 10525: the one added test is the second
+half of REQ-7.
+
+The run was started before this report was written and returned while the PR was
+being opened, so an earlier draft of this section said CI would be the governing
+check. It is recorded here because the real number arrived: the hedge is
+superseded, not merely unmentioned.
 
 ## Not Verified
 
