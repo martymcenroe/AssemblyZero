@@ -77,6 +77,31 @@ markers = [
 # disabled and no severity lowered -- see #3471 for the rule-by-rule work.
 extend-exclude = ["docs/lineage", "tests/fixtures/issue7_run*"]
 
+[tool.ruff.lint.per-file-ignores]
+# E402 here is structural, not stylistic (#3484). Each of these is a standalone
+# script that puts the repo root on `sys.path` before importing `assemblyzero`:
+#
+#     sys.path.insert(0, str(Path(__file__).parent.parent))
+#     from assemblyzero.tracing import configure_langsmith
+#
+# The import cannot precede the insert -- that is how a script in `tools/`
+# reaches the package without the package being installed. Moving it up breaks
+# the script.
+#
+# Verified per file rather than assumed: every entry below contains exactly one
+# `sys.path.insert` above its first flagged import. The files where the late
+# import was INCIDENTAL -- a logger or a constant that had drifted into the
+# import block -- were fixed by moving the statement instead, and are
+# deliberately absent from this list.
+"tools/collect-cross-project-metrics.py" = ["E402"]
+"tools/orchestrate.py" = ["E402"]
+"tools/run_implement_from_lld.py" = ["E402"]
+"tools/run_implementation_spec_workflow.py" = ["E402"]
+"tools/run_requirements_workflow.py" = ["E402"]
+"tools/run_scout_workflow.py" = ["E402"]
+"tools/test-gate.py" = ["E402"]
+"tests/tools/test_claude_usage_scraper.py" = ["E402"]
+
 [tool.poetry]
 packages = [{include = "assemblyzero"}]
 

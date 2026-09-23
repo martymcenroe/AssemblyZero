@@ -28,13 +28,6 @@ import tempfile
 import threading
 import time
 
-# Closes #1495: llm_provider.py uses logger.warning at line 593 for the
-# #1431 defensive non-dict-JSON branch, but no logger was ever defined at
-# module scope. Every call through that branch raised
-# `NameError: name 'logger' is not defined`, surfaced by the testing
-# workflow's N4 (implement_code) as "API error: name 'logger' is not
-# defined" -- halting the impl stage.
-logger = logging.getLogger(__name__)
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -48,6 +41,17 @@ from assemblyzero.core.errors import (
 )
 from assemblyzero.core.text_sanitizer import strip_emoji
 from assemblyzero.utils.process import kill_process_tree
+
+# Closes #1495: llm_provider.py uses logger.warning for the #1431 defensive
+# non-dict-JSON branch, but no logger was ever defined at module scope. Every
+# call through that branch raised `NameError: name 'logger' is not defined`,
+# surfaced by the testing workflow's N4 (implement_code) as "API error: name
+# 'logger' is not defined" -- halting the impl stage.
+#
+# Moved below the imports (#3484). It sat between them, which made every
+# import after it E402; it is only read at call time, so the position carried
+# no meaning and the history above is what mattered.
+logger = logging.getLogger(__name__)
 
 
 _PYDANTIC_WARNING_RE = re.compile(

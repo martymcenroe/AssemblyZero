@@ -17,13 +17,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-# Issue #508: Maximum total prompt content chars (to avoid token limits)
-MAX_TOTAL_PROMPT_CHARS = 120_000
-# Warn at 80% of the cap
-PROMPT_SIZE_WARNING_THRESHOLD = 0.8
-
 from assemblyzero.core.interface_surface import (
     build_interface_map_for_paths,
     format_interface_map_section,
@@ -73,6 +66,13 @@ from assemblyzero.core.verdict_schema import (
     DraftQuestionsResult,
     scan_open_questions_section,
 )
+
+logger = logging.getLogger(__name__)
+
+# Issue #508: Maximum total prompt content chars (to avoid token limits)
+MAX_TOTAL_PROMPT_CHARS = 120_000
+# Warn at 80% of the cap
+PROMPT_SIZE_WARNING_THRESHOLD = 0.8
 
 
 def _edit_script_halt(reason: str) -> str:
