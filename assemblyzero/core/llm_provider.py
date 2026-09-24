@@ -558,6 +558,23 @@ def _stream_with_idle_timeout(
     return outcome
 
 
+def _nested_claude_env() -> dict[str, str]:
+    """The environment every nested `claude -p` runs with (#3505).
+
+    A `claude -p` launched from inside a Claude Code session inherits
+    `CLAUDECODE` and refuses to start, and the refusal reads as a model
+    error. The tools used to rely on the operator typing `CLAUDECODE=` on
+    the command line, which `speedrun_roll.py` already does for itself.
+    The provider owns it now: every launch gets the empty string (not
+    unset, which the harness treats differently), whatever the parent
+    session was.
+    """
+    env = os.environ.copy()
+    env["PYTHONWARNINGS"] = "ignore"
+    env["CLAUDECODE"] = ""
+    return env
+
+
 class ClaudeCLIProvider(LLMProvider):
     """Claude provider using claude -p CLI (Max subscription).
 
@@ -685,8 +702,7 @@ class ClaudeCLIProvider(LLMProvider):
             creation_flags = (
                 subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             )
-        env = os.environ.copy()
-        env["PYTHONWARNINGS"] = "ignore"
+        env = _nested_claude_env()
 
         try:
             proc = subprocess.Popen(
@@ -867,8 +883,7 @@ class ClaudeCLIProvider(LLMProvider):
                     idx = cmd.index("--setting-sources")
                     cmd[idx + 1] = "user,project"
 
-                env = os.environ.copy()
-                env["PYTHONWARNINGS"] = "ignore"
+                env = _nested_claude_env()
 
                 proc = subprocess.Popen(
                     cmd,

@@ -31,7 +31,7 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
 | Gotcha | Fix |
 |--------|-----|
 | No output in background runs | `PYTHONUNBUFFERED=1` — Python buffers stdout when not on a TTY |
-| Nested Claude sessions fail | `CLAUDECODE= PYTHONUNBUFFERED=1 poetry run ...` (empty string, NOT unset) |
+| Nested Claude sessions fail | The provider clears `CLAUDECODE` itself for every nested `claude -p` (#3505); no prefix is needed. `PYTHONUNBUFFERED=1 poetry run ...` still applies for output |
 | `--yes` flag on implementation | Does NOT exist — only the LLD workflow has `--yes` |
 | Worktree already exists | ONLY if you have confirmed the stale worktree is archived/safe: use `--no-worktree` flag |
 | Workflow runs from wrong dir | ALWAYS `cd` to AssemblyZero first. The `--repo` flag points to the target |

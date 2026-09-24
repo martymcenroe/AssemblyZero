@@ -36,7 +36,7 @@ All commands run from AssemblyZero. The `--repo` flag points to the target repo.
 ### Step 1 — LLD
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_requirements_workflow.py \
+PYTHONUNBUFFERED=1 poetry run python tools/run_requirements_workflow.py \
     --type lld --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} --yes \
     > /tmp/lld-{NUMBER}.log 2>&1
 ```
@@ -44,7 +44,7 @@ CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_requirements_workflow
 ### Step 2 — Implementation Spec
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_implementation_spec_workflow.py \
+PYTHONUNBUFFERED=1 poetry run python tools/run_implementation_spec_workflow.py \
     --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} \
     > /tmp/impl-spec-{NUMBER}.log 2>&1
 ```
@@ -52,7 +52,7 @@ CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_implementation_spec_w
 ### Step 3 — TDD Implementation
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
+PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
     --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} \
     > /tmp/tdd-{NUMBER}.log 2>&1
 ```
