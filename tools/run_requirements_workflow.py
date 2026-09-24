@@ -742,13 +742,29 @@ def run_single_workflow(
     if args.debug:
         print(f"DEBUG: Initial state keys: {list(state.keys())}")
 
-    # Handle dry-run mode
+    # Handle dry-run mode. #3507: the plan names everything a real run would
+    # write, delete, shift, cut or push, and this branch touches none of it.
     if args.dry_run:
         print("DRY RUN: Would execute workflow with the above configuration")
         print(f"  Workflow type: {state['workflow_type']}")
         print(f"  Audit dir would be created at: {target_repo}/docs/lineage/active/...")
         if state["workflow_type"] == "lld":
             print(f"  LLD would be saved to: {target_repo}/docs/lld/active/LLD-{args.issue:03d}.md")
+            existing = check_existing_lld(args.issue, target_repo)
+            if existing["lld_exists"] or existing["lineage_exists"]:
+                print("  Regeneration (Standard 0012) would first:")
+                if existing["lld_exists"]:
+                    print(f"    delete {existing['lld_path'].relative_to(target_repo)}")
+                if existing["lineage_exists"]:
+                    lineage_rel = existing["lineage_path"].relative_to(target_repo)
+                    print(f"    shift {lineage_rel}/ to {args.issue}-lld-n1 (n1 to n2, n2 removed)")
+                if not args.yes:
+                    print("    and ask for YES first (no --yes given)")
+            base = state.get("base_branch")
+            if base:
+                print(f"  Worktree would be cut at: {target_repo}/data/worktrees/{args.issue}-lld")
+                print(f"  Branch would be: {args.issue}-lld from origin/{base}, pushed with a PR on APPROVED")
+        print("DRY RUN: nothing was written, deleted, shifted, cut or pushed.")
         return 0
 
     # Issue #1076: Speed-run instrumentation
@@ -1577,8 +1593,12 @@ def main() -> int:
                 return 0
             args.issue = selected
 
-    # Pre-generation check for LLD workflow (Standard 0012)
-    if args.type == "lld" and args.issue:
+    # Pre-generation check for LLD workflow (Standard 0012).
+    # #3507: not on a dry run. This call deletes the existing LLD and shifts
+    # lineage under --yes, and it used to run BEFORE the dry-run exit, so
+    # `--dry-run --yes` destroyed a generation and then printed DRY RUN. The
+    # dry run reports what this call would do instead (run_single_workflow).
+    if args.type == "lld" and args.issue and not args.dry_run:
         if not check_and_shift_existing_lld(args.issue, target_repo, args.yes):
             return 0  # User aborted
 
