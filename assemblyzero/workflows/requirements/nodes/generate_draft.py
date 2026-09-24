@@ -326,9 +326,18 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     else:
         print("\n[N1] Generating initial draft...")
 
-    # Use mock provider in mock mode, otherwise use configured drafter
+    # Use mock provider in mock mode, otherwise use configured drafter.
+    # #3533: an LLD run drafts from `mock:lld`, which clears N1.5, so the
+    # rehearsal reaches review and finalize. A caller that names `mock:draft`
+    # explicitly (the e2e loop-to-halt harness) keeps the draft that fails.
     if mock_mode:
-        drafter_spec = "mock:draft"
+        configured = str(state.get("config_drafter", "") or "")
+        if configured.startswith("mock:"):
+            drafter_spec = configured
+        elif workflow_type == "lld":
+            drafter_spec = "mock:lld"
+        else:
+            drafter_spec = "mock:draft"
     else:
         drafter_spec = state.get("config_drafter", "gemini:3.1-pro")
 

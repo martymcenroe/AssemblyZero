@@ -1743,6 +1743,41 @@ class MockProvider(LLMProvider):
         "draft": [
             "# Mock Issue Title\n\n## Summary\n\nThis is a mock draft for testing.\n\n## Requirements\n\n- Mock requirement 1\n- Mock requirement 2\n\n## Acceptance Criteria\n\n- [ ] Mock criteria met",
         ],
+        # #3533: an LLD that clears N1.5 on a near-empty repo, so `--mock`
+        # rehearses the whole LLD workflow -- review and finalize included --
+        # instead of looping on "Section 2.1 missing" to the draft cap. One
+        # new file at the repo root, so path validation has nothing to find.
+        "lld": [
+            "# Mock Feature: rehearsal LLD\n\n"
+            "## 1. Context & Goal\n\n"
+            "A mock LLD written by the mock drafter so a `--mock` run reaches "
+            "review and finalize.\n\n"
+            "## 2. Proposed Changes\n\n"
+            "### 2.1 Files Changed\n\n"
+            "| File | Change Type | Description |\n"
+            "|------|-------------|-------------|\n"
+            "| `mock_feature.py` | Add | Mock module for the rehearsal |\n\n"
+            "### 2.4 Function Signatures\n\n"
+            "```python\ndef mock_feature() -> int: ...\n```\n\n"
+            "## 3. Requirements\n\n"
+            "1. `mock_feature()` returns `1`.\n\n"
+            "## 10. Verification & Testing\n\n"
+            "### 10.0 Test Plan (TDD - Complete Before Implementation)\n\n"
+            "| Test ID | Test Description | Expected Behavior | Status |\n"
+            "|---------|------------------|-------------------|--------|\n"
+            "| T010 | mock_feature returns one | returns `1` | RED |\n\n"
+            "### 10.1 Test Scenarios\n\n"
+            "| ID | Scenario | Type | Input | Expected Output | Pass Criteria |\n"
+            "|----|----------|------|-------|-----------------|---------------|\n"
+            "| 010 | mock_feature returns one (REQ-1) | Auto | none | `1` "
+            "| `mock_feature() == 1` |\n\n"
+            "## 11. Risks & Mitigations\n\n"
+            "| Risk | Impact | Likelihood | Mitigation |\n"
+            "|------|--------|------------|------------|\n"
+            "| None; this is a rehearsal | Low | Low | Not applicable |\n\n"
+            "## 12. Definition of Done\n\n"
+            "- [x] `mock_feature()` returns `1` (T010)\n",
+        ],
         "review": [
             # Standard 0028: mock providers honor the structured contract
             # like every other provider — a schema-valid verdict, never
