@@ -725,6 +725,14 @@ def run_single_workflow(
     Returns:
         Exit code (0 for success, non-zero for error).
     """
+    # #3503: the record opens before anything is printed, so the tag and the
+    # log path are the first line and the header is already in the log. A
+    # dry run writes nothing, by definition.
+    record = None
+    if not args.dry_run:
+        from assemblyzero.core.run_record import RunRecord
+        record = RunRecord.start("lld", target_repo, args.issue or None)
+
     # Print header
     print_header(args)
 
@@ -812,14 +820,20 @@ def run_single_workflow(
 
         if final_state.get("error_message"):
             _finalize_speedrun("fail", fstate=final_state, error_msg=final_state.get("error_message", ""))
+            if record:
+                record.finish("fail", final_state.get("error_message", ""))
             return 1
 
         _finalize_speedrun("success", fstate=final_state)
+        if record:
+            record.finish("success")
         return 0
 
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted by user.")
         _finalize_speedrun("halt", error_msg="user interrupt", notes="KeyboardInterrupt")
+        if record:
+            record.finish("halt", "user interrupt")
         return 130
 
     except Exception as e:
@@ -828,6 +842,9 @@ def run_single_workflow(
             import traceback
             traceback.print_exc()
         _finalize_speedrun("halt", error_msg=str(e), notes=f"exception:{type(e).__name__}")
+        if record:
+            record.crash(e)
+            record.finish("halt", str(e))
         return 1
 
 
@@ -859,6 +876,10 @@ def run_resume_review(
         print(f"ERROR: No resumable draft found for issue #{issue_number}")
         print("  A resumable draft requires lineage with a draft file but no subsequent verdict.")
         return 1
+
+    # #3503: a resumed run is a run; it leaves the same record.
+    from assemblyzero.core.run_record import RunRecord
+    record = RunRecord.start("lld", target_repo, issue_number)
 
     print_header(args)
     print("[RESUME] Resuming at review with existing draft from:")
@@ -1048,12 +1069,15 @@ def run_resume_review(
             print_result(final_state)
 
             if final_state.get("error_message"):
+                record.finish("fail", final_state.get("error_message", ""))
                 return 1
 
+            record.finish("success")
             return 0
 
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted by user.")
+        record.finish("halt", "user interrupt")
         return 130
 
     except Exception as e:
@@ -1061,6 +1085,8 @@ def run_resume_review(
         if args.debug:
             import traceback
             traceback.print_exc()
+        record.crash(e)
+        record.finish("halt", str(e))
         return 1
 
 
