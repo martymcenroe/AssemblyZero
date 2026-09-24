@@ -62,7 +62,14 @@ git replace --graft <SQUASH_SHA> $BASE_SHA <ORPHAN_TIP_SHA>
 #     step 3 refuses and git's hint points straight at -D. Point the upstream
 #     at the ref the graft made the orphan reachable from. The proof is still
 #     the graft from step 2; the upstream only tells -d where to look for it.
-if [ "$(git branch --show-current)" != "<DEFAULT_BRANCH>" ]; then
+#
+#     The same refusal happens with HEAD ON the default branch when local
+#     <DEFAULT_BRANCH> has not been fast-forwarded past the squash (#3185):
+#     HEAD is main, and main does not contain the graft either. So the test is
+#     not "which branch is checked out" but "can HEAD reach the squash". The
+#     upstream it sets must contain the squash, which a fetch guarantees; step
+#     0b already compared against that commit.
+if ! git merge-base --is-ancestor <SQUASH_SHA> HEAD; then
   git branch --set-upstream-to=origin/<DEFAULT_BRANCH> <ORPHAN_BRANCH_NAME>
 fi
 
