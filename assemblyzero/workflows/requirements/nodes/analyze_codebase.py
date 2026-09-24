@@ -131,7 +131,16 @@ def analyze_codebase(state: dict) -> dict:
     # ------------------------------------------------------------------
     base_branch = str(state.get("base_branch", "") or "")
     issue_number = state.get("issue_number")
-    if base_branch and issue_number:
+    # #3512: a mock run is an offline rehearsal. N5 already cuts no branch
+    # and opens no PR under the flag (#2288); this is the same flag read the
+    # same way. No fetch, no worktree, no branch. Reading the checkout here is
+    # not #2684's leak: the mock drafter reads nothing it is given.
+    if base_branch and issue_number and state.get("config_mock_mode"):
+        print(
+            f"    [mock] no LLD worktree cut and no fetch of origin/{base_branch}; "
+            f"analysis reads the checkout"
+        )
+    elif base_branch and issue_number:
         from assemblyzero.workflows.requirements.git_operations import (
             GitOperationError,
             setup_lld_worktree,
