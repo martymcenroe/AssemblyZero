@@ -1030,8 +1030,8 @@ class TestCheckAndShiftExistingLLD:
         result = check_and_shift_existing_lld(42, tmp_path, yes=True)
 
         assert result is True
-        # LLD should be deleted
-        assert not lld_file.exists()
+        # #3510: the checkout's LLD stays; the new one lands in the worktree
+        assert lld_file.read_text() == "# Existing LLD"
 
     @patch.dict("os.environ", {"ASSEMBLYZERO_TEST_MODE": "1"})
     def test_auto_confirms_in_test_mode(self, tmp_path):
@@ -1051,8 +1051,8 @@ class TestCheckAndShiftExistingLLD:
         result = check_and_shift_existing_lld(42, tmp_path, yes=False)
 
         assert result is True
-        # LLD should be deleted, lineage shifted
-        assert not (lld_dir / "LLD-042.md").exists()
+        # #3510: the LLD stays; lineage is shifted
+        assert (lld_dir / "LLD-042.md").exists()
         assert not (tmp_path / AUDIT_ACTIVE_DIR / "42-lld").exists()
         assert (tmp_path / AUDIT_ACTIVE_DIR / "42-lld-n1").exists()
 
@@ -1130,7 +1130,8 @@ class TestMainWithPreGenerationCheck:
         mock_run.return_value = 0
 
         original_argv = sys.argv
-        sys.argv = ["prog", "--type", "lld", "--issue", "42", "--mock"]
+        # #3510: a real run; a mock run skips the check (tested below).
+        sys.argv = ["prog", "--type", "lld", "--issue", "42"]
 
         try:
             main()
@@ -1139,6 +1140,31 @@ class TestMainWithPreGenerationCheck:
 
         # Pre-generation check should be called
         mock_check.assert_called_once_with(42, tmp_path, False)
+
+    @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
+    @patch("tools.run_requirements_workflow.run_single_workflow")
+    @patch("tools.run_requirements_workflow.resolve_roots")
+    def test_main_skips_the_check_on_a_mock_run(
+        self, mock_roots, mock_run, mock_check, tmp_path
+    ):
+        """#3510: a mock run writes under data/mock-runs/ and must not shift
+        a real run's lineage for the same issue number."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        mock_roots.return_value = (tmp_path, tmp_path)
+        mock_run.return_value = 0
+
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "lld", "--issue", "42", "--yes", "--mock"]
+
+        try:
+            main()
+        finally:
+            sys.argv = original_argv
+
+        mock_check.assert_not_called()
+        mock_run.assert_called_once()
 
     @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
     @patch("tools.run_requirements_workflow.run_single_workflow")
@@ -1155,7 +1181,7 @@ class TestMainWithPreGenerationCheck:
         mock_run.return_value = 0
 
         original_argv = sys.argv
-        sys.argv = ["prog", "--type", "lld", "--issue", "42", "--yes", "--mock"]
+        sys.argv = ["prog", "--type", "lld", "--issue", "42", "--yes"]
 
         try:
             main()
