@@ -22,8 +22,8 @@ As of March 2026, babysitting has shifted from manual "human-watching-agent" to 
 
 ## Hard Rules
 
-1. **ALWAYS redirect output to `/tmp/` file.** Use: `> /tmp/workflow-ISSUE.log 2>&1 &` and `echo "PID: $!"`.
-2. **NEVER use the TaskOutput tool to monitor workflows.** Use `cat /tmp/workflow-ISSUE.log` instead.
+1. **ALWAYS redirect output to the target repo's `data/` directory.** Use `> /c/Users/mcwiz/Projects/{TARGET_REPO}/data/workflow-{ISSUE}.log 2>&1`, and launch with the Bash tool's `run_in_background` rather than `&`. Never `/tmp` (a hidden space the fleet's rules ban) and never `echo` (the shell guard denies it); the background launch reports the process itself, so `$!` is not needed (#3514).
+2. **NEVER use the TaskOutput tool to monitor workflows.** Read the run's own record: the tool's first line is `[run] <tag> -> <path>` (#3503), and `<tag>-events.log` beside that path carries node transitions, the crash record and the left-in-place list. `tail -n 40 <path>` is the monitor.
 3. **One workflow at a time** unless explicitly told otherwise.
 4. **Token discipline is paramount.** Use surgical context pruning on all retries.
 5. **When something produces no output, redirect to file FIRST.**
@@ -38,7 +38,7 @@ All commands run from AssemblyZero. The `--repo` flag points to the target repo.
 cd /c/Users/mcwiz/Projects/AssemblyZero
 PYTHONUNBUFFERED=1 poetry run python tools/run_requirements_workflow.py \
     --type lld --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} --yes \
-    > /tmp/lld-{NUMBER}.log 2>&1
+    > /c/Users/mcwiz/Projects/{TARGET_REPO}/data/lld-{NUMBER}.log 2>&1
 ```
 
 ### Step 2 — Implementation Spec
@@ -46,7 +46,7 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_requirements_workflow.py \
 cd /c/Users/mcwiz/Projects/AssemblyZero
 PYTHONUNBUFFERED=1 poetry run python tools/run_implementation_spec_workflow.py \
     --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} \
-    > /tmp/impl-spec-{NUMBER}.log 2>&1
+    > /c/Users/mcwiz/Projects/{TARGET_REPO}/data/impl-spec-{NUMBER}.log 2>&1
 ```
 
 ### Step 3 — TDD Implementation
@@ -54,7 +54,7 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_implementation_spec_workflow.py \
 cd /c/Users/mcwiz/Projects/AssemblyZero
 PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
     --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} \
-    > /tmp/tdd-{NUMBER}.log 2>&1
+    > /c/Users/mcwiz/Projects/{TARGET_REPO}/data/tdd-{NUMBER}.log 2>&1
 ```
 
 ## Monitoring (The Perdita Watch)
