@@ -380,7 +380,7 @@ def is_session_vend(permission: str) -> tuple[bool, str]:
         # But we need to be careful - some might be intentional
         # Only flag if it has a very specific path
         # Use config for path if available, otherwise fallback to default
-        projects_path = config.projects_root_unix() if config else "/c/Users/mcwiz/Projects"
+        projects_path = config.projects_root_unix() if config else Path(__file__).resolve().parents[2].as_posix()
         pattern = rf'Bash\(git -C {re.escape(projects_path)}/[^/]+-\d+ '
         if re.search(pattern, permission):
             return True, "git command on worktree (has issue ID)"

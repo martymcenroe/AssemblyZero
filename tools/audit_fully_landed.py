@@ -3,7 +3,9 @@ import subprocess
 import json
 import time
 
-projects_dir = "/mnt/c/Users/mcwiz/Projects"
+from pathlib import Path
+
+projects_dir = str(Path(__file__).resolve().parents[2])  # #3536: derived from the checkout, never spelled
 
 print(f"# Fully Landed Audit Report\n\nGenerated for `{projects_dir}`.\n")
 

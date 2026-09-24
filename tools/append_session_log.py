@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 
 # Configuration - Parent level session logs
-SESSION_LOGS_DIR = Path("C:/Users/mcwiz/Projects/session-logs")
+SESSION_LOGS_DIR = Path(__file__).resolve().parents[2] / "session-logs"  # #3536: derived from the checkout, never spelled
 CT_TIMEZONE = ZoneInfo("America/Chicago")
 
 

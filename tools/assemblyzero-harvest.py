@@ -217,7 +217,7 @@ def scan_project_permissions(project_path: Path, project_name: str) -> list:
         if pattern not in assemblyzero_allow:
             # Check if it looks generic (not project-specific path)
             # Use config for path if available, otherwise fallback to default
-            projects_path = config.projects_root_unix() if config else "/c/Users/mcwiz/Projects"
+            projects_path = config.projects_root_unix() if config else Path(__file__).resolve().parents[2].as_posix()
             is_generic = project_name.lower() not in pattern.lower() and \
                          projects_path not in pattern
 
