@@ -1061,9 +1061,16 @@ def shift_lineage_versions(issue_number: int, target_repo: Path) -> list[str]:
     """Shift existing lineage directories to preserve history.
 
     Per Standard 0012, when regenerating an LLD:
-    1. Delete existing LLD file
-    2. Shift lineage: {issue}-lld-n1 -> {issue}-lld-n2 (if n1 exists)
-    3. Rename current: {issue}-lld -> {issue}-lld-n1
+    1. Shift lineage: {issue}-lld-n1 -> {issue}-lld-n2 (if n1 exists)
+    2. Rename current: {issue}-lld -> {issue}-lld-n1
+
+    #3510: this no longer deletes the checkout's LLD or resets its
+    ``lld-status.json`` entry. Both are tracked files in the operator's
+    checkout, and a regeneration writes the new LLD and status into the LLD
+    worktree (see ``git_operations.lld_write_root``), which overwrites both
+    there. Deleting them here left the checkout dirty for nothing. Lineage is
+    workflow audit data that target repos gitignore (#1458), so shifting it
+    changes nothing tracked.
 
     Args:
         issue_number: GitHub issue number.
@@ -1076,22 +1083,11 @@ def shift_lineage_versions(issue_number: int, target_repo: Path) -> list[str]:
     active_dir = target_repo / AUDIT_ACTIVE_DIR
 
     # Paths
-    lld_path = target_repo / LLD_ACTIVE_DIR / f"LLD-{issue_number:03d}.md"
     lineage_current = active_dir / f"{issue_number}-lld"
     lineage_n1 = active_dir / f"{issue_number}-lld-n1"
     lineage_n2 = active_dir / f"{issue_number}-lld-n2"
 
-    # Step 1: Delete existing LLD file
-    if lld_path.exists():
-        lld_path.unlink()
-        operations.append(f"Deleted: {lld_path.relative_to(target_repo)}")
-
-    # Step 1.5: Reset lld-status.json entry (Issue #279: prevent stale approval)
-    # When regenerating, the old approval is invalid - must go through fresh review
-    _reset_lld_status_entry(issue_number, target_repo)
-    operations.append(f"Reset status for issue #{issue_number} in lld-status.json")
-
-    # Step 2: Shift n1 -> n2 (if n1 exists)
+    # Step 1: Shift n1 -> n2 (if n1 exists)
     if lineage_n1.exists():
         if lineage_n2.exists():
             # n2 already exists - remove it first (oldest version discarded)
@@ -1104,7 +1100,7 @@ def shift_lineage_versions(issue_number: int, target_repo: Path) -> list[str]:
             f"{lineage_n2.relative_to(target_repo)}"
         )
 
-    # Step 3: Shift current -> n1 (if current exists)
+    # Step 2: Shift current -> n1 (if current exists)
     if lineage_current.exists():
         lineage_current.rename(lineage_n1)
         operations.append(

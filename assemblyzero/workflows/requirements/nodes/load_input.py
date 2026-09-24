@@ -276,11 +276,15 @@ This is a mock issue for testing.
     # Closes #1467: per-run subdirectory.
     run_id = state.get("workflow_run_id", "") or make_run_id()
 
-    # Create audit directory
+    # #3510: a mock run's lineage goes under the mock output root, not the
+    # checkout's docs/lineage/, where it would sit beside (and be shifted
+    # with) a real run's lineage for the same issue number.
+    from assemblyzero.workflows.requirements.git_operations import mock_output_root
+
     audit_dir = create_audit_dir(
         workflow_type="lld",
         issue_number=issue_number,
-        target_repo=target_repo,
+        target_repo=mock_output_root(target_repo, issue_number),
         run_id=run_id,
     )
 
