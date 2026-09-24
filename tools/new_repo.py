@@ -760,11 +760,8 @@ def create_gemini_md(project_path: Path, name: str, github_user: str) -> None:
 **Before doing any work, read the AssemblyZero core rules:**
 `{assemblyzero_root_windows}\\CLAUDE.md`
 
-That file contains core rules that apply to ALL projects and ALL agents:
-- Bash command rules (no &&, |, ;)
-- Path format rules
-- Worktree isolation rules
-- Decision-making protocol
+Those rules apply to every project and every agent. They are not restated
+here, because a restatement drifts on every universal edit (ADR 0219).
 
 ---
 
@@ -773,7 +770,7 @@ That file contains core rules that apply to ALL projects and ALL agents:
 - **Authority:** `AssemblyZero:standards/0002-coding-standards` is the law for Git workflows.
 - **One Step Per Turn:** Provide one distinct step, then wait for confirmation.
 - **Check First:** Verify paths/content before changing them.
-- **Copy-Paste Ready:** No placeholders. Use heredocs for new files.
+- **Copy-Paste Ready:** No placeholders.
 
 ---
 
