@@ -37,6 +37,18 @@ def _state_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(resume_contract, "STATE_DIR", state)
 
 
+@pytest.fixture(autouse=True)
+def _disarm_call_recording():
+    """A run arms call recording (`call_recording.set_context`) and leaves it
+    armed when `main()` returns; a CLI process exits, a test process does
+    not. Left armed, every later `get_provider` in the session hands back a
+    `RecordingProvider`, which fails fifteen tests elsewhere."""
+    from assemblyzero.core import call_recording
+
+    yield
+    call_recording.reset_context()
+
+
 @pytest.fixture
 def target_repo(tmp_path: Path) -> Path:
     origin = tmp_path / "origin.git"
