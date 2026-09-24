@@ -33,12 +33,17 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 @pytest.fixture(autouse=True)
 def _state_dir(tmp_path, monkeypatch):
-    """Keep any halt snapshot out of the real ~/.assemblyzero (#3531)."""
+    """Keep halt snapshots and the workflow audit log out of the operator's
+    real home directory (#3531)."""
     from assemblyzero.core import resume_contract, state_persistence
+    from assemblyzero.workflows.testing import audit as testing_audit
 
     state = tmp_path / "workflow_state"
     monkeypatch.setattr(state_persistence, "STATE_DIR", state)
     monkeypatch.setattr(resume_contract, "STATE_DIR", state)
+    monkeypatch.setattr(
+        testing_audit, "WORKFLOW_AUDIT_FILE", tmp_path / "workflow-audit.jsonl"
+    )
 
 
 @pytest.fixture(autouse=True)

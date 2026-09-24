@@ -27,6 +27,8 @@ from ..git_operations import (
     GitOperationError,
     commit_and_pr,
     commit_and_push,
+    lld_write_root,
+    mock_output_root,
     setup_lld_worktree,
 )
 from assemblyzero.core.verdict_schema import (
@@ -139,8 +141,8 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
     except FileNotFoundError:
         return {"error_message": "gh CLI not found. Install GitHub CLI."}
 
-    # Save final state to audit
-    if audit_dir.exists():
+    # Save final state to audit (#3510: an empty audit_dir is not the cwd)
+    if state.get("audit_dir") and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         final_content = f"# Issue Filed\n\nURL: {issue_url}\n\n---\n\n{current_draft}"
         save_audit_file(audit_dir, file_num, "final.md", final_content)
@@ -260,6 +262,12 @@ def _mirror_to_worktree(
     out: list[str] = []
     for f in created_files:
         src = Path(f)
+        # #3510: N5 now writes into the worktree itself. Such a file is where
+        # it belongs; resolved against the checkout it would be copied to
+        # <worktree>/data/worktrees/<issue>-lld/..., a second copy of itself.
+        if src.resolve().is_relative_to(Path(worktree_path).resolve()):
+            out.append(str(src))
+            continue
         try:
             rel = src.relative_to(target_repo)
         except ValueError:
@@ -524,8 +532,24 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
         review_count=verdict_count,
     )
 
+    # #3510: the LLD and lld-status.json go into the LLD worktree (a mock
+    # run: the mock output root), never the operator's checkout. They used to
+    # be written into the checkout and copied to the worktree, so every run
+    # left them behind as uncommitted changes.
+    try:
+        write_root = lld_write_root(state)
+    except GitOperationError as exc:
+        # fail-open: not a fall-through -- error_message is the halt; the
+        # finalize node and its caller stop on it, and nothing is written into
+        # the checkout in the worktree's place.
+        state["error_message"] = (
+            f"LLD not saved: the LLD worktree could not be cut ({exc}). "
+            f"Refusing to write into the checkout ({target_repo}) instead (#3510)."
+        )
+        return state
+
     # Save to docs/lld/active/LLD-{issue_number}.md
-    lld_dir = target_repo / "docs" / "lld" / "active"
+    lld_dir = write_root / "docs" / "lld" / "active"
     lld_dir.mkdir(parents=True, exist_ok=True)
     lld_path = lld_dir / f"LLD-{issue_number:03d}.md"
     lld_path.write_text(lld_content, encoding="utf-8")
@@ -545,13 +569,20 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
         "last_review_date": datetime.now(timezone.utc).isoformat(),
         "review_count": verdict_count,
     }
-    update_lld_status(
-        issue_number=issue_number,
-        lld_path=str(lld_path),
-        review_info=review_info,
-        target_repo=target_repo,
-    )
-    print("    Updated lld-status.json tracking")
+    # #3510: not on a mock run. The approval cache resolves to the target's
+    # MAIN worktree whatever path it is handed (audit.lld_status_path, #1970),
+    # so a mock run recorded a mock APPROVED verdict for a real issue number
+    # in the target's real cache -- a rehearsal marking a real LLD approved.
+    if state.get("config_mock_mode"):
+        print("    [mock] approval cache (data/assemblyzero/lld-status.json) not updated")
+    else:
+        update_lld_status(
+            issue_number=issue_number,
+            lld_path=str(lld_path),
+            review_info=review_info,
+            target_repo=write_root,
+        )
+        print("    Updated lld-status.json tracking")
 
     # Add to created_files for commit
     created_files = list(state.get("created_files", []))
@@ -562,15 +593,17 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     # Closes #1458 (superseded #241 which committed lineage to target main).
 
     # Add lld-status.json to commit (Issue #279: was missing, causing stale status)
-    lld_status_path = target_repo / "docs" / "lld" / "lld-status.json"
+    lld_status_path = write_root / "docs" / "lld" / "lld-status.json"
     if lld_status_path.exists():
         created_files.append(str(lld_status_path))
 
     state["created_files"] = created_files
     state["final_lld_path"] = str(lld_path)
 
-    # Save to audit trail
-    if audit_dir.exists():
+    # Save to audit trail. #3510: `Path("")` is the current directory, which
+    # always exists, so a state with no audit_dir wrote NNN-final.md into
+    # wherever the process happened to be running.
+    if state.get("audit_dir") and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "final.md", lld_content)
 
@@ -696,8 +729,16 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
     if not state.get("error_message"):
         audit_dir = Path(state.get("audit_dir", ""))
         target_repo = Path(state.get("target_repo", "."))
-        if audit_dir.exists():
-            move_lineage_to_done(audit_dir, target_repo)
+        # #3510: a mock run's lineage lives under the mock output root, and
+        # moves to done/ there; resolved against the checkout it would fall
+        # through to the legacy branch and land in the checkout's docs/.
+        lineage_root = (
+            mock_output_root(target_repo, int(state.get("issue_number") or 0))
+            if state.get("config_mock_mode") and workflow_type == "lld"
+            else target_repo
+        )
+        if state.get("audit_dir") and audit_dir.exists():
+            move_lineage_to_done(audit_dir, lineage_root)
 
     # For LLD workflow, commit only on APPROVED — REVISE / BLOCKED outputs
     # are not project history and must not land on target main. Issue workflow

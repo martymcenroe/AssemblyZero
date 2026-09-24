@@ -964,20 +964,27 @@ class TestCheckExistingLLD:
 class TestShiftLineageVersions:
     """Tests for shift_lineage_versions function."""
 
-    def test_deletes_existing_lld_file(self, tmp_path):
-        """Test deletes existing LLD file."""
+    def test_leaves_the_checkouts_lld_and_status_alone(self, tmp_path):
+        """#3510: regeneration writes the new LLD and status into the LLD
+        worktree, so the checkout's tracked copies stay as the base has them.
+        They are consistent with each other (the status describes the LLD
+        beside it), which is what #279's reset protected; deleting and
+        resetting them only left the checkout dirty."""
         from assemblyzero.workflows.requirements.audit import shift_lineage_versions, LLD_ACTIVE_DIR
 
-        # Create LLD file
         lld_dir = tmp_path / LLD_ACTIVE_DIR
         lld_dir.mkdir(parents=True)
         lld_file = lld_dir / "LLD-042.md"
         lld_file.write_text("# Old LLD Content")
+        status = tmp_path / "docs" / "lld" / "lld-status.json"
+        status.write_text('{"42": {"final_verdict": "APPROVED"}}', encoding="utf-8")
+        status_before = status.read_bytes()
 
         operations = shift_lineage_versions(42, tmp_path)
 
-        assert not lld_file.exists()
-        assert any("Deleted" in op for op in operations)
+        assert lld_file.read_text() == "# Old LLD Content"
+        assert status.read_bytes() == status_before
+        assert not any("Deleted" in op or "Reset status" in op for op in operations)
 
     def test_shifts_current_to_n1(self, tmp_path):
         """Test shifts current lineage to n1."""
@@ -1049,9 +1056,8 @@ class TestShiftLineageVersions:
 
         operations = shift_lineage_versions(42, tmp_path)
 
-        # Issue #279: Now always resets lld-status.json even if nothing else exists
-        assert len(operations) == 1
-        assert "Reset status" in operations[0]
+        # #3510: nothing to shift, and the checkout's status is not touched.
+        assert operations == []
 
     def test_handles_only_lld_file(self, tmp_path):
         """Test handles case where only LLD file exists."""
@@ -1065,11 +1071,9 @@ class TestShiftLineageVersions:
 
         operations = shift_lineage_versions(42, tmp_path)
 
-        assert not lld_file.exists()
-        # Issue #279: Now 2 operations - delete + reset status
-        assert len(operations) == 2
-        assert "Deleted" in operations[0]
-        assert "Reset status" in operations[1]
+        # #3510: the LLD stays; there is no lineage to shift.
+        assert lld_file.exists()
+        assert operations == []
 
 
 # =============================================================================

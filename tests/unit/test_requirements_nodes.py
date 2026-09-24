@@ -13,6 +13,25 @@ Tests for:
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
+
+@pytest.fixture
+def write_root_is_target(monkeypatch):
+    """#3510: N5 writes into the LLD worktree. The finalize tests below are
+    about what finalize saves and in what order, not where the tree is, so
+    the write root is the test's own target directory rather than a worktree
+    cut in a directory that is not a git repo. `test_lld_writes_only_worktree`
+    tests where the files land."""
+    import importlib
+
+    fz = importlib.import_module(
+        "assemblyzero.workflows.requirements.nodes.finalize"
+    )
+    monkeypatch.setattr(
+        fz, "lld_write_root", lambda state: Path(state.get("target_repo", "."))
+    )
+
 
 class TestLoadInputNode:
     """Tests for load_input node."""
@@ -913,6 +932,7 @@ class TestReviewReviseToApprovedOnEmptyTier1:
         )
 
 
+@pytest.mark.usefixtures("write_root_is_target")
 class TestFinalizeNode:
     """Tests for finalize node."""
 
@@ -1372,6 +1392,7 @@ class TestFinalLldPrUrlDeclared:
         assert state["final_lld_pr_url"] == ""
 
 
+@pytest.mark.usefixtures("write_root_is_target")
 class TestFinalizeLineageFiles:
     """Tests for lineage files being excluded from created_files.
 

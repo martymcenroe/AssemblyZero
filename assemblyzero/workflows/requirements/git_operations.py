@@ -66,6 +66,43 @@ def lld_worktree_path_for(target_repo: Path | str, issue_number: int) -> Path:
     return pipeline_worktree_path(target_repo, issue_number, lld=True)
 
 
+def mock_output_root(target_repo: Path | str, issue_number: int) -> Path:
+    """Where a ``--mock`` LLD run writes everything it writes (#3510).
+
+    A mock run cuts no worktree (#3512), so it has nowhere of its own to
+    write; the checkout is not that place. This is under the target's
+    gitignored ``data/``, beside the worktrees and the run records, and it
+    mirrors the repo layout: ``docs/lld/active/``, ``docs/lld/lld-status.json``
+    and ``docs/lineage/``.
+
+    Returns:
+        {target_repo}/data/mock-runs/{issue_number}-lld
+    """
+    return Path(target_repo) / "data" / "mock-runs" / f"{issue_number}-lld"
+
+
+def lld_write_root(state: dict) -> Path:
+    """The tree N5 writes the LLD and ``lld-status.json`` into (#3510).
+
+    Never the operator's checkout. A mock run writes under
+    :func:`mock_output_root`; a real run writes into the LLD worktree, which
+    N0b normally cut already (reused here) and whose branch is the one the
+    LLD PR is opened from.
+
+    Raises:
+        GitOperationError: If a real run's worktree cannot be cut.
+    """
+    target_repo = Path(state.get("target_repo", "."))
+    issue_number = int(state.get("issue_number") or 0)
+    if state.get("config_mock_mode"):
+        return mock_output_root(target_repo, issue_number)
+    base_branch = str(state.get("base_branch", "") or "")
+    worktree_path, _branch = setup_lld_worktree(
+        target_repo, issue_number, base_branch=base_branch,
+    )
+    return Path(worktree_path)
+
+
 def lld_start_point(target_repo: Path | str, base_branch: str) -> str:
     """The ref the LLD worktree is cut from: ``origin/<base>`` when origin has it,
     else the local ``<base>`` (#2684). Fetches the branch first so the cut is

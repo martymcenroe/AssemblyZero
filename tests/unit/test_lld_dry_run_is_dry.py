@@ -92,7 +92,9 @@ class TestTheDryRunIsDry:
         _seed_existing_lld(target_repo)
         rc, out = _run_main(target_repo)
         assert rc == 0
-        assert "delete docs" in out.replace("\\", "/") or "delete docs" in out
+        # #3510: regeneration no longer deletes the checkout's LLD.
+        assert "leave docs" in out.replace("\\", "/")
+        assert "delete docs" not in out.replace("\\", "/")
         assert "42-lld-n1" in out
         assert "ask for YES first" in out
 

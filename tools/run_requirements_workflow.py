@@ -747,21 +747,35 @@ def run_single_workflow(
     if args.dry_run:
         print("DRY RUN: Would execute workflow with the above configuration")
         print(f"  Workflow type: {state['workflow_type']}")
-        print(f"  Audit dir would be created at: {target_repo}/docs/lineage/active/...")
+        if args.mock and state["workflow_type"] == "lld":
+            print(f"  Audit dir would be created at: {target_repo}/data/mock-runs/{args.issue}-lld/docs/lineage/active/...")
+        else:
+            print(f"  Audit dir would be created at: {target_repo}/docs/lineage/active/...")
         if state["workflow_type"] == "lld":
-            print(f"  LLD would be saved to: {target_repo}/docs/lld/active/LLD-{args.issue:03d}.md")
+            # #3510: N5 writes into the LLD worktree (a mock run: under
+            # data/mock-runs/), never the checkout.
+            if args.mock:
+                out_root = f"{target_repo}/data/mock-runs/{args.issue}-lld"
+            else:
+                out_root = f"{target_repo}/data/worktrees/{args.issue}-lld"
+            print(f"  LLD would be saved to: {out_root}/docs/lld/active/LLD-{args.issue:03d}.md")
             existing = check_existing_lld(args.issue, target_repo)
-            if existing["lld_exists"] or existing["lineage_exists"]:
+            if (existing["lld_exists"] or existing["lineage_exists"]) and not args.mock:
                 print("  Regeneration (Standard 0012) would first:")
                 if existing["lld_exists"]:
-                    print(f"    delete {existing['lld_path'].relative_to(target_repo)}")
+                    print(
+                        f"    leave {existing['lld_path'].relative_to(target_repo)} "
+                        "in the checkout as it is; the new LLD replaces it in the worktree"
+                    )
                 if existing["lineage_exists"]:
                     lineage_rel = existing["lineage_path"].relative_to(target_repo)
                     print(f"    shift {lineage_rel}/ to {args.issue}-lld-n1 (n1 to n2, n2 removed)")
                 if not args.yes:
                     print("    and ask for YES first (no --yes given)")
             base = state.get("base_branch")
-            if base:
+            if args.mock:
+                print("  Worktree: none (--mock cuts no worktree and fetches nothing, #3512)")
+            elif base:
                 print(f"  Worktree would be cut at: {target_repo}/data/worktrees/{args.issue}-lld")
                 print(f"  Branch would be: {args.issue}-lld from origin/{base}, pushed with a PR on APPROVED")
         print("DRY RUN: nothing was written, deleted, shifted, cut or pushed.")
@@ -1386,7 +1400,7 @@ def check_and_shift_existing_lld(
     print()
     print("Regenerating will:")
     if existing["lld_exists"]:
-        print("  - Delete the existing LLD file")
+        print("  - Write the new LLD into the LLD worktree (the checkout's copy is left as it is)")
     if existing["lineage_exists"]:
         print("  - Move existing lineage to {issue}-lld-n1")
     print()
@@ -1598,7 +1612,10 @@ def main() -> int:
     # lineage under --yes, and it used to run BEFORE the dry-run exit, so
     # `--dry-run --yes` destroyed a generation and then printed DRY RUN. The
     # dry run reports what this call would do instead (run_single_workflow).
-    if args.type == "lld" and args.issue and not args.dry_run:
+    # #3510: not on a mock run either. A mock run writes under
+    # data/mock-runs/ (git_operations.mock_output_root) and has no business
+    # shifting a real run's lineage for the same issue number.
+    if args.type == "lld" and args.issue and not args.dry_run and not args.mock:
         if not check_and_shift_existing_lld(args.issue, target_repo, args.yes):
             return 0  # User aborted
 

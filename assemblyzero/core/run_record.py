@@ -167,6 +167,55 @@ def left_in_place(target: Path, issue: Optional[int]) -> list[str]:
     return found
 
 
+#: Where the squash-merge orphan recipe lives, named in every branch cleanup.
+_GRAFT_ADR = "AssemblyZero docs/adrs/0217-squash-merge-orphan-graft-cleanup.md"
+
+
+def finishing_commands(target: Path, items: list[str]) -> list[str]:
+    """The exact commands that clear what ``left_in_place`` found (#3510).
+
+    A worktree or a branch the run left has an owner only if something says
+    how it ends. This says it, in order: worktrees before branches (``git
+    branch -d`` refuses while a worktree holds the branch), a prune before the
+    delete (a stale remote ref makes ``-d`` prove nothing), and the ADR-0217
+    graft for the squash-merge case, where ``-d`` refuses. Never ``-D`` and
+    never ``--force``. Checkout lines get no command: which of them are work
+    product is the operator's call. Pure; runs nothing.
+    """
+    worktrees: list[str] = []
+    branches: list[str] = []
+    remotes: list[str] = []
+    for item in items:
+        kind, _, rest = item.partition(": ")
+        if kind == "worktree":
+            worktrees.append(rest.split(" [", 1)[0])
+        elif kind == "branch":
+            branches.append(rest)
+        elif kind == "remote branch":
+            remotes.append(rest.removeprefix("origin/"))
+
+    t = str(target)
+    out: list[str] = []
+    for path in worktrees:
+        out.append(
+            f"git -C {t} worktree remove {path}    "
+            "# move any work product out of it first; never --force"
+        )
+    if branches:
+        out.append(f"git -C {t} fetch --prune origin")
+    for name in branches:
+        out.append(
+            f"git -C {t} branch -d {name}    "
+            f"# after a squash merge -d refuses: {_GRAFT_ADR}; never -D"
+        )
+    for name in remotes:
+        out.append(
+            f"git -C {t} push origin --delete {name}    "
+            "# only once its PR has merged or been closed"
+        )
+    return out
+
+
 @dataclass
 class RunRecord:
     tool: str
@@ -274,6 +323,11 @@ class RunRecord:
             print(f"[run] left in place ({len(items)}):", flush=True)
             for item in items:
                 print(f"[run]   {item}", flush=True)
+            commands = finishing_commands(self.target_repo, items)
+            if commands:
+                print("[run] to finish:", flush=True)
+                for command in commands:
+                    print(f"[run]   {command}", flush=True)
             print(f"[run] record: {self.events_path}", flush=True)
         except (OSError, ValueError):
             # fail-open: the events log already holds the list; a console that
@@ -295,6 +349,11 @@ class RunRecord:
             self._write_events(f"    {item}")
         if not items:
             self._write_events("    (nothing)")
+        commands = finishing_commands(self.target_repo, items)
+        if commands:
+            self._write_events(f"{_stamp()} to finish:")
+            for command in commands:
+                self._write_events(f"    {command}")
         return items
 
     def _write_events(self, line: str) -> None:

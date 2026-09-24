@@ -14,6 +14,24 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _write_root_is_target(monkeypatch):
+    """#3510: N5 writes into the LLD worktree. These tests are about the
+    review date embedded in the saved LLD, not where it lands, so the write
+    root is the test's own directory rather than a worktree cut in a
+    directory that is not a git repo."""
+    import importlib
+
+    fz = importlib.import_module(
+        "assemblyzero.workflows.requirements.nodes.finalize"
+    )
+    monkeypatch.setattr(
+        fz, "lld_write_root", lambda state: Path(state.get("target_repo", "."))
+    )
+
 
 
 class TestTemplateNoHallucinationPlaceholders:

@@ -146,6 +146,12 @@ def quiet_finalize(monkeypatch):
     monkeypatch.setattr(fz, "log_workflow_execution", lambda **kw: None)
     monkeypatch.setattr(fz, "move_lineage_to_done", lambda *a, **k: None)
     monkeypatch.setattr(fz, "update_lld_status", lambda **kw: None)
+    # #3510: N5 writes into the LLD worktree; these tests are about the
+    # repair routing, not where the file lands, so the write root is the
+    # test's own directory rather than a worktree cut in a non-repo.
+    monkeypatch.setattr(
+        fz, "lld_write_root", lambda state: Path(state.get("target_repo", "."))
+    )
 
 
 def _revise(monkeypatch, state, drafter):
