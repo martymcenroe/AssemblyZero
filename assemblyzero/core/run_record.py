@@ -75,6 +75,8 @@ class _Tee:
             self._log.write(text)
             self._log.flush()
         except (OSError, ValueError):
+            # fail-open: the console already got the text; a log that cannot
+            # take it must not stop the run it exists to record
             pass
         return n if n is not None else len(text)
 
@@ -83,6 +85,7 @@ class _Tee:
         try:
             self._log.flush()
         except (OSError, ValueError):
+            # fail-open: same as write; the console is the primary stream
             pass
 
     def __getattr__(self, name: str):
@@ -98,6 +101,8 @@ def _git(target: Path, *args: str) -> tuple[bool, str]:
             timeout=_GIT_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
+        # fail-open: the False is the signal; every caller prints the reason
+        # as an "unknown" line, so a git that cannot answer is on the record
         return False, f"{type(exc).__name__}: {exc}"
     if result.returncode != 0:
         return False, (result.stderr or result.stdout).strip()
@@ -215,6 +220,8 @@ class RunRecord:
             sys.stdout = _Tee(sys.stdout, record._log_fh)
             sys.stderr = _Tee(sys.stderr, record._log_fh)
         except OSError as exc:
+            # fail-open: console-only is the fallback the warning names; the
+            # run starts regardless, and the events log is still attempted
             record._warn(f"run log not opened ({exc}); console only")
         print(f"[run] {record.tag} -> {record.out_path}", flush=True)
         record.event(
@@ -269,6 +276,8 @@ class RunRecord:
                 print(f"[run]   {item}", flush=True)
             print(f"[run] record: {self.events_path}", flush=True)
         except (OSError, ValueError):
+            # fail-open: the events log already holds the list; a console that
+            # cannot take it changes nothing about the record
             pass
         self._restore_streams()
 
@@ -294,6 +303,8 @@ class RunRecord:
             with self.events_path.open("a", encoding="utf-8", errors="replace") as fh:
                 fh.write(line + "\n")
         except OSError as exc:
+            # fail-open: the warning carries the lost line to stderr; the
+            # record is best-effort by design and never raises into the run
             self._warn(f"events log not written ({exc}): {line}")
 
     def _warn(self, message: str) -> None:
@@ -302,6 +313,7 @@ class RunRecord:
             stream.write(f"[run] warning: {message}\n")
             stream.flush()
         except (OSError, ValueError):
+            # fail-open: the last resort; there is nothing left to report to
             pass
 
     def _restore_streams(self) -> None:
@@ -315,5 +327,7 @@ class RunRecord:
             try:
                 self._log_fh.close()
             except OSError:
+                # fail-open: a handle that will not close is already useless;
+                # the streams were restored above and the run is ending
                 pass
             self._log_fh = None
