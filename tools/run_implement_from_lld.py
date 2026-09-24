@@ -716,7 +716,10 @@ def main():
     # fresh run has no contract and passes silently.
     from assemblyzero.core.resume_contract import check_and_consume
 
-    if not check_and_consume(
+    # #3508: a dry run consumes nothing either; a verified contract is deleted
+    # on the way through, and a dry run must leave the halt's record for the
+    # real resume that follows it.
+    if not args.dry_run and not check_and_consume(
         "testing", args.issue,
         accept_changed=args.accept_changed_inputs,
     ):
@@ -725,6 +728,42 @@ def main():
     # Track original repo for worktree cleanup later
     original_repo_root = repo_root
     worktree_path = None
+
+    # Issue #290 / #3508: the dry run exits BEFORE the worktree is cut and
+    # the branch pushed. It used to sit after both, so `--dry-run` created a
+    # sibling directory, cut a branch, pushed it, and then printed "no files
+    # modified". It reports the plan and touches nothing; a test cuts a
+    # throwaway repo with a bare origin and shows the worktree list, the
+    # branch list and the origin's refs unchanged afterwards.
+    if args.dry_run:
+        db_path = Path(args.db_path) if args.db_path else get_checkpoint_db_path(args.issue)
+        lld_path = repo_root / "docs" / "lld" / "active" / f"LLD-{args.issue:03d}.md"
+        print()
+        print("[implement] AssemblyZero TDD Testing Workflow")
+        print("[implement] Mode: DRY RUN")
+        print()
+        print("[DRY RUN] Would execute:")
+        print("  N0_load_lld -> N1_review_test_plan -> N2_scaffold_tests -> N3_verify_red")
+        print("  -> N4_implement_code -> N5_verify_green -> N6_e2e_validation -> N7_finalize")
+        print()
+        print(f"  Repository: {repo_root}")
+        if args.no_worktree:
+            print("  Worktree: none (--no-worktree), the run would work in place")
+        else:
+            current = get_current_branch(repo_root)
+            base = args.base_branch or current or "(unreadable)"
+            print(
+                f"  Worktree would be cut at: {repo_root.parent / f'{repo_root.name}-{args.issue}'}"
+            )
+            print(f"  Branch would be: {args.issue}-implementation from {base}, pushed at creation")
+        print(f"  LLD: {lld_path} ({'found' if lld_path.exists() else 'NOT FOUND'})")
+        print(f"  Database: {db_path}")
+        print(f"  Mock mode: {args.mock}")
+        print(f"  Skip E2E: {args.skip_e2e}")
+        print(f"  Max iterations: {args.max_iterations}")
+        print()
+        print("[DRY RUN] Nothing was created, pushed or modified.")
+        return 0
 
     # Handle worktree creation/detection (#1756 attempt-branch model:
     # ANY named integration branch — main or e.g. speedrun-attempt-N —
@@ -810,23 +849,6 @@ def main():
     if args.timeout > 0:
         print(f"[implement] Timeout: {args.timeout} minutes")
     print()
-
-    # Issue #290: Dry-run — preview execution plan and exit
-    if args.dry_run:
-        lld_path = repo_root / "docs" / "lld" / "active" / f"LLD-{args.issue:03d}.md"
-        lld_exists = lld_path.exists()
-        print("[DRY RUN] Would execute:")
-        print("  N0_load_lld -> N1_review_test_plan -> N2_scaffold_tests -> N3_verify_red")
-        print("  -> N4_implement_code -> N5_verify_green -> N6_e2e_validation -> N7_finalize")
-        print()
-        print(f"  LLD: {lld_path} ({'found' if lld_exists else 'NOT FOUND'})")
-        print(f"  Database: {db_path}")
-        print(f"  Mock mode: {args.mock}")
-        print(f"  Skip E2E: {args.skip_e2e}")
-        print(f"  Max iterations: {args.max_iterations}")
-        print()
-        print("[DRY RUN] No API calls made, no files modified.")
-        return 0
 
     # #3503: from here on the run leaves a record in the CHECKOUT's
     # data/speedrun/runs/ (not the worktree's, which the run may remove):
