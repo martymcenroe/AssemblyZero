@@ -828,6 +828,13 @@ def main():
         print("[DRY RUN] No API calls made, no files modified.")
         return 0
 
+    # #3503: from here on the run leaves a record in the CHECKOUT's
+    # data/speedrun/runs/ (not the worktree's, which the run may remove):
+    # the tag and log path first, node transitions as the graph streams,
+    # a crash record if it dies, and what it left in place at the end.
+    from assemblyzero.core.run_record import RunRecord
+    record = RunRecord.start("impl", original_repo_root, args.issue)
+
     # Issue #288/#289: Load and validate context files
     context_content = ""
     if args.context:
@@ -839,6 +846,7 @@ def main():
             print(f"[implement] {err}")
         if context_errors and not context_content:
             print("[implement] ERROR: All context files failed validation")
+            record.finish("fail", "all context files failed validation")
             sys.exit(1)
         if context_content:
             print(f"[implement] Context loaded: {len(context_content):,} chars")
@@ -881,7 +889,12 @@ def main():
         initial_state["sandbox_repo"] = args.sandbox_repo
 
     # Build workflow
-    workflow = build_testing_workflow()
+    try:
+        workflow = build_testing_workflow()
+    except Exception as e:
+        record.crash(e)
+        record.finish("halt", str(e))
+        raise
 
     # Run with checkpointing
     thread_id = f"{args.issue}-testing"
@@ -964,6 +977,7 @@ def main():
             for event in app.stream(initial_state, config):
                 # Each event is keyed by node name
                 for node_name, node_output in event.items():
+                    record.node(node_name)
                     if node_name == "__end__":
                         continue
 
@@ -1012,6 +1026,7 @@ def main():
                         )
                     _write_status_file(repo_root, args.issue, "FAILED", values.get("error_message", ""), state=values)
                     _finalize_speedrun("fail", state=values, error_msg=values.get("error_message", ""))
+                    record.finish("fail", values.get("error_message", ""))
                     return 1
                 else:
                     print("Status: SUCCESS")
@@ -1030,6 +1045,7 @@ def main():
                         )
                     _write_status_file(repo_root, args.issue, "SUCCESS", state=values)
                     _finalize_speedrun("success", state=values)
+                    record.finish("success")
 
                     # Show next steps for worktree workflow
                     if worktree_path:
@@ -1052,6 +1068,7 @@ def main():
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted. Use --resume to continue.")
         _finalize_speedrun("halt", error_msg="user interrupt", notes="KeyboardInterrupt")
+        record.finish("halt", "user interrupt")
         return 130
 
     except Exception as e:
@@ -1067,14 +1084,19 @@ def main():
                 print(f"\nResponse preview:\n{preview[:500]}")
             print("\nThis is a hard failure. The implementation node could not produce valid code.")
             print("Check the LLD specification and try again.")
+            record.crash(e)
+            record.finish("fail", getattr(e, "reason", str(e)))
             return 1
 
         print(f"\n[FATAL] Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         _finalize_speedrun("halt", error_msg=str(e), notes=f"exception:{type(e).__name__}")
+        record.crash(e)
+        record.finish("halt", str(e))
         return 1
 
+    record.finish("halt", "the graph produced no final state")
     return 0
 
 
