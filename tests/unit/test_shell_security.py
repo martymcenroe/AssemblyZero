@@ -22,6 +22,18 @@ class TestValidateCommand:
         with pytest.raises(SecurityException, match="--hard"):
             validate_command("git reset --hard")
 
+    @pytest.mark.parametrize("command", [
+        "git push -f origin main",
+        ["git", "branch", "-f", "main", "HEAD~1"],
+        "git worktree remove -f ../x",
+        ["git", "checkout", "-f", "main"],
+    ])
+    def test_prohibited_short_f(self, command):
+        """#3515: `-f` is `--force` spelled short, and the gate listed only the
+        long form, so every short-form force passed it."""
+        with pytest.raises(SecurityException, match="'-f'"):
+            validate_command(command)
+
     def test_safe_commands_pass(self):
         validate_command("ls -la")
         validate_command(["git", "status"])

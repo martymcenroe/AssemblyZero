@@ -17,7 +17,9 @@ from typing import Any
 from assemblyzero.core.errors import SecurityException
 from assemblyzero.core.github_writes import suppress_if_inert
 
-PROHIBITED_FLAGS: frozenset[str] = frozenset({"--admin", "--force", "-D", "--hard"})
+# #3515: `-f` is `--force` spelled short (push, branch, checkout, worktree
+# remove, notes add all take it), and the list carried only the long form.
+PROHIBITED_FLAGS: frozenset[str] = frozenset({"--admin", "--force", "-f", "-D", "--hard"})
 
 
 def validate_command(command: str | list[str]) -> None:
