@@ -130,7 +130,8 @@ def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
 
 
 def create_worktree(
-    repo_path: Path, issue_number: int, start_point: str = ""
+    repo_path: Path, issue_number: int, start_point: str = "",
+    detached: bool = False,
 ) -> tuple[Path, str]:
     """Create a git worktree for the issue.
 
@@ -140,6 +141,10 @@ def create_worktree(
         start_point: Optional ref to carve the work branch from (#1756
             attempt-branch model — e.g. an explicit --base-branch).
             Empty → current HEAD, i.e. the checked-out branch.
+        detached: #3509: cut the worktree on a detached HEAD with no branch.
+            A mock run's checkpoint commits are fake; with no branch to hold
+            them, removing the worktree at the end leaves nothing behind.
+            An existing directory is never reused for a detached cut.
 
     Returns:
         Tuple of (worktree_path, error_message).
@@ -152,6 +157,23 @@ def create_worktree(
 
     # Branch name: issue-number-implementation
     branch_name = f"{issue_number}-implementation"
+
+    if detached:
+        if worktree_path.exists():
+            return worktree_path, (
+                f"{worktree_path} already exists. A mock run cuts a fresh "
+                "detached worktree and never reuses one."
+            )
+        add_cmd = ["git", "worktree", "add", "--detach", str(worktree_path)]
+        if start_point:
+            add_cmd.append(start_point)
+        result = subprocess.run(
+            add_cmd, cwd=str(repo_path), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        if result.returncode != 0:
+            return worktree_path, f"Failed to create worktree: {result.stderr.strip()}"
+        return worktree_path, ""
 
     # Check if worktree already exists AND is valid
     if worktree_path.exists():
@@ -208,6 +230,156 @@ def create_worktree(
     # by design (#2339, testing/checkpoints.py); pushing is the pr stage's
     # job, when there is work to push.
     return worktree_path, ""
+
+
+#: The end state of a standalone run (#3509). Printed in --help and restated
+#: by the final report, so the operator and the run agree on what "done" is.
+END_STATE = """\
+End state (#3509)
+-----------------
+A run that SUCCEEDS finishes its own worktree:
+  - whatever was written after the last checkpoint is committed ([CP:final])
+  - untracked and ignored files in the worktree (lineage, anything the
+    checkpoints exclude or .gitignore hides) are moved to
+    <repo>/data/runs-kept/impl-<issue>-<HHMMSS>/, never deleted;
+    caches (__pycache__, .pytest_cache, .ruff_cache, .mypy_cache, .coverage,
+    .venv, node_modules) are not kept
+  - the branch <issue>-implementation is pushed to origin (a real run only)
+  - the worktree is removed (plain `git worktree remove`, never --force)
+  - the local branch is deleted with `git branch -d` once origin holds it
+  Left: the remote branch <issue>-implementation, and nothing else. The
+  final report prints the `gh pr create` that turns it into a PR and the
+  command that deletes it once the PR has merged or been closed.
+A --mock run cuts a detached worktree (no branch), pushes nothing and
+removes the worktree: it leaves nothing at all.
+A run that FAILS or HALTS keeps its worktree and branch so `--resume` can
+continue; the report lists both and prints the commands that remove them.
+If any step cannot complete (a dirty worktree, a failed push), the run stops
+there, keeps what it has, and the report says which step and why.
+The status file is <repo>/data/speedrun/runs/.implement-status-<issue>.json.
+"""
+
+#: Ignored entries not worth keeping when a worktree is removed: regenerable
+#: caches, named one by one (a closed set, #2475's "decision on record").
+_CACHE_NAMES = frozenset({
+    "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+    ".coverage", ".venv", "node_modules",
+})
+
+
+def _git_out(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=120,
+    )
+
+
+def _keep_uncommitted(worktree: Path, keep_root: Path) -> list[str]:
+    """Move every untracked or ignored, non-cache entry out of ``worktree``
+    into ``keep_root`` at the same relative path.
+
+    ``git worktree remove`` deletes ignored files without asking and ``git
+    status`` calls the tree clean, so this is the only thing standing between
+    a lineage directory and the bin. Untracked entries are the checkpoint's
+    own exclusions (``.assemblyzero/``, ``data/lineage/``), which no commit
+    carries. Returns one line per entry moved."""
+    import shutil
+
+    moved: list[str] = []
+    listing = _git_out(worktree, "status", "--porcelain", "--ignored")
+    for line in listing.stdout.splitlines():
+        if not (line.startswith("!! ") or line.startswith("?? ")):
+            continue
+        rel = line[3:].strip().strip('"').rstrip("/")
+        if not rel or set(Path(rel).parts) & _CACHE_NAMES:
+            continue
+        src = worktree / rel
+        if not src.exists():
+            continue
+        dest = keep_root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        moved.append(f"kept: {rel} -> {dest}")
+    return moved
+
+
+def finish_standalone_run(
+    original_repo_root: Path, worktree_path: Path, issue_number: int,
+    base_branch: str, mock: bool,
+) -> tuple[bool, list[str]]:
+    """Bring a SUCCESSFUL standalone run to END_STATE (#3509).
+
+    N9 cleans up only when ``pr_url`` is set, and nothing standalone sets it,
+    so every standalone run used to end with its worktree, branch and lineage
+    in place and a "Next steps" that asked the operator to commit by hand.
+
+    Returns ``(finished, lines)``: whether the end state was reached, and one
+    line per step taken or refused. Never raises for a git refusal; the
+    refusal is the line.
+    """
+    from datetime import datetime
+
+    repo = Path(original_repo_root)
+    wt = Path(worktree_path)
+    lines: list[str] = []
+
+    # What the nodes after the last checkpoint wrote (N6-N8: e2e, docs,
+    # reports) is committed first, so the branch carries the whole result.
+    from assemblyzero.workflows.testing.checkpoints import commit_checkpoint
+
+    if commit_checkpoint(wt, issue_number, "final"):
+        lines.append("committed: [CP:final], the work written after the last checkpoint")
+
+    keep_root = repo / "data" / "runs-kept" / (
+        f"impl-{issue_number}-{datetime.now().strftime('%H%M%S')}"
+    )
+    lines += _keep_uncommitted(wt, keep_root)
+
+    dirty = _git_out(wt, "status", "--porcelain").stdout.strip()
+    if dirty:
+        lines.append(
+            f"stopped: {wt} has uncommitted changes, so it is kept as it is:\n"
+            + "\n".join(f"    {ln}" for ln in dirty.splitlines()[:20])
+        )
+        return False, lines
+
+    branch = _git_out(wt, "branch", "--show-current").stdout.strip()
+    pushed = False
+    if branch and not mock:
+        push = _git_out(wt, "push", "-u", "origin", branch)
+        if push.returncode != 0:
+            lines.append(
+                f"stopped: push of {branch} to origin failed, so the worktree "
+                f"and branch are kept: {push.stderr.strip()}"
+            )
+            return False, lines
+        pushed = True
+        lines.append(f"pushed: {branch} -> origin/{branch}")
+
+    removed = _git_out(repo, "worktree", "remove", str(wt))
+    if removed.returncode != 0:
+        lines.append(
+            f"stopped: `git worktree remove {wt}` refused: {removed.stderr.strip()}"
+        )
+        return False, lines
+    lines.append(f"removed worktree: {wt}")
+
+    if pushed:
+        deleted = _git_out(repo, "branch", "-d", branch)
+        if deleted.returncode != 0:
+            lines.append(
+                f"stopped: `git branch -d {branch}` refused, so the local "
+                f"branch is kept: {deleted.stderr.strip()}"
+            )
+            return False, lines
+        lines.append(f"deleted local branch: {branch} (origin/{branch} holds it)")
+        base = f" --base {base_branch}" if base_branch else ""
+        lines.append(
+            f"to finish: gh pr create --head {branch}{base}   "
+            f"(then, once it has merged or been closed: "
+            f"git -C {repo} push origin --delete {branch})"
+        )
+    return True, lines
 
 
 def get_checkpoint_db_path(issue_number: int = 0) -> Path:
@@ -361,7 +533,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run TDD Testing Workflow on an issue with an approved LLD",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        epilog=f"{__doc__}\n{END_STATE}",
     )
 
     # Issue selection (mutually exclusive)
@@ -628,24 +800,33 @@ def _write_status_file(
     status: str,
     error: str = "",
     state: dict | None = None,
+    out_dir: Path | None = None,
 ) -> None:
-    """Write a discoverable status file to the repo root.
+    """Write a discoverable status file.
 
     Issue #380: When SQLite checkpointing fails, this file is still
     discoverable so agents can detect success/failure independently.
 
+    #3509: it goes into the checkout's gitignored run-record directory
+    (``out_dir``), beside the run's log. It used to be written to the root of
+    whichever tree the run was in -- usually the worktree, which the run now
+    removes, and otherwise the checkout, as an untracked file.
+
     Args:
-        repo_root: Repository root path.
+        repo_root: Repository root path (the tree the run worked in).
         issue_number: GitHub issue number.
         status: "SUCCESS" or "FAILED".
         error: Error message if failed.
         state: Final workflow state dict for enrichment.
+        out_dir: Where the file goes; the repo root when not given.
     """
     import json
     from datetime import datetime, timezone
 
-    status_file = Path(repo_root) / f".implement-status-{issue_number}.json"
+    target_dir = Path(out_dir) if out_dir else Path(repo_root)
+    status_file = target_dir / f".implement-status-{issue_number}.json"
     try:
+        target_dir.mkdir(parents=True, exist_ok=True)
         status_data = {
             "issue": issue_number,
             "status": status,
@@ -783,7 +964,13 @@ def main():
             print(
                 f"  Worktree would be cut at: {repo_root.parent / f'{repo_root.name}-{args.issue}'}"
             )
-            print(f"  Branch would be: {args.issue}-implementation from {base}, local only (not pushed)")
+            if args.mock:
+                print(f"  Branch would be: none (--mock cuts a detached worktree from {base})")
+            else:
+                print(
+                    f"  Branch would be: {args.issue}-implementation from {base}, local "
+                    "until the run succeeds; then pushed, and the worktree removed (End state, --help)"
+                )
         print(f"  LLD: {lld_path} ({'found' if lld_path.exists() else 'NOT FOUND'})")
         print(f"  Database: {db_path}")
         print(f"  Mock mode: {args.mock}")
@@ -827,7 +1014,9 @@ def main():
         else:
             # Named integration branch: carve the issue worktree from it.
             base_branch = args.base_branch or current_branch
-            existing = find_existing_worktree(repo_root, args.issue)
+            # #3509: a mock run never resumes into a real worktree; it cuts a
+            # fresh detached one below.
+            existing = None if args.mock else find_existing_worktree(repo_root, args.issue)
 
             if existing and existing.exists():
                 print(f"Found existing worktree: {existing}")
@@ -839,7 +1028,8 @@ def main():
                     f"(base: {base_branch})..."
                 )
                 worktree_path, error = create_worktree(
-                    repo_root, args.issue, start_point=args.base_branch
+                    repo_root, args.issue, start_point=args.base_branch,
+                    detached=bool(args.mock),
                 )
                 if error:
                     print(f"Error: {error}")
@@ -884,6 +1074,9 @@ def main():
     # a crash record if it dies, and what it left in place at the end.
     from assemblyzero.core.run_record import RunRecord
     record = RunRecord.start("impl", original_repo_root, args.issue)
+    # #3509: the status file sits beside the run's log, in the checkout's
+    # gitignored data/, not at the root of a worktree the run removes.
+    runs_dir = Path(original_repo_root) / "data" / "speedrun" / "runs"
 
     # Issue #288/#289: Load and validate context files
     context_content = ""
@@ -1074,8 +1267,20 @@ def main():
                                 "status": "failed",
                             },
                         )
-                    _write_status_file(repo_root, args.issue, "FAILED", values.get("error_message", ""), state=values)
+                    _write_status_file(
+                        repo_root, args.issue, "FAILED",
+                        values.get("error_message", ""), state=values,
+                        out_dir=runs_dir,
+                    )
                     _finalize_speedrun("fail", state=values, error_msg=values.get("error_message", ""))
+                    if worktree_path:
+                        # #3509: a failed run keeps its worktree and branch
+                        # for --resume; the report lists both and prints the
+                        # commands that remove them.
+                        print(
+                            f"[implement] Kept for --resume: {worktree_path} "
+                            f"(see 'left in place' below)"
+                        )
                     record.finish("fail", values.get("error_message", ""))
                     return 1
                 else:
@@ -1093,26 +1298,30 @@ def main():
                                 "total_cost_usd": round(total_cost, 6),
                             },
                         )
-                    _write_status_file(repo_root, args.issue, "SUCCESS", state=values)
+                    _write_status_file(
+                        repo_root, args.issue, "SUCCESS", state=values,
+                        out_dir=runs_dir,
+                    )
                     _finalize_speedrun("success", state=values)
-                    record.finish("success")
 
-                    # Show next steps for worktree workflow
+                    # #3509: the run finishes its own worktree (END_STATE).
+                    # #1756: the PR targets the integration branch the
+                    # worktree was carved from, never a default main.
                     if worktree_path:
-                        # #1756: the PR must target the integration branch
-                        # the worktree was carved from, never default to main.
-                        pr_cmd = (
-                            f"gh pr create --base {base_branch}"
-                            if base_branch
-                            else "gh pr create"
-                        )
                         print()
-                        print("Next steps:")
-                        print(f"  1. cd {worktree_path}")
-                        print("  2. Review changes: git diff")
-                        print("  3. Commit: git add . && git commit -m 'feat: implement issue #{}'".format(args.issue))
-                        print(f"  4. Create PR: {pr_cmd}")
-
+                        print("[implement] Finishing the run (see --help, 'End state'):")
+                        finished, steps = finish_standalone_run(
+                            original_repo_root, Path(worktree_path), args.issue,
+                            base_branch or "", mock=bool(args.mock),
+                        )
+                        for step in steps:
+                            print(f"[implement]   {step}")
+                        if not finished:
+                            print(
+                                "[implement]   The end state was not reached; "
+                                "'left in place' below is what remains."
+                            )
+                    record.finish("success")
                     return 0
 
     except KeyboardInterrupt:
