@@ -202,20 +202,11 @@ def create_worktree(
         if result.returncode != 0:
             return worktree_path, f"Failed to create worktree: {result.stderr.strip()}"
 
-    # Push branch to remote
-    result = subprocess.run(
-        ["git", "push", "-u", "origin", branch_name],
-        cwd=str(worktree_path),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-    )
-    if result.returncode != 0:
-        # Non-fatal - might be offline or remote doesn't accept
-        print(f"    [WARN] Could not push branch to remote: {result.stderr.strip()}")
-
+    # #3511: no push here. The branch used to be pushed the moment the
+    # worktree existed, so a run halting at N0, N1 or N3 had already
+    # published an empty branch that nothing removed. Checkpoints are local
+    # by design (#2339, testing/checkpoints.py); pushing is the pr stage's
+    # job, when there is work to push.
     return worktree_path, ""
 
 
@@ -792,7 +783,7 @@ def main():
             print(
                 f"  Worktree would be cut at: {repo_root.parent / f'{repo_root.name}-{args.issue}'}"
             )
-            print(f"  Branch would be: {args.issue}-implementation from {base}, pushed at creation")
+            print(f"  Branch would be: {args.issue}-implementation from {base}, local only (not pushed)")
         print(f"  LLD: {lld_path} ({'found' if lld_path.exists() else 'NOT FOUND'})")
         print(f"  Database: {db_path}")
         print(f"  Mock mode: {args.mock}")
