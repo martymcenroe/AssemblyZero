@@ -779,6 +779,22 @@ class TestMainLocalWorkflow:
 
     @patch("new_repo.config")
     @patch("new_repo.run_command")
+    def test_T262_gemini_md_restates_no_universal_rules(self, mock_run, mock_config, tmp_path):
+        """#3209: GEMINI.md never prescribes a heredoc and never restates the
+        bash rules. It restated them wrongly ("no &&, |, ;" bans pipes, which
+        the universal rules use) and told agents to use heredocs, which are
+        banned and blocked. Per ADR 0219 it points at the rules instead."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = completed(returncode=0)
+        with patch("sys.argv", ["new_repo.py", "GemCheck", "--no-github"]):
+            main()
+        text = (tmp_path / "GemCheck" / "GEMINI.md").read_text(encoding="utf-8").lower()
+        assert "heredoc" not in text
+        assert "no &&" not in text
+        assert "claude.md" in text  # still points at the core rules
+
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T265_unleashed_json_defaults(self, mock_run, mock_config, tmp_path):
         """`.unleashed.json` defaults to assemblyZero=true (#1059) and
         does NOT include the deprecated pickupThresholdMinutes (#1060)."""
