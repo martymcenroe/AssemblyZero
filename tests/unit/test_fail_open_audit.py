@@ -596,30 +596,14 @@ class TestTheRepoGate:
             + "\n  ".join(stale[:20])
         )
 
-    def test_the_denominator_matches_what_it_was_measured_against(self, repo_scan):
-        """#2780's assertion, which this baseline was missing (#2753).
-
-        The `undeclared` list is enforced and `measured_against` was not, so
-        it could only be right by accident of who last regenerated the file.
-        It was not right: the committed block read 282 files / 7392 sites /
-        471 findings while the walker on the same tree saw 310 / 8803 / 535 --
-        drifted by 28 files and 64 findings. A denominator that wrong is worse
-        than none, because it reads as evidence.
-
-        Re-derived from the same scan the gate uses, not compared to a
-        literal, or this becomes one more number nobody updates.
-        """
-        findings, coverage = repo_scan
-        baseline = json.loads(cli.BASELINE_PATH.read_text(encoding="utf-8"))
-        assert baseline["measured_against"] == {
-            "files_scanned": coverage.files_scanned,
-            "sites_examined": coverage.sites_examined,
-            "findings_total": len(findings),
-        }, (
-            "the baseline's stated denominator no longer matches the tree it "
-            "claims to describe; regenerate with "
-            "`tools/audit_fail_open.py --write-baseline`"
-        )
+    def test_the_baseline_states_a_denominator(self):
+        """The counts still ride with the baseline (#2780, #2753); whether
+        they match the tree is `--check --strict`'s question, not the PR
+        gate's (#3523)."""
+        payload = json.loads(cli.BASELINE_PATH.read_text(encoding="utf-8"))
+        assert set(payload["measured_against"]) == {
+            "files_scanned", "sites_examined", "findings_total",
+        }
 
     def test_a_new_fail_open_actually_trips_the_gate(self, repo_scan):
         """The gate's own regression test.
@@ -656,6 +640,76 @@ class TestTheRepoGate:
         payload = json.loads(cli.BASELINE_PATH.read_text(encoding="utf-8"))
         assert isinstance(payload["undeclared"], list)
         assert payload["undeclared"], "an empty baseline would pass by vacuum"
+
+
+_ONE_SITE = """\
+def load():
+    try:
+        return open("x").read()
+    except OSError:
+        pass
+"""
+
+
+class TestTheDenominatorLeftThePRGate:
+    """#3523. The denominator test failed every PR that added a function, and
+    two concurrent PRs collided on its three count lines. The PR gate now
+    fails only on what it enforces; the counts are checked by `--strict`."""
+
+    def _baselined_tree(self, tmp_path):
+        src = tmp_path / "pkg"
+        src.mkdir()
+        (src / "mod.py").write_text(_ONE_SITE, encoding="utf-8")
+        baseline = tmp_path / "baseline.json"
+        findings, coverage = scan(tmp_path, ("pkg",))
+        cli.write_baseline(findings, coverage, baseline)
+        return src, baseline
+
+    def test_adding_a_function_passes_the_gate_without_touching_the_baseline(self, tmp_path):
+        src, baseline = self._baselined_tree(tmp_path)
+        before = baseline.read_bytes()
+        (src / "more.py").write_text(
+            "def helper(n):\n    if n:\n        return n + 1\n    return 0\n",
+            encoding="utf-8",
+        )
+
+        findings, coverage = scan(tmp_path, ("pkg",))
+        ok, fresh = cli.check(findings, cli.load_baseline(baseline))
+
+        assert ok and fresh == []
+        assert baseline.read_bytes() == before
+        # ...while strict mode still sees the tree has moved.
+        drift = cli.denominator_drift(findings, coverage, baseline)
+        assert "files_scanned" in drift
+        assert drift["files_scanned"] == (1, 2)
+
+    def test_strict_is_clean_on_the_tree_it_was_measured_against(self, tmp_path):
+        _, baseline = self._baselined_tree(tmp_path)
+        findings, coverage = scan(tmp_path, ("pkg",))
+        assert cli.denominator_drift(findings, coverage, baseline) == {}
+
+    def test_a_missing_denominator_is_drift_not_a_pass(self, tmp_path):
+        _, baseline = self._baselined_tree(tmp_path)
+        payload = json.loads(baseline.read_text(encoding="utf-8"))
+        del payload["measured_against"]
+        baseline.write_text(json.dumps(payload), encoding="utf-8")
+
+        findings, coverage = scan(tmp_path, ("pkg",))
+        drift = cli.denominator_drift(findings, coverage, baseline)
+
+        assert set(drift) == {"files_scanned", "sites_examined", "findings_total"}
+
+    def test_a_removed_baselined_site_is_still_stale(self, tmp_path):
+        """Staleness of the enforced part stays on every PR: fixing a site
+        leaves its key behind, and `test_the_baseline_is_not_stale`'s
+        comparison names it."""
+        src, baseline = self._baselined_tree(tmp_path)
+        (src / "mod.py").write_text("def load():\n    return 1\n", encoding="utf-8")
+
+        findings, _ = scan(tmp_path, ("pkg",))
+        stale = cli.load_baseline(baseline) - {f.key for f in findings}
+
+        assert len(stale) == 1
 
 
 class TestTheAuditFindsTheDefectItWasBuiltFor:

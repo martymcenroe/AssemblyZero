@@ -19,10 +19,18 @@ Usage
     poetry run python tools/audit_fail_open.py --undeclared   # only the unruled
     poetry run python tools/audit_fail_open.py --write-baseline
     poetry run python tools/audit_fail_open.py --check        # CI mode
+    poetry run python tools/audit_fail_open.py --check --strict
 
 ``--check`` exits 1 if any UNDECLARED site exists that is not in the baseline.
 It is what the unit test calls, so a newly-introduced fail-open fails the build
 at the point it lands.
+
+``--strict`` adds the denominator: it also exits 1 when the baseline's
+``measured_against`` counts differ from the tree. That check left the PR gate
+in #3523, because it failed every PR that added a function and made concurrent
+PRs collide on the same three lines. Staleness of the part that is enforced --
+a baselined site that no longer exists -- is still caught on every PR by the
+unit gate.
 
 Clearing a finding means one of two things, and the audit does not care which:
 make the site fail closed, or write ``# fail-open: <reason>`` on it and let it
@@ -93,7 +101,9 @@ def write_baseline(findings: list[Finding], coverage: Coverage,
     """Freeze today's undeclared findings so CI can catch tomorrow's.
 
     The counts ride along so a reader can see what the baseline was measured
-    against without re-running anything.
+    against without re-running anything. They describe the tree at the last
+    regeneration, not the current one; ``--check --strict`` says whether they
+    still match (#3523).
     """
     undeclared = sorted(f.key for f in findings if not f.declared)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,11 +119,7 @@ def write_baseline(findings: list[Finding], coverage: Coverage,
                     "add keys by hand: the point is that each removal is a "
                     "decision somebody made in the code."
                 ),
-                "measured_against": {
-                    "files_scanned": coverage.files_scanned,
-                    "sites_examined": coverage.sites_examined,
-                    "findings_total": len(findings),
-                },
+                "measured_against": measured(findings, coverage),
                 "undeclared": undeclared,
             },
             indent=2,
@@ -235,6 +241,36 @@ def check(findings: list[Finding], baseline: set[str]) -> tuple[bool, list[Findi
     return (not fresh), fresh
 
 
+def measured(findings: list[Finding], coverage: Coverage) -> dict[str, int]:
+    """The denominator as the walker sees the tree now."""
+    return {
+        "files_scanned": coverage.files_scanned,
+        "sites_examined": coverage.sites_examined,
+        "findings_total": len(findings),
+    }
+
+
+def denominator_drift(findings: list[Finding], coverage: Coverage,
+                      path: Path = BASELINE_PATH) -> dict[str, tuple]:
+    """Strict mode (#3523). Each count whose baseline value differs from the
+    tree, as ``{name: (baseline, live)}``. Empty means the stated denominator
+    is true. A missing or unreadable ``measured_against`` block is drift in
+    every count, not a pass: a denominator that cannot be read is not one
+    that matches."""
+    live = measured(findings, coverage)
+    try:
+        stated = json.loads(path.read_text(encoding="utf-8")).get("measured_against")
+    except (OSError, ValueError):
+        stated = None
+    if not isinstance(stated, dict):
+        return {name: (None, value) for name, value in live.items()}
+    return {
+        name: (stated.get(name), value)
+        for name, value in live.items()
+        if stated.get(name) != value
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=REPO_ROOT,
@@ -252,7 +288,12 @@ def main() -> int:
                         help="freeze today's undeclared findings for CI")
     parser.add_argument("--check", action="store_true",
                         help="exit 1 on any undeclared finding not in the baseline")
+    parser.add_argument("--strict", action="store_true",
+                        help="with --check: also exit 1 when the baseline's "
+                             "measured_against counts differ from the tree")
     args = parser.parse_args()
+    if args.strict and not args.check:
+        parser.error("--strict only applies with --check")
 
     subdirs = tuple(args.subdir) if args.subdir else DEFAULT_SUBDIRS
     findings, coverage = scan(args.root, subdirs)
@@ -265,12 +306,22 @@ def main() -> int:
 
     if args.check:
         ok, fresh = check(findings, load_baseline())
-        if ok:
+        drift = denominator_drift(findings, coverage) if args.strict else {}
+        if ok and not drift:
             print(
                 f"PASS -- {coverage.files_scanned} files, "
-                f"{coverage.sites_examined} sites examined, no new fail-open."
+                f"{coverage.sites_examined} sites examined, no new fail-open"
+                + (", denominator matches." if args.strict else ".")
             )
             return 0
+        if drift:
+            print("FAIL -- the baseline's measured_against no longer matches the tree:")
+            for name, (stated, live) in drift.items():
+                print(f"  {name}: baseline {stated}, tree {live}")
+            print("Regenerate with tools/audit_fail_open.py --write-baseline.")
+            if ok:
+                return 1
+            print()
         print(f"FAIL -- {len(fresh)} fail-open site(s) not in the baseline:")
         for f in fresh:
             print(f"  {f.path}:{f.line}  {f.qualname}  ({f.category}/{f.outcome})")
