@@ -301,21 +301,77 @@ class TestUnusedArgumentsRemoved:
 class TestWorktreeHandling:
     """Tests for worktree creation and detection."""
 
+    @staticmethod
+    def _repo_with_worktrees(tmp_path, worktrees):
+        """A throwaway repo named `Repo` with sibling worktrees, each
+        ``(dir_name, branch)``. Real git, because the defect was in parsing
+        what real git prints."""
+        import subprocess as sp
+
+        repo = tmp_path / "Repo"
+        repo.mkdir()
+
+        def git(*args, cwd=repo):
+            sp.run(["git", *args], cwd=str(cwd), check=True,
+                   capture_output=True, text=True)
+
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.invalid")
+        git("config", "user.name", "t")
+        (repo / "f.txt").write_text("x\n", encoding="utf-8")
+        git("add", "f.txt")
+        git("commit", "-q", "-m", "init")
+        for name, branch in worktrees:
+            git("worktree", "add", "-q", "-b", branch, str(tmp_path / name))
+        return repo
+
     def test_find_existing_worktree(self, tmp_path):
-        """Test finding existing worktree for issue."""
+        """#3513: issue 42 finds Repo-42 and not Repo-420; issue 4 finds
+        neither. The old substring match on `-{issue}` returned Repo-420 for
+        issue 4 and whichever came first for issue 42."""
         from tools.run_implement_from_lld import find_existing_worktree
 
-        # Mock git worktree list output
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(
-                returncode=0,
-                stdout="worktree /c/Projects/AssemblyZero\nworktree /c/Projects/AssemblyZero-42\n",
-            )
+        repo = self._repo_with_worktrees(tmp_path, [
+            ("Repo-420", "420-implementation"),
+            ("Repo-42", "42-implementation"),
+        ])
 
-            result = find_existing_worktree(tmp_path, 42)
+        found = find_existing_worktree(repo, 42)
+        assert found is not None
+        assert found.resolve() == (tmp_path / "Repo-42").resolve()
+        assert find_existing_worktree(repo, 4) is None
+        assert find_existing_worktree(repo, 420).resolve() == (
+            tmp_path / "Repo-420"
+        ).resolve()
 
-            assert result is not None
-            assert "-42" in str(result)
+    def test_the_right_name_on_the_wrong_branch_is_not_a_match(self, tmp_path):
+        """Both halves are compared whole: a legacy `Repo-42` on
+        `42-lld` is not issue 42's implementation worktree."""
+        from tools.run_implement_from_lld import find_existing_worktree
+
+        repo = self._repo_with_worktrees(tmp_path, [("Repo-42", "42-lld")])
+
+        assert find_existing_worktree(repo, 42) is None
+
+    def test_a_suffixed_directory_is_not_a_match(self, tmp_path):
+        from tools.run_implement_from_lld import find_existing_worktree
+
+        repo = self._repo_with_worktrees(
+            tmp_path, [("Repo-42-lld", "42-implementation")]
+        )
+
+        assert find_existing_worktree(repo, 42) is None
+
+    def test_create_worktree_refuses_the_right_path_on_the_wrong_branch(self, tmp_path):
+        """create_worktree reused any existing `Repo-42` with a `.git`, so the
+        exact match in find_existing_worktree could be walked around."""
+        from tools.run_implement_from_lld import create_worktree
+
+        repo = self._repo_with_worktrees(tmp_path, [("Repo-42", "42-lld")])
+
+        path, error = create_worktree(repo, 42)
+
+        assert error and "42-lld" in error and "Refusing" in error
 
     def test_find_no_worktree(self, tmp_path):
         """Test when no worktree exists for issue."""

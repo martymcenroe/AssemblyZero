@@ -77,8 +77,13 @@ def get_current_branch(repo_path: Path) -> str:
     return ""
 
 
-def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
-    """Find an existing worktree for this issue."""
+def _worktree_entries(repo_path: Path) -> list[tuple[Path, str]] | None:
+    """`git worktree list --porcelain` as (path, branch) pairs.
+
+    The branch is the short name, or "" for a detached or bare entry. None
+    when git itself fails, so a caller cannot mistake "could not list" for
+    "no such worktree".
+    """
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
         cwd=str(repo_path),
@@ -90,17 +95,38 @@ def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
     if result.returncode != 0:
         return None
 
-    # Parse worktree list for issue-specific worktree
-    worktree_path = None
-    for line in result.stdout.splitlines():
+    entries: list[tuple[Path, str]] = []
+    path: Path | None = None
+    branch = ""
+    for line in result.stdout.splitlines() + [""]:
         if line.startswith("worktree "):
             path = Path(line.split(" ", 1)[1])
-            # Check if this worktree is for our issue
-            if f"-{issue_number}" in path.name:
-                worktree_path = path
-                break
+            branch = ""
+        elif line.startswith("branch refs/heads/"):
+            branch = line[len("branch refs/heads/"):]
+        elif not line and path is not None:
+            entries.append((path, branch))
+            path = None
+    return entries
 
-    return worktree_path
+
+def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
+    """Find this issue's worktree: the one named ``{Repo}-{issue}`` on branch
+    ``{issue}-implementation``, both compared whole (#3513).
+
+    A substring match on ``-{issue}`` let issue 42 resume into ``Repo-420``
+    and sweep that issue's files into its own checkpoint commits -- the same
+    shape as the #1756 branch match.
+    """
+    entries = _worktree_entries(repo_path)
+    if entries is None:
+        return None
+    want_name = f"{repo_path.name}-{issue_number}"
+    want_branch = f"{issue_number}-implementation"
+    for path, branch in entries:
+        if path.name == want_name and branch == want_branch:
+            return path
+    return None
 
 
 def create_worktree(
@@ -132,6 +158,17 @@ def create_worktree(
         # Verify it's actually a git worktree (has .git file)
         git_marker = worktree_path / ".git"
         if git_marker.exists():
+            # #3513: the right name on the wrong branch is not this issue's
+            # worktree, and reusing it would commit into another branch.
+            on_branch = {
+                p.resolve(): b for p, b in (_worktree_entries(repo_path) or [])
+            }.get(worktree_path.resolve())
+            if on_branch != branch_name:
+                return worktree_path, (
+                    f"{worktree_path} exists but is on branch "
+                    f"{on_branch or '(none: not a worktree of this repo, or detached)'}, "
+                    f"not {branch_name}. Refusing to reuse it."
+                )
             return worktree_path, ""
         else:
             # Directory exists but isn't a valid worktree - remove it
