@@ -19,12 +19,21 @@ class _FakePreflightResult:
 
 @pytest.fixture(autouse=True)
 def _bypass_gemini_preflight():
-    """Unit tests never depend on real Gemini credentials."""
+    """Unit tests never depend on real Gemini credentials, and never make the
+    real agy probe call (#3506's transport check). The per-process memo is
+    reset so no test inherits another's answer."""
+    from assemblyzero.core import preflight
+
+    preflight._TRANSPORT_RESULT = None
     with patch(
         "assemblyzero.core.preflight.check_gemini_available",
         return_value=_FakePreflightResult(),
+    ), patch(
+        "assemblyzero.core.preflight.check_gemini_transport",
+        return_value=_FakePreflightResult(),
     ):
         yield
+    preflight._TRANSPORT_RESULT = None
 
 
 @pytest.fixture(autouse=True)
