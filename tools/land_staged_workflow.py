@@ -21,7 +21,9 @@ variable inside the `with classic_pat_session()` block, is consumed by
 
 ## What it does (idempotent -- safe to re-run)
 
-  1. If the destination already exists on main -> report + exit 0.
+  1. If the destination already exists on main -> report + exit 0, unless
+     --replace is given (#3606); with it, exit 0 only when main already holds
+     exactly the staged text.
   2. Read the staged file from the target repo over the Contents API. Read from
      GitHub, never from a local working tree: bytes on GitHub are already
      LF-normalized, which sidesteps the CRLF hazard entirely (root CLAUDE.md
@@ -142,6 +144,25 @@ def read_staged(pat: str, cfg: argparse.Namespace) -> str:
     return text
 
 
+def landing_action(live: str | None, staged: str, replace: bool) -> str:
+    """What to do given the destination's text on main (None if absent) (#3606).
+
+    Returns "add", "replace", "exists" (present and --replace not given: the
+    original behavior, nothing written) or "identical" (--replace, and main
+    already carries exactly the staged text: nothing to write, so a re-run is
+    idempotent).
+    """
+    if live is None:
+        return "add"
+    if not replace:
+        return "exists"
+    return "identical" if live == staged else "replace"
+
+
+def _verb(cfg: argparse.Namespace) -> str:
+    return "update" if getattr(cfg, "replace", False) else "add"
+
+
 def main_sha(pat: str, cfg: argparse.Namespace) -> str:
     r = requests.get(
         _repo_url(cfg, "git/ref/heads/main"), headers=_headers(pat), timeout=HTTP_TIMEOUT_S
@@ -167,7 +188,7 @@ def ensure_branch(pat: str, cfg: argparse.Namespace, sha: str) -> None:
 def put_workflow(pat: str, cfg: argparse.Namespace, content: str) -> None:
     existing = get_file(pat, cfg, cfg.workflow, cfg.branch)
     payload: dict[str, object] = {
-        "message": f"ci: add {Path(cfg.workflow).name} (Closes #{cfg.issue})",
+        "message": f"ci: {_verb(cfg)} {Path(cfg.workflow).name} (Closes #{cfg.issue})",
         "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
         "branch": cfg.branch,
     }
@@ -233,7 +254,7 @@ def open_pr(pat: str, cfg: argparse.Namespace) -> int:
         _repo_url(cfg, "pulls"),
         headers=_headers(pat),
         json={
-            "title": f"ci: add {Path(cfg.workflow).name} (Closes #{cfg.issue})",
+            "title": f"ci: {_verb(cfg)} {Path(cfg.workflow).name} (Closes #{cfg.issue})",
             "head": cfg.branch,
             "base": "main",
             "body": body,
@@ -374,6 +395,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     ap.add_argument("--keep-staged", action="store_true", help="Do not remove the staged copy.")
     ap.add_argument(
+        "--replace",
+        action="store_true",
+        help="Update a destination that already exists on main (#3606). "
+             "Without it an existing destination ends the run with nothing written.",
+    )
+    ap.add_argument(
         "--merge-on-red",
         action="store_true",
         help="Merge even if the installed check fails. Default is to stop and report.",
@@ -394,6 +421,7 @@ def main() -> int:
         print(f"  target   : {target}")
         print(f"  read     : {cfg.staged} @ main")
         print(f"  write    : {cfg.workflow} on branch {cfg.branch}")
+        print(f"  mode     : {'replace an existing workflow' if cfg.replace else 'add (stops if it exists)'}")
         print(f"  staged   : {'kept' if cfg.keep_staged else 'removed in the same PR'}")
         print(f"  header   : {'stripped' if cfg.strip_header_comment else 'preserved'}")
         print(f"  PR       : Closes #{cfg.issue}, waits for workflow `{cfg.check or '<parsed from the file>'}`")
@@ -401,13 +429,19 @@ def main() -> int:
         return 0
 
     with classic_pat_session(reason=f"land {cfg.workflow} in {target}") as pat:
-        if get_file(pat, cfg, cfg.workflow, "main"):
-            print(f"{cfg.workflow} already exists on {target}@main -- nothing to do.")
+        live_rec = get_file(pat, cfg, cfg.workflow, "main")
+        if live_rec and not cfg.replace:
+            print(f"{cfg.workflow} already exists on {target}@main -- nothing to do. "
+                  f"Pass --replace to update it.")
             return 0
 
         print(f"Landing {cfg.workflow} in {target} ...")
         content = read_staged(pat, cfg)
         print(f"  read {cfg.staged} ({len(content):,} chars)")
+        live = base64.b64decode(live_rec["content"]).decode("utf-8") if live_rec else None
+        if landing_action(live, content, cfg.replace) == "identical":
+            print(f"{cfg.workflow} on {target}@main already matches {cfg.staged} -- nothing to do.")
+            return 0
         ensure_branch(pat, cfg, main_sha(pat, cfg))
         put_workflow(pat, cfg, content)
         if not cfg.keep_staged:
