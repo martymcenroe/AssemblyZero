@@ -531,148 +531,19 @@ def _append_json_schema_directive(system_instruction: str, schema: dict) -> str:
     )
 
 
-# #1906: spawn nominal is sub-second; a spawn still pending after this long
-# is the hang-shaped sibling of the #1872 instant spawn failures.
-SPAWN_TIMEOUT_SECONDS = 30.0
-
-
-def _spawn_pty_bounded(argv, cwd, dimensions, timeout_seconds=SPAWN_TIMEOUT_SECONDS):
-    """PtyProcess.spawn with a wall-clock bound (#1906).
-
-    The #1874 budget bounds the PTY READ loop, whose deadline is set after
-    spawn returns — so a spawn that hangs under machine pressure sits before
-    any deadline exists and escapes the budget entirely (observed live:
-    13:45:22 entry, killed by hand at 13:58). Spawn runs in a worker thread;
-    on expiry the caller gets the standard failure path and the abandoned
-    thread terminates its own late-arriving process so nothing leaks.
-
-    Returns:
-        The spawned PtyProcess.
-
-    Raises:
-        TimeoutError: spawn did not complete within the bound.
-        Exception: whatever spawn itself raised, re-raised in the caller.
-    """
-    import threading
-
-    from winpty import PtyProcess
-
-    holder: dict = {}
-    lock = threading.Lock()
-
-    def _target() -> None:
-        try:
-            proc = PtyProcess.spawn(argv, cwd=cwd, dimensions=dimensions)
-        except Exception as exc:  # noqa: BLE001 — re-raised by the caller
-            with lock:
-                holder["error"] = exc
-            return
-        with lock:
-            if holder.get("abandoned"):
-                # The caller gave up; a process arriving now would be an
-                # orphan burning quota with nobody reading its output.
-                try:
-                    proc.terminate(force=True)
-                except Exception:  # noqa: BLE001
-                    pass
-                return
-            holder["proc"] = proc
-
-    thread = threading.Thread(target=_target, daemon=True)
-    thread.start()
-    thread.join(timeout=timeout_seconds)
-
-    with lock:
-        if "proc" in holder:
-            return holder["proc"]
-        if "error" in holder:
-            raise holder["error"]
-        holder["abandoned"] = True
-    raise TimeoutError(
-        f"agy spawn timed out ({timeout_seconds:.0f}s) — machine-pressure "
-        f"hang; treated like a spawn failure"
-    )
-
-
-def _read_pty_bounded(proc, timeout_seconds: float):
-    """Drain a PTY child under a bound the child cannot defeat (#1910).
-
-    pywinpty's read() blocks until data arrives, so a deadline checked
-    between reads never fires against a silent child — observed live as 12
-    minutes inside read() while agy produced nothing. The drain runs in a
-    worker thread; on expiry the process TREE dies, which forces the
-    blocked read to EOF so the thread exits too.
-
-    Returns:
-        (True, text, exit_status) on completion;
-        (False, error_message, None) on timeout.
-    """
-    import threading
-
-    chunks: list[str] = []
-    done = threading.Event()
-    holder: dict = {}
-
-    def _drain() -> None:
-        try:
-            while True:
-                try:
-                    data = proc.read(4096)
-                except EOFError:
-                    break
-                except Exception:  # noqa: BLE001 — killed mid-read
-                    break
-                if data:
-                    chunks.append(data)
-                elif not proc.isalive():
-                    break
-                else:
-                    time.sleep(0.05)
-            try:
-                holder["exit_status"] = proc.exitstatus
-            except Exception:  # noqa: BLE001
-                holder["exit_status"] = None
-        finally:
-            done.set()
-
-    thread = threading.Thread(target=_drain, daemon=True)
-    thread.start()
-    if not done.wait(timeout=timeout_seconds):
-        try:
-            proc.terminate(force=True)
-        except Exception:  # noqa: BLE001
-            pass
-        # #1874: terminate() ends the console host, not the grandchildren.
-        try:
-            kill_process_tree(proc.pid)
-        except Exception:  # noqa: BLE001
-            pass
-        done.wait(timeout=10)  # the blocked read returns once the tree dies
-        return (
-            False,
-            f"agy CLI timeout ({timeout_seconds:.0f}s, silent child killed)",
-            None,
-        )
-    return True, "".join(chunks), holder.get("exit_status")
-
-
 def _is_spawn_failure(error_text: str) -> bool:
     """True when an error string carries a Windows process-creation code.
 
     Issue #1872: these mean the child never started. That is transient
     machine pressure and deserves a backoff, not a credential write-off.
-    Issue #1906: a hung spawn (timed out) is the same condition in slow
-    motion and takes the same retry path.
+    (#1906's "spawn timed out" left with the PTY spawner that raised it, #3624.)
     """
-    if "spawn timed out" in error_text:
-        return True
     return any(str(code) in error_text for code in SPAWN_FAILURE_EXIT_CODES)
 
 
 def _strip_ansi(text: str) -> str:
-    """Strip ANSI/VT control sequences from agy's pseudo-console output and
-    normalize newlines. agy renders to a TTY, so the captured stream carries
-    color codes and CR/LF that must be removed before the response is parsed."""
+    """Strip ANSI/VT control sequences from agy's output and normalize
+    newlines, so color codes and CR/LF never reach the response parser."""
     return _ANSI_RE.sub("", text).replace("\r\n", "\n").replace("\r", "")
 
 
@@ -759,19 +630,14 @@ class GeminiClient:
         """Invoke the governance model via the Antigravity CLI (agy).
 
         This is the subscription/OAuth transport (#1335), replacing the retired
-        Gemini CLI. Two things differ from a normal subprocess call:
+        Gemini CLI. It composes the prompt (agy has no --system flag) and hands
+        it to ``_invoke_via_stdin``, which runs agy in a clean temporary
+        directory with the prompt on stdin.
 
-        1. agy renders its response ONLY to a TTY — a piped stdout receives
-           nothing (exit 0, empty stream). So we run agy under a pseudo-console
-           via pywinpty and strip ANSI control codes from the captured output.
-        2. agy is run in a clean temp working directory so no repo GEMINI.md /
-           AGENTS.md / .gemini context bleeds into the governance review. This
-           also retires the old GEMINI.md-rename workaround (and the .bak debris
-           it produced) entirely.
-
-        The prompt rides in argv (agy `-p <prompt>`); Windows caps a command
-        line at ~32767 chars, so an oversized prompt is rejected explicitly
-        rather than truncated silently.
+        There used to be a second path here that put the prompt in argv and ran
+        agy.exe under a Windows pseudo-console (pywinpty). After #3623 agy never
+        runs as agy.exe, and off Windows pywinpty does not exist, so nothing
+        reached it; #3624 removed it.
 
         Returns:
             Tuple of (success, response_text, error_message)
@@ -779,103 +645,26 @@ class GeminiClient:
         if not self._agy_cli:
             return False, "", "Antigravity CLI (agy) not found"
 
-        # Combine system instruction and content (agy has no --system flag).
         full_prompt = (
             f"You are {self.model}.\n\n"
             f"<system_instruction>\n{system_instruction}\n</system_instruction>\n\n"
             f"<user_content>\n{content}\n</user_content>"
         )
-
-        # Windows CreateProcess command-line limit is 32767 chars; leave
-        # headroom. #1772: oversize prompts ride stdin instead of argv —
-        # `agy --model X` with no -p reads the prompt from stdin and prints
-        # the response to a plain pipe (verified with a 39,954-char prompt).
-        # Small prompts keep the proven PTY path below. #3623: a WSL agy, and
-        # any agy off Windows, always rides stdin. The PTY path needs pywinpty,
-        # which exists only on Windows, so on Linux every short prompt failed
-        # here; a Linux agy answers on plain pipes (proved through WSL).
-        via_wsl = (self._agy_cli or "").startswith(AGY_WSL_PREFIX)
-        if len(full_prompt) > 30000 or via_wsl or not _ON_WINDOWS:
-            return self._invoke_via_stdin(full_prompt, timeout_seconds)
-
-        try:
-            import winpty  # noqa: F401 — availability probe only
-        except ImportError as e:
-            return False, "", f"pywinpty unavailable for agy invocation: {e}"
-
-        import tempfile
-
-        argv = [
-            self._agy_cli, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
-            "-p", full_prompt, "--model", self.model,
-        ]
-        chunks: list[str] = []
-        exit_status = None
-        try:
-            with tempfile.TemporaryDirectory() as tmp_cwd:
-                # #3612: the agent this call runs as lives in this directory.
-                write_text_only_agent(tmp_cwd)
-                # #1906: spawn itself must be bounded — the read deadline
-                # below does not exist yet while spawn hangs.
-                try:
-                    proc = _spawn_pty_bounded(
-                        argv, cwd=tmp_cwd, dimensions=(60, 1000)
-                    )
-                except TimeoutError as e:
-                    return False, "", str(e)
-                # #1910: the old between-reads deadline was no bound at all —
-                # pywinpty's read() blocks, so a silent child parked the loop
-                # inside read() for 12+ minutes with the deadline never
-                # consulted. The drain runs in a worker thread the child
-                # cannot hold hostage.
-                ok, payload, exit_status = _read_pty_bounded(
-                    proc, timeout_seconds
-                )
-                if not ok:
-                    return False, "", payload
-                chunks.append(payload)
-        except Exception as e:  # pywinpty raises assorted OS/runtime errors
-            return False, "", f"agy CLI invocation failed: {e}"
-
-        text = _strip_ansi("".join(chunks)).strip()
-
-        # #3612, #3623: the PTY carries stderr and stdout on one stream, so an
-        # agent agy could not load shows up in the text. The default agent,
-        # with its tools, answered; that is a failed call. This check was on
-        # the stdin path only until #3623.
-        warned = agent_warning(text)
-        if warned:
-            return False, "", f"agy did not run as {AGY_AGENT_NAME}: {warned[:400]}"
-
-        # #1765: never hand a CLI error banner to callers as model output.
-        # (Boundary checks below are mirrored in _invoke_via_stdin.)
-        # An invalid --model (etc.) printed 'Error: ...' to the PTY and was
-        # laundered through draft -> review -> verdict as content. Nonzero
-        # exit is the primary signal; a first-line 'Error:' catches banners
-        # printed under a PTY with ambiguous status.
-        if exit_status not in (0, None):
-            return False, "", f"agy exited {exit_status}: {text[:400]}"
-        first_line = text.splitlines()[0].strip() if text else ""
-        if first_line.startswith("Error:"):
-            return False, "", f"agy error output: {text[:400]}"
-
-        if text:
-            return True, text, ""
-        return False, "", "agy returned no output"
+        return self._invoke_via_stdin(full_prompt, timeout_seconds)
 
     def _invoke_via_stdin(
         self,
         full_prompt: str,
         timeout_seconds: float = AGY_CALL_TIMEOUT_SECONDS,
     ) -> tuple[bool, str, str]:
-        """Invoke agy with the prompt on stdin (#1772).
+        """Invoke agy with the prompt on stdin (#1772); every call, since #3624.
 
-        For prompts beyond the Windows argv ceiling. `agy --model X` with
-        no ``-p`` reads the prompt from stdin and prints the response to a
-        plain pipe — no PTY required on this path (verified 2026-07-14
-        with a 39,954-char prompt). Same temp-cwd isolation (no repo
-        GEMINI.md / CLAUDE.md context bleed) and the same #1765 error
-        boundaries as the PTY path.
+        `agy --model X` with no ``-p`` reads the prompt from stdin and prints
+        the response to a plain pipe, no TTY needed (verified 2026-07-14 with
+        a 39,954-char prompt, and through WSL on 2026-09-25, #3623). The temp
+        cwd keeps any repo's GEMINI.md / CLAUDE.md out of the call, and the
+        #1765 error boundaries below keep a CLI banner from passing as model
+        output.
 
         Returns:
             Tuple of (success, response_text, error_message)
@@ -926,11 +715,13 @@ class GeminiClient:
 
         # #3612: an agent agy could not load means the default agent, with its
         # tools, answered. That is a failed call, whatever the exit status.
-        warned = agent_warning(stderr or "")
+        # Both streams are read (#3624): the removed PTY path saw them merged,
+        # and nothing proves agy writes the warning to stderr only.
+        warned = agent_warning(f"{stderr or ''}\n{text}")
         if warned:
             return False, "", f"agy did not run as {AGY_AGENT_NAME}: {warned[:400]}"
 
-        # #1765 boundaries, mirrored from the PTY path.
+        # #1765: never hand a CLI error banner to callers as model output.
         if returncode != 0:
             detail = (stderr or "").strip() or text
             return False, "", (

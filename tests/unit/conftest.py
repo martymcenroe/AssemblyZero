@@ -73,13 +73,3 @@ def _bypass_box_health_preflight():
         module, "check_box_health", lambda *a, **k: BoxHealth(True, [], "")
     ):
         yield
-
-
-@pytest.fixture
-def windows_pty():
-    """Run the agy transport as Windows with a native agy, the only case that
-    reaches the PTY path (#3623). Off Windows, and through WSL, every call
-    rides stdin, so a test of the PTY path says which platform it simulates.
-    """
-    with patch("assemblyzero.core.gemini_client._ON_WINDOWS", True):
-        yield
