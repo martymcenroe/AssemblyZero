@@ -379,16 +379,25 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Issue #486: Pre-flight check — verify Gemini available before expensive Claude call
     # -------------------------------------------------------------------------
+    # #3506: only when some node of this run is Gemini, and then the agy
+    # transport itself, not the credential file.
     if not mock_mode:
-        from assemblyzero.core.preflight import check_gemini_available
-        preflight = check_gemini_available()
-        print(f"    [PREFLIGHT] Gemini: {preflight.available_credentials}/{preflight.total_credentials} credentials")
-        if not preflight.passed:
+        from assemblyzero.core.preflight import preflight_for_specs
+        preflight = preflight_for_specs(
+            str(state.get("config_drafter", DEFAULT_DRAFTER) or ""),
+            str(state.get("config_reviewer", "") or ""),
+        )
+        if preflight is None:
+            print("    [PREFLIGHT] no Gemini node in this run; transport check skipped")
+        elif not preflight.passed:
             warnings_str = ", ".join(preflight.warnings)
             return {
+                # The head is the registered gate's (spec.preflight).
                 "error_message": f"[PREFLIGHT] Gemini unavailable: {warnings_str}",
                 "previous_review_feedback": review_feedback,
             }
+        else:
+            print("    [PREFLIGHT] Gemini transport: agy answered")
 
     # -------------------------------------------------------------------------
     # Get drafter provider

@@ -369,14 +369,23 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
         pct = prompt_len / MAX_TOTAL_PROMPT_CHARS * 100
         print(f"    [WARN] Prompt at {pct:.0f}% of cap ({prompt_len:,} / {MAX_TOTAL_PROMPT_CHARS:,} chars)")
 
-    # Issue #486: Pre-flight check — verify Gemini available before expensive Claude call
+    # Issue #486: Pre-flight check — verify Gemini available before expensive
+    # Claude call. #3506: only when some node of this run is Gemini, and then
+    # the agy transport itself, not the credential file.
     if not mock_mode:
-        from assemblyzero.core.preflight import check_gemini_available
-        preflight = check_gemini_available()
-        print(f"    [PREFLIGHT] Gemini: {preflight.available_credentials}/{preflight.total_credentials} credentials")
-        if not preflight.passed:
+        from assemblyzero.core.preflight import preflight_for_specs
+        preflight = preflight_for_specs(
+            drafter_spec, str(state.get("config_reviewer", "") or ""),
+        )
+        if preflight is None:
+            print("    [PREFLIGHT] no Gemini node in this run; transport check skipped")
+        elif not preflight.passed:
             warnings_str = ", ".join(preflight.warnings)
+            # The head is the registered gate's (lld.preflight); the warnings
+            # say which transport step failed.
             return {"error_message": f"[PREFLIGHT] Gemini unavailable: {warnings_str}"}
+        else:
+            print("    [PREFLIGHT] Gemini transport: agy answered")
 
     # Get drafter provider
     try:
