@@ -169,6 +169,7 @@ class _FakePty:
         pass
 
 
+@pytest.mark.usefixtures("windows_pty")
 class TestInvokeViaCliErrorBoundary:
     """#1765: CLI error banners must never be returned as model output.
 
@@ -590,7 +591,10 @@ def test_strip_ansi_removes_codes_and_normalizes_newlines():
 
 
 def test_find_agy_cli_uses_path():
-    with patch("assemblyzero.core.gemini_client.shutil.which", return_value="/usr/bin/agy"):
+    # Off Windows only: on Windows agy is found inside WSL (#3623,
+    # tests/unit/test_agy_wsl_transport.py).
+    with patch("assemblyzero.core.gemini_client._ON_WINDOWS", False), \
+         patch("assemblyzero.core.gemini_client.shutil.which", return_value="/usr/bin/agy"):
         client = GeminiClient(model="gemini-3.1-pro-preview")
     assert client._agy_cli == "/usr/bin/agy"
 
@@ -616,6 +620,7 @@ def test_invoke_via_cli_routes_oversized_prompt_to_stdin():
     assert len(mock_stdin.call_args[0][0]) > 31000  # full composed prompt
 
 
+@pytest.mark.usefixtures("windows_pty")
 def test_invoke_via_cli_strips_ansi_and_returns_text():
     client = GeminiClient(model="gemini-3.1-pro-preview")
     client._agy_cli = "agy"
@@ -736,6 +741,7 @@ class TestTheFailureTextNamesTheTransport:
         assert "agy" in err
 
 
+@pytest.mark.usefixtures("windows_pty")
 def test_invoke_via_cli_empty_output_is_failure():
     client = GeminiClient(model="gemini-3.1-pro-preview")
     client._agy_cli = "agy"

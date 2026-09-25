@@ -3,7 +3,7 @@
 **Date:** 2026-09-24
 **Status:** Accepted, 2026-09-24. The operator ruled #3517 (agy in both seats, both workflows) with this finding in view; the `--sandbox` flag shipped with the ADR in PR #3545, as #3516 directed, and the blast-radius statement below stands as the record.
 **Amends:** ADR 0220 (Antigravity CLI migration), finding 2, which recorded that `--sandbox` exists and nothing about what it does.
-**Amended:** 2026-09-25 (#3605, #3612, #3603). The `--sandbox` decision below is withdrawn; see the amendment before section 1.
+**Amended:** 2026-09-25 (#3605, #3612, #3603). The `--sandbox` decision below is withdrawn; see the amendment before section 1. Amended again 2026-09-25 (#3623): on Windows `agy` runs inside WSL, never as `agy.exe`; see the second amendment.
 **Issue:** #3516 (parent #3502)
 
 ## The blast radius, stated for pointing at
@@ -23,6 +23,16 @@ What the results below establish, read again with the mechanism known: without t
 The decision that replaces both the flag and the settings check (#3612): `agy` loads a custom agent from `<cwd>/.agents/agents/<name>/agent.md` and selects it with `--agent <name>`; a definition's `tools` list is the explicit set of tools the agent may call, and `commandExecutionPolicy: off` turns shell execution off. Both transports already run in a fresh temporary directory, so each call writes the pipeline's definition (`assemblyzero-text`: `tools: []`, `commandExecutionPolicy: "off"`, `inheritMcp: false`; the value is quoted because a YAML 1.1 parser reads a bare `off` as false) into that directory and passes `--agent assemblyzero-text`. A warning from `agy` about the flag is a failed call. Proved 2026-09-25 at about 12:15 PM Central with one call, no sandbox flag, the machine at `always-proceed`, a prompt asking for `whoami` and a file write: one turn, 7.1 s, no prompt from anything, no file, and the answer "I cannot run commands, read or write files, or reach the network because I have no tools available". The call's input fell from 15,983 tokens to 2,766, the tool schemas leaving the prompt. The file-write finding below is answered by the same definition, since the agent has no file tool.
 
 The premise the operator stated for using `agy` inside AssemblyZero was that, inside the workflow, `agy`'s lack of safety checks does not matter, and that the premise should be true by construction. **It is not true.** The fresh empty working directory bounds nothing `agy` chooses to write elsewhere. No flag in `agy --help` (v1, 2026-09-24) removes file writes. The `--mode plan` option was tried; the plan was "automatically approved" and the file was written. The only safety in place for file writes is that the prompts sent to `agy` ask for a review, not for action.
+
+## Second amendment, 2026-09-25: on Windows, `agy` runs inside WSL (#3623)
+
+An audit of the transport after #3612 found three gaps. The PTY path, which carried every prompt under 30,000 characters, never checked for the `--agent` warning, so a call that fell back to the default agent was returned as a success. No test exercised the check on either path. And on Windows the transport ran `agy.exe`, whose shell runs under PowerShell, outside the fleet's shell guard. The tool-less agent was the only control on that machine, and nothing verified it.
+
+The decision: on Windows the transport never runs `agy.exe`. It finds `agy` inside the default WSL distribution (`which agy`, then `$HOME/.local/bin/agy`, both through `wsl.exe --exec` with no shell) and runs it as `wsl.exe --cd <temporary directory> --exec <agy> --agent assemblyzero-text --model <id>`, always with the prompt on stdin. Under WSL the fleet's hooks cover `agy`, and Linux has no UAC to ask. When WSL has no `agy`, the client reports it not found and the preflight halts. Off Windows, the native `agy` on PATH is used as before. Both transports now fail a call whose output carries an `--agent` warning, and `tests/unit/test_agy_wsl_transport.py` pins all of it.
+
+Proved 2026-09-25 at about 4:05 PM Central with one call through the new path: `agy` resolved to `/home/mcwiz/.local/bin/agy`, the prompt asked for `whoami` and a file write, and the call returned in 8.3 s with the answer "I cannot run shell commands or create files because I do not have access to any tools", with no dialog from anything.
+
+Residue, stated: when a call times out, `kill_process_tree` ends `wsl.exe` and its Windows children. The Linux `agy` normally ends with its relay, but nothing here proves it did. The PTY path is no longer reached on Windows or Linux (it needs pywinpty, so off Windows it never worked for a short prompt); its removal is #3624.
 
 ## 1. Context
 

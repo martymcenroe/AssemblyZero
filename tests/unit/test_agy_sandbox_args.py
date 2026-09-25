@@ -68,6 +68,7 @@ def test_the_definition_has_no_tools_and_no_command_execution():
     assert parsed["commandExecutionPolicy"] == "off"
 
 
+@pytest.mark.usefixtures("windows_pty")
 def test_the_pty_path_runs_as_the_agent_written_into_its_cwd(monkeypatch):
     seen = {}
 
