@@ -638,6 +638,7 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
         response, error = call_claude_for_file(
             prompt, file_path=str(test_path), model=model,
             timeout_seconds=AUGMENT_TIMEOUT_SECONDS, effort=effort,
+            seat="impl.augment_tests",  # #3577: the call record names this seat
         )
         suffix = f"-retry{attempt}" if attempt > 1 else ""
         _audit(f"augment-response{suffix}.md", response or f"(no response: {error})")
@@ -714,6 +715,7 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
         response, error = call_claude_for_file(
             repair_prompt, file_path=str(test_path), model=model,
             timeout_seconds=AUGMENT_TIMEOUT_SECONDS, effort=effort,
+            seat="impl.augment_tests",  # #3577: the call record names this seat
         )
         _audit("augment-response-repair.md", response or f"(no response: {error})")
         repaired = extract_code_block(response or "", str(test_path)) or ""

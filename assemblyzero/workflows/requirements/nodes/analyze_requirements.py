@@ -539,9 +539,11 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
     # `requirements.analyze.escalation` seat for the one timeout retry.
     drafter_spec = "(unresolved)"
     try:
+        # #3577: the escalation seat first, so the analysis seat is the last
+        # resolved before its provider is built and the call record names it.
+        escalation_spec = resolve(state, "requirements.analyze.escalation").spec
         seat = resolve(state, "requirements.analyze")
         drafter_spec = seat.spec
-        escalation_spec = resolve(state, "requirements.analyze.escalation").spec
         provider = get_provider(drafter_spec, effort=seat.effort)
     except ValueError as e:
         # #2474: halts immediately, with no backoff. The backoff exists to
@@ -599,6 +601,8 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
                 f"escalating to {stronger} for the one retry (#2375)."
             )
             try:
+                # #3577: named last, so the retry is recorded as this seat's.
+                resolve(state, "requirements.analyze.escalation")
                 provider = get_provider(stronger)
                 answered_by = stronger
             except ValueError as e:

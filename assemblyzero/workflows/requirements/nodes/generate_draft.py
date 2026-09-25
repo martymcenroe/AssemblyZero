@@ -336,9 +336,11 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     drafter_seat = None
     drafter_spec = reviewer_spec = ""
     try:
+        # #3577: the reviewer first, so the drafter is the last seat resolved
+        # before its provider is built and the call record names it.
+        reviewer_spec = resolve(state, "requirements.review").spec
         drafter_seat = resolve(state, "requirements.draft")
         drafter_spec = drafter_seat.spec
-        reviewer_spec = resolve(state, "requirements.review").spec
     except ValueError as e:
         # fail-open: not here. The error is held and raised inside the drafter
         # try below, so it halts with the node's one "Invalid drafter" message.
