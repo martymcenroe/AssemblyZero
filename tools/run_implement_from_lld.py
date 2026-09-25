@@ -419,6 +419,25 @@ def get_checkpoint_db_path(issue_number: int = 0) -> Path:
     return db_dir / "testing_workflow.db"
 
 
+def checkpoint_db_for_run(
+    db_path_arg: str | None, issue_number: int, mock: bool, target_repo: Path,
+) -> Path:
+    """The checkpoint database this run uses (#3547).
+
+    ``--db-path`` wins. A ``--mock`` run keeps its database under the
+    target's gitignored ``data/mock-runs/``: it used to land at
+    ``~/.assemblyzero/testing_{issue}.db`` like a real run's, outside the
+    repository it rehearsed against, where a later REAL ``--resume`` for the
+    same issue number would read the mock's checkpoints. Real runs are
+    unchanged here (keying them by repository is #3548).
+    """
+    if db_path_arg:
+        return Path(db_path_arg)
+    if mock:
+        return Path(target_repo) / "data" / "mock-runs" / f"impl-{issue_number}" / "checkpoints.db"
+    return get_checkpoint_db_path(issue_number)
+
+
 def select_approved_lld(repo_root: Path) -> int | None:
     """Interactively select from approved LLDs in docs/lld/active/.
 
@@ -952,7 +971,7 @@ def main():
     # throwaway repo with a bare origin and shows the worktree list, the
     # branch list and the origin's refs unchanged afterwards.
     if args.dry_run:
-        db_path = Path(args.db_path) if args.db_path else get_checkpoint_db_path(args.issue)
+        db_path = checkpoint_db_for_run(args.db_path, args.issue, bool(args.mock), repo_root)
         lld_path = repo_root / "docs" / "lld" / "active" / f"LLD-{args.issue:03d}.md"
         print()
         print("[implement] AssemblyZero TDD Testing Workflow")
@@ -1044,12 +1063,12 @@ def main():
                 print(f"Created worktree: {worktree_path}")
                 repo_root = worktree_path
 
-    # Set up checkpoint database (Issue #379: per-issue partitioning)
-    if args.db_path:
-        db_path = Path(args.db_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        db_path = get_checkpoint_db_path(args.issue)
+    # Set up checkpoint database (Issue #379: per-issue partitioning; #3547:
+    # a mock run's lives under the target's data/mock-runs/)
+    db_path = checkpoint_db_for_run(
+        args.db_path, args.issue, bool(args.mock), original_repo_root,
+    )
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Startup banner (Issue #380: visible diagnostics for cross-repo debugging)
     print()
@@ -1288,6 +1307,7 @@ def main():
                             f"[implement] Kept for --resume: {worktree_path} "
                             f"(see 'left in place' below)"
                         )
+                    print(f"[implement] Checkpoint database (resume state): {db_path}")
                     record.finish("fail", values.get("error_message", ""))
                     return 1
                 else:
@@ -1328,6 +1348,8 @@ def main():
                                 "[implement]   The end state was not reached; "
                                 "'left in place' below is what remains."
                             )
+                    # #3547: the checkpoint database is an artifact the run leaves.
+                    print(f"[implement] Checkpoint database (resume state): {db_path}")
                     record.finish("success")
                     return 0
 
