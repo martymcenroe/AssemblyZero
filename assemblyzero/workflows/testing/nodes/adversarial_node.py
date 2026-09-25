@@ -14,6 +14,9 @@ This node:
 import json
 import logging
 import os
+from collections.abc import Mapping
+from typing import Any
+
 from assemblyzero.workflows.testing.adversarial_gemini import (
     AdversarialGeminiClient,
     ForbiddenModelError,
@@ -48,17 +51,56 @@ _REQUIRED_ANALYSIS_CATEGORIES = [
 ]
 
 
+def _skipped(state: AdversarialNodeState, reason: str) -> AdversarialNodeState:
+    """The review did not run. Recorded, never raised: this node is
+    non-blocking by design (route_after_adversarial always proceeds to N8),
+    and the reason travels to the run report and the PR body through
+    ``adversarial_summary`` (#2926)."""
+    return {
+        **state,
+        "adversarial_skipped_reason": reason,
+        "adversarial_verdict": "skipped",
+        "adversarial_test_count": 0,
+        "adversarial_error": None,
+        "generated_test_files": {},
+    }
+
+
+def adversarial_summary(state: Mapping[str, Any]) -> str:
+    """One line saying what N7.5 did, for the run report and the PR body.
+
+    #2926: a skipped review used to reach the log and nothing else, so a PR
+    could land with the adversarial step silently absent, and did, on every
+    run from 2026-07-31 to 2026-09-24.
+    """
+    verdict = state.get("adversarial_verdict")
+    if verdict is None:
+        return "Adversarial review (N7.5): did not reach this step"
+    reason = state.get("adversarial_skipped_reason")
+    if verdict == "skipped" or reason:
+        return f"Adversarial review (N7.5): did not run: {reason}"
+    if verdict == "error":
+        return f"Adversarial review (N7.5): errored: {state.get('adversarial_error')}"
+    count = state.get("adversarial_test_count", 0)
+    return (
+        f"Adversarial review (N7.5): ran; {count} adversarial test(s) written; "
+        f"verdict {verdict}"
+    )
+
+
 def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     """LangGraph node: Orchestrates adversarial test generation via Gemini.
 
     1. Collects implementation code and LLD from state.
     2. Builds adversarial analysis prompt.
-    3. Invokes Gemini Pro for analysis via adversarial_gemini wrapper.
+    3. Invokes Gemini Pro for analysis via adversarial_gemini wrapper, on the
+       sanctioned transport (#2926).
     4. Parses structured response into AdversarialAnalysis.
     5. Delegates to writer and validator.
     6. Returns updated state with generated tests.
 
-    Fails gracefully on Gemini quota/downgrade errors (sets adversarial_skipped_reason).
+    Never blocks the run: a review that cannot run is recorded as "skipped"
+    with its reason, and ``adversarial_summary`` carries that to the report.
 
     Args:
         state: The current workflow state.
@@ -69,46 +111,45 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     logger.info("[ADV] Starting adversarial test generation node")
 
     # Issue #547: Skip-on-resume — don't re-call Gemini if verdict already exists
-    if state.get("adversarial_verdict") in ("success", "error") and state.get("adversarial_test_count", 0) > 0:
+    if (
+        state.get("adversarial_verdict") in ("pass", "success", "error")
+        and state.get("adversarial_test_count", 0) > 0
+    ):
         logger.info("[ADV] Adversarial analysis already complete — skipping")
         return state
+
+    # #3546: a mock run makes no network call. The flag reaches this node
+    # through AdversarialNodeState now; it used to be filtered out at the
+    # LangGraph boundary, and the node decided by whether a client could be
+    # built -- which on a machine holding any Gemini key meant a real call to
+    # the paid API from a rehearsal.
+    if state.get("mock_mode"):
+        logger.info("[ADV] Mock run — no adversarial review")
+        return _skipped(state, "mock run, no adversarial review is made")
 
     # Check for implementation files
     impl_files = state.get("implementation_files", [])
     if not impl_files:
         logger.info("[ADV] No implementation files in state — skipping")
-        return {
-            **state,
-            "adversarial_skipped_reason": "No implementation files in state",
-            "adversarial_verdict": "error",
-            "adversarial_test_count": 0,
-            "adversarial_error": None,
-            "generated_test_files": {},
-        }
+        return _skipped(state, "No implementation files in state")
 
     # Collect and trim context
     impl_context, lld_context, test_context = _collect_context(state)
 
-    # Invoke Gemini. This node is non-blocking by design (route_after_adversarial
-    # always proceeds to N8). If no usable Gemini client can be constructed —
-    # mock_mode runs, or a credential-less environment such as CI — skip
-    # gracefully instead of crashing the whole TDD workflow (#1602). The
-    # mock_mode flag is NOT visible here: LangGraph filters the node input to
-    # AdversarialNodeState, which omits it, so we key off client-constructability
-    # rather than the flag.
+    # #2926: the sanctioned transport and nothing else. Construction fails
+    # only on a forbidden alias or a spec get_provider refuses, and neither
+    # blocks the run: the reason is recorded and the run continues.
     try:
         client = AdversarialGeminiClient()
-    except Exception as exc:  # noqa: BLE001 — non-blocking node: any ctor failure skips
-        logger.info("[ADV] No usable Gemini client — skipping adversarial: %s", exc)
-        return {
-            **state,
-            "adversarial_skipped_reason": f"no Gemini client available: {exc}",
-            "adversarial_verdict": "success",
-            "adversarial_test_count": 0,
-            "adversarial_error": None,
-            "generated_test_files": {},
-        }
+    except (ForbiddenModelError, ValueError) as exc:
+        logger.warning("[ADV] No adversarial client — skipping: %s", exc)
+        return _skipped(state, f"no adversarial client: {exc}")
 
+    # One call. The transport has already retried and rotated before it
+    # reports a failure (#1907); the second lap this node used to take
+    # doubled a gauntlet that had run its course, and printed "timeout --
+    # retrying" in every run log since 2026-07-31 when the cause was a dead
+    # API key (#2926). The transport's own message is what gets recorded.
     try:
         raw_response = client.generate_adversarial_tests(
             implementation_code=impl_context,
@@ -116,61 +157,22 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
             existing_tests=test_context,
             timeout=120,
         )
-    except GeminiQuotaExhaustedError:
-        logger.warning("[ADV] Gemini quota exhausted — skipping adversarial tests")
-        return {
-            **state,
-            "adversarial_skipped_reason": "Gemini quota exhausted",
-            "adversarial_verdict": "error",
-            "adversarial_test_count": 0,
-            "adversarial_error": None,
-            "generated_test_files": {},
-        }
+    except GeminiQuotaExhaustedError as e:
+        logger.warning("[ADV] Gemini quota exhausted — skipping: %s", e)
+        return _skipped(state, f"Gemini quota exhausted: {e}")
     except ForbiddenModelError as e:
-        # #2286: the requested model is checked before the call now. This node
-        # is non-blocking by design, and the surrounding handlers name specific
-        # Gemini errors rather than catching broadly, so a new exception type
-        # would otherwise escape and halt a pipeline that is supposed to
+        # #2286: the requested model is checked before the call. The handlers
+        # here name specific errors rather than catching broadly, so a new
+        # exception type would escape and halt a pipeline that is supposed to
         # continue without adversarial coverage.
         logger.warning("[ADV] Adversarial model not permitted — skipping: %s", e)
-        return {
-            **state,
-            "adversarial_skipped_reason": f"adversarial model not permitted: {e}",
-            "adversarial_verdict": "error",
-            "adversarial_test_count": 0,
-            "adversarial_error": None,
-            "generated_test_files": {},
-        }
+        return _skipped(state, f"adversarial model not permitted: {e}")
     except GeminiModelDowngradeError as e:
         logger.warning("[ADV] Gemini model downgraded to Flash — skipping: %s", e)
-        return {
-            **state,
-            "adversarial_skipped_reason": f"Gemini model downgraded to Flash: {e}",
-            "adversarial_verdict": "error",
-            "adversarial_test_count": 0,
-            "adversarial_error": None,
-            "generated_test_files": {},
-        }
-    except GeminiTimeoutError:
-        # Retry once with extended timeout
-        logger.warning("[ADV] Gemini timeout — retrying with 180s timeout")
-        try:
-            raw_response = client.generate_adversarial_tests(
-                implementation_code=impl_context,
-                lld_content=lld_context,
-                existing_tests=test_context,
-                timeout=180,
-            )
-        except (GeminiTimeoutError, GeminiQuotaExhaustedError, GeminiModelDowngradeError) as e:
-            logger.warning("[ADV] Gemini retry failed — skipping: %s", e)
-            return {
-                **state,
-                "adversarial_skipped_reason": f"Gemini timeout after retry: {e}",
-                "adversarial_verdict": "error",
-                "adversarial_test_count": 0,
-                "adversarial_error": None,
-                "generated_test_files": {},
-            }
+        return _skipped(state, f"Gemini model downgraded to Flash: {e}")
+    except GeminiTimeoutError as e:
+        logger.warning("[ADV] Gemini call failed — skipping: %s", e)
+        return _skipped(state, f"Gemini call failed: {e}")
 
     # Parse response
     try:
@@ -189,7 +191,9 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     # Write test files. #1757: root them in the target repo/worktree —
     # the writer's CWD-relative default would land target-repo tests in
     # AssemblyZero's own tests/adversarial/ when workflows run from AZ.
-    issue_id = state.get("issue_id", 0)
+    # #2926: the testing state names the issue `issue_number`; `issue_id` is
+    # this node's own older spelling, kept for callers that use it.
+    issue_id = state.get("issue_id") or state.get("issue_number", 0)
     repo_root = state.get("repo_root", "")
     output_dir = (
         os.path.join(repo_root, "tests", "adversarial")

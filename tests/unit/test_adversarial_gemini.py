@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 
+from assemblyzero.core.llm_provider import LLMCallResult, LLMProvider
 from assemblyzero.workflows.testing.adversarial_gemini import (
+    ADVERSARIAL_PROVIDER_SPEC,
     AdversarialGeminiClient,
     GeminiModelDowngradeError,
     GeminiQuotaExhaustedError,
@@ -159,44 +161,6 @@ class TestAdversarialGeminiClient:
         client = AdversarialGeminiClient(provider=mock_provider)
         assert client._provider is mock_provider
 
-    def test_auto_discovery_import_error(self):
-        """When no provider can be discovered, raises ImportError."""
-        with patch(
-            "assemblyzero.workflows.testing.adversarial_gemini.AdversarialGeminiClient._discover_provider",
-            side_effect=ImportError("No Gemini provider found"),
-        ):
-            with pytest.raises(ImportError, match="No Gemini provider found"):
-                AdversarialGeminiClient(provider=None)
-
-    def test_langchain_provider_strategy(self):
-        """Client can use LangChain-style provider with invoke() method."""
-        mock_response = MagicMock()
-        mock_response.content = (
-            '{"uncovered_edge_cases": [], "false_claims": [], '
-            '"missing_error_handling": [], "implicit_assumptions": [], '
-            '"test_cases": []}'
-        )
-        mock_response.response_metadata = {"model": "gemini-2.5-pro-preview-05-06"}
-
-        mock_provider = MagicMock()
-        # Remove callable behavior so it falls to invoke() strategy
-        mock_provider.models = MagicMock(spec=[])  # no generate_content
-        del mock_provider.models.generate_content
-        mock_provider.invoke.return_value = mock_response
-
-        client = AdversarialGeminiClient(provider=mock_provider)
-
-        with patch(
-            "assemblyzero.workflows.testing.adversarial_gemini.AdversarialGeminiClient._invoke_provider",
-            return_value=(mock_response.content, mock_response.response_metadata),
-        ):
-            result = client.generate_adversarial_tests(
-                implementation_code="def foo(): pass",
-                lld_content="# LLD",
-                existing_tests="",
-            )
-
-        assert "test_cases" in result
 
 
 class TestVerifyModelIsPro:
@@ -291,35 +255,13 @@ class TestIsQuotaError:
 
 
 # ---------------------------------------------------------------------------
-# The request we build must be one the SDK accepts (#2281)
+# The sanctioned transport, and nothing else (#2926)
 # ---------------------------------------------------------------------------
 
 _VALID_RESPONSE = (
     '{"uncovered_edge_cases": [], "false_claims": [], '
     '"missing_error_handling": [], "implicit_assumptions": [], "test_cases": []}'
 )
-
-
-def _capturing_genai_provider() -> tuple[MagicMock, dict]:
-    """A stand-in for a google.genai Client that records the kwargs it is given.
-
-    Shaped to take strategy 1 in `_invoke_provider` (`provider.models.generate_content`),
-    which is the path a real google.genai Client takes.
-    """
-    captured: dict = {}
-
-    def generate_content(*, model, contents, config):
-        captured["model"] = model
-        captured["contents"] = contents
-        captured["config"] = config
-        response = MagicMock()
-        response.text = _VALID_RESPONSE
-        response.model = "gemini-2.5-pro"
-        return response
-
-    provider = MagicMock()
-    provider.models.generate_content = generate_content
-    return provider, captured
 
 
 def _invoke(provider, **kwargs) -> str:
@@ -331,56 +273,154 @@ def _invoke(provider, **kwargs) -> str:
     )
 
 
-class TestGenerateContentConfigIsAcceptedBySdk:
-    """The config dict this module builds is validated by the real SDK type.
+class _FakeTransport(LLMProvider):
+    """An LLMProvider that answers with a canned LLMCallResult and records
+    the call: the shape GeminiProvider over agy has, without the network."""
 
-    Before #2281 the call site put `timeout` inside the config dict.
-    `GenerateContentConfig` forbids extra fields, so every adversarial
-    invocation raised a pydantic ValidationError locally, before any request
-    was sent. The integration test could not catch it -- it skips on the very
-    exception the defect raises -- so this offline check is the one that must.
-    """
+    def __init__(self, result: LLMCallResult) -> None:
+        self._result = result
+        self.calls: list[dict] = []
 
-    def test_config_validates_against_the_real_sdk_type(self):
-        from google.genai.types import GenerateContentConfig
+    @property
+    def provider_name(self) -> str:
+        return "gemini"
 
-        provider, captured = _capturing_genai_provider()
-        _invoke(provider, timeout=120)
+    @property
+    def model(self) -> str:
+        return "3.1-pro"
 
-        # Must not raise. This is the whole defect: the dict below was rejected.
-        GenerateContentConfig(**captured["config"])
+    def invoke(
+        self,
+        system_prompt: str,
+        content: str,
+        timeout_seconds: int = 300,
+        response_schema: dict | None = None,
+        json_schema: dict | None = None,
+    ) -> LLMCallResult:
+        self.calls.append({
+            "system_prompt": system_prompt,
+            "content": content,
+            "timeout_seconds": timeout_seconds,
+        })
+        return self._result
 
-    def test_timeout_is_not_passed_as_a_config_field(self):
-        provider, captured = _capturing_genai_provider()
-        _invoke(provider, timeout=120)
 
-        assert "timeout" not in captured["config"], (
-            "`timeout` is not a GenerateContentConfig field and the model forbids "
-            "extras -- putting it back here breaks every adversarial call (#2281)."
-        )
+def _result(**overrides) -> LLMCallResult:
+    base = dict(
+        success=True,
+        response=_VALID_RESPONSE,
+        raw_response=_VALID_RESPONSE,
+        error_message=None,
+        provider="gemini",
+        model_used="gemini-3.1-pro-high",
+        duration_ms=1,
+        attempts=1,
+    )
+    base.update(overrides)
+    return LLMCallResult(**base)
 
-    def test_timeout_reaches_http_options_in_milliseconds(self):
-        provider, captured = _capturing_genai_provider()
-        _invoke(provider, timeout=120)
 
-        assert captured["config"]["http_options"]["timeout"] == 120_000
+class TestTheSanctionedTransport:
+    """#2926. The client used to discover its provider through four module
+    names that did not exist and fall through to google.genai.Client(), which
+    read a retired GEMINI_API_KEY from the environment. Google answered
+    API_KEY_INVALID on every run from 2026-07-31 to 2026-09-24, the error was
+    renamed to a timeout, and the node skipped itself each time."""
 
-    def test_sdk_still_documents_http_options_timeout_in_milliseconds(self):
-        """Pin the UNIT, not just the field.
+    def test_the_default_provider_comes_from_get_provider_with_the_gemini_spec(self):
+        with patch("assemblyzero.core.llm_provider.get_provider") as factory:
+            factory.return_value = _FakeTransport(_result())
+            client = AdversarialGeminiClient()
 
-        A version bump that redefined `http_options.timeout` as seconds would
-        turn our 120-second budget into 120000 seconds, or a 120ms one if the
-        conversion were dropped. Neither would fail any other test here, and
-        both would present as a Gemini problem rather than ours.
-        """
-        from google.genai.types import HttpOptions
+        factory.assert_called_once_with(ADVERSARIAL_PROVIDER_SPEC)
+        assert ADVERSARIAL_PROVIDER_SPEC == "gemini:3.1-pro"
+        assert client._provider is factory.return_value
 
-        description = (HttpOptions.model_fields["timeout"].description or "").lower()
-        assert "millisecond" in description, (
-            f"google-genai no longer documents http_options.timeout in "
-            f"milliseconds (got: {description!r}). The `* 1000` conversion in "
-            f"adversarial_gemini.py must be re-derived before this ships."
-        )
+    def test_a_forbidden_alias_is_refused_before_any_transport_is_built(self):
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
+
+        with patch("assemblyzero.core.llm_provider.get_provider") as factory, \
+                patch.object(ag, "ADVERSARIAL_MODEL_ALIAS", "flash"):
+            with pytest.raises(ag.ForbiddenModelError):
+                AdversarialGeminiClient()
+
+        factory.assert_not_called()
+
+    def test_an_llm_provider_is_invoked_with_the_prompts_and_the_timeout(self):
+        transport = _FakeTransport(_result())
+
+        text = _invoke(transport, timeout=120)
+
+        assert len(transport.calls) == 1
+        call = transport.calls[0]
+        assert call["timeout_seconds"] == 120
+        assert "adversarial" in call["system_prompt"].lower()
+        assert "def foo(): pass" in call["content"]
+        assert "test_cases" in text
+
+    def test_the_reply_metadata_carries_the_model_the_transport_used(self):
+        transport = _FakeTransport(_result(model_used="gemini-3.1-pro-high"))
+        client = AdversarialGeminiClient(provider=transport)
+
+        _, metadata = client._invoke_provider("sys", "user", 120)
+
+        assert metadata == {"model": "gemini-3.1-pro-high"}
+
+    def test_a_reported_failure_carries_the_transport_message_not_a_timeout(self):
+        """#2926's first requirement: a credential failure is reported as one.
+        The message is the transport's own, with its status, and is not
+        renamed to "exceeded 120s timeout" on the way out."""
+        transport = _FakeTransport(_result(
+            success=False,
+            response=None,
+            error_message="API key not valid. Please pass a valid API key.",
+            status_code=400,
+        ))
+
+        with pytest.raises(GeminiTimeoutError) as excinfo:
+            _invoke(transport, timeout=120)
+
+        message = str(excinfo.value)
+        assert "API key not valid" in message
+        assert "status=400" in message
+        assert "exceeded 120s timeout" not in message
+
+    def test_a_rate_limit_is_a_quota_error(self):
+        transport = _FakeTransport(_result(
+            success=False,
+            response=None,
+            error_message="429 RESOURCE_EXHAUSTED",
+            rate_limited=True,
+            status_code=429,
+        ))
+
+        with pytest.raises(GeminiQuotaExhaustedError):
+            _invoke(transport, timeout=120)
+
+    def test_no_discovery_and_no_sdk_import_remain(self):
+        """The failed path's names are gone from the module, not merely
+        unreachable: no discovery method, and no import of the SDK, of
+        importlib, of langchain, or of the utils package that never held a
+        provider."""
+        import ast
+        from pathlib import Path
+
+        import assemblyzero.workflows.testing.adversarial_gemini as ag
+
+        assert not hasattr(AdversarialGeminiClient, "_discover_provider")
+
+        imported: set[str] = set()
+        for node in ast.walk(ast.parse(Path(ag.__file__).read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                imported |= {alias.name for alias in node.names}
+            elif isinstance(node, ast.ImportFrom):
+                imported.add(node.module or "")
+        banned = {
+            name for name in imported
+            if name.split(".")[0] in {"google", "importlib", "langchain_core"}
+            or name.startswith("assemblyzero.utils")
+        }
+        assert banned == set(), banned
 
 
 class TestClientSideErrorsAreNotReportedAsOutages:
@@ -510,44 +550,12 @@ class TestTheRequestedModelIsChosenNotSpelled:
         ]
         assert not [line for line in code if "gemini-2.5-pro-preview" in line]
 
-
-class TestTheResolvedModelReachesTheWireAndTheMetadata:
-    def _client_with_fake_genai(self, response):
+    def test_the_spec_sent_is_the_alias_that_was_checked(self):
+        """#2926: the model half of the provider spec is the alias
+        resolve_adversarial_model validates, so what is checked and what is
+        requested cannot drift apart."""
         from assemblyzero.workflows.testing.adversarial_gemini import (
-            AdversarialGeminiClient,
+            ADVERSARIAL_MODEL_ALIAS,
         )
 
-        provider = MagicMock()
-        provider.models.generate_content.return_value = response
-        return AdversarialGeminiClient(provider=provider), provider
-
-    def test_the_request_carries_the_resolved_identifier(self):
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            resolve_adversarial_model,
-        )
-
-        response = MagicMock()
-        response.text = "{}"
-        response.model = resolve_adversarial_model()
-        client, provider = self._client_with_fake_genai(response)
-
-        client._invoke_provider("sys", "user", 120)
-
-        kwargs = provider.models.generate_content.call_args.kwargs
-        assert kwargs["model"] == resolve_adversarial_model()
-
-    def test_the_metadata_fallback_reports_the_model_actually_requested(self):
-        """The old fallbacks repeated the literal, so after a change at the
-        call site they would have named a model nobody asked for."""
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            resolve_adversarial_model,
-        )
-
-        response = MagicMock(spec=["text", "candidates"])
-        response.text = "{}"
-        response.candidates = []
-        client, _ = self._client_with_fake_genai(response)
-
-        _, metadata = client._invoke_provider("sys", "user", 120)
-
-        assert metadata["model"] == resolve_adversarial_model()
+        assert ADVERSARIAL_PROVIDER_SPEC == f"gemini:{ADVERSARIAL_MODEL_ALIAS}"

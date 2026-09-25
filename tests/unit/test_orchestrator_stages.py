@@ -643,6 +643,44 @@ class TestRunPrStage:
         assert f"issue-{issue}" not in pushed_argv
 
     @patch("assemblyzero.workflows.orchestrator.stages.run_command")
+    def test_pr_body_says_what_the_adversarial_review_did(self, mock_run):
+        """#2926: the impl stage writes `adversarial_summary` and the pr stage
+        puts it on the PR, so a review that did not run is visible where the
+        work is judged. With no summary in state (a run that never reached
+        N7.5), the body says the step was not reached rather than nothing."""
+
+        def fake_run(cmd, *args, **kwargs):
+            out = MagicMock()
+            if cmd[:2] == ["git", "rev-parse"]:
+                out.stdout = "2926-transport\n"
+            else:
+                out.stdout = "https://github.com/martymcenroe/AssemblyZero/pull/9999\n"
+            return out
+
+        mock_run.side_effect = fake_run
+
+        def body_for(summary):
+            state = create_initial_state(2926, get_default_config())
+            state["worktree_path"] = "/tmp/AssemblyZero-2926"
+            state["base_branch"] = "main"
+            if summary is not None:
+                state["adversarial_summary"] = summary
+            run_pr_stage(state)
+            pr_calls = [
+                c for c in mock_run.call_args_list
+                if c.args[0][:3] == ["gh", "pr", "create"]
+            ]
+            argv = pr_calls[-1].args[0]
+            return argv[argv.index("--body") + 1]
+
+        skipped = (
+            "Adversarial review (N7.5): did not run: "
+            "Gemini call failed: API key not valid"
+        )
+        assert skipped in body_for(skipped)
+        assert "Adversarial review (N7.5): did not reach this step" in body_for(None)
+
+    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
     def test_pr_base_is_attempt_branch_from_state(self, mock_run):
         """#1755 attempt-branch model: the impl PR targets the integration
         branch captured at pipeline start, never a hardcoded main."""

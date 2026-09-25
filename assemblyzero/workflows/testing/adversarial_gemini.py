@@ -3,8 +3,16 @@
 Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 
 Encapsulates adversarial-specific invocation (system prompt, no-mock constraint,
-timeout handling) while delegating actual API communication to the existing
-provider infrastructure.
+model check) while delegating the call to the sanctioned transport:
+``get_provider("gemini:3.1-pro")``, which is ``agy`` over stdin per ADR 0220.
+
+#2926: until 2026-09-24 the client "discovered" its provider through four
+module names that did not exist, fell through to ``google.genai.Client()``,
+and that SDK read a retired ``GEMINI_API_KEY`` from the environment. Google
+answered ``API_KEY_INVALID`` on every run since 2026-07-31 and the node
+skipped itself each time. There is no discovery and no SDK fallback now: the
+provider is the one every other Gemini caller in this repository uses, or one
+the caller injects.
 """
 
 import logging
@@ -59,6 +67,11 @@ class ForbiddenModelError(Exception):
 #: notes and `FORBIDDEN_MODELS` both reach this path, and a fleet-wide migration
 #: cannot miss it.
 ADVERSARIAL_MODEL_ALIAS = "3.1-pro"
+
+#: #2926: the spec the node hands to ``get_provider``. Its model half is the
+#: alias ``resolve_adversarial_model`` checks against FORBIDDEN_MODELS, so the
+#: request that is validated and the request that is sent cannot differ.
+ADVERSARIAL_PROVIDER_SPEC = f"gemini:{ADVERSARIAL_MODEL_ALIAS}"
 
 
 def resolve_adversarial_model() -> str:
@@ -122,66 +135,27 @@ class AdversarialGeminiClient:
     """
 
     def __init__(self, provider: Any | None = None) -> None:
-        """Initialize with an optional GeminiProvider instance.
-
-        If provider is None, attempts to instantiate the default provider
-        from assemblyzero.utils (auto-discovered at runtime).
+        """Wrap ``provider``, or build the sanctioned one.
 
         Args:
-            provider: An object with a method to invoke Gemini. If None,
-                      auto-discovers from assemblyzero.utils.
+            provider: An ``LLMProvider`` (the sanctioned shape), or a callable
+                ``(system_prompt=..., user_prompt=...) -> (text, metadata)``
+                standing in for one in tests. ``None`` builds
+                ``get_provider(ADVERSARIAL_PROVIDER_SPEC)`` after
+                ``resolve_adversarial_model`` has checked the alias, so a
+                forbidden tier is refused before any transport exists.
+
+        Raises:
+            ForbiddenModelError: if the alias resolves to a forbidden model.
+            ValueError: from ``get_provider`` if the spec cannot be built.
         """
         if provider is not None:
             self._provider = provider
-        else:
-            self._provider = self._discover_provider()
+            return
+        resolve_adversarial_model()
+        from assemblyzero.core.llm_provider import get_provider
 
-    def _discover_provider(self) -> Any:
-        """Auto-discover and instantiate the Gemini provider from assemblyzero.utils.
-
-        Searches for common provider class names in the utils package.
-
-        Returns:
-            An instantiated Gemini provider.
-
-        Raises:
-            ImportError: If no suitable Gemini provider found.
-        """
-        # Try known provider locations in order of likelihood
-        provider_attempts = [
-            ("assemblyzero.utils.gemini_provider", "GeminiProvider"),
-            ("assemblyzero.utils.gemini", "GeminiProvider"),
-            ("assemblyzero.utils.gemini_client", "GeminiClient"),
-            ("assemblyzero.utils.providers", "GeminiProvider"),
-        ]
-
-        for module_path, class_name in provider_attempts:
-            try:
-                import importlib
-
-                mod = importlib.import_module(module_path)
-                cls = getattr(mod, class_name)
-                logger.info(
-                    "Discovered Gemini provider: %s.%s", module_path, class_name
-                )
-                return cls()
-            except (ImportError, AttributeError):
-                continue
-
-        # Fallback: try google.genai directly
-        try:
-            from google import genai
-
-            logger.info("Using google.genai directly as Gemini provider")
-            return genai.Client()
-        except ImportError:
-            pass
-
-        raise ImportError(
-            "No Gemini provider found. Ensure google-genai or "
-            "langchain-google-genai is installed and a provider class "
-            "exists in assemblyzero.utils."
-        )
+        self._provider = get_provider(ADVERSARIAL_PROVIDER_SPEC)
 
     def verify_model_is_pro(self, response_metadata: dict) -> bool:
         """Check response metadata to confirm Gemini Pro was used.
@@ -268,6 +242,12 @@ class AdversarialGeminiClient:
                 user_prompt=user_prompt,
                 timeout=timeout,
             )
+        except (GeminiQuotaExhaustedError, GeminiTimeoutError):
+            # #2926: already typed by the sanctioned path, with the transport's
+            # own message. Re-wrapping below would rename a reported failure
+            # to "exceeded {timeout}s timeout", which is the misreading that
+            # hid a dead API key for two months.
+            raise
         except TimeoutError as e:
             raise GeminiTimeoutError(
                 f"Gemini API response exceeded {timeout}s timeout",
@@ -319,68 +299,47 @@ class AdversarialGeminiClient:
     ) -> tuple[str, dict]:
         """Invoke the underlying provider and return (response_text, metadata).
 
-        This method abstracts over different provider APIs (google.genai,
-        langchain-google-genai, etc.).
+        Two shapes, and only two (#2926). The ``google.genai`` and LangChain
+        strategies that used to sit here were the failed path: a raw SDK
+        constructed around the sanctioned client, reading a key from the
+        environment that nothing sanctioned reads.
 
         Returns:
             Tuple of (raw_response_text, response_metadata_dict).
+
+        Raises:
+            GeminiQuotaExhaustedError: the transport reported a rate limit.
+            GeminiTimeoutError: the transport reported any other failure. The
+                message carries the transport's own error text and status,
+                so a credential failure reads as one rather than as a timeout.
         """
         provider = self._provider
+        from assemblyzero.core.llm_provider import LLMProvider
 
-        # Strategy 1: google.genai Client
-        if hasattr(provider, "models") and hasattr(
-            getattr(provider, "models", None), "generate_content"
-        ):
-            # #2286: resolved once, then reused for the metadata fallbacks
-            # below. They previously repeated the literal, so a change here
-            # alone would have left them reporting a model never requested.
-            model_id = resolve_adversarial_model()
-            response = provider.models.generate_content(
-                model=model_id,
-                contents=user_prompt,
-                config={
-                    "system_instruction": system_prompt,
-                    "response_mime_type": "application/json",
-                    # `timeout` is NOT a GenerateContentConfig field -- the model
-                    # forbids extras, so passing it there raised a pydantic
-                    # ValidationError before any request was sent, and every
-                    # adversarial invocation failed locally (#2281). The
-                    # per-request timeout lives in http_options, in
-                    # MILLISECONDS: the SDK documents the field as "Timeout for
-                    # the request in milliseconds." A test pins the unit,
-                    # because a version bump that changed it to seconds would
-                    # otherwise silently make this a 2-minute-to-120ms cut.
-                    "http_options": {"timeout": timeout * 1000},
-                },
+        # The sanctioned shape: an LLMProvider, which for a gemini: spec is
+        # GeminiClient over agy (ADR 0220), with its own retries and rotation.
+        if isinstance(provider, LLMProvider):
+            result = provider.invoke(
+                system_prompt=system_prompt,
+                content=user_prompt,
+                timeout_seconds=timeout,
             )
-            text = response.text if hasattr(response, "text") else str(response)
+            if not result.success:
+                if result.rate_limited:
+                    raise GeminiQuotaExhaustedError(
+                        f"Gemini quota exhausted: {result.error_message}",
+                        provider="gemini",
+                    )
+                raise GeminiTimeoutError(
+                    f"Gemini API error (status={result.status_code}): "
+                    f"{result.error_message}",
+                    provider="gemini",
+                )
             # Issue #527: Strip emojis from Gemini response
-            text = strip_emoji(text)
-            metadata: dict[str, Any] = {}
-            if hasattr(response, "model"):
-                metadata["model"] = response.model
-            elif hasattr(response, "candidates") and response.candidates:
-                metadata["model"] = getattr(response, "model_version", model_id)
-            else:
-                metadata["model"] = model_id
-            return text, metadata
+            text = strip_emoji(result.response or "")
+            return text, {"model": result.model_used}
 
-        # Strategy 2: LangChain-style provider with invoke()
-        if hasattr(provider, "invoke"):
-            from langchain_core.messages import HumanMessage, SystemMessage
-
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_prompt),
-            ]
-            response = provider.invoke(messages)
-            text = response.content if hasattr(response, "content") else str(response)
-            # Issue #527: Strip emojis from Gemini response
-            text = strip_emoji(text)
-            metadata = getattr(response, "response_metadata", {})
-            return text, metadata
-
-        # Strategy 3: Generic callable
+        # A plain callable, standing in for the transport in tests.
         if callable(provider):
             result = provider(system_prompt=system_prompt, user_prompt=user_prompt)
             if isinstance(result, tuple):
@@ -389,7 +348,7 @@ class AdversarialGeminiClient:
 
         raise TypeError(
             f"Unsupported Gemini provider type: {type(provider).__name__}. "
-            "Provider must have 'models.generate_content', 'invoke', or be callable."
+            "Provider must be an LLMProvider or a callable."
         )
 
     def _is_quota_error(self, response: str | None, metadata: dict) -> bool:

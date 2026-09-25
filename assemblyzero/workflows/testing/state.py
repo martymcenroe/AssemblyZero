@@ -283,6 +283,15 @@ class TestingWorkflowState(TypedDict, total=False):
     test_plan_revision_count: int  # Issue #1072: incremented per revision cycle
     auto_mode: bool
     mock_mode: bool
+    #: #2926: N7.5's outputs. Undeclared until 2026-09-24, they were dropped
+    #: at the LangGraph boundary (#2018) on the way OUT of the node, so no
+    #: report, status file or PR body could ever say what the adversarial
+    #: review did -- which is how it skipped itself for two months unseen.
+    adversarial_verdict: str
+    adversarial_error: str | None
+    adversarial_test_count: int
+    adversarial_skipped_reason: str | None
+    generated_test_files: dict[str, str]
     #: #1941: RESUMED or REGENERATED, set by the orchestrator on a stage retry;
     #: #2845 sets RESUMED when the worktree was carved from a preserved
     #: attempt. MUST stay declared (#2847): it was sent from the day #1941

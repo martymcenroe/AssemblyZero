@@ -870,6 +870,17 @@ def _write_status_file(
             status_data["previous_coverage"] = state.get("previous_coverage", 0)
             status_data["test_files"] = state.get("test_files", [])
             status_data["implementation_files"] = state.get("implementation_files", [])
+            # #2926: the adversarial review, or why it did not run.
+            from assemblyzero.workflows.testing.nodes.adversarial_node import (
+                adversarial_summary,
+            )
+
+            status_data["adversarial"] = {
+                "verdict": state.get("adversarial_verdict"),
+                "test_count": state.get("adversarial_test_count", 0),
+                "skipped_reason": state.get("adversarial_skipped_reason"),
+                "summary": adversarial_summary(state),
+            }
 
             if state.get("estimated_tokens_used"):
                 status_data["tokens_used"] = state["estimated_tokens_used"]
@@ -1276,6 +1287,14 @@ def main():
 
                 if values.get("test_report_path"):
                     print(f"Test Report: {values['test_report_path']}")
+
+                # #2926: the adversarial review's outcome, or why it did not
+                # run, is in the report where the run is judged.
+                from assemblyzero.workflows.testing.nodes.adversarial_node import (
+                    adversarial_summary,
+                )
+
+                print(adversarial_summary(values))
 
                 if values.get("error_message"):
                     print(f"Status: {values['error_message']}")
