@@ -87,22 +87,76 @@ QUOTA_EXHAUSTED_PATTERNS = [
 AGY_CALL_TIMEOUT_SECONDS = 300.0
 MAX_TOTAL_INVOKE_SECONDS = 600.0
 
-#: Every agy call runs sandboxed (#3516, ADR 0233). Measured 2026-09-24,
-#: through this client's own `_invoke_via_cli`, asked to run `whoami` and to
-#: write a file at an absolute path outside its temp cwd:
-#:   no flag              -> ran `whoami` (answered "mcwiz") and wrote the file
-#:   --sandbox            -> shell refused ("createAppContainer: ShellExecute
-#:                           failed"); the file was STILL written
-#:   --sandbox --mode plan -> the same: plan "auto-approved", file written
-#: So the flag removes shell execution and nothing else. agy can still write
-#: any file the operator's account can write; ADR 0233 states that plainly.
-#:
-#: REMOVED 2026-09-25 (#3608): on Windows `--sandbox` builds an AppContainer and
-#: raised a UAC administrator-rights prompt. Operator ruling: no agent ever
-#: requests elevation, and agents do not pass --sandbox. The fleet's shell guard
-#: now denies `agy --sandbox`, so this must stay empty.
+#: No agy call carries a flag whose mechanism is elevation (#3608, #3605,
+#: #3603; ADR 0233 as amended 2026-09-25). ``--sandbox`` was here from
+#: 2026-09-24 (#3516) to 2026-09-25. On Windows it makes agy build an
+#: AppContainer for every shell command the model attempts, and building one
+#: needs an administrator token, which agy gets by relaunching itself elevated:
+#: a UAC dialog naming agy.exe. The "shell refused" result ADR 0233 measured
+#: on 2026-09-24 was that dialog timing out; the flag never blocked file
+#: writes either. The operator's ruling: no agent ever requests elevation, and
+#: agents do not pass --sandbox. The fleet's shell guard now denies
+#: ``agy --sandbox``, this list stays empty, and
+#: ``tests/unit/test_agy_sandbox_args.py`` pins it empty.
 AGY_SAFETY_ARGS: list[str] = []
 MIN_ATTEMPT_SECONDS = 20.0
+
+#: What keeps a print-mode agy call from executing the model's tool calls is
+#: agy's own ``toolPermission`` setting, not a flag (#3605). Under the
+#: documented default, ``request-review``, a headless shell command is
+#: soft-denied: nothing runs, exit 0, a notice on stderr. Under
+#: ``always-proceed`` the same command is executed unattended, and under
+#: ``proceed-in-sandbox`` the elevation above is requested. The pipeline's
+#: calls are text in, text out, and it refuses to run on a machine whose agy
+#: would execute what the model proposes.
+AGY_SETTINGS_PATH = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+AGY_REQUIRED_TOOL_PERMISSION = "request-review"
+
+
+class AgyToolExecutionEnabledError(RuntimeError):
+    """agy on this machine would execute the model's tool calls (#3605)."""
+
+
+def require_headless_tool_denial(settings_path: Optional[Path] = None) -> None:
+    """Refuse to call agy unless its settings soft-deny tool execution.
+
+    Reads ``AGY_SETTINGS_PATH``. The file must exist and either omit
+    ``toolPermission`` or set it to ``request-review``; anything else,
+    including a missing, unreadable or unparseable file, raises
+    ``AgyToolExecutionEnabledError`` before any subprocess starts. Nothing
+    here is inferred from agy's defaults: the pipeline runs only on a machine
+    that has stated its setting.
+    """
+    path = Path(settings_path or AGY_SETTINGS_PATH)
+    if not path.is_file():
+        raise AgyToolExecutionEnabledError(
+            f"{path} does not exist; the pipeline runs only on a machine whose agy "
+            f"settings state toolPermission={AGY_REQUIRED_TOOL_PERMISSION!r}. "
+            f"Create it (runbook 0957) and rerun (#3605)."
+        )
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise AgyToolExecutionEnabledError(
+            f"cannot read {path} ({exc}); the pipeline cannot tell whether agy "
+            f"executes the model's tool calls, so it does not run (#3605)"
+        ) from exc
+    try:
+        settings = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise AgyToolExecutionEnabledError(
+            f"{path} is not valid JSON ({exc}); the pipeline cannot tell whether "
+            f"agy executes the model's tool calls, so it does not run (#3605)"
+        ) from exc
+    value = settings.get("toolPermission") if isinstance(settings, dict) else None
+    if value is None or value == AGY_REQUIRED_TOOL_PERMISSION:
+        return
+    raise AgyToolExecutionEnabledError(
+        f"{path} sets toolPermission={value!r}; the pipeline requires "
+        f"{AGY_REQUIRED_TOOL_PERMISSION!r} (or the key absent), under which a "
+        f"headless shell command is soft-denied and never runs. Set it and rerun. "
+        f"No pipeline call executes a tool and no agent requests elevation (#3605)."
+    )
 
 #: Named in every failure this module hands back to a caller (#2476).
 #:
@@ -661,6 +715,7 @@ class GeminiClient:
         Returns:
             Tuple of (success, response_text, error_message)
         """
+        require_headless_tool_denial()
         if not self._agy_cli:
             return False, "", "Antigravity CLI (agy) not found"
 
@@ -828,6 +883,9 @@ class GeminiClient:
         Returns:
             GeminiCallResult with full observability data.
         """
+        # #3605: before credentials, before any attempt. A machine whose agy
+        # executes the model's tool calls gets no call from this pipeline.
+        require_headless_tool_denial()
         start_time = time.time()
         total_attempts = 0
 
