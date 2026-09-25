@@ -31,7 +31,7 @@ The Issue Workflow is a LangGraph-based state machine that transforms user ideat
 ### Core Flow (Happy Path)
 
 ```
-Brief -> Claude Draft -> Human Review -> Gemini Review -> Auto-route -> File Issue
+Brief -> Gemini Draft -> Human Review -> Gemini Review -> Auto-route -> File Issue
 ```
 
 ### Key Numbers
@@ -574,7 +574,7 @@ interface IssueWorkflowState {
 ```
 docs/lineage/active/{slug}/
 ├── 001-brief.md          # Copy of original ideation notes
-├── 002-draft.md          # First Claude draft
+├── 002-draft.md          # First draft (Gemini in agy since 2026-09-24)
 ├── 003-verdict.md        # First Gemini verdict
 ├── 004-feedback.txt      # Human feedback (if R at N3)
 ├── 005-draft.md          # Revised draft

@@ -168,7 +168,7 @@ These gates are mechanical — they run automatically and block progression. The
 ```mermaid
 graph LR
     subgraph G1["Gate 1: LLD Review"]
-        R1["Claude drafts LLD<br/>→ Gemini reviews<br/>→ APPROVE or BLOCK"]
+        R1["Gemini drafts LLD<br/>→ Gemini reviews<br/>→ APPROVE or BLOCK"]
     end
 
     subgraph G2["Gate 2: Mechanical Validation"]

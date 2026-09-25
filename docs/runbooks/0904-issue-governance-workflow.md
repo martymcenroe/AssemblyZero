@@ -8,7 +8,7 @@
 
 ## Purpose
 
-Create GitHub issues through a governed workflow that ensures human review at every step. The workflow uses a LangGraph StateGraph to enforce Inversion of Control - Claude drafts, Gemini reviews, but humans approve at every gate.
+Create GitHub issues through a governed workflow that ensures human review at every step. The workflow uses a LangGraph StateGraph to enforce Inversion of Control - Gemini in agy drafts, Gemini in agy reviews (the 2026-09-24 law, ADR 0234), but humans approve at every gate.
 
 **Use this when:** You want to create a well-structured GitHub issue with AI assistance but full human oversight.
 
@@ -90,7 +90,7 @@ sequenceDiagram
         Note over Python,User: N3: HUMAN EDIT DRAFT
         Python->>VSCode: 8. code --wait draft-issue.md
         Note over VSCode: SCRIPT PAUSES
-        User->>VSCode: 9. Review/edit Claude draft
+        User->>VSCode: 9. Review/edit the draft
         User->>VSCode: 10. Close editor
         VSCode-->>Python: 11. Editor closed
         Python->>User: 12. [G]emini / [R]evise / [S]ave?
@@ -215,9 +215,9 @@ If the slug already exists, you'll be prompted:
 - **[C]lean** - Delete checkpoint and audit dir, start fresh
 - **[A]bort** - Exit cleanly
 
-### Step 4: N2 - Claude Drafts
+### Step 4: N2 - Gemini Drafts
 
-Claude expands your brief into a full GitHub issue with:
+Gemini (agy) expands your brief into a full GitHub issue with:
 - Clear title and description
 - Acceptance criteria
 - Technical approach

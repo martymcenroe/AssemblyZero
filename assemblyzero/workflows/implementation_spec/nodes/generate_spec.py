@@ -2,7 +2,7 @@
 
 Issue #304: Implementation Readiness Review Workflow (LLD -> Implementation Spec)
 
-Uses the configured drafter LLM (Claude) to generate an Implementation Spec
+Uses the configured drafter LLM (Gemini in agy by default, per the 2026-09-24 law, ADR 0234) to generate an Implementation Spec
 from the approved LLD, codebase analysis results (current state snapshots
 and pattern references), and the Implementation Spec template.
 

@@ -2,7 +2,9 @@
 
 Issue #486: Halt-and-Plan pattern — self-babysitting workflows.
 
-Checks Gemini availability BEFORE spending money on Claude drafts.
+Checks Gemini availability before a run starts. Gemini in agy drafts and
+validates (the 2026-09-24 law, ADR 0234), so an unreachable transport halts
+the run before any node spends anything.
 Two levels:
 1. check_gemini_available() — read-only, zero API calls, <1ms
 2. check_gemini_reachable() — lightweight API ping, 10s timeout
@@ -187,9 +189,9 @@ def gemini_in_specs(*specs: str) -> bool:
     return any(str(s or "").strip().lower().startswith("gemini:") for s in specs)
 
 
-#: The probe's model when no spec names one. Never ``config.REVIEWER_MODEL``:
-#: that is the reviewer default, now a Claude id, and ``GeminiClient`` rejects
-#: it (#3541).
+#: The probe's model when no spec names one. Not ``config.REVIEWER_MODEL``,
+#: even though ADR 0234 made it a Gemini id: it was a Claude id once and
+#: ``GeminiClient`` rejected it (#3541); the probe names its model itself.
 DEFAULT_PROBE_MODEL = "gemini-3.1-pro-high"
 
 
