@@ -17,9 +17,9 @@ Usage:
     # Resume interrupted workflow
     python tools/run_requirements_workflow.py --type issue --resume my-feature.md
 
-    # With custom LLM providers
+    # With custom LLM providers (the default is agy in both seats, #3517)
     python tools/run_requirements_workflow.py --type lld --issue 42 \
-        --drafter gemini:2.5-flash --reviewer claude:sonnet
+        --drafter claude:sonnet --reviewer claude:opus
 
     # With human review at draft stage
     python tools/run_requirements_workflow.py --type lld --issue 42 --review draft
@@ -324,9 +324,9 @@ Examples:
   # LLD workflow (from GitHub issue)
   python tools/run_requirements_workflow.py --type lld --issue 42
 
-  # Custom LLM providers
+  # Custom LLM providers (the default is agy in both seats, #3517)
   python tools/run_requirements_workflow.py --type lld --issue 42 \\
-      --drafter gemini:2.5-flash --reviewer claude:sonnet
+      --drafter claude:sonnet --reviewer claude:opus
 
   # With human review at draft and verdict stages
   python tools/run_requirements_workflow.py --type lld --issue 42 --review all
@@ -374,16 +374,19 @@ Examples:
         help="Resume LLD workflow at review stage, reusing existing validated draft (Issue #536)",
     )
 
-    # LLM configuration
+    # LLM configuration. #3517, operator directive of 2026-09-24: agy drafts
+    # and validates; Claude is out of both seats. These match the
+    # orchestrator's defaults (orchestrator/config.py) and the library's own
+    # (requirements/config.py), which the CLI had been overriding.
     parser.add_argument(
         "--drafter",
-        default="claude:sonnet",
-        help="Drafter LLM spec (default: claude:sonnet)",
+        default="gemini:3.1-pro",
+        help="Drafter LLM spec (default: gemini:3.1-pro, agy)",
     )
     parser.add_argument(
         "--reviewer",
-        default="claude:opus",
-        help="Reviewer LLM spec (default: claude:opus)",
+        default="gemini:3.1-pro",
+        help="Reviewer LLM spec (default: gemini:3.1-pro, agy)",
     )
     parser.add_argument(
         "--effort",

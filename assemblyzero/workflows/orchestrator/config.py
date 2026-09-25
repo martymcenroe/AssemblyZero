@@ -41,11 +41,14 @@ def get_default_config() -> OrchestratorConfig:
         skip_existing_lld=True,
         skip_existing_spec=True,
         stages={
-            # #1434: Default to Gemini 3.1 Pro Preview (top-tier production
-            # model). Earlier #1432/PR #1433 incorrectly used gemini:2.5-flash;
-            # operator runs top-tier models by default. The Claude json_schema
-            # crash (#1431) remains the reason this defaults to Gemini rather
-            # than Claude — but with the right tier this time.
+            # #1434: Default to Gemini 3.1 Pro (top-tier production model).
+            # Earlier #1432/PR #1433 incorrectly used gemini:2.5-flash; the
+            # operator runs top-tier models by default. This comment used to
+            # cite the Claude json_schema crash (#1431) as the reason for
+            # Gemini over Claude. On 2026-09-24 that crash did not reproduce
+            # on haiku or opus (#3519), so the reasons are #1434 and the
+            # operator's directive of the same day that agy drafts and
+            # validates in both workflows (#3517).
             "triage": StageConfig(
                 drafter="gemini:3.1-pro",
                 reviewer="gemini:3.1-pro",

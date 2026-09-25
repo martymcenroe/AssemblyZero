@@ -91,9 +91,10 @@ def _roll_gate_drafter() -> str:
 #: `mock_mode`. The pre-check exists to tell an operator what the roll's gate
 #: will do BEFORE paying for a roll, so its value is entirely predictive and
 #: the roll is the thing being predicted. Aligning the roll to the pre-check
-#: instead would change what every stage drafts with and reopen #1431, the
-#: Claude `json_schema` crash that is the documented reason the roll defaults
-#: to Gemini at all.
+#: instead would change what every stage drafts with. (#1431, the Claude
+#: `json_schema` crash, was the documented reason the roll defaulted to
+#: Gemini; it did not reproduce on 2026-09-24, #3519, and the standalone
+#: tools default to Gemini in both seats since #3517.)
 #:
 #: One consequence, stated because it invalidates evidence rather than because
 #: it is convenient: #2375's measurements -- sonnet timing out three
