@@ -1,7 +1,7 @@
 # ADR 0232: Nested `claude -p` Calls Load No User Hooks
 
 **Date:** 2026-09-24
-**Status:** Proposed. The operator accepts or rejects it; the flag it describes has shipped with this ADR, as #3504 directed for this outcome.
+**Status:** Accepted, 2026-09-24. The operator directed the outcome in #3504 (the #3502 work order); the flag shipped with this ADR in PR #3543, and the status was recorded with #3517.
 **Amends:** ADR 0208 (LLM Invocation Strategy), § Claude CLI Invocation
 **Issue:** #3504 (parent #3502)
 

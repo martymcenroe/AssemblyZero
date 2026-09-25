@@ -137,7 +137,7 @@ class TestArgumentParsing:
         assert args.max_iterations == 10
 
     def test_default_values(self):
-        """Test default argument values."""
+        """Test default argument values. Both seats are agy since #3517."""
         from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
@@ -145,8 +145,8 @@ class TestArgumentParsing:
             "--issue", "42",
         ])
 
-        assert args.drafter == "claude:sonnet"
-        assert args.reviewer == "claude:opus"
+        assert args.drafter == "gemini:3.1-pro"
+        assert args.reviewer == "gemini:3.1-pro"
         assert args.review == "none"
         assert args.mock is False
         assert args.max_iterations == 20

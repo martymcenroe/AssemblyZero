@@ -259,8 +259,10 @@ def preflight_for_specs(*specs: str, client=None) -> Optional[PreflightResult]:
 
     A run whose every node is Claude never calls Gemini, so it is never
     stopped for a Gemini credential file it would not have read. That was the
-    standalone default (``--drafter claude:sonnet --reviewer claude:opus``),
-    and on a machine without the file it could not draft.
+    standalone default until #3517 (``--drafter claude:sonnet --reviewer
+    claude:opus``), and on a machine without the file it could not draft. The
+    defaults are agy in both seats now, so a default run does get this probe;
+    an all-Claude override still does not.
     """
     global _TRANSPORT_RESULT
     if not gemini_in_specs(*specs):

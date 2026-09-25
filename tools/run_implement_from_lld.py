@@ -708,11 +708,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Max estimated tokens before circuit breaker trips (0 = unlimited)",
     )
 
-    # Issue #773: Reviewer LLM configuration
+    # Issue #773: Reviewer LLM configuration. #3517, operator directive of
+    # 2026-09-24: agy reviews, matching the orchestrator's impl stage. The
+    # test-plan revisor reuses this spec (#1072), so it is agy too. N4, the
+    # coder, is not a seat this flag names and stays where it was.
     parser.add_argument(
         "--reviewer",
-        default="claude:opus",
-        help="Reviewer LLM spec (default: claude:opus)",
+        default="gemini:3.1-pro",
+        help="Reviewer LLM spec (default: gemini:3.1-pro, agy)",
     )
     parser.add_argument(
         "--effort",

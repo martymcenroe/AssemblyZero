@@ -260,7 +260,7 @@ The verdict line is parsed by `_parse_verdict()` (structured JSON first via `par
 
 | Setting | Value | Notes |
 |---|---|---|
-| Reviewer model | `claude:opus` (default), or `gemini:3-pro-preview` | Set via `state["config_reviewer"]` (Issue #773). |
+| Reviewer model | `gemini:3.1-pro` (default since #3517, 2026-09-24), or `claude:opus` | Set via `state["config_reviewer"]` (Issue #773). |
 | Retries | 2 attempts with 2s, 4s exponential backoff | Inline retry; no integration with AZ #1071 yet. |
 | Schema | `VERDICT_SCHEMA` (Issue #775) | Forces structured JSON when supported. |
 | Effort | Configurable via `state["config_effort"]` | For Claude reviewer. |

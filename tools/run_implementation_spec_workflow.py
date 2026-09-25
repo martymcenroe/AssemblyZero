@@ -150,16 +150,17 @@ Examples:
         help="Path to LLD file (default: auto-detect from issue number)",
     )
 
-    # LLM configuration
+    # LLM configuration. #3517, operator directive of 2026-09-24: agy drafts
+    # and validates, matching the orchestrator's spec stage.
     parser.add_argument(
         "--drafter",
-        default="claude:opus",
-        help="Drafter LLM spec (default: claude:opus)",
+        default="gemini:3.1-pro",
+        help="Drafter LLM spec (default: gemini:3.1-pro, agy)",
     )
     parser.add_argument(
         "--reviewer",
-        default="claude:opus",
-        help="Reviewer LLM spec (default: claude:opus)",
+        default="gemini:3.1-pro",
+        help="Reviewer LLM spec (default: gemini:3.1-pro, agy)",
     )
     parser.add_argument(
         "--effort",

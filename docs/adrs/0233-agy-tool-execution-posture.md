@@ -1,7 +1,7 @@
 # ADR 0233: What `agy` Can Do Inside the Workflow
 
 **Date:** 2026-09-24
-**Status:** Proposed. The operator accepts or rejects it. The `--sandbox` flag it describes has shipped with it, as #3516 directed if the experiment showed the flag changes anything.
+**Status:** Accepted, 2026-09-24. The operator ruled #3517 (agy in both seats, both workflows) with this finding in view; the `--sandbox` flag shipped with the ADR in PR #3545, as #3516 directed, and the blast-radius statement below stands as the record.
 **Amends:** ADR 0220 (Antigravity CLI migration), finding 2, which recorded that `--sandbox` exists and nothing about what it does.
 **Issue:** #3516 (parent #3502)
 
