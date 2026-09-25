@@ -22,10 +22,15 @@ from assemblyzero.core.seats import builtin_path, load_profile, set_run_profile 
 
 
 def _help(tool: str) -> str:
+    import os
+
+    # UTF-8 on the pipe: the LLD tool's --retry-policy help carries a "→",
+    # which a cp1252 pipe cannot encode (a separate, older defect).
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     result = subprocess.run(
         [sys.executable, str(TOOLS / tool), "--help"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        cwd=str(REPO), timeout=120,
+        cwd=str(REPO), timeout=120, env=env,
     )
     assert result.returncode == 0, result.stderr
     return result.stdout
@@ -121,11 +126,16 @@ def _roll_spec_graph(target: Path, profile_name: str, run_tag: str, monkeypatch)
     from assemblyzero.core.scripted_provider import ScriptedProvider, set_active
     from assemblyzero.workflows.implementation_spec.graph import create_implementation_spec_graph
 
+    from assemblyzero.speedrun.convergence import record_stage_enter, record_terminal
+
     monkeypatch.setenv("SPEEDRUN_RUN_TAG", run_tag)
     set_run_profile(load_profile(builtin_path(profile_name)))
     audit = target / "docs" / "lineage" / "active" / f"4-implspec-{profile_name}"
     audit.mkdir(parents=True, exist_ok=True)
     set_active(ScriptedProvider([], model="mock-roll"))
+    # The orchestrator's rows around the stage: it enters the stage, and it
+    # writes the one terminal (the spec graph halts without an LLD).
+    record_stage_enter(target, "spec", 3, 6)
     try:
         for _ in create_implementation_spec_graph().stream(
             {
@@ -143,6 +153,7 @@ def _roll_spec_graph(target: Path, profile_name: str, run_tag: str, monkeypatch)
             {"recursion_limit": 30},
         ):
             pass
+        record_terminal(target, outcome="failed", furthest_stage="spec", furthest_node="HALT")
     finally:
         set_active(None)
         set_run_profile(None)
