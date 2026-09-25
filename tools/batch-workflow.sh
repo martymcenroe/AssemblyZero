@@ -26,7 +26,8 @@
 set -euo pipefail
 
 # Configuration
-ASSEMBLYZERO_ROOT="/c/Users/mcwiz/Projects/AssemblyZero"
+# #3536: the checkout this script belongs to, derived rather than spelled.
+ASSEMBLYZERO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ASSEMBLYZERO_ROOT/logs/batch"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 

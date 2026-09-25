@@ -36,7 +36,7 @@ import re
 import sys
 from pathlib import Path
 
-PROJECTS_ROOT = Path(r"C:\Users\mcwiz\Projects")
+PROJECTS_ROOT = Path(__file__).resolve().parents[2]  # #3536: derived from the checkout, never spelled
 
 # Fixed relative globs per repo. Deliberately NOT a recursive walk: the
 # hazard class lives in rendered agent-facing command/skill files, and a

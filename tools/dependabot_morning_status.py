@@ -28,7 +28,7 @@ import subprocess
 from pathlib import Path
 
 GITHUB_USER = "martymcenroe"
-LOG_FILE = Path("C:/Users/mcwiz/Projects/dependabot-fleet.log")
+LOG_FILE = Path(__file__).resolve().parents[2] / "dependabot-fleet.log"  # #3536: derived from the checkout, never spelled
 LOG_TAIL_LINES = 10
 TITLE_TRUNC = 80
 

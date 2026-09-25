@@ -64,7 +64,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from new_repo import GITIGNORE_TEMPLATE  # noqa: E402
 
-PROJECTS_ROOT = Path(r"C:\Users\mcwiz\Projects")
+PROJECTS_ROOT = Path(__file__).resolve().parents[2]  # #3536: derived from the checkout, never spelled
 
 # Repos whose .gitignore is deliberately its own thing.
 SKIP_REPOS = {"AssemblyZero"}

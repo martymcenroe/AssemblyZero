@@ -40,21 +40,34 @@ PathFormat = Literal['windows', 'unix', 'auto']
 REQUIRED_PATH_KEYS = {'assemblyzero_root', 'projects_root', 'user_claude_dir'}
 REQUIRED_FORMAT_KEYS = {'windows', 'unix'}
 
-# Default paths (SINGLE SOURCE OF TRUTH)
-# These match the current hardcoded values for backward compatibility
+def _spellings(path: Path) -> dict:
+    """A real path in both formats this module serves (#3536).
+
+    On a Windows drive: `C:\\...` and Git Bash's `/c/...`. Under WSL, a drive seen
+    through `/mnt/c/...` gets its `C:\\...` twin; an ext4 path has no Windows
+    spelling, so both formats are the POSIX path. The format a caller gets on its
+    own OS ('auto') is therefore always a path that exists there.
+    """
+    posix = path.as_posix()
+    if len(posix) > 2 and posix[1] == ":":
+        return {"windows": posix.replace("/", "\\"), "unix": "/" + posix[0].lower() + posix[2:]}
+    if posix.startswith("/mnt/") and len(posix) >= 6 and posix[5].isalpha() and posix[6:7] in ("", "/"):
+        rest = posix[6:] or "/"
+        return {"windows": posix[5].upper() + ":" + rest.replace("/", "\\"), "unix": posix}
+    return {"windows": posix, "unix": posix}
+
+
+# Default paths (SINGLE SOURCE OF TRUTH), derived from where this checkout sits
+# rather than spelled (#3536). The spelled defaults were `C:\Users\mcwiz\...` and
+# `/c/Users/mcwiz/...`; under WSL the 'unix' one pointed at a directory that does
+# not exist, so every tool using this module resolved the tree wrongly there. On
+# the Windows machine the derived values equal the old ones.
+# ~/.assemblyzero/config.json still overrides every one of them.
+_REPO = Path(__file__).resolve().parents[1]
 DEFAULTS = {
-    "assemblyzero_root": {
-        "windows": r"C:\Users\mcwiz\Projects\AssemblyZero",
-        "unix": "/c/Users/mcwiz/Projects/AssemblyZero"
-    },
-    "projects_root": {
-        "windows": r"C:\Users\mcwiz\Projects",
-        "unix": "/c/Users/mcwiz/Projects"
-    },
-    "user_claude_dir": {
-        "windows": r"C:\Users\mcwiz\.claude",
-        "unix": "/c/Users/mcwiz/.claude"
-    }
+    "assemblyzero_root": _spellings(_REPO),
+    "projects_root": _spellings(_REPO.parent),
+    "user_claude_dir": _spellings(Path.home() / ".claude"),
 }
 
 CONFIG_PATH = Path.home() / ".assemblyzero" / "config.json"

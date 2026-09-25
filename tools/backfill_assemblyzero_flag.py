@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ISSUE_NUMBER = 1212
-PROJECTS_ROOT = Path("C:/Users/mcwiz/Projects")
+PROJECTS_ROOT = Path(__file__).resolve().parents[2]  # #3536: derived from the checkout, never spelled
 SKIP_REPOS = {"AssemblyZero"}  # governance layer; not a governed project
 BRANCH_NAME = f"chore-{ISSUE_NUMBER}-set-assemblyzero-flag"
 COMMIT_MESSAGE = (
