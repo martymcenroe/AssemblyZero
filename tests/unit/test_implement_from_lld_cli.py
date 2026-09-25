@@ -450,13 +450,15 @@ class TestWorktreeHandling:
 
 
 class TestCheckpointDbPath:
-    """Tests for get_checkpoint_db_path() — Issue #379.
+    """Tests for get_checkpoint_db_path() — Issue #379, keyed by repository
+    since #3548.
 
-    Verifies per-issue database partitioning to prevent concurrent deadlocks.
+    Verifies per-issue database partitioning to prevent concurrent deadlocks,
+    now under the target repository's own data/ rather than the home directory.
     """
 
-    def test_default_per_issue_partitioning(self):
-        """Default db_path includes issue number."""
+    def test_default_per_issue_partitioning(self, tmp_path):
+        """Default db_path includes issue number, under the target's data/."""
         from tools.run_implement_from_lld import get_checkpoint_db_path
 
         with patch.dict("os.environ", {}, clear=False):
@@ -464,12 +466,12 @@ class TestCheckpointDbPath:
             import os
             os.environ.pop("ASSEMBLYZERO_WORKFLOW_DB", None)
 
-            path = get_checkpoint_db_path(42)
+            path = get_checkpoint_db_path(42, tmp_path)
 
-        assert "testing_42.db" in str(path)
-        assert ".assemblyzero" in str(path)
+        assert path == tmp_path / "data" / "speedrun" / "checkpoints" / "testing_42.db"
+        assert ".assemblyzero" not in str(path)
 
-    def test_different_issues_get_different_dbs(self):
+    def test_different_issues_get_different_dbs(self, tmp_path):
         """Two different issues get different database files."""
         from tools.run_implement_from_lld import get_checkpoint_db_path
 
@@ -477,14 +479,14 @@ class TestCheckpointDbPath:
             import os
             os.environ.pop("ASSEMBLYZERO_WORKFLOW_DB", None)
 
-            path_42 = get_checkpoint_db_path(42)
-            path_99 = get_checkpoint_db_path(99)
+            path_42 = get_checkpoint_db_path(42, tmp_path)
+            path_99 = get_checkpoint_db_path(99, tmp_path)
 
         assert path_42 != path_99
         assert "testing_42.db" in str(path_42)
         assert "testing_99.db" in str(path_99)
 
-    def test_zero_issue_falls_back(self):
+    def test_zero_issue_falls_back(self, tmp_path):
         """Issue number 0 falls back to generic testing_workflow.db."""
         from tools.run_implement_from_lld import get_checkpoint_db_path
 
@@ -492,9 +494,9 @@ class TestCheckpointDbPath:
             import os
             os.environ.pop("ASSEMBLYZERO_WORKFLOW_DB", None)
 
-            path = get_checkpoint_db_path(0)
+            path = get_checkpoint_db_path(0, tmp_path)
 
-        assert "testing_workflow.db" in str(path)
+        assert path.name == "testing_workflow.db"
 
     def test_env_var_overrides(self, tmp_path):
         """ASSEMBLYZERO_WORKFLOW_DB env var overrides default."""
@@ -502,7 +504,7 @@ class TestCheckpointDbPath:
 
         custom_db = str(tmp_path / "custom.db")
         with patch.dict("os.environ", {"ASSEMBLYZERO_WORKFLOW_DB": custom_db}):
-            path = get_checkpoint_db_path(42)
+            path = get_checkpoint_db_path(42, tmp_path / "repo")
 
         assert str(path) == custom_db
 
@@ -512,7 +514,7 @@ class TestCheckpointDbPath:
 
         override_db = str(tmp_path / "override.db")
         with patch.dict("os.environ", {"ASSEMBLYZERO_WORKFLOW_DB": override_db}):
-            path = get_checkpoint_db_path(99)
+            path = get_checkpoint_db_path(99, tmp_path / "repo")
 
         assert str(path) == override_db
         assert "testing_99" not in str(path)

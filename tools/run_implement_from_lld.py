@@ -389,18 +389,30 @@ def finish_standalone_run(
     return True, lines
 
 
-def get_checkpoint_db_path(issue_number: int = 0) -> Path:
+def _checkpoint_db_name(issue_number: int) -> str:
+    return f"testing_{issue_number}.db" if issue_number > 0 else "testing_workflow.db"
+
+
+def get_checkpoint_db_path(issue_number: int, target_repo: Path) -> Path:
     """Get path to SQLite checkpoint database.
 
     Priority:
     1. ASSEMBLYZERO_WORKFLOW_DB environment variable (explicit override)
-    2. Per-issue database: testing_{issue_number}.db
-    3. Fallback: testing_workflow.db (when issue_number is 0)
+    2. ``<target_repo>/data/speedrun/checkpoints/testing_{issue_number}.db``
+       (``testing_workflow.db`` when issue_number is 0)
 
-    Issue #379: Partition database by issue to prevent concurrent deadlocks.
+    Issue #379 partitioned the database by issue to prevent concurrent
+    deadlocks. #3548 keys it by the target repository too: at
+    ``~/.assemblyzero/testing_{issue}.db`` two repositories that each had an
+    issue 42 shared one database, and a ``--resume`` in one could load the
+    other's checkpoints. Same reasoning as #1970 for the LLD approval cache:
+    state that belongs to a repository lives in that repository's gitignored
+    ``data/``, where no other repository can reach it.
 
     Args:
         issue_number: GitHub issue number for per-issue partitioning.
+        target_repo: The repository the run works against (the checkout,
+            not a worktree the run may remove).
 
     Returns:
         Path to checkpoint database.
@@ -410,32 +422,61 @@ def get_checkpoint_db_path(issue_number: int = 0) -> Path:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return db_path
 
-    db_dir = Path.home() / ".assemblyzero"
+    db_dir = Path(target_repo) / "data" / "speedrun" / "checkpoints"
     db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / _checkpoint_db_name(issue_number)
 
-    if issue_number > 0:
-        return db_dir / f"testing_{issue_number}.db"
 
-    return db_dir / "testing_workflow.db"
+def legacy_checkpoint_db_path(issue_number: int) -> Path:
+    """Where a real run's database lived before #3548.
+
+    ``~/.assemblyzero/testing_{issue}.db``, keyed by the issue alone. Never
+    read by default any more; named so the operator can hand it to
+    ``--db-path`` when a run that started before #3548 is to be resumed.
+    """
+    return Path.home() / ".assemblyzero" / _checkpoint_db_name(issue_number)
+
+
+def legacy_checkpoint_notice(
+    issue_number: int, db_path_arg: str | None, mock: bool,
+) -> str | None:
+    """The line a real run prints when the pre-#3548 database exists.
+
+    #3548's third requirement: an existing ``~/.assemblyzero/testing_{issue}.db``
+    is not silently read for a different repository. It is named and
+    ignored, with the flag that would use it. ``None`` when there is nothing
+    to say: no such file, or the run chose its database (``--db-path``), or
+    the run is a mock and never read that location (#3547).
+    """
+    if db_path_arg or mock:
+        return None
+    legacy = legacy_checkpoint_db_path(issue_number)
+    if not legacy.exists():
+        return None
+    return (
+        f"[implement] Ignoring {legacy}: keyed by the issue alone, it may hold "
+        f"another repository's checkpoints (#3548). To resume from it, pass "
+        f"--db-path {legacy}"
+    )
 
 
 def checkpoint_db_for_run(
     db_path_arg: str | None, issue_number: int, mock: bool, target_repo: Path,
 ) -> Path:
-    """The checkpoint database this run uses (#3547).
+    """The checkpoint database this run uses (#3547, #3548).
 
     ``--db-path`` wins. A ``--mock`` run keeps its database under the
     target's gitignored ``data/mock-runs/``: it used to land at
     ``~/.assemblyzero/testing_{issue}.db`` like a real run's, outside the
     repository it rehearsed against, where a later REAL ``--resume`` for the
-    same issue number would read the mock's checkpoints. Real runs are
-    unchanged here (keying them by repository is #3548).
+    same issue number would read the mock's checkpoints. A real run's is
+    under the target's ``data/speedrun/checkpoints/`` (#3548).
     """
     if db_path_arg:
         return Path(db_path_arg)
     if mock:
         return Path(target_repo) / "data" / "mock-runs" / f"impl-{issue_number}" / "checkpoints.db"
-    return get_checkpoint_db_path(issue_number)
+    return get_checkpoint_db_path(issue_number, target_repo)
 
 
 def select_approved_lld(repo_root: Path) -> int | None:
@@ -1067,11 +1108,15 @@ def main():
                 repo_root = worktree_path
 
     # Set up checkpoint database (Issue #379: per-issue partitioning; #3547:
-    # a mock run's lives under the target's data/mock-runs/)
+    # a mock run's lives under the target's data/mock-runs/; #3548: a real
+    # run's under the target's data/speedrun/checkpoints/)
     db_path = checkpoint_db_for_run(
         args.db_path, args.issue, bool(args.mock), original_repo_root,
     )
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_notice = legacy_checkpoint_notice(args.issue, args.db_path, bool(args.mock))
+    if legacy_notice:
+        print(legacy_notice)
 
     # Startup banner (Issue #380: visible diagnostics for cross-repo debugging)
     print()
