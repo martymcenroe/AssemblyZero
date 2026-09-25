@@ -558,6 +558,16 @@ def _stream_with_idle_timeout(
     return outcome
 
 
+#: Every nested `claude -p` runs with the user's hooks off (#3504, ADR 0232).
+#: `--setting-sources user` loads ~/.claude/settings.json, and with it every
+#: hook registered there. Measured on one nested haiku call, 2026-09-24:
+#: SessionStart wrote a baseline file into the repository containing the cwd,
+#: and SessionEnd rescanned 17,725 transcripts and copied 29.8 MB. PreToolUse
+#: and PostToolUse can never fire (`--tools ""`). With this flag the call
+#: answered the same and neither record appeared.
+NESTED_SETTINGS_ARGS = ["--settings", json.dumps({"disableAllHooks": True})]
+
+
 def _nested_claude_env() -> dict[str, str]:
     """The environment every nested `claude -p` runs with (#3505).
 
@@ -693,6 +703,7 @@ class ClaudeCLIProvider(LLMProvider):
             "-p",
             "--output-format", "json",
             "--setting-sources", "user",
+            *NESTED_SETTINGS_ARGS,
             "--tools", "",
             "--strict-mcp-config",
             "--model", self._model_id,
@@ -809,6 +820,7 @@ class ClaudeCLIProvider(LLMProvider):
             "--verbose",
             "--include-partial-messages",
             "--setting-sources", "user",  # Skip project CLAUDE.md context
+            *NESTED_SETTINGS_ARGS,  # No user hooks in a nested call (#3504)
             "--tools", "",  # Disable built-in tools
             "--strict-mcp-config",  # Disable MCP tools (issue #157)
             "--model", self._model_id,  # Use full model ID (e.g., claude-opus-4-6)
