@@ -10,9 +10,17 @@ Usage
     poetry run python tools/audit_halt_sites.py --tsv        # one row per site
     poetry run python tools/audit_halt_sites.py --unregistered
     poetry run python tools/audit_halt_sites.py --check      # CI mode
+    poetry run python tools/audit_halt_sites.py --check --strict
 
 ``--check`` exits 1 on any walked site no registry row names, or any registry
 site the walker cannot find. It is what the unit test calls.
+
+``--strict`` adds the denominator: it also exits 1 when the baseline's
+``measured_against`` counts differ from the tree. That check left the PR gate
+in #3527, for the reason #3523 gave for the fail-open baseline: it failed any
+PR that added a walked file, halt site or not, and two PRs adding files
+collided on the same line. Run it on demand, and regenerate with
+``--write-baseline`` when it reports drift.
 """
 
 from __future__ import annotations
@@ -56,6 +64,36 @@ def model_output_halt_rows() -> int:
     )
 
 
+def measured(sites: list[HaltSite], coverage: WalkCoverage) -> dict[str, int]:
+    """The denominator as the walker sees the tree now."""
+    return {
+        "files_scanned": coverage.files_scanned,
+        "halt_sites": len(sites),
+        "gates": len(GATE_REGISTRY),
+    }
+
+
+def denominator_drift(sites: list[HaltSite], coverage: WalkCoverage,
+                      path: Path = BASELINE_PATH) -> dict[str, tuple]:
+    """Strict mode (#3527). Each count whose baseline value differs from the
+    tree, as ``{name: (baseline, live)}``. Empty means the stated denominator
+    is true. A missing or unreadable ``measured_against`` block is drift in
+    every count, not a pass: a denominator that cannot be read is not one
+    that matches."""
+    live = measured(sites, coverage)
+    try:
+        stated = json.loads(path.read_text(encoding="utf-8")).get("measured_against")
+    except (OSError, ValueError):
+        stated = None
+    if not isinstance(stated, dict):
+        return {name: (None, value) for name, value in live.items()}
+    return {
+        name: (stated.get(name), value)
+        for name, value in live.items()
+        if stated.get(name) != value
+    }
+
+
 def write_baseline(sites: list[HaltSite], coverage: WalkCoverage,
                    path: Path = BASELINE_PATH) -> dict:
     """Freeze today's halt-row counts so CI can refuse tomorrow's rise (#2720).
@@ -63,7 +101,8 @@ def write_baseline(sites: list[HaltSite], coverage: WalkCoverage,
     The counts ride with what they were measured against, so a reader can
     see the denominator without re-running anything. Lower it by hand when
     a gate stops halting; raise it only in a PR that names an operator
-    ruling.
+    ruling. The block is built by the same ``measured()`` that strict mode
+    compares against, so the two cannot count differently.
     """
     payload = {
         "_comment": (
@@ -76,11 +115,7 @@ def write_baseline(sites: list[HaltSite], coverage: WalkCoverage,
             "operator ruling named in the row's created_by or justified_by, "
             "in the same PR."
         ),
-        "measured_against": {
-            "files_scanned": coverage.files_scanned,
-            "halt_sites": len(sites),
-            "gates": len(GATE_REGISTRY),
-        },
+        "measured_against": measured(sites, coverage),
         "halt_rows_per_stage": halt_counts(),
         "model_output_halt_rows": model_output_halt_rows(),
     }
@@ -161,7 +196,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="exit 1 on any unregistered or phantom site")
     parser.add_argument("--write-baseline", action="store_true",
                         help="freeze today's halt-row counts for the ratchet")
+    parser.add_argument("--strict", action="store_true",
+                        help="with --check: also exit 1 when the baseline's "
+                             "measured_against counts differ from the tree")
     args = parser.parse_args(argv)
+    if args.strict and not args.check:
+        parser.error("--strict only applies with --check")
 
     sites, coverage = scan_halt_sites(args.root)
 
@@ -185,7 +225,13 @@ def main(argv: list[str] | None = None) -> int:
         # neither direction of the two-way check can see. Compared here so a
         # wrong pairing fails the same command an unregistered site does.
         unpaired = mismatched_emits(sites)
-        if not fresh and not ghosts and not moved and not unpaired:
+        # #3527: the denominator is judged only under --strict. The path is
+        # passed here rather than left to the default, so a test can point the
+        # module at another baseline.
+        drift = (
+            denominator_drift(sites, coverage, BASELINE_PATH) if args.strict else {}
+        )
+        if not fresh and not ghosts and not moved and not unpaired and not drift:
             paired = sum(
                 1 for g in GATE_REGISTRY
                 if len(g.sites) == 1 and g.key not in EMITS_HEAD_EXEMPTIONS
@@ -195,8 +241,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"sites, every one registered; {len(GATE_REGISTRY)} gates, "
                 f"halt rows: {halt_counts()}; {paired} row(s) paired to their "
                 f"own return, {len(EMITS_HEAD_EXEMPTIONS)} exempt (#2814)"
+                + ("; denominator matches." if args.strict else "")
             )
             return 0
+        if drift:
+            print("FAIL -- the baseline's measured_against no longer matches the tree:")
+            for name, (stated, live) in drift.items():
+                print(f"  {name}: baseline {stated}, tree {live}")
+            print("Regenerate with tools/audit_halt_sites.py --write-baseline.")
+            if not fresh and not ghosts and not moved and not unpaired:
+                return 1
+            print()
         parts = []
         if unpaired:
             parts.append(f"{len(unpaired)} mispaired row(s)")
