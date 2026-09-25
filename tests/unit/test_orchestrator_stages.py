@@ -1132,14 +1132,20 @@ class TestSynthesizeBriefSummary:
         assert result == ""
 
     @patch("assemblyzero.workflows.orchestrator.stages.get_provider")
-    def test_uses_haiku_model(self, mock_get_provider):
-        """Provider is requested with 'claude:haiku' (fast/cheap for summaries)."""
+    def test_uses_the_triage_summary_seat(self, mock_get_provider):
+        """#3563: the provider is the `orchestrator.triage_summary` seat of the
+        profile in hand: Gemini by default, `claude:haiku` under `claude.toml`
+        (the model this call hardcoded before profiles)."""
+        from assemblyzero.core.seats import builtin_path, load_profile, using_profile
         from assemblyzero.workflows.orchestrator.stages import _synthesize_brief_summary
 
         mock_get_provider.return_value = self._mock_provider(response="A summary.")
         _synthesize_brief_summary("Title", "Body")
+        assert mock_get_provider.call_args.args[0] == "gemini:3.1-pro"
 
-        mock_get_provider.assert_called_once_with("claude:haiku")
+        with using_profile(load_profile(builtin_path("claude"))):
+            _synthesize_brief_summary("Title", "Body")
+        assert mock_get_provider.call_args.args[0] == "claude:haiku"
 
 
 class TestFetchIssueBriefWithSummary:

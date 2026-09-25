@@ -303,7 +303,7 @@ def test_filing_failure_leaves_the_halt_message_intact(monkeypatch, tmp_path):
         def invoke(self, **_kw):
             return _Result()
 
-    monkeypatch.setattr(llm, "get_provider", lambda _spec: _Provider())
+    monkeypatch.setattr(llm, "get_provider", lambda _spec, **_kw: _Provider())
     monkeypatch.setattr(llm, "GeminiProvider", type("NotGemini", (), {}))
 
     def boom(*_a, **_kw):
@@ -344,7 +344,7 @@ def test_conflict_halt_still_files_when_github_is_healthy(monkeypatch, tmp_path)
         def invoke(self, **_kw):
             return _Result()
 
-    monkeypatch.setattr(llm, "get_provider", lambda _spec: _Provider())
+    monkeypatch.setattr(llm, "get_provider", lambda _spec, **_kw: _Provider())
     monkeypatch.setattr(llm, "GeminiProvider", type("NotGemini", (), {}))
 
     seen = {}

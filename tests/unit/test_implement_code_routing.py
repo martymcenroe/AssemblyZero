@@ -222,8 +222,8 @@ def test_the_n4_node_enters_the_run_profile():
         seen["name"] = active_profile()["name"]
         return {}
 
-    with patch.object(orchestrator, "_implement_code", side_effect=body):
-        orchestrator.implement_code({"model_profile": _profile("claude")})
+    with patch.object(orchestrator, "implement_code", side_effect=body):
+        orchestrator.implement_code_under_profile({"model_profile": _profile("claude")})
 
     assert seen["name"] == "claude"
 

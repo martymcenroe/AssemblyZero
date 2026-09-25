@@ -330,12 +330,19 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     # #3563: the drafter is the run profile's `requirements.draft` seat. The
     # mock profile puts `mock:lld` there (#3533), so a rehearsal reaches
     # review and finalize; the issue workflow's --mock makes it `mock:draft`.
+    # A seat that will not resolve is reported where an unbuildable drafter
+    # always was, below, so the node keeps one "Invalid drafter" halt site.
+    seat_error: ValueError | None = None
+    drafter_seat = None
+    drafter_spec = reviewer_spec = ""
     try:
         drafter_seat = resolve(state, "requirements.draft")
+        drafter_spec = drafter_seat.spec
         reviewer_spec = resolve(state, "requirements.review").spec
     except ValueError as e:
-        return {"error_message": f"Invalid drafter: {e}"}
-    drafter_spec = drafter_seat.spec
+        # fail-open: not here. The error is held and raised inside the drafter
+        # try below, so it halts with the node's one "Invalid drafter" message.
+        seat_error = e
 
     # Determine template path based on workflow type
     if workflow_type == "issue":
@@ -368,7 +375,7 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     # Issue #486: Pre-flight check — verify Gemini available before expensive
     # Claude call. #3506: only when some node of this run is Gemini, and then
     # the agy transport itself, not the credential file.
-    if not mock_mode:
+    if not mock_mode and seat_error is None:
         from assemblyzero.core.preflight import preflight_for_specs
         preflight = preflight_for_specs(drafter_spec, reviewer_spec)
         if preflight is None:
@@ -383,6 +390,8 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
 
     # Get drafter provider
     try:
+        if seat_error is not None:
+            raise seat_error
         drafter = get_provider(drafter_spec, effort=drafter_seat.effort)
     except ValueError as e:
         return {"error_message": f"Invalid drafter: {e}"}

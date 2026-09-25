@@ -82,11 +82,6 @@ LEGACY_REVIEWER_SEATS = (
     "impl.test_plan.review",
 )
 
-#: Provider prefixes a spec may name. ``get_provider`` is the authority on
-#: what it can build; this list is checked first so a profile fails at load,
-#: naming the seat, instead of at the first call.
-KNOWN_PROVIDERS = frozenset({"claude", "anthropic", "gemini", "mock", "scripted"})
-
 PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
 DEFAULT_PROFILE = "gemini"
 MOCK_PROFILE = "mock"
@@ -139,6 +134,13 @@ def check_spec(spec: str, where: str) -> tuple[str, str, str]:
 
     ``where`` names the seat (or flag) in every message, so a bad profile says
     which line to fix.
+
+    Fails closed on the two things #3563 requirement 2 names: a spec that does
+    not parse under ``parse_provider_spec``, and a model ``FORBIDDEN_MODELS``
+    fences. A provider or alias this module does not know is NOT refused here:
+    ``get_provider`` is the authority on what it can build and refuses it when
+    the seat is used, with its own message. The resolved id is the provider's
+    map entry when there is one, else the model as written.
     """
     from assemblyzero.core.config import FORBIDDEN_MODELS
     from assemblyzero.core.llm_provider import (
@@ -154,33 +156,20 @@ def check_spec(spec: str, where: str) -> tuple[str, str, str]:
         provider, model = parse_provider_spec(spec.strip())
     except ValueError as e:
         raise ProfileError(f"{where}: {e}") from e
-    if provider not in KNOWN_PROVIDERS:
-        raise ProfileError(
-            f"{where}: unknown provider {provider!r} in {spec!r}. "
-            f"Known: {', '.join(sorted(KNOWN_PROVIDERS))}"
-        )
 
-    lowered = model.lower()
+    lowered = model.strip().lower()
     if provider == "gemini":
-        resolved = GeminiProvider.MODEL_MAP.get(lowered)
+        resolved = getattr(GeminiProvider, "MODEL_MAP", {}).get(lowered)
         if resolved is None:
-            raise ProfileError(
-                f"{where}: unknown Gemini model {model!r}. "
-                f"Valid: {', '.join(sorted(GeminiProvider.MODEL_MAP))}"
-            )
+            # Checked against the fence in its full form, so `gemini:3-pro`
+            # is caught as `gemini-3-pro`.
+            resolved = lowered if lowered.startswith("gemini-") else f"gemini-{lowered}"
     elif provider == "claude":
-        resolved = ClaudeCLIProvider.MODEL_MAP.get(lowered)
-        if resolved is None:
-            if not lowered.startswith("claude-"):
-                raise ProfileError(
-                    f"{where}: unknown Claude model {model!r}. "
-                    f"Valid: {', '.join(sorted(ClaudeCLIProvider.MODEL_MAP))} or a full claude-* id"
-                )
-            resolved = lowered
+        resolved = getattr(ClaudeCLIProvider, "MODEL_MAP", {}).get(lowered, lowered)
     elif provider == "anthropic":
-        resolved = AnthropicProvider.MODEL_MAP.get(lowered, lowered)
+        resolved = getattr(AnthropicProvider, "MODEL_MAP", {}).get(lowered, lowered)
     else:
-        resolved = model
+        resolved = model.strip()
 
     # Exact match, then family: FORBIDDEN_MODELS carries specific ids and
     # family names, and a family entry is only meaningful as a substring

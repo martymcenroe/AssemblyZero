@@ -156,12 +156,12 @@ class TestPerFileGate:
 
         calls = []
 
-        def fake_call(prompt, file_path=None, model=None, system_prompt=""):
+        def fake_call(prompt, file_path=None, seat=None, system_prompt=""):
             calls.append(1)
             return ("", api_error)
 
         monkeypatch.setattr(impl, "call_claude_for_file", fake_call)
-        monkeypatch.setattr(impl, "select_model_for_file", lambda *_a: "sonnet")
+        monkeypatch.setattr(impl, "select_seat_for_file", lambda *_a: "impl.code")
         with pytest.raises(Exception) as exc:
             impl.generate_file_with_retry(
                 filepath="src/x.py", base_prompt="p", max_retries=max_retries,
