@@ -122,3 +122,36 @@ def test_status_reports_both_halves_in_every_state(paths, capsys):
 def test_the_staged_write_never_leaves_a_tmp_file(paths):
     _run(paths, "--lock", "--apply")
     assert not paths["settings"].with_name("settings.json.tmp").exists()
+
+
+def test_a_read_only_settings_file_is_written_and_left_read_only(paths):
+    csl.make_readonly(paths["settings"])
+    assert csl.is_readonly(paths["settings"])
+
+    assert _run(paths, "--lock", "--apply") == 0
+
+    assert _deny(paths)[3:] == list(csl.DENY_ENTRIES)
+    assert csl.is_readonly(paths["settings"])
+    assert not paths["settings"].with_name("settings.json.tmp").exists()
+
+
+def test_a_writable_settings_file_stays_writable(paths):
+    assert not csl.is_readonly(paths["settings"])
+    assert _run(paths, "--lock", "--apply") == 0
+    assert not csl.is_readonly(paths["settings"])
+
+
+def test_a_failed_replace_names_the_backup_and_leaves_no_tmp(paths, monkeypatch, capsys):
+    def refuse(src, dst):
+        raise PermissionError(5, "Access is denied", str(src))
+
+    monkeypatch.setattr(csl.os, "replace", refuse)
+    before = paths["settings"].read_text(encoding="utf-8")
+
+    assert _run(paths, "--lock", "--apply") == csl.EXIT_VERIFY
+    out = capsys.readouterr().out
+
+    assert "FAILED" in out and "backup at" in out
+    assert paths["settings"].read_text(encoding="utf-8") == before
+    assert not paths["settings"].with_name("settings.json.tmp").exists()
+    assert not paths["lock"].exists()
