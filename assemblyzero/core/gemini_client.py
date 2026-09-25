@@ -101,62 +101,57 @@ MAX_TOTAL_INVOKE_SECONDS = 600.0
 AGY_SAFETY_ARGS: list[str] = []
 MIN_ATTEMPT_SECONDS = 20.0
 
-#: What keeps a print-mode agy call from executing the model's tool calls is
-#: agy's own ``toolPermission`` setting, not a flag (#3605). Under the
-#: documented default, ``request-review``, a headless shell command is
-#: soft-denied: nothing runs, exit 0, a notice on stderr. Under
-#: ``always-proceed`` the same command is executed unattended, and under
-#: ``proceed-in-sandbox`` the elevation above is requested. The pipeline's
-#: calls are text in, text out, and it refuses to run on a machine whose agy
-#: would execute what the model proposes.
-AGY_SETTINGS_PATH = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
-AGY_REQUIRED_TOOL_PERMISSION = "request-review"
+#: Every call runs as the pipeline's own agent, which has no tools (#3612,
+#: #3603). agy loads a custom agent from ``<cwd>/.agents/agents/<name>/agent.md``
+#: and selects it with ``--agent <name>``; the definition's ``tools`` list is
+#: the explicit set of tools the agent may call, and ``commandExecutionPolicy:
+#: off`` turns shell execution off. Both transports run in a fresh temporary
+#: directory, so each call writes this definition there and names the agent on
+#: its command line. Nothing is read from the machine's agy settings and
+#: nothing is deployed anywhere. Proved 2026-09-25: asked to run ``whoami`` and
+#: write a file, the model answered "I cannot run commands, read or write
+#: files, or reach the network because I have no tools available", in one
+#: turn, with no prompt from agy or Windows, and the call's input fell from
+#: 15,983 tokens to 2,766 because the tool schemas left the prompt.
+AGY_AGENT_NAME = "assemblyzero-text"
+AGY_AGENT_DEFINITION = """---
+name: assemblyzero-text
+description: AssemblyZero pipeline seat. Answers from the prompt text alone. No tools, no shell, no files, no network.
+mainAgent: true
+subagent: false
+hidden: true
+inheritMcp: false
+tools: []
+commandExecutionPolicy: "off"
+---
+
+You answer from the text you are given and nothing else. You have no tools: you cannot run commands, read or write files, or reach the network, and you never ask for any of them. If the prompt refers to files or attachments, their content is absent; say so in one sentence and answer from what is present.
+"""
 
 
-class AgyToolExecutionEnabledError(RuntimeError):
-    """agy on this machine would execute the model's tool calls (#3605)."""
+def write_text_only_agent(cwd: Path | str) -> Path:
+    """Write the pipeline's agent definition into ``cwd`` and return its path.
 
-
-def require_headless_tool_denial(settings_path: Optional[Path] = None) -> None:
-    """Refuse to call agy unless its settings soft-deny tool execution.
-
-    Reads ``AGY_SETTINGS_PATH``. The file must exist and either omit
-    ``toolPermission`` or set it to ``request-review``; anything else,
-    including a missing, unreadable or unparseable file, raises
-    ``AgyToolExecutionEnabledError`` before any subprocess starts. Nothing
-    here is inferred from agy's defaults: the pipeline runs only on a machine
-    that has stated its setting.
+    Called inside the temporary directory of every call, before the spawn, so
+    ``--agent assemblyzero-text`` resolves to this file and to nothing else.
     """
-    path = Path(settings_path or AGY_SETTINGS_PATH)
-    if not path.is_file():
-        raise AgyToolExecutionEnabledError(
-            f"{path} does not exist; the pipeline runs only on a machine whose agy "
-            f"settings state toolPermission={AGY_REQUIRED_TOOL_PERMISSION!r}. "
-            f"Create it (runbook 0957) and rerun (#3605)."
-        )
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise AgyToolExecutionEnabledError(
-            f"cannot read {path} ({exc}); the pipeline cannot tell whether agy "
-            f"executes the model's tool calls, so it does not run (#3605)"
-        ) from exc
-    try:
-        settings = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise AgyToolExecutionEnabledError(
-            f"{path} is not valid JSON ({exc}); the pipeline cannot tell whether "
-            f"agy executes the model's tool calls, so it does not run (#3605)"
-        ) from exc
-    value = settings.get("toolPermission") if isinstance(settings, dict) else None
-    if value is None or value == AGY_REQUIRED_TOOL_PERMISSION:
-        return
-    raise AgyToolExecutionEnabledError(
-        f"{path} sets toolPermission={value!r}; the pipeline requires "
-        f"{AGY_REQUIRED_TOOL_PERMISSION!r} (or the key absent), under which a "
-        f"headless shell command is soft-denied and never runs. Set it and rerun. "
-        f"No pipeline call executes a tool and no agent requests elevation (#3605)."
-    )
+    path = Path(cwd) / ".agents" / "agents" / AGY_AGENT_NAME / "agent.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(AGY_AGENT_DEFINITION, encoding="utf-8")
+    return path
+
+
+def agent_warning(text: str) -> str:
+    """The first line of ``text`` that warns about ``--agent``, or ``""``.
+
+    agy reports an agent it could not load as a warning naming the flag. A
+    call that fell back to the default agent would run with that agent's
+    tools, so the caller treats any such line as a failed call.
+    """
+    for line in (text or "").splitlines():
+        if "--agent" in line:
+            return line.strip()
+    return ""
 
 #: Named in every failure this module hands back to a caller (#2476).
 #:
@@ -715,7 +710,6 @@ class GeminiClient:
         Returns:
             Tuple of (success, response_text, error_message)
         """
-        require_headless_tool_denial()
         if not self._agy_cli:
             return False, "", "Antigravity CLI (agy) not found"
 
@@ -741,11 +735,16 @@ class GeminiClient:
 
         import tempfile
 
-        argv = [self._agy_cli, *AGY_SAFETY_ARGS, "-p", full_prompt, "--model", self.model]
+        argv = [
+            self._agy_cli, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
+            "-p", full_prompt, "--model", self.model,
+        ]
         chunks: list[str] = []
         exit_status = None
         try:
             with tempfile.TemporaryDirectory() as tmp_cwd:
+                # #3612: the agent this call runs as lives in this directory.
+                write_text_only_agent(tmp_cwd)
                 # #1906: spawn itself must be bounded — the read deadline
                 # below does not exist yet while spawn hangs.
                 try:
@@ -813,8 +812,13 @@ class GeminiClient:
             # ignore_cleanup_errors: a just-killed child can still hold the
             # temp cwd for a moment; that must not fail the call.
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_cwd:
+                # #3612: the agent this call runs as lives in this directory.
+                write_text_only_agent(tmp_cwd)
                 proc = subprocess.Popen(
-                    [self._agy_cli, *AGY_SAFETY_ARGS, "--model", self.model],
+                    [
+                        self._agy_cli, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
+                        "--model", self.model,
+                    ],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -841,6 +845,12 @@ class GeminiClient:
             return False, "", f"agy stdin invocation failed: {e}"
 
         text = _strip_ansi(stdout or "").strip()
+
+        # #3612: an agent agy could not load means the default agent, with its
+        # tools, answered. That is a failed call, whatever the exit status.
+        warned = agent_warning(stderr or "")
+        if warned:
+            return False, "", f"agy did not run as {AGY_AGENT_NAME}: {warned[:400]}"
 
         # #1765 boundaries, mirrored from the PTY path.
         if returncode != 0:
@@ -883,9 +893,6 @@ class GeminiClient:
         Returns:
             GeminiCallResult with full observability data.
         """
-        # #3605: before credentials, before any attempt. A machine whose agy
-        # executes the model's tool calls gets no call from this pipeline.
-        require_headless_tool_denial()
         start_time = time.time()
         total_attempts = 0
 
