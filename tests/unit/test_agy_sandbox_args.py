@@ -99,8 +99,11 @@ def test_request_review_and_an_absent_key_pass(tmp_path):
         gc.require_headless_tool_denial(_settings(tmp_path, body))
 
 
-def test_a_missing_settings_file_passes(tmp_path):
-    gc.require_headless_tool_denial(tmp_path / "absent.json")
+def test_a_missing_settings_file_refuses(tmp_path):
+    with pytest.raises(gc.AgyToolExecutionEnabledError) as excinfo:
+        gc.require_headless_tool_denial(tmp_path / "absent.json")
+    assert "does not exist" in str(excinfo.value)
+    assert "0957" in str(excinfo.value)
 
 
 def test_unparseable_settings_refuse(tmp_path):

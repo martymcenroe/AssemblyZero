@@ -117,16 +117,22 @@ class AgyToolExecutionEnabledError(RuntimeError):
 def require_headless_tool_denial(settings_path: Optional[Path] = None) -> None:
     """Refuse to call agy unless its settings soft-deny tool execution.
 
-    Reads ``AGY_SETTINGS_PATH``. A missing file means agy runs on its
-    documented default and passes. Anything else that is not
-    ``request-review``, including an unreadable or unparseable file, raises
-    ``AgyToolExecutionEnabledError`` before any subprocess starts.
+    Reads ``AGY_SETTINGS_PATH``. The file must exist and either omit
+    ``toolPermission`` or set it to ``request-review``; anything else,
+    including a missing, unreadable or unparseable file, raises
+    ``AgyToolExecutionEnabledError`` before any subprocess starts. Nothing
+    here is inferred from agy's defaults: the pipeline runs only on a machine
+    that has stated its setting.
     """
     path = Path(settings_path or AGY_SETTINGS_PATH)
+    if not path.is_file():
+        raise AgyToolExecutionEnabledError(
+            f"{path} does not exist; the pipeline runs only on a machine whose agy "
+            f"settings state toolPermission={AGY_REQUIRED_TOOL_PERMISSION!r}. "
+            f"Create it (runbook 0957) and rerun (#3605)."
+        )
     try:
         text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return
     except OSError as exc:
         raise AgyToolExecutionEnabledError(
             f"cannot read {path} ({exc}); the pipeline cannot tell whether agy "

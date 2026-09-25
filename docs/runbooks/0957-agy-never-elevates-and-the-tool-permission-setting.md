@@ -6,7 +6,7 @@ The pipeline calls agy for text: a draft in, a review out. It never asks agy to 
 
 ## What the pipeline does on its own
 
-`GeminiClient` passes no flag between the agy binary and the model. `--sandbox` was withdrawn on 2026-09-25: on Windows it makes agy build an AppContainer for each shell command the model attempts, and agy obtains the administrator token for that by relaunching itself elevated, which is a UAC dialog naming `agy.exe`. Before every call the client reads `~/.gemini/antigravity-cli/settings.json` and refuses to run, naming the file and the value it found, unless `toolPermission` is absent or `request-review`.
+`GeminiClient` passes no flag between the agy binary and the model. `--sandbox` was withdrawn on 2026-09-25: on Windows it makes agy build an AppContainer for each shell command the model attempts, and agy obtains the administrator token for that by relaunching itself elevated, which is a UAC dialog naming `agy.exe`. Before every call the client reads `~/.gemini/antigravity-cli/settings.json` and refuses to run, naming the file and the value it found, unless the file exists and `toolPermission` is absent from it or `request-review`. A machine with no settings file gets no call either; create the file with the line below.
 
 ## The one step: set agy to review, not proceed
 
