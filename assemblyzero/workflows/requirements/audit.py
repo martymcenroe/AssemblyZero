@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from assemblyzero.core.config import REVIEWER_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -1132,11 +1131,13 @@ def embed_review_evidence(
     verdict: str,
     review_date: str,
     review_count: int,
+    reviewer_model: str = "",
+    reviewer_spec: str = "",
 ) -> str:
     """Embed review evidence in LLD content.
 
     Adds/updates:
-    1. Status field: "* **Status:** Approved (Gemini Review, {date})"
+    1. Status field: "* **Status:** Approved ({reviewer model id}, {date})"
     2. Review Summary table entry
     3. Final Status marker at end of document
 
@@ -1145,21 +1146,32 @@ def embed_review_evidence(
         verdict: Review verdict ("APPROVED", "BLOCKED").
         review_date: ISO8601 date of review.
         review_count: Review iteration number.
+        reviewer_model: The reviewer seat's resolved model id, from the
+            run's resolution (#3565). Empty means the active profile's
+            `requirements.review` seat. ``REVIEWER_MODEL`` is not read here:
+            it stamped a model whatever reviewer had actually run.
+        reviewer_spec: The reviewer seat's spec, beside the id in the table.
 
     Returns:
         Updated LLD content with embedded evidence.
     """
+    if not reviewer_model:
+        from assemblyzero.core.seats import resolve_active
+
+        seat = resolve_active("requirements.review")
+        reviewer_model, reviewer_spec = seat.resolved_model_id, reviewer_spec or seat.spec
+    reviewer_cell = f"`{reviewer_model}`" + (f" (`{reviewer_spec}`)" if reviewer_spec else "")
     # Update Status field if present
     # Pattern: * **Status:** Draft -> * **Status:** Approved (Gemini Review, date)
     status_pattern = re.compile(
         r"(\*\s*\*\*Status:\*\*)\s*\w+(?:\s*\([^)]*\))?",
         re.IGNORECASE,
     )
-    new_status = f"\\1 {verdict.capitalize()} ({REVIEWER_MODEL}, {review_date})"
+    new_status = f"\\1 {verdict.capitalize()} ({reviewer_model}, {review_date})"
     lld_content = status_pattern.sub(new_status, lld_content, count=1)
 
     # Update or create Review Summary table in Appendix
-    review_entry = f"| {review_count} | {review_date} | {verdict} | `{REVIEWER_MODEL}` |"
+    review_entry = f"| {review_count} | {review_date} | {verdict} | {reviewer_cell} |"
 
     # Check if Review Summary table exists
     if "### Review Summary" in lld_content:

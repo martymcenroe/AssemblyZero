@@ -463,6 +463,11 @@ def build_initial_state(
         "node_tokens": {},
     }
     print(describe(profile))
+    # #3565: the run record opens with the profile; seats no state reaches
+    # (triage, visual gate, contract fidelity) follow it.
+    from assemblyzero.core.model_record import announce_profile
+
+    announce_profile(profile)
 
     return state
 

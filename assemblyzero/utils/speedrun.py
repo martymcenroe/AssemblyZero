@@ -286,15 +286,23 @@ class RunLogger:
         total_seconds: float,
         failure_mode: Optional[str] = None,
         notes: str = "",
+        profile: Optional[str] = None,
     ) -> None:
         """Append one run entry to the log.
 
         Idempotency: this function does NOT deduplicate. Calling it
         twice for the same (issue, attempt) results in two entries.
         Callers should ensure single-call discipline.
+
+        #3565: ``profile`` is the model profile's name; when not given, the
+        process's run profile (``seats.current_profile_name``).
         """
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         ended_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        if not profile:
+            from assemblyzero.core.seats import current_profile_name
+
+            profile = current_profile_name()
         entry = {
             "attempt": attempt,
             "issue": issue,
@@ -304,6 +312,7 @@ class RunLogger:
             "failure_mode": failure_mode,
             "total_seconds": round(total_seconds, 2),
             "notes": notes,
+            "profile": profile,
         }
         try:
             with self.log_path.open("a", encoding="utf-8") as f:

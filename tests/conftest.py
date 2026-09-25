@@ -173,8 +173,20 @@ def no_model_profile_from_the_machine(monkeypatch):
     ``AZ_MODEL_PROFILE`` outranks the built-in default, so an operator who
     exported it for a comparison roll would otherwise change which provider
     every seat resolves to across the whole suite.
+
+    #3565: the process-wide run profile and the per-call record's sink are
+    reset around every test too, so a test that opens a run record or
+    announces a profile cannot leak it into the next.
     """
     monkeypatch.delenv("AZ_MODEL_PROFILE", raising=False)
+    from assemblyzero.core.model_record import close_sink
+    from assemblyzero.core.seats import set_run_profile
+
+    set_run_profile(None)
+    close_sink()
+    yield
+    set_run_profile(None)
+    close_sink()
 
 
 @pytest.fixture
