@@ -18,8 +18,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from assemblyzero.workflows.implementation_spec.check_classification import (
     FACT,
     CLASSIFICATIONS,
@@ -192,46 +190,40 @@ class TestItIsAReviseCheckByConstruction:
         assert (moved, fresh, ghosts) == ([], [], [])
 
 
-BOOSTGAUGE = Path("C:/Users/mcwiz/Projects/boostgauge/docs/lineage")
+CORPUS = Path(__file__).resolve().parents[1] / "fixtures" / "section_ten_corpus"
 
 
-@pytest.mark.skipif(
-    not BOOSTGAUGE.is_dir(),
-    reason="the recorded lineage lives in the target repo, not in this one",
-)
-class TestAgainstEveryRecordedDraft:
-    """Measured across the whole corpus, not only the exhibit.
+class TestAgainstRecordedDrafts:
+    """Measured against real drafts, not only the exhibit, on a corpus that never moves (#3625).
 
-    90 unique spec drafts survive in boostgauge's lineage. The check refuses 12
-    of them, and those 12 are two runs: `run-issue4-192453` (six drafts) and one
-    run of issue #331 (six drafts). Both left Section 10 holding a table and a
-    pointer. Every other draft carries its functions and passes.
+    This class used to read boostgauge's live `docs/lineage` at test time and
+    pin its counts (90 drafts, 12 refused in two runs). That directory is
+    untracked and changes with every run: by 2026-09-25 it held 102 drafts,
+    and `run-issue4-192453` was gone from disk, so the test failed on every
+    workstation while CI, which skips a missing directory, stayed green.
+
+    The corpus is now copied from that lineage into `tests/fixtures/`: the
+    six drafts of the issue #331 run that left Section 10 holding a table and
+    a pointer (every one must be refused), and three drafts of a later
+    issue #4 run that carries its functions (every one must pass).
     """
 
-    def _drafts(self) -> list[Path]:
-        seen: dict[str, Path] = {}
-        for path in sorted(BOOSTGAUGE.rglob("*-spec-draft.md")):
-            seen.setdefault(str(path.resolve()), path)
-        return list(seen.values())
+    def _drafts(self, kind: str) -> list[Path]:
+        return sorted((CORPUS / kind).rglob("*-spec-draft.md"))
 
-    def test_it_refuses_only_the_two_runs_that_moved_their_tests(self):
-        refused = [
-            path for path in self._drafts()
-            if not check_section_ten_carries_test_functions(
-                path.read_text(encoding="utf-8", errors="replace")
-            )["passed"]
-        ]
-        runs = sorted({path.parent.name for path in refused})
-        assert len(refused) == 12, [str(p) for p in refused]
-        assert len(runs) == 2, runs
+    def _passes(self, path: Path) -> bool:
+        return check_section_ten_carries_test_functions(
+            path.read_text(encoding="utf-8", errors="replace")
+        )["passed"]
 
-    def test_every_other_draft_passes(self):
-        drafts = self._drafts()
-        passing = [
-            path for path in drafts
-            if check_section_ten_carries_test_functions(
-                path.read_text(encoding="utf-8", errors="replace")
-            )["passed"]
-        ]
-        assert len(drafts) - len(passing) == 12
-        assert len(passing) == 78
+    def test_the_corpus_is_there(self):
+        assert len(self._drafts("refused")) == 6
+        assert len(self._drafts("passing")) == 3
+
+    def test_it_refuses_every_draft_of_the_run_that_moved_its_tests(self):
+        wrongly_passed = [p.name for p in self._drafts("refused") if self._passes(p)]
+        assert wrongly_passed == []
+
+    def test_every_draft_that_carries_its_functions_passes(self):
+        wrongly_refused = [p.name for p in self._drafts("passing") if not self._passes(p)]
+        assert wrongly_refused == []
