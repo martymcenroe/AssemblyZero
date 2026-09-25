@@ -28,7 +28,7 @@ from assemblyzero.core.seats import (
 )
 
 FIELDS = (
-    "seat", "spec", "resolved_model_id", "provider_class", "fallback",
+    "profile", "seat", "spec", "resolved_model_id", "provider_class", "fallback",
     "fallback_provider", "effort", "duration_ms", "input_tokens",
     "output_tokens", "success", "model_used",
 )

@@ -93,7 +93,10 @@ def call_fields(
     resolved = _resolved_id(spec)
     if fallback:
         resolved = str(getattr(answering, "_model_id", "") or getattr(answering, "model", ""))
+    from assemblyzero.core.seats import current_profile_name
+
     return {
+        "profile": current_profile_name(),
         "seat": seat or "",
         "spec": spec or "",
         "resolved_model_id": resolved,
