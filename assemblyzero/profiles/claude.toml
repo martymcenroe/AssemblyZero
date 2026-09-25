@@ -3,7 +3,7 @@
 # It exists so the first boostgauge comparison has an honest baseline
 # (#3562, #3563's first comment). Values are the code's own, seat by seat.
 name = "claude"
-description = "The pre-2026-09-24 defaults: Claude drafts, reviews and codes."
+description = "The pre-2026-09-24 defaults, with Claude in the drafting, reviewing and coding seats."
 
 [defaults]
 spec = "claude:opus"

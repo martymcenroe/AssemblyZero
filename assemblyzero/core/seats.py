@@ -415,13 +415,13 @@ def profile_from_args(
     and dropped. ``mock_overrides`` are the entry point's own mock choices
     (the issue workflow's ``mock:draft``).
     """
-    overrides = parse_seat_overrides(getattr(args, "seat", None))
+    overrides = parse_seat_overrides(_seat_arg(args))
     for attr, seat_names in (legacy or {}).items():
-        value = getattr(args, attr, None)
+        value = _str_arg(args, attr)
         if value:
             for seat_name in seat_names:
                 overrides.setdefault(seat_name, value)
-    mock = bool(getattr(args, "mock", False))
+    mock = getattr(args, "mock", False) is True
     if mock:
         for seat_name, spec in list(overrides.items()):
             if not _is_offline_spec(spec):
@@ -430,12 +430,27 @@ def profile_from_args(
         for seat_name, spec in (mock_overrides or {}).items():
             overrides.setdefault(seat_name, spec)
     return load_run_profile(
-        getattr(args, "models", None),
+        _str_arg(args, "models"),
         target_repo,
         mock=mock,
         overrides=overrides,
-        effort=getattr(args, "effort", None),
+        effort=_str_arg(args, "effort"),
     )
+
+
+def _str_arg(args, name: str) -> str | None:
+    """An argparse attribute when it is a non-empty string, else None.
+
+    Callers sometimes hand a ``Mock`` for ``args``; an attribute they did not
+    set is then a Mock, which must read as "not given", never as a value.
+    """
+    value = getattr(args, name, None)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _seat_arg(args) -> list[str]:
+    value = getattr(args, "seat", None)
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
 def default_profile() -> dict:
@@ -443,6 +458,15 @@ def default_profile() -> dict:
     profile = load_profile(builtin_path(DEFAULT_PROFILE))
     profile["selected_by"] = "builtin"
     return profile
+
+
+def default_spec(seat_name: str) -> str:
+    """The built-in default profile's spec for one seat.
+
+    For library signatures that take a spec and need a default: they read it
+    here rather than restating it, so the profile stays the one source.
+    """
+    return seat_in(default_profile(), seat_name).spec
 
 
 # ---------------------------------------------------------------------------

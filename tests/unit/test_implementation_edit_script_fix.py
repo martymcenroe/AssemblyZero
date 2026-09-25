@@ -339,7 +339,7 @@ class TestWiring:
 
         calls = []
 
-        def fake_call(prompt, file_path=None, model=None, system_prompt=""):
+        def fake_call(prompt, file_path=None, seat=None, system_prompt=""):
             calls.append({"prompt": prompt, "system_prompt": system_prompt})
             return (response, error)
 
@@ -398,7 +398,7 @@ class TestWiring:
 
         calls = []
 
-        def fake_call(prompt, file_path=None, model=None, system_prompt=""):
+        def fake_call(prompt, file_path=None, seat=None, system_prompt=""):
             calls.append(prompt)
             return (GOOD_EDIT_SCRIPT, "")
 

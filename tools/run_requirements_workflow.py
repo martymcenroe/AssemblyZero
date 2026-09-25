@@ -61,7 +61,7 @@ from assemblyzero.workflows.requirements.audit import (
 from assemblyzero.core.seats import (  # noqa: E402  (#3563)
     add_profile_arguments,
     describe,
-    legacy_keys,
+    seat_in,
     profile_from_args,
 )
 from assemblyzero.utils.git import current_branch, validate_integration_branch
@@ -666,7 +666,6 @@ def build_initial_state(
     # #3563: the run's model profile, snapshotted into state. The three
     # legacy keys are written from it for one release.
     profile = run_profile_for(args, target_repo)
-    legacy = legacy_keys(profile)
 
     # Build state based on workflow type
     if args.type == "issue":
@@ -682,14 +681,14 @@ def build_initial_state(
             workflow_type="issue",
             assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
-            drafter=legacy["config_drafter"],
-            reviewer=legacy["config_reviewer"],
+            drafter=seat_in(profile, "requirements.draft").spec,
+            reviewer=seat_in(profile, "requirements.review").spec,
             gates_draft=gate_config.draft_gate,
             gates_verdict=gate_config.verdict_gate,
             auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
-            effort=legacy["config_effort"],
+            effort=seat_in(profile, "requirements.review").effort or "",
             retry_policy=getattr(args, "retry_policy", "default"),
             brief_file=args.brief or "",
             source_idea=source_idea,
@@ -708,14 +707,14 @@ def build_initial_state(
             assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
             base_branch=base_branch,
-            drafter=legacy["config_drafter"],
-            reviewer=legacy["config_reviewer"],
+            drafter=seat_in(profile, "requirements.draft").spec,
+            reviewer=seat_in(profile, "requirements.review").spec,
             gates_draft=gate_config.draft_gate,
             gates_verdict=gate_config.verdict_gate,
             auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
-            effort=legacy["config_effort"],
+            effort=seat_in(profile, "requirements.review").effort or "",
             retry_policy=getattr(args, "retry_policy", "default"),
             issue_number=args.issue or 0,
             context_files=args.context or [],
@@ -743,24 +742,27 @@ def run_profile_for(args: argparse.Namespace, target_repo: Path) -> dict:
     AZ_MODEL_PROFILE, then the target's models.toml, then gemini.toml, with
     --seat, --drafter, --reviewer and --effort applied on top. Under --mock
     the issue workflow drafts from `mock:draft` and the LLD workflow from
-    `mock:lld` (#3533)."""
-    from assemblyzero.core.seats import parse_seat_overrides
+    `mock:lld` (#3533). A --drafter also sets the N0c escalation seat by
+    #2375's map, unless --seat names that seat itself."""
+    from assemblyzero.core.seats import apply_overrides
 
     mock_overrides = (
         {"requirements.draft": "mock:draft"} if getattr(args, "type", "") == "issue" else {}
     )
-    drafter = getattr(args, "drafter", None)
-    if drafter and "requirements.analyze.escalation" not in parse_seat_overrides(args.seat):
+    profile = profile_from_args(
+        args, target_repo, LEGACY_SEAT_FLAGS, mock_overrides=mock_overrides,
+    )
+    drafter = profile["overrides"].get("requirements.analyze")
+    if drafter and "requirements.analyze.escalation" not in profile["overrides"]:
         from assemblyzero.workflows.requirements.nodes.analyze_requirements import (
             escalated_drafter,
         )
 
-        args.seat = list(args.seat or []) + [
-            f"requirements.analyze.escalation={escalated_drafter(drafter) or drafter}"
-        ]
-    return profile_from_args(
-        args, target_repo, LEGACY_SEAT_FLAGS, mock_overrides=mock_overrides,
-    )
+        profile = apply_overrides(
+            profile,
+            {"requirements.analyze.escalation": escalated_drafter(drafter) or drafter},
+        )
+    return profile
 
 
 def run_single_workflow(

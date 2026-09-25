@@ -277,7 +277,8 @@ class TestTheTransportWiring:
 
         out = modify_mod.default_transport("sys prompt", "content")
 
-        assert calls["spec"] == modify_mod.TRANSLATION_PROVIDER
+        # #3563: the visual_gate.translate seat of the default profile.
+        assert calls["spec"] == "gemini:3.1-pro"
         assert calls["spec"].startswith("gemini:"), (
             "the spec routes a Gemini model to the Gemini transport"
         )
@@ -300,7 +301,7 @@ class TestTheTransportWiring:
         with pytest.raises(RuntimeError) as err:
             modify_mod.default_transport("s", "c")
 
-        assert modify_mod.TRANSLATION_PROVIDER in str(err.value)
+        assert "gemini:3.1-pro" in str(err.value)
         assert "quota exhausted" in str(err.value)
 
 

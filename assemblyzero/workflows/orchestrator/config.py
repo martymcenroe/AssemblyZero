@@ -51,6 +51,8 @@ def get_default_config() -> OrchestratorConfig:
             # #1434: top-tier production models by default; #1432/PR #1433
             # had used gemini:2.5-flash. The model itself now comes from the
             # profile: Gemini in agy drafts and validates (#3517, ADR 0234).
+            # The Claude json_schema crash (#1431) this comment once cited did
+            # not reproduce on 2026-09-24 (#3519) and is no reason for anything.
             "triage": StageConfig(
                 drafter=seats["requirements.draft"],
                 reviewer=seats["requirements.review"],

@@ -137,7 +137,9 @@ class TestArgumentParsing:
         assert args.max_iterations == 10
 
     def test_default_values(self):
-        """Test default argument values. Both seats are agy since #3517."""
+        """Test default argument values. Both seats are agy since #3517; since
+        #3563 that default lives in the model profile, so the seat flags
+        default to "not given" and override the profile only when passed."""
         from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
@@ -145,8 +147,11 @@ class TestArgumentParsing:
             "--issue", "42",
         ])
 
-        assert args.drafter == "gemini:3.1-pro"
-        assert args.reviewer == "gemini:3.1-pro"
+        assert args.drafter is None
+        assert args.reviewer is None
+        assert args.models is None
+        assert args.seat == []
+        assert args.effort is None
         assert args.review == "none"
         assert args.mock is False
         assert args.max_iterations == 20
@@ -224,7 +229,7 @@ class TestBuildInitialState:
         args = Mock()
         args.type = "lld"
         args.issue = 42
-        args.drafter = "gemini:2.5-flash"
+        args.drafter = "claude:opus"
         args.reviewer = "claude:sonnet"
         args.review = "none"
         args.mock = True
@@ -240,7 +245,11 @@ class TestBuildInitialState:
 
         assert state["workflow_type"] == "lld"
         assert state["issue_number"] == 42
-        assert state["config_drafter"] == "gemini:2.5-flash"
+        # #3563: --mock selects mock.toml, and a real spec passed beside it is
+        # dropped by name, so a mock run never reaches a real transport.
+        assert state["model_profile"]["name"] == "mock"
+        assert state["config_drafter"] == "mock:lld"
+        assert state["config_reviewer"] == "mock:review"
         assert state["config_gates_draft"] is False
         assert state["config_gates_verdict"] is False
         assert state["config_mock_mode"] is True
@@ -729,13 +738,35 @@ class TestAllArgumentsUsed:
         args = parse_args([
             "--type", "lld",
             "--issue", "42",
-            "--drafter", "gemini:2.5-flash",
+            "--drafter", "claude:sonnet",
             "--base-branch", "main",
         ])
 
         state = build_initial_state(args, tmp_path, tmp_path)
 
-        assert state["config_drafter"] == "gemini:2.5-flash"
+        assert state["config_drafter"] == "claude:sonnet"
+        # #3563: the flag overrides the drafter seats, and the N0c escalation
+        # follows #2375's map; every other seat stays at the profile's value.
+        from assemblyzero.core.seats import seat_in
+
+        profile = state["model_profile"]
+        assert seat_in(profile, "requirements.analyze").spec == "claude:sonnet"
+        assert seat_in(profile, "requirements.draft").spec == "claude:sonnet"
+        assert seat_in(profile, "requirements.analyze.escalation").spec == "claude:opus"
+        assert seat_in(profile, "requirements.review").spec == "gemini:3.1-pro"
+
+    def test_a_forbidden_drafter_fails_closed(self, tmp_path):
+        """#3563: FORBIDDEN_MODELS applies to every seat at run start."""
+        from assemblyzero.core.seats import ProfileError
+        from tools.run_requirements_workflow import parse_args, build_initial_state
+
+        args = parse_args([
+            "--type", "lld", "--issue", "42",
+            "--drafter", "gemini:2.5-flash", "--base-branch", "main",
+        ])
+
+        with pytest.raises(ProfileError, match="gemini-2.5-flash"):
+            build_initial_state(args, tmp_path, tmp_path)
 
     def test_reviewer_passed_to_state(self, tmp_path):
         """Test --reviewer is passed to state."""

@@ -17,6 +17,7 @@ both workflow types through a single graph. Fields are organized by:
 
 from enum import Enum
 from typing import Literal, TypedDict
+from assemblyzero.core.seats import default_spec
 
 
 class WorkflowType(str, Enum):
@@ -301,8 +302,8 @@ def create_initial_state(
     assemblyzero_root: str,
     target_repo: str,
     base_branch: str = "",
-    drafter: str = "gemini:3.1-pro",
-    reviewer: str = "gemini:3.1-pro",
+    drafter: str | None = None,
+    reviewer: str | None = None,
     gates_draft: bool = True,
     gates_verdict: bool = True,
     auto_mode: bool = False,
@@ -362,8 +363,8 @@ def create_initial_state(
         "assemblyzero_root": assemblyzero_root,
         "target_repo": target_repo,
         "base_branch": base_branch,
-        "config_drafter": drafter,
-        "config_reviewer": reviewer,
+        "config_drafter": drafter or default_spec("requirements.draft"),
+        "config_reviewer": reviewer or default_spec("requirements.review"),
         "config_effort": effort,
         "config_retry_policy": retry_policy,
         "config_gates_draft": gates_draft,

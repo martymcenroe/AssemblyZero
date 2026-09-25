@@ -187,12 +187,19 @@ class TestTheCeiling:
     def test_the_call_runs_at_low_effort(self, worktree):
         """The measured cause: at the default effort this prompt thinks past
         fifteen minutes on Opus and Sonnet alike; at low it returns in ten
-        seconds. The flag has been in the provider since #773."""
+        seconds. The flag has been in the provider since #773. #3563: that
+        `low` is the `impl.augment_tests` seat's effort in `claude.toml`, the
+        profile that runs this seat on Claude."""
+        from assemblyzero.core.seats import builtin_path, load_profile
+
+        state = _state(worktree)
+        state["model_profile"] = load_profile(builtin_path("claude"))
         with patch.object(
             augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, ""),
         ) as call:
-            augment_tests_for_coverage(_state(worktree))
+            augment_tests_for_coverage(state)
 
+        assert call.call_args.kwargs["model"] == "claude:sonnet"
         assert call.call_args.kwargs["effort"] == "low"
 
     def test_call_claude_for_file_hands_effort_to_the_provider(self):
@@ -214,23 +221,25 @@ class TestTheCeiling:
         with patch.object(claude_client, "get_provider", fake_get_provider):
             claude_client.call_claude_for_file("p", file_path="t.py", effort="low")
             assert seen["effort"] == "low"
+            # #3563: no effort given is the seat's (impl.code, `max` in the
+            # built-in default), never an unset flag.
             claude_client.call_claude_for_file("p", file_path="t.py")
-            assert seen["effort"] is None
+            assert seen["effort"] == "max"
 
     def test_the_model_is_routed_as_n4_routes_it_not_bare_opus(self, worktree):
         """The cause of the 3,335-second call: bare `opus` runs with extended
         thinking and no ceiling on it. N4 routes through select_model_for_file
-        and returns in twenty seconds; N4c now does the same."""
-        from assemblyzero.workflows.testing.nodes.implementation.routing import (
-            select_model_for_file,
-        )
+        and returns in twenty seconds; N4c did the same. #3563: N4c is its own
+        seat, `impl.augment_tests`, resolved under the run's profile."""
+        from assemblyzero.core.seats import resolve
+
+        state = _state(worktree)
         with patch.object(
             augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, ""),
         ) as call:
-            augment_tests_for_coverage(_state(worktree))
+            augment_tests_for_coverage(state)
 
-        routed = select_model_for_file(str(worktree / "tests" / "test_issue_4.py"))
-        assert call.call_args.kwargs["model"] == routed
+        assert call.call_args.kwargs["model"] == resolve(state, "impl.augment_tests").spec
         assert call.call_args.kwargs["model"] != "opus"
 
     def test_call_claude_for_file_honours_an_explicit_ceiling(self):

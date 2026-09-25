@@ -10,7 +10,6 @@ from pydantic import BaseModel, ValidationError as PydanticValidationError
 
 from assemblyzero.core.llm_provider import LLMCallResult, LLMProvider
 from assemblyzero.workflows.testing.adversarial_gemini import (
-    ADVERSARIAL_PROVIDER_SPEC,
     AdversarialGeminiClient,
     GeminiModelDowngradeError,
     GeminiQuotaExhaustedError,
@@ -332,17 +331,17 @@ class TestTheSanctionedTransport:
             factory.return_value = _FakeTransport(_result())
             client = AdversarialGeminiClient()
 
-        factory.assert_called_once_with(ADVERSARIAL_PROVIDER_SPEC)
-        assert ADVERSARIAL_PROVIDER_SPEC == "gemini:3.1-pro"
+        # #3563: with no spec given, the `impl.adversarial` seat of the
+        # built-in default profile, which is Gemini.
+        factory.assert_called_once_with("gemini:3.1-pro", effort=None)
         assert client._provider is factory.return_value
 
     def test_a_forbidden_alias_is_refused_before_any_transport_is_built(self):
         from assemblyzero.workflows.testing import adversarial_gemini as ag
 
-        with patch("assemblyzero.core.llm_provider.get_provider") as factory, \
-                patch.object(ag, "ADVERSARIAL_MODEL_ALIAS", "flash"):
+        with patch("assemblyzero.core.llm_provider.get_provider") as factory:
             with pytest.raises(ag.ForbiddenModelError):
-                AdversarialGeminiClient()
+                AdversarialGeminiClient(spec="gemini:flash")
 
         factory.assert_not_called()
 
@@ -484,12 +483,15 @@ class TestTheRequestedModelIsChosenNotSpelled:
     """
 
     def test_the_alias_is_in_the_selection_map(self):
+        """#3563: the alias is the model half of the default profile's
+        `impl.adversarial` seat."""
         from assemblyzero.core.llm_provider import GeminiProvider
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            ADVERSARIAL_MODEL_ALIAS,
-        )
+        from assemblyzero.core.seats import default_profile, seat_in
 
-        assert ADVERSARIAL_MODEL_ALIAS in GeminiProvider.MODEL_MAP, (
+        spec = seat_in(default_profile(), "impl.adversarial").spec
+        provider, _, alias = spec.partition(":")
+        assert provider == "gemini"
+        assert alias in GeminiProvider.MODEL_MAP, (
             "the alias must resolve through the map, or supersession notes and "
             "fleet migrations cannot reach this call"
         )
@@ -523,16 +525,22 @@ class TestTheRequestedModelIsChosenNotSpelled:
         The two ends of one call have to agree."""
         from assemblyzero.workflows.testing import adversarial_gemini as ag
 
-        with patch.object(ag, "ADVERSARIAL_MODEL_ALIAS", alias):
-            with pytest.raises(ag.ForbiddenModelError):
-                ag.resolve_adversarial_model()
+        with pytest.raises(ag.ForbiddenModelError):
+            ag.resolve_adversarial_model(f"gemini:{alias}")
 
     def test_an_unknown_alias_is_refused_rather_than_passed_through(self):
         from assemblyzero.workflows.testing import adversarial_gemini as ag
 
-        with patch.object(ag, "ADVERSARIAL_MODEL_ALIAS", "gemini-9.9-imaginary"):
-            with pytest.raises(ag.ForbiddenModelError):
-                ag.resolve_adversarial_model()
+        with pytest.raises(ag.ForbiddenModelError):
+            ag.resolve_adversarial_model("gemini:gemini-9.9-imaginary")
+
+    def test_a_forbidden_model_under_another_provider_is_refused(self):
+        """#3563: a profile may put any provider in this seat; FORBIDDEN_MODELS
+        still applies."""
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
+
+        with pytest.raises(ag.ForbiddenModelError):
+            ag.resolve_adversarial_model("mock:gemini-3-pro")
 
     def test_the_dated_preview_is_gone_from_every_call_site(self):
         """It appeared three times: the model argument and two metadata
@@ -553,9 +561,15 @@ class TestTheRequestedModelIsChosenNotSpelled:
     def test_the_spec_sent_is_the_alias_that_was_checked(self):
         """#2926: the model half of the provider spec is the alias
         resolve_adversarial_model validates, so what is checked and what is
-        requested cannot drift apart."""
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            ADVERSARIAL_MODEL_ALIAS,
-        )
+        requested cannot drift apart. #3563: the spec the client is given is
+        the one both checked and built."""
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
 
-        assert ADVERSARIAL_PROVIDER_SPEC == f"gemini:{ADVERSARIAL_MODEL_ALIAS}"
+        with patch.object(
+            ag, "resolve_adversarial_model", wraps=ag.resolve_adversarial_model
+        ) as checked, patch("assemblyzero.core.llm_provider.get_provider") as factory:
+            factory.return_value = _FakeTransport(_result())
+            ag.AdversarialGeminiClient(spec="gemini:3.1-pro-high", effort="max")
+
+        checked.assert_called_once_with("gemini:3.1-pro-high")
+        factory.assert_called_once_with("gemini:3.1-pro-high", effort="max")

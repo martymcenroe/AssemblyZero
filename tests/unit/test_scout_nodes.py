@@ -637,7 +637,7 @@ class TestGapAnalystNode:
     """Tests for gap_analyst_node function."""
 
     def test_online_mode_uses_gemini_client(self):
-        """Test online mode uses GeminiClient."""
+        """Online mode asks the scout.analyze seat through get_provider (#3563)."""
         state = create_initial_state("topic", offline_mode=False)
         state["found_repos"] = [
             ExternalRepo(name="repo", url="#", stars=100, description="Test",
@@ -648,7 +648,7 @@ class TestGapAnalystNode:
         mock_result.success = True
         mock_result.response = "Analysis from Gemini"
 
-        with patch("assemblyzero.core.gemini_client.GeminiClient") as MockClient:
+        with patch("assemblyzero.core.llm_provider.get_provider") as MockClient:
             mock_instance = MagicMock()
             mock_instance.invoke.return_value = mock_result
             MockClient.return_value = mock_instance
@@ -656,6 +656,7 @@ class TestGapAnalystNode:
             result = gap_analyst_node(state)
 
         assert "Analysis from Gemini" in result["gap_analysis"]
+        assert MockClient.call_args.args[0] == "gemini:3.1-pro"
 
     def test_online_mode_handles_client_failure(self):
         """Test handling when GeminiClient returns failure."""
@@ -669,7 +670,7 @@ class TestGapAnalystNode:
         mock_result.success = False
         mock_result.error = "API quota exceeded"
 
-        with patch("assemblyzero.core.gemini_client.GeminiClient") as MockClient:
+        with patch("assemblyzero.core.llm_provider.get_provider") as MockClient:
             mock_instance = MagicMock()
             mock_instance.invoke.return_value = mock_result
             MockClient.return_value = mock_instance
@@ -702,7 +703,7 @@ class TestGapAnalystNode:
 
         # Mock the import inside the function
         with patch.dict("sys.modules", {"assemblyzero.core.gemini_client": MagicMock()}):
-            with patch("assemblyzero.core.gemini_client.GeminiClient") as MockClient:
+            with patch("assemblyzero.core.llm_provider.get_provider") as MockClient:
                 mock_instance = MagicMock()
                 mock_instance.invoke.side_effect = Exception("API Error")
                 MockClient.return_value = mock_instance
