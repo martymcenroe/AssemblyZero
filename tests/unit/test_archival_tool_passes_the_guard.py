@@ -89,7 +89,12 @@ class TestMainRunsTheThreeStepsAndNothingElse:
         argv = ["prog", "--worktree", str(tmp_path), "--issue", "3558", "--main-repo", str(tmp_path)]
         with patch("sys.argv", argv):
             awl.main()
+        # #3626: eviction is opt-in, so the default run stops after staging.
+        assert calls == ["require", "archive", "stage"]
 
+        calls.clear()
+        with patch("sys.argv", argv + ["--evict-venv"]):
+            awl.main()
         assert calls == ["require", "archive", "stage", "evict"]
 
 

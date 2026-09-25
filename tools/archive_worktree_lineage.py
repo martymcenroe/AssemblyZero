@@ -9,8 +9,16 @@ Usage:
 This script:
 1. Copies docs/lineage/active/{issue}-*/ to main repo's docs/lineage/archived/
 2. Stages the archived files in main
-3. Evicts the poetry venv cached for the worktree, so it can be removed
+3. Only with --evict-venv: evicts the worktree's poetry environment
 4. Does NOT remove the worktree (user does that after)
+
+Step 3 is opt-in (#3614, #3626). It ran on every call and deleted the
+environment out from under whatever was using it: twice on 2026-09-25 a test
+tier in the same worktree lost `site-packages` mid-run. Poetry here keeps each
+environment inside its project (`virtualenvs.in-project = true`), so `git
+worktree remove` deletes it with the worktree and the eviction bought
+nothing. With --evict-venv the tool warns first and refuses while any other
+process runs from the worktree, naming it.
 
 It deletes nothing (#3558). It used to clean the worktree's caches first,
 with `shutil.rmtree`, and the shell guard reads that token and refused the
@@ -126,6 +134,40 @@ def stage_archived(main_repo: Path, issue_number: int) -> None:
         print("  No lineage changes to stage")
 
 
+def _own_lineage() -> set[int]:
+    """This process and its ancestors: `poetry run` itself runs from the worktree."""
+    import psutil
+
+    pids = {psutil.Process().pid}
+    try:
+        for parent in psutil.Process().parents():
+            pids.add(parent.pid)
+    except psutil.Error:
+        pass
+    return pids
+
+
+def processes_using(worktree_path: Path) -> list[tuple[int, str]]:
+    """Every other process whose executable or working directory is inside the worktree."""
+    import psutil
+
+    root = str(worktree_path.resolve()).lower().rstrip("\\/")
+    mine = _own_lineage()
+    found: list[tuple[int, str]] = []
+    for proc in psutil.process_iter(["pid", "name", "exe", "cwd"]):
+        info = proc.info
+        if info["pid"] in mine:
+            continue
+        for place in (info.get("exe"), info.get("cwd")):
+            if not place:
+                continue
+            p = str(place).lower().rstrip("\\/")
+            if p == root or p.startswith(root + "\\") or p.startswith(root + "/"):
+                found.append((info["pid"], info.get("name") or "?"))
+                break
+    return found
+
+
 def evict_poetry_venv(worktree_path: Path) -> None:
     """Evict poetry-cached virtualenvs tied to the worktree path.
 
@@ -148,6 +190,17 @@ def evict_poetry_venv(worktree_path: Path) -> None:
         # Not a poetry project — skip silently.
         return
 
+    # #3614, #3626: never pull the environment out from under a running tier.
+    users = processes_using(worktree_path)
+    if users:
+        listing = "; ".join(f"PID {pid} ({name})" for pid, name in users)
+        raise SystemExit(
+            f"Refusing to evict the environment: running from {worktree_path}: {listing}. "
+            "Let it finish, then run this again."
+        )
+
+    print("  WARNING: removing this worktree's poetry environment. Tests cannot run "
+          "in the worktree afterwards without `poetry install`.")
     print("  Evicting poetry-cached virtualenvs (so the worktree can be removed cleanly)...")
     result = subprocess.run(
         ["poetry", "env", "remove", "--all"],
@@ -178,6 +231,11 @@ def main():
     parser.add_argument("--issue", required=True, type=int, help="Issue number")
     parser.add_argument("--main-repo", default=".", help="Path to main repo (default: cwd)")
     parser.add_argument("--no-stage", action="store_true", help="Skip git add")
+    parser.add_argument(
+        "--evict-venv", action="store_true",
+        help="Also remove the worktree's poetry environment (#3626). Refused while "
+             "any other process runs from the worktree.",
+    )
     args = parser.parse_args()
 
     worktree = Path(args.worktree).resolve()
@@ -195,8 +253,9 @@ def main():
     if archived and not args.no_stage:
         stage_archived(main_repo, args.issue)
 
-    # Evict poetry venvs that lock the worktree directory on Windows
-    evict_poetry_venv(worktree)
+    # Opt-in only (#3614, #3626): an in-project environment goes with the worktree.
+    if args.evict_venv:
+        evict_poetry_venv(worktree)
 
     print("\nDone. You can now remove the worktree:")
     print(f"  git worktree remove {worktree}")
