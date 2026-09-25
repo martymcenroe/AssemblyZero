@@ -16,12 +16,35 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
 
 from land_staged_workflow import (  # noqa: E402
+    landing_action,
     parse_args,
     strip_header_comment,
     workflow_name,
 )
 
 WORKFLOW = "name: tests\non:\n  pull_request:\n"
+
+
+class TestLandingAction:
+    """#3606: --replace updates a live workflow; without it nothing changes."""
+
+    def test_absent_destination_is_added(self):
+        assert landing_action(None, WORKFLOW, replace=False) == "add"
+        assert landing_action(None, WORKFLOW, replace=True) == "add"
+
+    def test_existing_destination_without_replace_writes_nothing(self):
+        assert landing_action("name: old\n", WORKFLOW, replace=False) == "exists"
+
+    def test_existing_different_destination_with_replace_is_replaced(self):
+        assert landing_action("name: old\n", WORKFLOW, replace=True) == "replace"
+
+    def test_identical_destination_with_replace_writes_nothing(self):
+        assert landing_action(WORKFLOW, WORKFLOW, replace=True) == "identical"
+
+    def test_replace_defaults_off(self):
+        cfg = parse_args(["--repo", "r", "--issue", "7", "--staged", "docs/ci/t.yml",
+                          "--workflow", ".github/workflows/t.yml"])
+        assert cfg.replace is False
 
 
 class TestStripHeaderComment:

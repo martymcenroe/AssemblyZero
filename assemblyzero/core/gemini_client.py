@@ -87,14 +87,17 @@ QUOTA_EXHAUSTED_PATTERNS = [
 AGY_CALL_TIMEOUT_SECONDS = 300.0
 MAX_TOTAL_INVOKE_SECONDS = 600.0
 
-#: No agy call carries a flag whose mechanism is elevation (#3605, #3603;
-#: ADR 0233 as amended 2026-09-25). ``--sandbox`` was here from 2026-09-24 to
-#: 2026-09-25. On Windows it makes agy build an AppContainer for every shell
-#: command the model attempts, and building one needs an administrator token,
-#: which agy gets by relaunching itself elevated: a UAC dialog naming agy.exe.
-#: The "shell refused" result ADR 0233 measured was that dialog timing out.
-#: The operator's ruling: no agent ever gets elevated rights. This list stays
-#: empty, and ``tests/unit/test_agy_sandbox_args.py`` pins it empty.
+#: No agy call carries a flag whose mechanism is elevation (#3608, #3605,
+#: #3603; ADR 0233 as amended 2026-09-25). ``--sandbox`` was here from
+#: 2026-09-24 (#3516) to 2026-09-25. On Windows it makes agy build an
+#: AppContainer for every shell command the model attempts, and building one
+#: needs an administrator token, which agy gets by relaunching itself elevated:
+#: a UAC dialog naming agy.exe. The "shell refused" result ADR 0233 measured
+#: on 2026-09-24 was that dialog timing out; the flag never blocked file
+#: writes either. The operator's ruling: no agent ever requests elevation, and
+#: agents do not pass --sandbox. The fleet's shell guard now denies
+#: ``agy --sandbox``, this list stays empty, and
+#: ``tests/unit/test_agy_sandbox_args.py`` pins it empty.
 AGY_SAFETY_ARGS: list[str] = []
 MIN_ATTEMPT_SECONDS = 20.0
 

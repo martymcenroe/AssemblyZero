@@ -1,12 +1,14 @@
 """No agy call carries a flag whose mechanism is elevation, and no call runs
-on a machine whose agy executes the model's tool calls (#3605, #3603; ADR 0233
-as amended 2026-09-25).
+on a machine whose agy executes the model's tool calls (#3608, #3605, #3603;
+ADR 0233 as amended 2026-09-25).
 
-`--sandbox` was passed here from 2026-09-24 to 2026-09-25. On Windows it makes
+#3516 added `--sandbox` to every agy call on 2026-09-24. On Windows it makes
 agy build an AppContainer for each shell command the model attempts, which
 needs an administrator token that agy obtains by relaunching itself elevated:
 a UAC dialog naming agy.exe, raised three times in one pipeline call on
-2026-09-25. The operator's ruling: no agent ever gets elevated rights.
+2026-09-25. The operator's ruling: no agent ever requests elevation, and agents
+do not pass --sandbox. Both transports are pinned here so the flag cannot come
+back, in its bare and its `--sandbox=` form.
 
 What keeps a headless call text-only is agy's `toolPermission` setting. The
 documented default, `request-review`, soft-denies a shell command in print
@@ -38,6 +40,12 @@ def _settings(tmp_path, body: str):
     return path
 
 
+def _no_elevating_flag(argv: list[str]) -> bool:
+    return not any(
+        a == flag or a.startswith(flag + "=") for a in argv for flag in ELEVATING_FLAGS
+    )
+
+
 def test_the_safety_args_are_empty():
     assert gc.AGY_SAFETY_ARGS == []
 
@@ -57,8 +65,7 @@ def test_the_pty_path_carries_no_elevating_flag(monkeypatch):
     assert ok is False
     argv = seen["argv"]
     assert argv[:2] == ["/fake/agy", "-p"]
-    for flag in ELEVATING_FLAGS:
-        assert flag not in argv
+    assert _no_elevating_flag(argv)
 
 
 @patch("assemblyzero.core.gemini_client.subprocess.Popen")
@@ -73,8 +80,7 @@ def test_the_stdin_path_carries_no_elevating_flag(mock_popen):
 
     argv = mock_popen.call_args[0][0]
     assert argv[:3] == ["/fake/agy", "--model", "gemini-3.1-pro-high"]
-    for flag in ELEVATING_FLAGS:
-        assert flag not in argv
+    assert _no_elevating_flag(argv)
 
 
 @pytest.mark.parametrize("value", ["always-proceed", "proceed-in-sandbox", "strict"])
