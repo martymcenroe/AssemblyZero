@@ -63,7 +63,7 @@ from .prompts import (
     build_single_file_prompt,
     build_stable_system_prompt,
 )
-from .routing import HAIKU_MODEL, select_model_for_file
+from .routing import SMALL_SEAT, select_seat_for_file
 
 # Issue #644: Prompt size cap for code generation (chars)
 CODE_GEN_PROMPT_CAP = 60_000
@@ -76,7 +76,7 @@ def try_edit_script_fix(
     filepath: str,
     existing_content: str,
     failure_context: str,
-    model: str = "",
+    seat: str = "",
     system_prompt: str = "",
     audit_dir: Path | None = None,
     spec_excerpt: str = "",
@@ -108,7 +108,7 @@ def try_edit_script_fix(
     try:
         with ProgressReporter("Calling Claude (edit script)", interval=15):
             result = call_claude_for_file(
-                prompt, file_path=filepath, model=model,
+                prompt, file_path=filepath, seat=seat or None,
                 # The stable system prompt describes whole-file output; a
                 # patch engine needs the opposite instruction, and mixing them
                 # is how a model ends up sending a file back.
@@ -156,8 +156,8 @@ def generate_file_with_retry(
     Issue #309: Retry up to max_retries times on API or validation errors,
     including error context in subsequent prompts.
 
-    Calls select_model_for_file() to determine the model, then delegates
-    to call_claude_for_file() with the resolved model.
+    Calls select_seat_for_file() to pick the coder seat (#3563), then delegates
+    to call_claude_for_file(), which resolves it under the run profile.
 
     Args:
         filepath: Path to the file being generated (used for routing).
@@ -180,7 +180,7 @@ def generate_file_with_retry(
     prompt = base_prompt
 
     # Issue #641: Route scaffolding/boilerplate files to Haiku
-    model = select_model_for_file(filepath, estimated_line_count, is_test_scaffold)
+    seat = select_seat_for_file(filepath, estimated_line_count, is_test_scaffold)
 
     for attempt in range(max_retries):
         attempt_num = attempt + 1  # 1-indexed for display
@@ -216,9 +216,9 @@ def generate_file_with_retry(
             )
 
         # Call Claude (Issue #447: pass filepath for file-type-aware system prompt)
-        # Issue #641: pass routed model
+        # Issue #641: pass the routed seat (#3563)
         # Issue #643: pass stable system prompt for caching
-        result = call_claude_for_file(prompt, file_path=filepath, model=model, system_prompt=system_prompt)
+        result = call_claude_for_file(prompt, file_path=filepath, seat=seat, system_prompt=system_prompt)
 
         # Unpack result — call_claude_for_file returns (response, error_str)
         # but callers may mock with (response, usage_dict); only treat str as error
@@ -505,6 +505,19 @@ def resolve_change_type(
 def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     """N4: Generate implementation code file-by-file.
 
+    #3553/#3563: every coder call below resolves `impl.code` or
+    `impl.code.small` under the run's profile, entered here once so the
+    helpers ten calls down need not carry state.
+    """
+    from assemblyzero.core.seats import profile_of, using_profile
+
+    with using_profile(profile_of(state)):
+        return _implement_code(state)
+
+
+def _implement_code(state: TestingWorkflowState) -> dict[str, Any]:
+    """N4's body, run under the run profile (see ``implement_code``).
+
     Issue #272: File-by-file prompting with mechanical validation.
     """
     iteration_count = state.get("iteration_count", 0)
@@ -649,8 +662,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             continue
 
         # Only batch Add files routed to Haiku
-        model = select_model_for_file(fp, file_spec.get("estimated_line_count", 0))
-        if ct.lower() == "add" and model == HAIKU_MODEL:
+        seat = select_seat_for_file(fp, file_spec.get("estimated_line_count", 0))
+        if ct.lower() == "add" and seat == SMALL_SEAT:
             batch_specs.append(file_spec)
         else:
             regular_specs.append(file_spec)
@@ -670,7 +683,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 response, api_error = call_claude_for_file(
                     prompt=batch_prompt,
                     file_path=batch_paths[0],
-                    model=HAIKU_MODEL,
+                    seat=SMALL_SEAT,
                     system_prompt=stable_system_prompt,
                 )
 
@@ -1022,7 +1035,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 filepath=filepath,
                 existing_content=edit_script_content,
                 failure_context=revision_error_context,
-                model=select_model_for_file(filepath, 0, False),
+                seat=select_seat_for_file(filepath, 0, False),
                 system_prompt=stable_system_prompt,
                 audit_dir=audit_dir if audit_dir.exists() else None,
             )

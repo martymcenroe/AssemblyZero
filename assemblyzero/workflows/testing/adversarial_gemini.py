@@ -4,7 +4,8 @@ Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 
 Encapsulates adversarial-specific invocation (system prompt, no-mock constraint,
 model check) while delegating the call to the sanctioned transport:
-``get_provider("gemini:3.1-pro")``, which is ``agy`` over stdin per ADR 0220.
+``get_provider`` on the run profile's ``impl.adversarial`` seat (#3563),
+``gemini:3.1-pro`` by default, which is ``agy`` over stdin per ADR 0220.
 
 #2926: until 2026-09-24 the client "discovered" its provider through four
 module names that did not exist, fell through to ``google.genai.Client()``,
@@ -60,22 +61,27 @@ class ForbiddenModelError(Exception):
     """
 
 
-#: #2286: the alias, not an identifier. Three call sites previously spelled out
-#: `gemini-2.5-pro-preview-05-06` -- a dated preview whose validity was never
-#: established, because the call died in local validation before #2281 and at
-#: authentication after it. Naming a tier instead means `MODEL_MAP` supersession
-#: notes and `FORBIDDEN_MODELS` both reach this path, and a fleet-wide migration
-#: cannot miss it.
-ADVERSARIAL_MODEL_ALIAS = "3.1-pro"
-
-#: #2926: the spec the node hands to ``get_provider``. Its model half is the
-#: alias ``resolve_adversarial_model`` checks against FORBIDDEN_MODELS, so the
-#: request that is validated and the request that is sent cannot differ.
-ADVERSARIAL_PROVIDER_SPEC = f"gemini:{ADVERSARIAL_MODEL_ALIAS}"
+#: #2286 named a tier alias instead of a dated identifier, so `MODEL_MAP`
+#: supersession notes and `FORBIDDEN_MODELS` both reach this path. #2926 made
+#: the node hand ``gemini:<alias>`` to ``get_provider``. #3563: the spec is the
+#: run profile's `impl.adversarial` seat (``gemini:3.1-pro`` in `gemini.toml`
+#: and `claude.toml` alike), and its model half is the alias checked below, so
+#: the request that is validated and the request that is sent cannot differ.
+SEAT = "impl.adversarial"
 
 
-def resolve_adversarial_model() -> str:
+def _seat_spec() -> str:
+    from assemblyzero.core.seats import resolve_active
+
+    return resolve_active(SEAT).spec
+
+
+def resolve_adversarial_model(spec: str | None = None) -> str:
     """The model this call will request, resolved and checked.
+
+    ``spec`` is the seat's provider spec; ``None`` resolves the seat under the
+    active profile. Only a ``gemini:`` spec is checked here; every other
+    provider was checked against FORBIDDEN_MODELS when the profile loaded.
 
     Two things the old call site did not do. The alias goes through the same
     map every other Gemini caller uses, so a retired preview remaps rather than
@@ -87,8 +93,17 @@ def resolve_adversarial_model() -> str:
     """
     from assemblyzero.core.config import FORBIDDEN_MODELS
     from assemblyzero.core.llm_provider import GeminiProvider
+    from assemblyzero.core.seats import ProfileError, check_spec
 
-    alias = ADVERSARIAL_MODEL_ALIAS.lower()
+    spec = spec or _seat_spec()
+    provider_name, _, model = spec.partition(":")
+    if provider_name.strip().lower() != "gemini":
+        try:
+            return check_spec(spec, SEAT)[1]
+        except ProfileError as exc:
+            raise ForbiddenModelError(str(exc)) from exc
+
+    alias = model.strip().lower()
     model_id = GeminiProvider.MODEL_MAP.get(alias)
     if model_id is None:
         valid = ", ".join(sorted(GeminiProvider.MODEL_MAP))
@@ -134,28 +149,37 @@ class AdversarialGeminiClient:
     actual Gemini API communication to the existing provider infrastructure.
     """
 
-    def __init__(self, provider: Any | None = None) -> None:
+    def __init__(
+        self,
+        provider: Any | None = None,
+        spec: str | None = None,
+        effort: str | None = None,
+    ) -> None:
         """Wrap ``provider``, or build the sanctioned one.
 
         Args:
             provider: An ``LLMProvider`` (the sanctioned shape), or a callable
                 ``(system_prompt=..., user_prompt=...) -> (text, metadata)``
                 standing in for one in tests. ``None`` builds
-                ``get_provider(ADVERSARIAL_PROVIDER_SPEC)`` after
-                ``resolve_adversarial_model`` has checked the alias, so a
-                forbidden tier is refused before any transport exists.
+                ``get_provider(spec)`` after ``resolve_adversarial_model`` has
+                checked it, so a forbidden tier is refused before any
+                transport exists.
+            spec: The `impl.adversarial` seat's spec; ``None`` resolves the
+                seat under the active profile (#3563).
+            effort: The seat's effort.
 
         Raises:
-            ForbiddenModelError: if the alias resolves to a forbidden model.
+            ForbiddenModelError: if the spec resolves to a forbidden model.
             ValueError: from ``get_provider`` if the spec cannot be built.
         """
         if provider is not None:
             self._provider = provider
             return
-        resolve_adversarial_model()
+        spec = spec or _seat_spec()
+        resolve_adversarial_model(spec)
         from assemblyzero.core.llm_provider import get_provider
 
-        self._provider = get_provider(ADVERSARIAL_PROVIDER_SPEC)
+        self._provider = get_provider(spec, effort=effort)
 
     def verify_model_is_pro(self, response_metadata: dict) -> bool:
         """Check response metadata to confirm Gemini Pro was used.

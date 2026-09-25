@@ -1,12 +1,19 @@
 """Model routing logic for file generation.
 
-Issue #641: Route scaffolding/boilerplate files to Haiku to reduce API spend.
+Issue #641: Route scaffolding/boilerplate files to a cheaper model to reduce
+spend.
+
+#3553/#3563: the routing picks a SEAT, never a model. Scaffolds,
+``__init__.py``, ``conftest.py`` and files under fifty lines go to
+``impl.code.small``; everything else to ``impl.code``. Which model answers each
+seat is the run profile's decision (``gemini.toml`` by default; ``claude.toml``
+reproduces the old Sonnet/Haiku split exactly).
 """
 
 import logging
 from pathlib import Path
 
-from assemblyzero.core.config import CLAUDE_MODEL
+from assemblyzero.core.seats import resolve_active
 
 logger = logging.getLogger(__name__)
 
@@ -14,36 +21,31 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
-"""Model identifier for Claude Haiku — used for cheap/simple file generation."""
+CODE_SEAT: str = "impl.code"
+"""The coder's seat for ordinary files."""
+
+SMALL_SEAT: str = "impl.code.small"
+"""The coder's seat for cheap/simple file generation (Haiku before the law)."""
 
 SMALL_FILE_LINE_THRESHOLD: int = 50
-"""Files with estimated line count below this threshold route to Haiku."""
+"""Files with estimated line count below this threshold route to the small seat."""
 
 _BOILERPLATE_BASENAMES: frozenset[str] = frozenset({"__init__.py", "conftest.py"})
-"""Filenames that are always routed to Haiku regardless of size."""
+"""Filenames that always route to the small seat regardless of size."""
 
 
-def _get_default_model() -> str:
-    """Return the configured default model (Sonnet).
-
-    Delegates to the same config source that call_claude_for_file uses.
-    """
-    return CLAUDE_MODEL
-
-
-def select_model_for_file(
+def select_seat_for_file(
     file_path: str,
     estimated_line_count: int = 0,
     is_test_scaffold: bool = False,
 ) -> str:
-    """Return the model ID to use for generating the given file.
+    """Return the seat that generates the given file.
 
     Routing rules (evaluated in order):
-      1. is_test_scaffold=True  -> HAIKU_MODEL
-      2. basename is __init__.py or conftest.py -> HAIKU_MODEL
-      3. estimated_line_count > 0 and < SMALL_FILE_LINE_THRESHOLD -> HAIKU_MODEL
-      4. Otherwise -> configured default (Sonnet)
+      1. is_test_scaffold=True  -> SMALL_SEAT
+      2. basename is __init__.py or conftest.py -> SMALL_SEAT
+      3. estimated_line_count > 0 and < SMALL_FILE_LINE_THRESHOLD -> SMALL_SEAT
+      4. Otherwise -> CODE_SEAT
 
     Args:
         file_path: Relative or absolute path to the file being generated.
@@ -53,9 +55,6 @@ def select_model_for_file(
             Negative values are treated as unknown (same as 0).
         is_test_scaffold: True when this file is being generated as a test
             scaffold by the N2 node; overrides all other routing rules.
-
-    Returns:
-        Model identifier string suitable for passing to the Anthropic client.
 
     Raises:
         TypeError: If file_path is not a str.
@@ -67,35 +66,32 @@ def select_model_for_file(
 
     basename = Path(file_path).name
 
-    # Rule 1: Test scaffold override
     if is_test_scaffold:
-        logger.info(
-            "Routing %s -> %s (reason: test_scaffold)", file_path, HAIKU_MODEL
-        )
-        return HAIKU_MODEL
+        reason = "test_scaffold"
+        seat = SMALL_SEAT
+    elif basename in _BOILERPLATE_BASENAMES:
+        reason = "boilerplate_filename"
+        seat = SMALL_SEAT
+    elif 0 < estimated_line_count < SMALL_FILE_LINE_THRESHOLD:
+        reason = f"small_file, lines={estimated_line_count}"
+        seat = SMALL_SEAT
+    else:
+        reason = "default"
+        seat = CODE_SEAT
 
-    # Rule 2: Boilerplate filename
-    if basename in _BOILERPLATE_BASENAMES:
-        logger.info(
-            "Routing %s -> %s (reason: boilerplate_filename)",
-            file_path,
-            HAIKU_MODEL,
-        )
-        return HAIKU_MODEL
+    logger.info("Routing %s -> %s (reason: %s)", file_path, seat, reason)
+    return seat
 
-    # Rule 3: Small file by line count
-    if 0 < estimated_line_count < SMALL_FILE_LINE_THRESHOLD:
-        logger.info(
-            "Routing %s -> %s (reason: small_file, lines=%d)",
-            file_path,
-            HAIKU_MODEL,
-            estimated_line_count,
-        )
-        return HAIKU_MODEL
 
-    # Rule 4: Default (Sonnet)
-    default_model = _get_default_model()
-    logger.info(
-        "Routing %s -> %s (reason: default)", file_path, default_model
-    )
-    return default_model
+def select_model_for_file(
+    file_path: str,
+    estimated_line_count: int = 0,
+    is_test_scaffold: bool = False,
+) -> str:
+    """Return the provider spec that generates the given file.
+
+    The seat from :func:`select_seat_for_file`, resolved under the active
+    profile (the one the N4 or N4c node entered from run state).
+    """
+    seat = select_seat_for_file(file_path, estimated_line_count, is_test_scaffold)
+    return resolve_active(seat).spec

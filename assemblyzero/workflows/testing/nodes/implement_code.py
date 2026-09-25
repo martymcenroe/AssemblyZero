@@ -44,7 +44,9 @@ from assemblyzero.workflows.testing.nodes.implementation import (  # noqa: F811
     LARGE_FILE_LINE_THRESHOLD,
     LARGE_FILE_BYTE_THRESHOLD,
     CODE_GEN_PROMPT_CAP,
-    HAIKU_MODEL,
+    CODE_SEAT,
+    SMALL_SEAT,
+    select_seat_for_file,
     SMALL_FILE_LINE_THRESHOLD,
 )
 
@@ -95,6 +97,8 @@ __all__ = [
     "LARGE_FILE_LINE_THRESHOLD",
     "LARGE_FILE_BYTE_THRESHOLD",
     "CODE_GEN_PROMPT_CAP",
-    "HAIKU_MODEL",
+    "CODE_SEAT",
+    "SMALL_SEAT",
+    "select_seat_for_file",
     "SMALL_FILE_LINE_THRESHOLD",
 ]

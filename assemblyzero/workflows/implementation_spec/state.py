@@ -132,6 +132,7 @@ class ImplementationSpecState(TypedDict, total=False):
     config_drafter: str
     config_reviewer: str
     config_effort: str  # Issue #773: Effort level for Claude reviewer
+    model_profile: dict  # #3563: the run's model profile snapshot (core/seats.py)
 
     # Loaded content (N0)
     lld_content: str

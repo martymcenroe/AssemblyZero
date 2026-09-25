@@ -60,7 +60,9 @@ from .orchestrator import (
 # --- routing.py ---
 from .routing import (
     select_model_for_file,
-    HAIKU_MODEL,
+    CODE_SEAT,
+    SMALL_SEAT,
+    select_seat_for_file,
     SMALL_FILE_LINE_THRESHOLD,
 )
 
@@ -113,7 +115,9 @@ __all__ = [
     "_mock_implement_code",
     # routing
     "select_model_for_file",
-    "HAIKU_MODEL",
+    "CODE_SEAT",
+    "SMALL_SEAT",
+    "select_seat_for_file",
     "SMALL_FILE_LINE_THRESHOLD",
     # deprecated
     "build_implementation_prompt",

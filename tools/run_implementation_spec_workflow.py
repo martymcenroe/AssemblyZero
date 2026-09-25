@@ -150,23 +150,27 @@ Examples:
         help="Path to LLD file (default: auto-detect from issue number)",
     )
 
-    # LLM configuration. #3517, operator directive of 2026-09-24: agy drafts
-    # and validates, matching the orchestrator's spec stage.
+    # LLM configuration. #3563: every seat's model comes from the run's model
+    # profile (--models; default gemini.toml, the 2026-09-24 law, #3517).
+    # --drafter and --reviewer are per-seat overrides; --seat is the general form.
+    from assemblyzero.core.seats import add_profile_arguments
+
+    add_profile_arguments(parser)
     parser.add_argument(
         "--drafter",
-        default="gemini:3.1-pro",
-        help="Drafter LLM spec (default: gemini:3.1-pro, agy)",
+        default=None,
+        help="Override the spec.draft seat. Default: the profile's",
     )
     parser.add_argument(
         "--reviewer",
-        default="gemini:3.1-pro",
-        help="Reviewer LLM spec (default: gemini:3.1-pro, agy)",
+        default=None,
+        help="Override the spec.review seat. Default: the profile's",
     )
     parser.add_argument(
         "--effort",
         choices=["low", "medium", "high", "max"],
-        default="max",
-        help="Claude reviewer effort level (default: max)",
+        default=None,
+        help="Effort for every seat, over the profile's (default: the profile's, max)",
     )
 
     # Review configuration (human gates)
@@ -388,6 +392,13 @@ def build_initial_state(
     Returns:
         Initialized ImplementationSpecState.
     """
+    # #3563: the run's model profile, snapshotted into state below.
+    from assemblyzero.core.seats import describe, profile_from_args, seat_in
+
+    profile = profile_from_args(
+        args, target_repo, {"drafter": ("spec.draft",), "reviewer": ("spec.review",)},
+    )
+
     # Resolve LLD path
     lld_path = ""
     if args.lld:
@@ -440,15 +451,18 @@ def build_initial_state(
         "error_message": "",
         # Issue #476: API cost budget
         "cost_budget_usd": args.budget,
-        # LLM config
-        "config_reviewer": args.reviewer,
-        "config_drafter": args.drafter,
+        # LLM config. #3563: the model profile is the source; the three
+        # legacy keys are written from it for one release.
+        "model_profile": profile,
+        "config_reviewer": seat_in(profile, "spec.review").spec,
+        "config_drafter": seat_in(profile, "spec.draft").spec,
         "config_mock_mode": args.mock,
-        "config_effort": args.effort,  # Issue #773
+        "config_effort": seat_in(profile, "spec.review").effort or "",  # Issue #773
         # Issue #511: Per-node LLM cost tracking
         "node_costs": {},
         "node_tokens": {},
     }
+    print(describe(profile))
 
     return state
 
@@ -476,8 +490,8 @@ def print_header(
     print("=" * 60)
     print(f"Issue:        #{args.issue}")
     print(f"Repository:   {target_repo}")
-    print(f"Drafter:      {args.drafter}")
-    print(f"Reviewer:     {args.reviewer}")
+    print(f"Models:       {getattr(args, 'models', None) or '(profile precedence; see [models] below)'}")
+    print(f"Overrides:    drafter={getattr(args, 'drafter', None) or '-'} reviewer={getattr(args, 'reviewer', None) or '-'} seat={getattr(args, 'seat', None) or '-'}")
     print(f"Review mode:  {args.review}")
     print(f"Human gate:   {'enabled' if args.human_gate_enabled else 'disabled'}")
     print(f"Max iters:    {args.max_iterations}")

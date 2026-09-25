@@ -38,6 +38,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict
 
+from assemblyzero.core.seats import resolve
 from assemblyzero.utils.ast_sentinel import analyze_file as ast_analyze_file
 
 logger = logging.getLogger(__name__)
@@ -1818,7 +1819,7 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
                 check="mechanical",
                 issue=int(state.get("issue_number") or 0) or None,
                 draft_number=state.get("draft_number"),
-                drafter_model=state.get("config_drafter", ""),
+                drafter_model=resolve(state, "requirements.draft").spec,
                 run_id=run_id,
             )
         except Exception as exc:  # noqa: BLE001 - telemetry never breaks a roll

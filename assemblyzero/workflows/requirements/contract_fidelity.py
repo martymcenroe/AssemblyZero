@@ -147,6 +147,9 @@ from assemblyzero.workflows.requirements.scope_coverage import (
 
 LABEL = "Contract fidelity (#2646)"
 
+#: #3563: the seat whose model reads the contract.
+SEAT = "requirements.contract_fidelity"
+
 #: A markdown heading and its level.
 _HEADING = re.compile(r"^(#{2,6})\s+(?P<name>.+?)\s*$", re.MULTILINE)
 
@@ -997,7 +1000,7 @@ class FidelityReview:
 
 def review_fidelity(
     brief: FidelityBrief,
-    drafter_spec: str = "gemini:3.1-pro",
+    drafter_spec: str | None = None,
     timeout_seconds: int = 300,
 ) -> FidelityReview:
     """Ask the reviewer to adjudicate, with the contract in hand.
@@ -1006,6 +1009,9 @@ def review_fidelity(
     that cannot reach a verdict is recorded as NOT REACHED, never as clean.
     It does not block the roll -- this check is report-only -- but "was not
     audited" and "was audited and passed" never render the same.
+
+    #3563: ``drafter_spec`` defaults to the active profile's
+    `requirements.contract_fidelity` seat.
     """
     review = FidelityReview(brief=brief)
     if not brief.ready:
@@ -1013,9 +1019,14 @@ def review_fidelity(
         return review
 
     from assemblyzero.core.llm_provider import GeminiProvider, get_provider
+    from assemblyzero.core.seats import resolve_active
 
     try:
-        provider = get_provider(drafter_spec)
+        effort = None
+        if drafter_spec is None:
+            seat = resolve_active(SEAT)
+            drafter_spec, effort = seat.spec, seat.effort
+        provider = get_provider(drafter_spec, effort=effort)
     except ValueError as exc:
         # fail-open: the roll proceeds -- a bad provider spec is not this
         # check's to halt on, and #2474 already halts the requirements gate
@@ -1065,7 +1076,7 @@ def review_fidelity(
 
 
 def check_contract_fidelity_at_preflight(
-    repo_root, issues: list[int], fetch, drafter_spec: str = "gemini:3.1-pro"
+    repo_root, issues: list[int], fetch, drafter_spec: str | None = None
 ) -> tuple[str, bool]:
     """The whole preflight step: (text to print, whether to refuse).
 

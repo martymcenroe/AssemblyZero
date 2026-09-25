@@ -74,7 +74,10 @@ def _roll_gate_drafter() -> str:
     said there was nothing to check. A constant that is DERIVED cannot drift
     from the thing it claims to mirror -- there is no second copy to update.
 
-    `orchestrator.config` imports only stdlib, so this cannot cycle.
+    #3563: the orchestrator's lld drafter is itself read from the built-in
+    default profile's `requirements.draft` seat (`gemini.toml`), so this is
+    that seat, one hop removed. `orchestrator.config` and `core.seats` import
+    only stdlib at module level, so this cannot cycle.
     """
     from assemblyzero.workflows.orchestrator.config import get_default_config
 

@@ -171,6 +171,7 @@ class RequirementsWorkflowState(TypedDict, total=False):
     config_drafter: str
     config_reviewer: str
     config_effort: str  # Issue #773: Effort level for Claude reviewer
+    model_profile: dict  # #3563: the run's model profile snapshot (core/seats.py)
     config_retry_policy: str  # Issue #1071: "default" | "aggressive" | "none"
     config_gates_draft: bool
     config_gates_verdict: bool

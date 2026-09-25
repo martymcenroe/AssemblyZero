@@ -432,8 +432,13 @@ def _synthesize_brief_summary(title: str, body: str) -> str:
     )
     content = f"Title: {title}\n\nBody:\n{body}"
 
+    # #3563: the active profile's `orchestrator.triage_summary` seat
+    # (`claude:haiku` in `claude.toml`, as it was hardcoded here before).
     try:
-        provider = get_provider("claude:haiku")
+        from assemblyzero.core.seats import resolve_active
+
+        seat = resolve_active("orchestrator.triage_summary")
+        provider = get_provider(seat.spec, effort=seat.effort)
         result = provider.invoke(
             system_prompt=system_prompt,
             content=content,

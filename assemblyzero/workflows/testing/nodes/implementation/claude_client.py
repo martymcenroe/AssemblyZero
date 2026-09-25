@@ -9,6 +9,9 @@ import threading
 import time
 
 from assemblyzero.core.llm_provider import get_provider
+from assemblyzero.core.seats import resolve_active
+
+from .routing import CODE_SEAT
 
 
 # Issue #321: Timeout constants
@@ -199,8 +202,16 @@ def call_claude_for_file(
     system_prompt: str = "",
     timeout_seconds: float | None = None,
     effort: str | None = None,
+    seat: str | None = None,
 ) -> tuple[str, str]:
-    """Call Claude for a single file implementation.
+    """Call the coder seat's model for a single file implementation.
+
+    #3553/#3563: the name is historical. The model is the run profile's
+    ``seat`` (``impl.code`` when none is named), resolved under the profile the
+    N4/N4c node entered; ``model``, when given, is an explicit provider spec
+    (``gemini:3.1-pro``, ``claude:haiku``) and wins over the seat. A bare model
+    id with no provider prefix is refused: the coder never falls to Claude by
+    default again. ``effort``, when not given, is the seat's.
 
     Issue #447: Added file_path parameter for file-type-aware system prompt.
     Issue #641: Added model parameter for Haiku routing.
@@ -233,7 +244,17 @@ def call_claude_for_file(
 
     # Issue #783: Use unified provider — respects API policy gate
     try:
-        provider = get_provider(f"claude:{model or 'opus'}", effort=effort)
+        resolved = resolve_active(seat or CODE_SEAT)
+        if model:
+            if ":" not in model:
+                return "", (
+                    f"[NON-RETRYABLE] model {model!r} is not a provider spec "
+                    "(provider:model); the coder's model is the profile's seat (#3553)"
+                )
+            spec = model
+        else:
+            spec = resolved.spec
+        provider = get_provider(spec, effort=effort if effort is not None else resolved.effort)
         result = provider.invoke(
             system_prompt=effective_system_prompt,
             content=prompt,

@@ -1,0 +1,53 @@
+# The pre-law baseline: every seat as the code chose it before ADR 0234
+# (2026-09-24) moved the drafter, the reviewers and the coder to Gemini.
+# It exists so the first boostgauge comparison has an honest baseline
+# (#3562, #3563's first comment). Values are the code's own, seat by seat.
+name = "claude"
+description = "The pre-2026-09-24 defaults: Claude drafts, reviews and codes."
+
+[defaults]
+spec = "claude:opus"
+effort = "max"
+
+# The standalone LLD tool's old --drafter default.
+[seats."requirements.analyze"]
+spec = "claude:sonnet"
+
+[seats."requirements.draft"]
+spec = "claude:sonnet"
+
+# GATE_DRAFTER_ESCALATION's target for claude:sonnet (#2375).
+[seats."requirements.analyze.escalation"]
+spec = "claude:opus"
+
+# CLAUDE_MODEL's default, which routing.py used for every file it did not
+# send to Haiku.
+[seats."impl.code"]
+spec = "claude:sonnet"
+
+# routing.py's HAIKU_MODEL: scaffolds, __init__.py, conftest.py, and files
+# under fifty lines.
+[seats."impl.code.small"]
+spec = "claude:haiku"
+
+# N4c used the coder's routing with AUGMENT_EFFORT = "low" (#2899).
+[seats."impl.augment_tests"]
+spec = "claude:sonnet"
+effort = "low"
+
+[seats."orchestrator.triage_summary"]
+spec = "claude:haiku"
+
+# These four seats were Gemini before the law, so the baseline keeps them on
+# Gemini: changing them would make the comparison measure more than the law.
+[seats."requirements.contract_fidelity"]
+spec = "gemini:3.1-pro"
+
+[seats."visual_gate.translate"]
+spec = "gemini:3.1-pro"
+
+[seats."scout.analyze"]
+spec = "gemini:3.1-pro"
+
+[seats."impl.adversarial"]
+spec = "gemini:3.1-pro"

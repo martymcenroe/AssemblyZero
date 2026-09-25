@@ -35,9 +35,7 @@ from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
 from assemblyzero.workflows.testing.nodes.implementation.parsers import (
     extract_code_block,
 )
-from assemblyzero.workflows.testing.nodes.implementation.routing import (
-    select_model_for_file,
-)
+from assemblyzero.core.seats import resolve
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 from assemblyzero.workflows.testing.symbol_validator import validate_test_imports
 
@@ -64,8 +62,9 @@ AUGMENT_TIMEOUT_SECONDS = 900
 #: ninety-second probe, and MAX_THINKING_TOKENS=2000 in the environment
 #: changed nothing. `--effort low` on the same prompt returned the tests in
 #: ten seconds. The provider has carried the flag since #773; nothing on this
-#: path passed it.
-AUGMENT_EFFORT = "low"
+#: path passed it. #3563: that `low` now lives in the profile, as the
+#: `impl.augment_tests` seat's effort in `claude.toml`; the Gemini transport
+#: takes no effort flag.
 
 
 def parse_uncovered_lines(output: str) -> dict[str, list[str]]:
@@ -605,11 +604,20 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     # events in ninety seconds and not one character of text. Run 34's
     # 187,699 "output" tokens were thinking. N4 routes every file through
     # `select_model_for_file` -- Sonnet by default, Haiku for scaffolds --
-    # and its calls return in twenty seconds. N4c now routes the same way.
-    model = select_model_for_file(str(test_path))
+    # and its calls return in twenty seconds. N4c routed the same way, with
+    # `--effort low`. #3563: N4c is now its own seat, `impl.augment_tests`,
+    # and the profile carries both its model and that effort (`claude.toml`
+    # keeps `claude:sonnet` at `low`).
+    try:
+        seat = resolve(state, "impl.augment_tests")
+    except ValueError as err:
+        print(f"    [N4c] no new tests generated: {err}")
+        return {"next_node": "N5_verify_green", "error_message": ""}
+    model = seat.spec
+    effort = seat.effort
     print(
         f"    [N4c] generation ceiling {AUGMENT_TIMEOUT_SECONDS:.0f} s per "
-        f"attempt, model {model}, effort {AUGMENT_EFFORT} (#2899)"
+        f"attempt, model {model}, effort {effort} (#2899)"
     )
 
     # #2336: validate BEFORE writing, and revise in place.
@@ -629,7 +637,7 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         response, error = call_claude_for_file(
             prompt, file_path=str(test_path), model=model,
-            timeout_seconds=AUGMENT_TIMEOUT_SECONDS, effort=AUGMENT_EFFORT,
+            timeout_seconds=AUGMENT_TIMEOUT_SECONDS, effort=effort,
         )
         suffix = f"-retry{attempt}" if attempt > 1 else ""
         _audit(f"augment-response{suffix}.md", response or f"(no response: {error})")
@@ -705,7 +713,7 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
         )
         response, error = call_claude_for_file(
             repair_prompt, file_path=str(test_path), model=model,
-            timeout_seconds=AUGMENT_TIMEOUT_SECONDS, effort=AUGMENT_EFFORT,
+            timeout_seconds=AUGMENT_TIMEOUT_SECONDS, effort=effort,
         )
         _audit("augment-response-repair.md", response or f"(no response: {error})")
         repaired = extract_code_block(response or "", str(test_path)) or ""
