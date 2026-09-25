@@ -208,7 +208,52 @@ notes.** They are not recorded here: this repository is public, and where a
 particular secret lives is not something a public artifact should say. An agent
 finds the pointer in its auto-loaded instructions.
 
-## 8. References
+## 8. Single-repo read-only tokens, and new_repo.py post-create hooks (2026-09-25)
+
+### The credential
+
+Some CI jobs check out one other private repository and need a read-only token
+for it, deployed as a repo-level Actions secret in every repository that runs
+such a job. That token cannot destroy anything: it reads one repository's
+contents. It is not metered either, so section 7's plaintext allowance, which
+requires a spend cap, does not apply. Its worst case is disclosure of that one
+repository.
+
+**Decision: such a token is stored gpg-encrypted and decrypted per use, under
+this ADR's rules**: pinentry on every decrypt, caching disabled, value in the
+Python heap only, never in argv, the environment or a log. The operator already
+decrypts the classic PAT and the Cerberus PEM when creating a repository; one
+more announced prompt is the natural cost, and it keeps the value off disk in
+plaintext. Where the encrypted file lives is recorded in the operator's private
+notes, per section 7.
+
+### Getting it into a new repository
+
+`tools/new_repo.py` sets the Cerberus secrets itself, but it cannot know every
+other secret a repository will need, and many such secrets belong to private
+repositories this public repo must not name. So it runs **post-create hooks**
+(#3588):
+
+- The operator lists hook modules, one absolute path per line, in
+  `~/.claude/new-repo-post-create-hooks.txt`. The file lives outside every
+  repository; no file means no hooks.
+- `new_repo.py` imports each module and calls
+  `post_create(owner=, repo=, pat=)` **in-process, inside the existing
+  `classic_pat_session()`**, after the repository is created and pushed. The
+  PAT therefore never leaves the process, which rules out the alternative of
+  running a separate program: that would need the PAT in argv or the
+  environment, both forbidden by section 3.
+- A hook that needs its own secret decrypts it with
+  `_pat_session.gpg_secret_session(path, secret_name, reason)`, which applies
+  this ADR's rules to any file and announces the caller-supplied name.
+- Every failure is loud: a listed path that does not exist, a module without
+  `post_create`, or an exception in the hook is reported by path and marked
+  `FAILED` in the summary. A hook's failure does not abort repository creation.
+
+Section 6.1 still binds: the operator runs `new_repo.py`, and hooks run in the
+operator's process.
+
+## 9. References
 
 - PR #966 (issue #959) — the `_pat_session.py` module
 - PR #967 (issue #960) — `sentinel_migrate.py`, the first production caller
@@ -218,6 +263,7 @@ finds the pointer in its auto-loaded instructions.
 - PR #942 — the predecessor v2 pattern
 - Issue #1018 — 2026-04-30 hardening session that surfaced section 6
 - Issue #1051 — this section's tracking issue
+- Issue #3588 — section 8: post-create hooks and `gpg_secret_session`
 - Runbook `docs/runbooks/0930-gpg-and-classic-pat-rotation.md` — operational procedures derived from sections 6.1, 6.2, 6.5, 6.6
 - Blog draft: `dispatch/drafts/2026-04-18-pat-swap-friction-pattern-from-AssemblyZero.md` — full design narrative including the user-pushback that surfaced v3
 - Follow-up draft: `dispatch/drafts/2026-04-21-in-process-pat-decryption-from-AssemblyZero.md` — companion piece on the v3 pattern itself

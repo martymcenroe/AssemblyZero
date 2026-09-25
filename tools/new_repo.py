@@ -118,6 +118,12 @@ DEFAULT_CERBERUS_PEM_GPG = Path.home() / ".secrets" / "cerberus-pem.gpg"
 # unperformable check must not produce a warning banner.
 DEFAULT_PR_SENTINEL_APP_GPG = Path.home() / ".secrets" / "pr-sentinel-app.gpg"
 
+# Operator-owned list of post-create hook modules (#3588, ADR-0216 section 8):
+# one absolute path per line, '#' starts a comment. Lives outside every repo,
+# so this public script never names what the hooks do or which repos they
+# serve. Absent file => no hooks.
+DEFAULT_POST_CREATE_HOOKS = Path.home() / ".claude" / "new-repo-post-create-hooks.txt"
+
 
 def load_structure_schema(schema_path: Path | None = None) -> dict:
     """Load and validate the project structure schema from JSON file.
@@ -2779,6 +2785,64 @@ def _deploy_cerberus(
     return "OK"
 
 
+def read_post_create_hooks(list_path: Path = DEFAULT_POST_CREATE_HOOKS) -> list[Path]:
+    """Return the hook module paths listed in the operator's hook file (#3588).
+
+    Blank lines and '#' comments are ignored. A missing file means no hooks.
+    Paths are returned as written; run_post_create_hooks reports any that do
+    not exist, so a typo fails loudly rather than vanishing here.
+    """
+    if not list_path.exists():
+        return []
+    hooks = []
+    for line in list_path.read_text(encoding="utf-8").splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if entry:
+            hooks.append(Path(entry))
+    return hooks
+
+
+def run_post_create_hooks(
+    hook_paths: list[Path],
+    owner: str,
+    repo: str,
+    pat: str,
+) -> list[tuple[Path, str]]:
+    """Call each hook's post_create(owner=, repo=, pat=) in this process (#3588).
+
+    In-process on purpose: the classic PAT lives only in this heap (ADR-0216),
+    and handing it to a separate program would put it in argv or the
+    environment. A hook that decrypts a secret of its own uses
+    _pat_session.gpg_secret_session.
+
+    Returns (path, status) per hook. A missing file, a module without
+    post_create, or an exception in the hook yields a status beginning
+    "FAILED" that names the cause. Nothing is skipped silently.
+    """
+    import importlib.util
+
+    results: list[tuple[Path, str]] = []
+    for i, path in enumerate(hook_paths):
+        if not path.is_file():
+            results.append((path, "FAILED: hook file not found"))
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"_new_repo_post_create_hook_{i}", path,
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            hook = getattr(module, "post_create", None)
+            if not callable(hook):
+                results.append((path, "FAILED: no post_create function"))
+                continue
+            status = hook(owner=owner, repo=repo, pat=pat)
+            results.append((path, str(status)))
+        except Exception as e:  # a hook's failure must not abort repo creation
+            results.append((path, f"FAILED: {type(e).__name__}: {e}"))
+    return results
+
+
 def main():
     # Detach stdin before anything else (#1806). A run prompts for a GPG
     # passphrase via pinentry; if pinentry loses the focus race, keystrokes
@@ -3385,6 +3449,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     repo_settings_ok = False
     protection_ok = False
     cerberus_status: str | None = None
+    hook_results: list[tuple[Path, str]] = []
     gh_checks_passed = 0
     gh_checks_total = 0
 
@@ -3746,6 +3811,22 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                             print(f"\n  WARNING: PEM gpg decrypt failed: {e}")
                             cerberus_status = "PEM_GPG_FAILED"
 
+                # Post-create hooks (#3588). Same with-block, so they share
+                # `pat` in-process; a hook that needs its own secret decrypts
+                # it with its own pinentry prompt, like the Cerberus PEM.
+                if github_created and push_succeeded:
+                    hook_paths = read_post_create_hooks()
+                    print("\n" + "=" * 60)
+                    print("POST-CREATE HOOKS")
+                    print("=" * 60)
+                    if not hook_paths:
+                        print(f"  None listed in {DEFAULT_POST_CREATE_HOOKS}.")
+                    hook_results = run_post_create_hooks(
+                        hook_paths, github_user, args.name, pat,
+                    )
+                    for hook_path, hook_status in hook_results:
+                        print(f"  {hook_path}: {hook_status}")
+
                 # GitHub-side verification. Also inside the with-block --
                 # shares `pat`, no extra pinentry. (#1200, #1202)
                 if github_created:
@@ -3859,6 +3940,11 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print(f"  Branch protection:  {'OK' if protection_ok else 'FAILED — configure manually or re-run with classic PAT'}")
         if cerberus_status is not None:
             print(f"  Cerberus secrets:   {cerberus_status}")
+        for hook_path, hook_status in hook_results:
+            print(f"  Hook {hook_path.stem}: {hook_status}")
+        if any(s.startswith("FAILED") for _, s in hook_results):
+            print("\nWARNING: a post-create hook failed. Its secret or setting is "
+                  "NOT in place; fix the cause and run the hook's own tool.")
 
     print("\n" + "=" * 60)
     print(f"[SUCCESS] Repository '{args.name}' created!")
