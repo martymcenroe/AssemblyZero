@@ -40,6 +40,42 @@ def pytest_configure(config):
     )
 
 
+def pytest_sessionstart(session):
+    """Remember the operator's home state before any test runs (#3531)."""
+    from tests.home_state_guard import snapshot
+
+    session.config._home_state_before = snapshot()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Fail the session if any test wrote into the operator's home state (#3531).
+
+    The autouse fixture below redirects every writer this repository knows
+    about. This is the check on that knowledge: a new writer, or a test that
+    reaches the real paths some other way, fails the run it first appears in,
+    with the paths named, rather than filling the operator's resume directory
+    and audit log until someone opens them.
+    """
+    from tests.home_state_guard import changes, snapshot
+
+    before = getattr(session.config, "_home_state_before", None)
+    if before is None:
+        return
+    lines = changes(before, snapshot())
+    if not lines:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line("")
+        reporter.write_line(
+            "FAIL: the suite wrote into the operator's home state (#3531). "
+            "Redirect the writer through tests/home_state_guard.redirect:"
+        )
+        for line in lines:
+            reporter.write_line("  " + line)
+    session.exitstatus = 1
+
+
 _MODULE_SNAPSHOT_KEYS = [
     "assemblyzero.workflows.testing.nodes.review_test_plan",
     "assemblyzero.core.config",
@@ -112,6 +148,22 @@ def no_live_model_calls(request, monkeypatch):
 
     install(monkeypatch, request.node.nodeid)
     yield
+
+
+@pytest.fixture(autouse=True)
+def home_state_stays_out_of_home(tmp_path, monkeypatch):
+    """Every test's halt snapshots, resume contracts and audit lines land
+    under its own tmp_path, never under ~/.assemblyzero/workflow_state or
+    ~/.claude/assemblyzero/workflow-audit.jsonl (#3531).
+
+    Autouse and unconditional, for the reason `no_live_model_calls` gives:
+    the tests that polluted the operator's home were written by people who
+    believed the paths were already redirected. A test that patches one of
+    these bindings itself still wins, since its monkeypatch runs later.
+    """
+    from tests.home_state_guard import redirect
+
+    redirect(monkeypatch, tmp_path / "home-state")
 
 
 @pytest.fixture
