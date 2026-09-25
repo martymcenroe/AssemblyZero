@@ -53,6 +53,7 @@ from .orchestrator import (
     CODE_GEN_PROMPT_CAP,
     generate_file_with_retry,
     implement_code,
+    implement_code_under_profile,
     validate_files_to_modify,
     _mock_implement_code,
 )
@@ -111,6 +112,7 @@ __all__ = [
     "CODE_GEN_PROMPT_CAP",
     "generate_file_with_retry",
     "implement_code",
+    "implement_code_under_profile",
     "validate_files_to_modify",
     "_mock_implement_code",
     # routing

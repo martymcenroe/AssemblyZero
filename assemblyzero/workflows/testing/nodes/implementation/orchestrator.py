@@ -502,21 +502,23 @@ def resolve_change_type(
     return change_type
 
 
-def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
-    """N4: Generate implementation code file-by-file.
+def implement_code_under_profile(state: TestingWorkflowState) -> dict[str, Any]:
+    """N4 as the graph registers it: ``implement_code`` under the run's profile.
 
-    #3553/#3563: every coder call below resolves `impl.code` or
-    `impl.code.small` under the run's profile, entered here once so the
-    helpers ten calls down need not carry state.
+    #3553/#3563: every coder call in N4 resolves `impl.code` or
+    `impl.code.small` under the run's model profile. The profile is entered
+    here, once, so the helpers ten calls down need not carry state, and
+    ``implement_code`` keeps its name and its body, which the gate registry
+    and the halt-site walker key on.
     """
     from assemblyzero.core.seats import profile_of, using_profile
 
     with using_profile(profile_of(state)):
-        return _implement_code(state)
+        return implement_code(state)
 
 
-def _implement_code(state: TestingWorkflowState) -> dict[str, Any]:
-    """N4's body, run under the run profile (see ``implement_code``).
+def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
+    """N4: Generate implementation code file-by-file.
 
     Issue #272: File-by-file prompting with mechanical validation.
     """

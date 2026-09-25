@@ -18,4 +18,17 @@
 
 ## Runs
 
-FULL_TIER_RESULT
+Targeted: `tests/unit/test_model_record.py tests/unit/test_seats.py`, 50 passed. The recording tests run ahead of it (`test_call_recording_roll.py test_replay_run.py test_model_record.py`), 58 passed.
+
+Full unit tier, from the worktree with the main checkout's interpreter, no other pytest session running:
+
+```
+3 failed, 10761 passed, 21 skipped, 7 deselected, 5 xfailed, 13 warnings in 711.13s (0:11:51)
+FAILED tests/unit/test_model_record.py::TestThePerCallRecord::test_outside_a_run_nothing_is_wrapped
+FAILED tests/unit/test_section_ten_carries_tests.py::TestAgainstEveryRecordedDraft::test_it_refuses_only_the_two_runs_that_moved_their_tests
+FAILED tests/unit/test_section_ten_carries_tests.py::TestAgainstEveryRecordedDraft::test_every_other_draft_passes
+```
+
+The two `test_section_ten_carries_tests` failures are #3468's pair, red on `main`. The first failure was a real finding about the suite, not the code: an earlier test leaves `call_recording`'s module-global context armed, so in full-suite order `get_provider` is wrapped even with no run record open. The test now takes the `reset_call_context` fixture, as the other tests here that depend on the context do, and passes in that order. The leak itself predates this change.
+
+`tools/audit_fail_open.py --check`: PASS, 307 files, no new fail-open.

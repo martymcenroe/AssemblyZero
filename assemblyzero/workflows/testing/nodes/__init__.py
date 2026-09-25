@@ -30,7 +30,10 @@ from assemblyzero.workflows.testing.nodes.completeness_gate import (
 from assemblyzero.workflows.testing.nodes.document import document
 from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 from assemblyzero.workflows.testing.nodes.finalize import finalize
-from assemblyzero.workflows.testing.nodes.implement_code import implement_code
+from assemblyzero.workflows.testing.nodes.implement_code import (
+    implement_code,
+    implement_code_under_profile,
+)
 from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
@@ -52,6 +55,7 @@ __all__ = [
     "scaffold_tests",
     "verify_red_phase",
     "implement_code",
+    "implement_code_under_profile",
     "completeness_gate",
     "verify_green_phase",
     "e2e_validation",
