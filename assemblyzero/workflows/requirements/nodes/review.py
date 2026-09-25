@@ -175,16 +175,6 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     verdict_count = state.get("verdict_count", 0) + 1
     print(f"\n[N3] Reviewing draft (review #{verdict_count})...")
 
-    # #3563: the reviewer is the run profile's `requirements.review` seat
-    # (`mock:review` under the mock profile).
-    from assemblyzero.core.seats import resolve
-
-    try:
-        reviewer_seat = resolve(state, "requirements.review")
-    except ValueError as e:
-        return {"error_message": f"Invalid reviewer: {e}"}
-    reviewer_spec = reviewer_seat.spec
-
     # Determine review prompt path based on workflow type
     if workflow_type == "issue":
         prompt_path = Path("docs/skills/0701c-Issue-Review-Prompt.md")
@@ -198,8 +188,15 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
         return {"error_message": str(e)}
 
     # Get reviewer provider
-    # Issue #773: Pass effort level to Claude reviewer (#3563: the seat's)
+    # Issue #773: Pass effort level to Claude reviewer. #3563: the reviewer
+    # is the run profile's `requirements.review` seat (`mock:review` under the
+    # mock profile), with the seat's effort.
+    from assemblyzero.core.seats import resolve
+
+    reviewer_spec = "(unresolved)"
     try:
+        reviewer_seat = resolve(state, "requirements.review")
+        reviewer_spec = reviewer_seat.spec
         reviewer = get_provider(reviewer_spec, effort=reviewer_seat.effort)
     except ValueError as e:
         return {"error_message": f"Invalid reviewer: {e}"}

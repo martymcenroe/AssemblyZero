@@ -2098,7 +2098,8 @@ class TestGenerateDraftNodeCoverage:
 
         generate_draft(state)
 
-        mock_get_provider.assert_called_with("mock:draft")
+        # #3563: the seat's effort rides along (create_initial_state's "max").
+        mock_get_provider.assert_called_with("mock:draft", effort="max")
 
     @patch("assemblyzero.workflows.requirements.nodes.generate_draft.get_provider")
     def test_handles_invalid_drafter(self, mock_get_provider, tmp_path):

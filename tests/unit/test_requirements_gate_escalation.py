@@ -140,39 +140,34 @@ class TestTheRetryEscalates:
         Inventing a ladder for every spec is the guessing #2375 forbids."""
         asked, provider = specs(TIMEOUT, OK)
 
-        # #3563: a spec the seat registry accepts and the escalation map does
-        # not name (it was `fake:model`, which a profile now refuses at load).
-        analyze_requirements(_state(tmp_path, "gemini:3.1-pro"))
+        analyze_requirements(_state(tmp_path, "fake:model"))
 
         # The provider object is reused rather than rebuilt -- exactly what
         # #2290 did. The retry is visible in the call count, not in a second
         # trip through the factory.
-        assert asked == ["gemini:3.1-pro"]
+        assert asked == ["fake:model"]
         assert len(provider.calls) == 2
 
     def test_a_broken_escalation_target_falls_back_rather_than_losing_the_retry(
         self, tmp_path, specs, calm, monkeypatch
     ):
-        """A target that cannot be built must not cost the run the attempt
-        #2290 gave it. #3563: a spec no provider accepts (`bogus:spec`) is now
-        refused when the profile loads, so the case left at call time is a
-        valid spec whose transport will not build; the retry falls back."""
-        asked, provider = specs(TIMEOUT, OK, raises_for=("claude:opus",))
+        """A bad map entry must not cost the run the attempt #2290 gave it."""
+        # The package re-exports `analyze_requirements` as a FUNCTION, so a
+        # dotted setattr target resolves to it rather than to the module.
+        from importlib import import_module
+
+        module = import_module(
+            "assemblyzero.workflows.requirements.nodes.analyze_requirements"
+        )
+        monkeypatch.setattr(
+            module, "GATE_DRAFTER_ESCALATION", {"claude:sonnet": "bogus:spec"}
+        )
+        asked, provider = specs(TIMEOUT, OK, raises_for=("bogus:spec",))
 
         analyze_requirements(_state(tmp_path, "claude:sonnet"))
 
-        assert asked == ["claude:sonnet", "claude:opus"]
+        assert asked == ["claude:sonnet", "bogus:spec"]
         assert len(provider.calls) == 2, "the retry must still happen"
-
-    def test_a_bogus_escalation_seat_fails_closed_at_load(self):
-        """#3563 requirement 2: a spec that parses to no known provider never
-        reaches a call."""
-        from assemblyzero.core.seats import ProfileError, apply_overrides, default_profile
-
-        with pytest.raises(ProfileError, match="requirements.analyze.escalation"):
-            apply_overrides(
-                default_profile(), {"requirements.analyze.escalation": "bogus:spec"}
-            )
 
 
 class TestWhatEscalationDoesNotChange:

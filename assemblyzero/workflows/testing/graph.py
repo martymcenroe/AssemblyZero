@@ -67,7 +67,7 @@ from assemblyzero.workflows.testing.nodes import (
     document,
     e2e_validation,
     finalize,
-    implement_code,
+    implement_code_under_profile,
     load_lld,
     route_after_document,
     review_test_plan,
@@ -570,7 +570,8 @@ def build_testing_workflow() -> StateGraph:
     _add("N2_scaffold_tests", _wrap_with_checkpoint(scaffold_tests, "post-scaffold"))
     _add("N2_5_validate_tests", validate_tests_mechanical_node)  # Issue #335
     _add("N3_verify_red", verify_red_phase)
-    _add("N4_implement_code", _wrap_with_checkpoint(implement_code, "post-impl"))
+    # #3563: N4 runs under the run's model profile.
+    _add("N4_implement_code", _wrap_with_checkpoint(implement_code_under_profile, "post-impl"))
     _add("N4b_completeness_gate", completeness_gate)  # Issue #147
     _add("N4c_augment_tests", augment_tests_for_coverage)  # #2327
     _add("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))

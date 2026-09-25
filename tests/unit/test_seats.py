@@ -87,9 +87,20 @@ class TestTheLoader:
         with pytest.raises(ProfileError, match="provider:model"):
             load_profile(path)
 
-    def test_an_unknown_provider_fails_closed(self):
-        with pytest.raises(ProfileError, match="unknown provider"):
-            apply_overrides(seats.default_profile(), {"impl.code": "bogus:spec"})
+    def test_an_unknown_provider_is_left_to_get_provider(self):
+        """Requirement 2 fences what parses and what is forbidden; which
+        providers exist is get_provider's to say, when the seat is used."""
+        from assemblyzero.core.llm_provider import get_provider
+
+        profile = apply_overrides(seats.default_profile(), {"impl.code": "bogus:spec"})
+        seat = seat_in(profile, "impl.code")
+        assert (seat.spec, seat.resolved_model_id) == ("bogus:spec", "spec")
+        with pytest.raises(ValueError, match="Unknown provider 'bogus'"):
+            get_provider(seat.spec)
+
+    def test_a_forbidden_gemini_alias_is_caught_in_its_full_form(self):
+        with pytest.raises(ProfileError, match="gemini-3-pro"):
+            apply_overrides(seats.default_profile(), {"spec.review": "gemini:3-pro"})
 
     def test_no_defaults_and_a_missing_seat_fails_closed(self):
         with pytest.raises(ProfileError, match="no \\[defaults\\] spec"):
