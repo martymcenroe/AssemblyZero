@@ -217,7 +217,13 @@ def scan_project_permissions(project_path: Path, project_name: str) -> list:
         if pattern not in assemblyzero_allow:
             # Check if it looks generic (not project-specific path)
             # Use config for path if available, otherwise fallback to default
-            projects_path = config.projects_root_unix() if config else Path(__file__).resolve().parents[2].as_posix()
+            if config:
+                projects_path = config.projects_root_unix()
+            else:
+                # Derived, never spelled (#3536); a drive path gets the Git Bash spelling
+                projects_path = Path(__file__).resolve().parents[2].as_posix()
+                if projects_path[1:2] == ":":
+                    projects_path = "/" + projects_path[0].lower() + projects_path[2:]
             is_generic = project_name.lower() not in pattern.lower() and \
                          projects_path not in pattern
 
