@@ -376,3 +376,70 @@ def pr_sentinel_app_session(
         f"gpg decrypt of pr-sentinel App bundle failed after "
         f"{MAX_GPG_ATTEMPTS} attempts. Last error: {last_stderr}"
     )
+
+
+@contextmanager
+def gpg_secret_session(
+    path: Path,
+    secret_name: str,
+    reason: str | None = None,
+) -> Iterator[str]:
+    """Yield any gpg-decrypted secret, under the same rules as the sessions above.
+
+    For callers this module does not know by name, chiefly new_repo.py
+    post-create hooks (#3588) that deploy a secret of their own: a
+    single-repo read-only token, for example. ADR-0216 section 8.
+
+    The caller names the secret. The name is printed on the pre-prompt banner
+    (#1853) and must be a display string only -- never secret material, and,
+    since this repo is public, built by the caller at run time rather than
+    hardcoded here.
+
+    Args:
+        path: The gpg-encrypted file.
+        secret_name: Human name printed on the banner, e.g. "read-only CI token".
+        reason: What this decrypt is for on this run.
+
+    Yields:
+        The decrypted value, stripped. Lives only in this generator's scope.
+
+    Raises:
+        FileNotFoundError: If the encrypted file does not exist.
+        RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
+        subprocess.TimeoutExpired: Same hung-pinentry handling as
+            classic_pat_session.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"{secret_name} not found at {path}.")
+
+    last_stderr = ""
+    for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
+        _announce_decrypt(secret_name, path, reason, attempt, MAX_GPG_ATTEMPTS)
+        result = subprocess.run(
+            ["gpg", "--quiet", "--decrypt", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=GPG_TIMEOUT_S,
+        )
+        if result.returncode == 0:
+            value = result.stdout.strip()
+            try:
+                yield value
+            finally:
+                del value
+            return
+        last_stderr = result.stderr.strip()
+        if attempt < MAX_GPG_ATTEMPTS:
+            print(
+                f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
+                file=sys.stderr,
+            )
+            print(
+                "Retrying -- pinentry will prompt again. (Ctrl-C to abort.)",
+                file=sys.stderr,
+            )
+
+    raise RuntimeError(
+        f"gpg decrypt of {secret_name} failed after {MAX_GPG_ATTEMPTS} attempts. "
+        f"Last error: {last_stderr}"
+    )
