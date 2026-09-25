@@ -30,4 +30,18 @@
 
 ## Runs
 
-FULL_TIER_RESULT
+Full unit tier, from the worktree with the main checkout's interpreter and `PYTHONPATH` set to the worktree, on `6c311b86` plus this change, no other pytest session running:
+
+```
+2 failed, 10748 passed, 21 skipped, 7 deselected, 5 xfailed, 13 warnings in 681.78s (0:11:21)
+FAILED tests/unit/test_section_ten_carries_tests.py::TestAgainstEveryRecordedDraft::test_it_refuses_only_the_two_runs_that_moved_their_tests
+FAILED tests/unit/test_section_ten_carries_tests.py::TestAgainstEveryRecordedDraft::test_every_other_draft_passes
+```
+
+The two are #3468's pair (a unit test reading another repository's working tree), red on `main` before this change.
+
+The first full run of this branch had 83 failures. Most came from `check_spec` refusing providers and models it did not know, which requirement 2 does not ask for; it now fails closed only on an unparseable spec, a seat outside the registry, and a forbidden model. The others were the gate registry and the halt-site walker finding moved sites, which led to the registered `implement_code_under_profile` wrapper and to seat errors held and raised inside each node's existing "Invalid drafter" handler, and test fakes that did not accept `seat=` or `effort=`.
+
+`tools/audit_fail_open.py --check`: PASS after `--write-baseline`, whose only change was renumbering one existing `generate_draft` handler from index 0 to 1.
+
+`ruff check` on every changed file: the nine findings reported all predate this branch.
