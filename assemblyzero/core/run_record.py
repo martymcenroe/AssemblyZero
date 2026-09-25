@@ -283,7 +283,50 @@ class RunRecord:
             f"target head={head.strip() if ok else 'unknown'} "
             f"branch={branch.strip() if ok2 else 'unknown'}"
         )
+        # #3565: from here every model call of the run writes a `model` event.
+        from assemblyzero.core.model_record import open_sink
+
+        open_sink(record)
         return record
+
+    def profile(self, profile: dict) -> None:
+        """The run's model profile: name, content hash, and the seat table.
+
+        Called by the entry point once it has loaded the profile, so the
+        record opens with which model every seat was going to ask (#3565).
+        """
+        try:
+            from assemblyzero.core.seats import seat_table
+
+            self.event(
+                f"profile name={profile.get('name')} "
+                f"sha256={profile.get('sha256')} "
+                f"selected_by={profile.get('selected_by') or 'given'} "
+                f"source={profile.get('source')}"
+            )
+            overrides = profile.get("overrides") or {}
+            if overrides:
+                self.event(
+                    "profile overrides "
+                    + " ".join(f"{k}={v}" for k, v in sorted(overrides.items()))
+                )
+            for name, seat in seat_table(profile).items():
+                self.event(
+                    f"seat {name} spec={seat.spec} effort={seat.effort or ''} "
+                    f"resolved={seat.resolved_model_id} provider={seat.provider}"
+                )
+        except Exception as exc:  # noqa: BLE001 - a record never costs a run
+            # fail-open: the profile already loaded and validated at run
+            # start; a header that cannot be written is warned about and the
+            # run proceeds.
+            self._warn(f"profile header not written ({exc})")
+
+    def model(self, fields: dict) -> None:
+        """One model call: seat, spec, resolved id, provider, fallback,
+        effort, duration and tokens, as JSON after the word ``model``."""
+        import json
+
+        self.event("model " + json.dumps(fields, sort_keys=True))
 
     def node(self, name: str) -> None:
         """A node transition. Called by the tool as the graph streams."""
@@ -312,6 +355,9 @@ class RunRecord:
         if self._finished:
             return
         self._finished = True
+        from assemblyzero.core.model_record import close_sink
+
+        close_sink(self)
         seconds = round(time.time() - self.started_at, 1)
         error = " ".join(str(error_message).split())
         self.event(

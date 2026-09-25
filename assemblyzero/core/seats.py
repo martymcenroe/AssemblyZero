@@ -552,7 +552,7 @@ def profile_of(state: Mapping[str, Any]) -> dict:
 
 def resolve(state: Mapping[str, Any], seat_name: str) -> Seat:
     """The seat ``seat_name`` under the run's profile."""
-    return seat_in(profile_of(state), seat_name)
+    return _remember(seat_in(profile_of(state), seat_name))
 
 
 # ---------------------------------------------------------------------------
@@ -580,11 +580,14 @@ def using_profile(profile: dict) -> Iterator[dict]:
 
 
 def active_profile() -> dict:
-    """The profile set by :func:`using_profile`, else the run-start precedence
-    applied to the current environment (flag excepted: there is none here)."""
+    """The profile set by :func:`using_profile`, else the run's profile set by
+    :func:`set_run_profile`, else the run-start precedence applied to the
+    current environment (flag excepted: there is none here)."""
     current = _ACTIVE.get()
     if current is not None:
         return current
+    if _RUN_PROFILE is not None:
+        return _RUN_PROFILE
     how, path = select_profile_path(None, None)
     profile = load_profile(path)
     profile["selected_by"] = how
@@ -593,7 +596,59 @@ def active_profile() -> dict:
 
 def resolve_active(seat_name: str) -> Seat:
     """The seat under the active profile."""
-    return seat_in(active_profile(), seat_name)
+    return _remember(seat_in(active_profile(), seat_name))
+
+
+# ---------------------------------------------------------------------------
+# The run's profile and the last seat resolved, for the per-call record (#3565)
+# ---------------------------------------------------------------------------
+
+_RUN_PROFILE: dict | None = None
+
+_LAST_SEAT: contextvars.ContextVar[Seat | None] = contextvars.ContextVar(
+    "assemblyzero_last_seat", default=None
+)
+
+
+def set_run_profile(profile: dict | None) -> None:
+    """Record the profile this process's run started with.
+
+    Entry points call it once, after loading. :func:`active_profile` falls
+    back to it, so seats no state reaches (the triage summary, the visual
+    gate, contract fidelity) follow the run's ``--models`` choice, and the
+    telemetry writers read its name.
+    """
+    global _RUN_PROFILE
+    _RUN_PROFILE = profile
+
+
+def current_profile_name() -> str:
+    """The run's profile name, for telemetry rows: never empty."""
+    try:
+        return str(active_profile().get("name", "")) or DEFAULT_PROFILE
+    except Exception:  # noqa: BLE001 - a telemetry row never costs a run
+        # fail-open: a profile that cannot be read here was already reported
+        # at run start; the row still says which default applies.
+        return DEFAULT_PROFILE
+
+
+def _remember(seat: Seat) -> Seat:
+    _LAST_SEAT.set(seat)
+    return seat
+
+
+def last_resolved_seat(spec: str) -> str:
+    """The name of the seat resolved last, when it resolved to ``spec``.
+
+    A node resolves its seat and then builds the provider from the seat's
+    spec, so the two meet here. When the spec differs (an explicit override
+    passed straight to ``get_provider``), the call is recorded with no seat
+    rather than a wrong one.
+    """
+    seat = _LAST_SEAT.get()
+    if seat is None or seat.spec.strip().lower() != (spec or "").strip().lower():
+        return ""
+    return seat.name
 
 
 def describe(profile: dict) -> str:

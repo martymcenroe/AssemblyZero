@@ -725,6 +725,11 @@ def build_initial_state(
     state["cost_budget_usd"] = getattr(args, "budget", 5.0)
     state["model_profile"] = profile
     print(describe(profile))
+    # #3565: the run record opens with the profile; seats no state reaches
+    # (triage, visual gate, contract fidelity) follow it.
+    from assemblyzero.core.model_record import announce_profile
+
+    announce_profile(profile)
 
     return state
 

@@ -525,11 +525,18 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Embed review evidence with ACTUAL verdict (not hardcoded APPROVED!)
     review_date = datetime.now().strftime("%Y-%m-%d")
+    # #3565: the stamp names the reviewer seat this run resolved, not an
+    # environment default that may never have reviewed anything.
+    from assemblyzero.core.seats import resolve
+
+    reviewer_seat = resolve(state, "requirements.review")
     lld_content = embed_review_evidence(
         current_draft,
         verdict=lld_status,  # Use actual verdict from Gemini review
         review_date=review_date,
         review_count=verdict_count,
+        reviewer_model=reviewer_seat.resolved_model_id,
+        reviewer_spec=reviewer_seat.spec,
     )
 
     # #3510: the LLD and lld-status.json go into the LLD worktree (a mock

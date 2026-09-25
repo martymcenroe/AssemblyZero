@@ -1200,6 +1200,11 @@ def main():
         record.finish("fail", f"model profile: {e}")
         sys.exit(1)
     print(describe(profile))
+    # #3565: the run record opens with the profile; seats no state reaches
+    # (triage, visual gate, contract fidelity) follow it.
+    from assemblyzero.core.model_record import announce_profile
+
+    announce_profile(profile)
     review_seat = seat_in(profile, "impl.test_plan.review")
 
     # Build initial state

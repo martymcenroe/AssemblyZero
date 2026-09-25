@@ -96,10 +96,14 @@ def _append(repo_root: Path | str, record: dict) -> bool:
 
 
 def _base(event: str, run_tag: str) -> dict:
+    from assemblyzero.core.seats import current_profile_name
+
     return {
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "event": event,
         "run_tag": run_tag or current_run_tag(),
+        # #3565: which model profile the run rolled under (#3562's bench).
+        "profile": current_profile_name(),
     }
 
 

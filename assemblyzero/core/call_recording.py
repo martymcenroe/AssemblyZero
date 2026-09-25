@@ -198,9 +198,22 @@ class RecordingProvider(LLMProvider):
     line, and only when the graph has told it where.
     """
 
-    def __init__(self, inner: LLMProvider, *, audit_dir: str = "") -> None:
+    def __init__(
+        self,
+        inner: LLMProvider,
+        *,
+        audit_dir: str = "",
+        spec: str = "",
+        effort: str | None = None,
+        seat: str = "",
+    ) -> None:
         self.inner = inner
         self._audit_dir = audit_dir
+        # #3565: what the call was asked for, so the record can say which
+        # seat and spec it served and which model answered.
+        self._spec = spec
+        self._effort = effort
+        self._seat = seat
 
     @property
     def provider_name(self) -> str:
@@ -222,7 +235,17 @@ class RecordingProvider(LLMProvider):
         result = self.inner.invoke(
             system_prompt, content, timeout_seconds, response_schema, json_schema
         )
+        duration_ms = int((time.monotonic() - started) * 1000)
+        # #3565: the per-call model record, for every run with a record open,
+        # whether or not an audit directory takes the bodies below.
+        from assemblyzero.core.model_record import call_fields, record_call
+
+        fields = call_fields(
+            inner=self.inner, spec=self._spec, seat=self._seat,
+            effort=self._effort, result=result, duration_ms=duration_ms,
+        )
         context = current_context()
+        record_call({**fields, "stage": context.stage, "node": context.node})
         destination = self._audit_dir or context.audit_dir
         if destination:
             _append(destination, {
@@ -242,8 +265,11 @@ class RecordingProvider(LLMProvider):
                 "response": result.response or "",
                 "success": bool(result.success),
                 "error_message": result.error_message or "",
-                "duration_ms": int((time.monotonic() - started) * 1000),
+                "duration_ms": duration_ms,
                 "has_schema": bool(response_schema or json_schema),
+                # #3565: which seat and spec, and which model answered.
+                # `provider` and `model` above stay as the replay reads them.
+                **{k: v for k, v in fields.items() if k not in ("duration_ms", "success")},
             })
         return result
 

@@ -1474,14 +1474,28 @@ class FallbackProvider(LLMProvider):
         # persist across instances (get_provider() creates fresh instances
         # each LangGraph iteration).
         self._breaker_key = f"{primary.provider_name}:{primary.model}"
+        # #3565: which provider produced the last result. `provider_name` and
+        # `model` report it, so a record never names the primary for a call
+        # the fallback answered.
+        self._answered: LLMProvider | None = None
+
+    @property
+    def answered(self) -> "LLMProvider":
+        """The provider that produced the last result (the primary before any call)."""
+        return self._answered or self._primary
+
+    @property
+    def fallback_answered(self) -> bool:
+        """Whether the last call was answered by the fallback."""
+        return self._answered is self._fallback
 
     @property
     def provider_name(self) -> str:
-        return self._primary.provider_name
+        return self.answered.provider_name
 
     @property
     def model(self) -> str:
-        return self._primary.model
+        return self.answered.model
 
     def invoke(
         self,
@@ -1543,6 +1557,7 @@ class FallbackProvider(LLMProvider):
             )
             if result.success:
                 _circuit_breaker_registry[self._breaker_key] = 0
+                self._answered = self._primary
                 return result
 
             # Primary failed â€” try fallback with full timeout
@@ -1555,6 +1570,7 @@ class FallbackProvider(LLMProvider):
             system_prompt, content, timeout_seconds,
             response_schema=response_schema, json_schema=json_schema,
         )
+        self._answered = self._fallback
         if fallback_result.success:
             _circuit_breaker_registry[self._breaker_key] = 0
         else:
@@ -1931,27 +1947,36 @@ def get_provider(spec: str, effort: str | None = None) -> LLMProvider:
         >>> reviewer = get_provider("gemini:3.1-pro")
         >>> mock = get_provider("mock:test")
     """
-    return _recorded(_build_provider(spec, effort))
+    return _recorded(_build_provider(spec, effort), spec=spec, effort=effort)
 
 
-def _recorded(provider: "LLMProvider") -> "LLMProvider":
+def _recorded(
+    provider: "LLMProvider", spec: str = "", effort: str | None = None,
+) -> "LLMProvider":
     """Wrap a transport so its calls are written down, when there is a run.
 
     #2731. This is the single place every stage asks for a transport, so it is
     the single place a recording can be attached without every caller having to
-    remember to. The wrap happens ONLY when a graph node has said where the
-    run-scoped lineage directory is; outside a run -- a unit test, a one-off
-    script -- `get_provider` returns exactly what it always returned, which is
-    what keeps the scripted-provider identity contract intact.
+    remember to. The wrap happens ONLY when there is a run to record into: a
+    graph node has said where the run-scoped lineage directory is (the prompt
+    and response bodies, #2731), or a run record is open (the per-call model
+    record, #3565). Outside a run -- a unit test, a one-off script --
+    `get_provider` returns exactly what it always returned, which is what keeps
+    the scripted-provider identity contract intact.
     """
     try:
         from assemblyzero.core.call_recording import (
             RecordingProvider,
             recording_is_armed,
         )
+        from assemblyzero.core.model_record import model_record_is_armed
 
-        if recording_is_armed():
-            return RecordingProvider(provider)
+        if recording_is_armed() or model_record_is_armed():
+            from assemblyzero.core.seats import last_resolved_seat
+
+            return RecordingProvider(
+                provider, spec=spec, effort=effort, seat=last_resolved_seat(spec),
+            )
     except Exception:  # noqa: BLE001 - a recording never costs a roll
         # fail-open: if the recorder cannot be reached, the run proceeds on the
         # bare transport. A missing recording is reported by the replay, which
