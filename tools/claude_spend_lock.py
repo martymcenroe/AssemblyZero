@@ -23,6 +23,7 @@ import argparse
 import difflib
 import json
 import os
+import stat
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -111,12 +112,42 @@ def backup(settings: Path, backup_dir: Path) -> Path:
     return target
 
 
+def is_readonly(path: Path) -> bool:
+    return not path.stat().st_mode & stat.S_IWUSR
+
+
+def make_writable(path: Path) -> None:
+    os.chmod(path, path.stat().st_mode | stat.S_IWUSR)
+
+
+def make_readonly(path: Path) -> None:
+    os.chmod(path, path.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+
+
 def write_settings(settings: Path, text: str) -> None:
-    """Stage beside the file, verify the staged text parses, then replace."""
+    """Stage beside the file, verify the staged text parses, then replace.
+
+    The hook deploy leaves ``settings.json`` read-only on purpose, and Windows
+    refuses a rename over a read-only file (#3618), so the write bit is cleared
+    for the replace and the state the file had is restored afterwards. A stale
+    ``.tmp`` from an earlier failed run is overwritten, and on any failure the
+    ``.tmp`` is removed before the error reaches the caller.
+    """
     tmp = settings.with_name(settings.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    json.loads(tmp.read_text(encoding="utf-8"))
-    os.replace(tmp, settings)
+    readonly = is_readonly(settings)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        json.loads(tmp.read_text(encoding="utf-8"))
+        if readonly:
+            make_writable(settings)
+        os.replace(tmp, settings)
+    except BaseException:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+    finally:
+        if readonly and settings.exists() and not is_readonly(settings):
+            make_readonly(settings)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -168,7 +199,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if settings_changed:
         saved = backup(args.settings, args.backup_dir)
-        write_settings(args.settings, new_text)
+        try:
+            write_settings(args.settings, new_text)
+        except OSError as exc:
+            print(f"FAILED: could not replace {args.settings} ({exc}); it is unchanged; backup at {saved}")
+            return EXIT_VERIFY
         check, _ = load(args.settings)
         if check != new:
             print(f"FAILED: {args.settings} did not read back as written; backup at {saved}")
