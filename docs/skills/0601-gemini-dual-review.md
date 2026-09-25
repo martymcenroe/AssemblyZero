@@ -106,7 +106,7 @@ Before using this skill, ensure:
 ├──────────────────────────────────────────────────────────────┤
 │ Trigger: User says "write issue for [X]"                    │
 │                                                              │
-│ 1. Claude drafts issue (template 0101)                      │
+│ 1. Gemini (agy) drafts issue (template 0101)                │
 │ 2. AUTO-INVOKE: Gemini reviews for completeness            │
 │ 3. Model Check: Ensure Gemini 3 Pro                        │
 │ 4. Claude incorporates feedback                             │
@@ -217,7 +217,7 @@ Before using this skill, ensure:
 - Extract issue topic from message
 
 **Process:**
-1. **Claude Drafts Issue:**
+1. **Gemini (agy) Drafts Issue:**
    - Load template: `docs/0101-TEMPLATE-issue.md`
    - Populate sections based on user request
 2. **AUTO-INVOKE GEMINI:**

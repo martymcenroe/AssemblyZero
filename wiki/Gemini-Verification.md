@@ -298,7 +298,7 @@ This ensures reviews are never skipped due to quota issues.
 ### Standard Flow
 
 ```
-1. Claude drafts LLD
+1. Gemini (agy) drafts LLD
    ↓
 2. LLD Review Gate ←── Gemini 3 Pro
    │

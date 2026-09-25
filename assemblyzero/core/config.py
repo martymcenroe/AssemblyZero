@@ -12,11 +12,11 @@ from pathlib import Path
 # =============================================================================
 
 # Primary review model - highest reasoning tier available
-# Issue #773: Default to Claude Opus via Max subscription (free)
-REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "claude-opus-4-6")
+# Issue #773 made this Claude Opus via the Max subscription. ADR 0234 (2026-09-24): Gemini in agy validates, so the reviewer id is the Gemini model the agy transport accepts.
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.1-pro-high")
 
 # Acceptable fallback models
-REVIEWER_MODEL_FALLBACKS = ["claude-sonnet-4-6"]
+REVIEWER_MODEL_FALLBACKS: list[str] = []  # no Claude fallback for the reviewer seat (ADR 0234)
 
 # Forbidden models - fail closed rather than use these
 FORBIDDEN_MODELS = [

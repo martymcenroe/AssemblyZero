@@ -32,7 +32,7 @@ The LLD Workflow is a LangGraph-based state machine that transforms GitHub issue
 ### Core Flow (Happy Path)
 
 ```
-GitHub Issue -> Claude Draft -> Human Review -> Gemini Review -> Save Approved LLD
+GitHub Issue -> Gemini Draft -> Human Review -> Gemini Review -> Save Approved LLD
 ```
 
 ### Key Numbers

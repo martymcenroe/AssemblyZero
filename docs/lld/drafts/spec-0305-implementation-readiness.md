@@ -259,8 +259,8 @@ class StageConfig(TypedDict, total=False):
 
 ```json
 {
-    "drafter": "claude:opus-4.5",
-    "reviewer": "gemini:3-pro-preview",
+    "drafter": "gemini:3.1-pro",
+    "reviewer": "gemini:3.1-pro",
     "max_revisions": 5,
     "timeout_seconds": 600
 }
@@ -289,25 +289,25 @@ class OrchestratorConfig(TypedDict, total=False):
     "skip_existing_spec": true,
     "stages": {
         "triage": {
-            "drafter": "claude:opus-4.5",
-            "reviewer": "gemini:3-pro-preview",
+            "drafter": "gemini:3.1-pro",
+            "reviewer": "gemini:3.1-pro",
             "max_revisions": 3,
             "timeout_seconds": 300
         },
         "lld": {
-            "drafter": "claude:opus-4.5",
-            "reviewer": "gemini:3-pro-preview",
+            "drafter": "gemini:3.1-pro",
+            "reviewer": "gemini:3.1-pro",
             "max_revisions": 5,
             "timeout_seconds": 600
         },
         "spec": {
-            "drafter": "claude:opus-4.5",
-            "reviewer": "gemini:3-pro-preview",
+            "drafter": "gemini:3.1-pro",
+            "reviewer": "gemini:3.1-pro",
             "max_revisions": 3,
             "timeout_seconds": 600
         },
         "impl": {
-            "drafter": "claude:opus-4.5",
+            "drafter": "gemini:3.1-pro",
             "reviewer": "",
             "max_revisions": 3,
             "timeout_seconds": 1800
@@ -491,10 +491,10 @@ def get_default_config() -> OrchestratorConfig:
     "skip_existing_lld": True,
     "skip_existing_spec": True,
     "stages": {
-        "triage": {"drafter": "claude:opus-4.5", "reviewer": "gemini:3-pro-preview", "max_revisions": 3, "timeout_seconds": 300},
-        "lld": {"drafter": "claude:opus-4.5", "reviewer": "gemini:3-pro-preview", "max_revisions": 5, "timeout_seconds": 600},
-        "spec": {"drafter": "claude:opus-4.5", "reviewer": "gemini:3-pro-preview", "max_revisions": 3, "timeout_seconds": 600},
-        "impl": {"drafter": "claude:opus-4.5", "reviewer": "", "max_revisions": 3, "timeout_seconds": 1800},
+        "triage": {"drafter": "gemini:3.1-pro", "reviewer": "gemini:3.1-pro", "max_revisions": 3, "timeout_seconds": 300},
+        "lld": {"drafter": "gemini:3.1-pro", "reviewer": "gemini:3.1-pro", "max_revisions": 5, "timeout_seconds": 600},
+        "spec": {"drafter": "gemini:3.1-pro", "reviewer": "gemini:3.1-pro", "max_revisions": 3, "timeout_seconds": 600},
+        "impl": {"drafter": "gemini:3.1-pro", "reviewer": "", "max_revisions": 3, "timeout_seconds": 1800},
         "pr": {"drafter": "", "reviewer": "", "max_revisions": 1, "timeout_seconds": 120},
     },
     "gates": {"triage": False, "lld": False, "spec": False, "impl": False, "pr": True},
@@ -1585,25 +1585,25 @@ def get_default_config() -> OrchestratorConfig:
         skip_existing_spec=True,
         stages={
             "triage": StageConfig(
-                drafter="claude:opus-4.5",
-                reviewer="gemini:3-pro-preview",
+                drafter="gemini:3.1-pro",
+                reviewer="gemini:3.1-pro",
                 max_revisions=3,
                 timeout_seconds=300,
             ),
             "lld": StageConfig(
-                drafter="claude:opus-4.5",
-                reviewer="gemini:3-pro-preview",
+                drafter="gemini:3.1-pro",
+                reviewer="gemini:3.1-pro",
                 max_revisions=5,
                 timeout_seconds=600,
             ),
             "spec": StageConfig(
-                drafter="claude:opus-4.5",
-                reviewer="gemini:3-pro-preview",
+                drafter="gemini:3.1-pro",
+                reviewer="gemini:3.1-pro",
                 max_revisions=3,
                 timeout_seconds=600,
             ),
             "impl": StageConfig(
-                drafter="claude:opus-4.5",
+                drafter="gemini:3.1-pro",
                 reviewer="",
                 max_revisions=3,
                 timeout_seconds=1800,

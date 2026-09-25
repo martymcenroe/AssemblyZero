@@ -1,6 +1,6 @@
 # ADR 0208: LLM Invocation Strategy
 
-**Status:** Accepted
+**Status:** Accepted; superseded in part on 2026-09-24 by ADR 0234 (Gemini in agy drafts and validates; Claude holds no seat)
 **Date:** 2026-02-19
 **Deciders:** Orchestrator
 **Context:** Documenting the multi-provider LLM invocation architecture used across all workflows
@@ -26,19 +26,19 @@ Key constraints:
 
 | Provider | Class | Role | Cost Model |
 |----------|-------|------|------------|
-| **Claude CLI** | `ClaudeCLIProvider` | Primary drafter/implementer | Free (Max subscription) |
+| **Claude CLI** | `ClaudeCLIProvider` | No seat since 2026-09-24 (ADR 0234); before that the drafter/implementer | Max subscription; withdrawn from the workflow for budget |
 | **Anthropic API** | `AnthropicProvider` | Paid fallback for CLI failures | Per-token ($5-25/M output) |
 | **Fallback** | `FallbackProvider` | CLI→API automatic failover | Free first, paid if needed |
 | **Gemini** | `GeminiProvider` | Adversarial reviewer | Free (API preview/quota) |
 
 ### Provider Selection
 
-The `get_provider(spec)` factory resolves provider specs like `claude:opus` or `gemini:3-pro-preview`:
+The `get_provider(spec)` factory resolves provider specs like `claude:opus` or `gemini:3.1-pro`:
 
 1. **Claude specs** (`claude:opus`, `claude:sonnet`, `claude:haiku`):
    - If `ANTHROPIC_API_KEY` exists in `.env`: returns `FallbackProvider(CLI→API)`
    - Otherwise: returns `ClaudeCLIProvider` alone
-2. **Gemini specs** (`gemini:3-pro-preview`): returns `GeminiProvider`
+2. **Gemini specs** (`gemini:3.1-pro`): returns `GeminiProvider`
 3. **Anthropic specs** (`anthropic:opus`): returns `AnthropicProvider` directly
 
 ### Claude CLI Invocation
@@ -78,9 +78,9 @@ Critical flags:
 
 This is transparent to callers — they receive a unified `LLMCallResult` regardless of which provider actually served the request.
 
-### Gemini: Adversarial Review Only
+### Gemini: drafter and reviewer since 2026-09-24 (ADR 0234); review only before that
 
-Gemini is used exclusively for review, never for drafting or implementation:
+Since 2026-09-24 Gemini in agy drafts and validates (ADR 0234). Before that it was used for review only, for these reasons:
 - Different model family catches different blind spots than Claude
 - Credential rotation across multiple API keys handles quota exhaustion
 - Model verification detects silent downgrades (Pro requested, Flash returned)
@@ -142,9 +142,9 @@ This enables consistent token accounting, cost tracking, and rate-limit detectio
 ## Consequences
 
 ### Positive
-- **Zero marginal cost** for Claude drafting via Max subscription
+- ~~Zero marginal cost for Claude drafting via Max subscription~~ (withdrawn 2026-09-24: the Anthropic budget is the constraint; ADR 0234)
 - **Automatic resilience** via CLI→API fallback
-- **Adversarial value** from cross-family review (Claude builds, Gemini reviews)
+- ~~Adversarial value from cross-family review (Claude builds, Gemini reviews)~~ (superseded 2026-09-24: both seats are Gemini; ADR 0234)
 - **Deterministic workflows** via MCP/tool disabling in subprocesses
 - **Resume capability** via LangGraph checkpointing
 - **Concurrent safety** via per-issue database partitioning

@@ -2,7 +2,7 @@
 
 N1 called `check_gemini_available()` unconditionally. That reads
 `~/.assemblyzero/gemini-credentials.json`, so a run launched with the
-standalone defaults (`--drafter claude:sonnet --reviewer claude:opus`) could
+standalone defaults before the 2026-09-24 law (Claude in both seats) could
 not draft on a machine without the file, and on a machine with it the check
 said nothing about whether `agy` -- the transport since ADR 0220 -- was
 installed, logged in, or answering.
@@ -92,7 +92,7 @@ class TestItChecksTheTransport:
 
 
 class TestTheProbeUsesAGeminiModel:
-    """#3541: `GeminiClient()` with no model takes `REVIEWER_MODEL`, now a
+    """#3541: `GeminiClient()` with no model takes `REVIEWER_MODEL`, at the time a
     Claude id, and raises -- so every Gemini-configured run halted at the
     preflight. The fake-client tests above never built the real client."""
 
