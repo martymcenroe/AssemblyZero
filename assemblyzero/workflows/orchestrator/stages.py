@@ -60,6 +60,17 @@ def mock_mode(state: OrchestrationState) -> bool:
     return bool((state.get("config", {}) or {}).get("mock_mode", False))
 
 
+def _profile_keys(state: OrchestrationState) -> dict:
+    """``{"model_profile": <snapshot>}`` for a sub-state, when the run has one.
+
+    #3566: the orchestrator's snapshot travels into every sub-workflow the way
+    ``mock_mode`` does, for the reason ``mock_mode`` gives: each stage builds
+    its sub-state independently, so the rule lives in one place.
+    """
+    profile = state.get("model_profile")
+    return {"model_profile": profile} if isinstance(profile, dict) and profile else {}
+
+
 def fetch_issue_body(target_repo: str, issue_number: int) -> str | None:
     """The rolling issue's body text, or None when it cannot be read.
 
@@ -681,6 +692,9 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),
+            # #3566: the run's model profile, so every seat in the stage
+            # resolves under it; without one the seats fall to the legacy keys.
+            **_profile_keys(state),
             "config_gates_draft": gate_enabled,
             "config_gates_verdict": gate_enabled,
             "config_mock_mode": mock_mode(state),
@@ -1165,6 +1179,9 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),
+            # #3566: the run's model profile, so every seat in the stage
+            # resolves under it; without one the seats fall to the legacy keys.
+            **_profile_keys(state),
             # #2288: was a hardcoded False, so the spec stage could not be
             # rehearsed and every change to it was first executed by the roll
             # it was meant to protect.
@@ -1853,6 +1870,9 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),
+            # #3566: the run's model profile, so every seat in the stage
+            # resolves under it; without one the seats fall to the legacy keys.
+            **_profile_keys(state),
             # #1941: RESUMED lets the runner reuse a prior attempt's files;
             # REGENERATED forbids it. Absent on a first attempt, which reuses
             # nothing because there is nothing to reuse.

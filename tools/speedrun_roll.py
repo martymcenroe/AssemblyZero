@@ -1148,6 +1148,74 @@ def _halted_stage(data: dict, results: dict) -> str | None:
     return current
 
 
+#: #3566: the exit code of an issue refused because its resumable state was
+#: recorded under a different model profile than this launch asks for.
+PROFILE_MISMATCH_EXIT = 93
+
+
+def requested_profile_name(models: str | None, repo_root: Path, extra: list[str]) -> str:
+    """The model profile this launch would roll under, by name (#3566).
+
+    The same precedence `orchestrate.py` applies: --models, AZ_MODEL_PROFILE,
+    the target's models.toml, gemini.toml; a forwarded --mock selects mock.
+    """
+    from assemblyzero.core.seats import load_run_profile
+
+    return str(load_run_profile(models, repo_root, mock="--mock" in extra)["name"])
+
+
+def _models_in(extra: list[str]) -> str | None:
+    """The --models value forwarded in the child argv, if any."""
+    for i, token in enumerate(extra):
+        if token == "--models" and i + 1 < len(extra):
+            return extra[i + 1]
+        if token.startswith("--models="):
+            return token.split("=", 1)[1]
+    return None
+
+
+def _profile_label(repo_root: Path, extra: list[str]) -> str:
+    """The profile name for the run's START line. Never raises."""
+    try:
+        return requested_profile_name(_models_in(extra), repo_root, extra)
+    except Exception as exc:  # noqa: BLE001 - a log line never costs a roll
+        # fail-open: the child loads the same profile and refuses a bad one
+        # before any stage runs; the START line says what went wrong.
+        return f"unreadable({exc})"
+
+
+def persisted_profile_name(az_root: Path, issue: int) -> str:
+    """The profile the issue's persisted orchestrator state was rolled under,
+    or "" when there is no state or it predates profiles."""
+    try:
+        data = json.loads(_orchestrator_state_path(az_root, issue).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # fail-open: no readable state means nothing to resume, so nothing
+        # to mismatch; the resume planner reaches the same answer on its own.
+        return ""
+    profile = data.get("model_profile") if isinstance(data, dict) else None
+    return str(profile.get("name", "")) if isinstance(profile, dict) else ""
+
+
+def profile_refusal(az_root: Path, issue: int, requested: str) -> str:
+    """Why a resume of #issue must not proceed under ``requested``, or "".
+
+    A resumed run keeps the snapshot it was persisted with, so resuming under
+    a different profile would roll the remaining stages on the OLD models
+    while the operator believes they are comparing the new ones. A new
+    profile is a new attempt: --fresh.
+    """
+    recorded = persisted_profile_name(az_root, issue)
+    if not recorded or recorded == requested:
+        return ""
+    return (
+        f"#{issue}: its resumable state was rolled under model profile "
+        f"'{recorded}', and this launch asks for '{requested}'. A resume keeps "
+        f"'{recorded}'. Relaunch with --fresh to roll #{issue} under "
+        f"'{requested}' from the start, or with --models {recorded} to resume."
+    )
+
+
 def resume_plan(
     az_root: Path, repo_root: Path, issue: int, log: EventLog
 ) -> str | None:
@@ -1409,7 +1477,10 @@ def roll_issue(
     heartbeat_path = log_dir / f"{tag}-heartbeat.log"
     out_path = log_dir / f"{tag}.log"
 
-    log.write(f"START issue=#{issue} repo={repo_root} pid={os.getpid()}")
+    log.write(
+        f"START issue=#{issue} repo={repo_root} pid={os.getpid()} "
+        f"profile={_profile_label(repo_root, extra)}"
+    )
 
     with Heartbeat(heartbeat_path):
         base: str | None = None
@@ -3535,6 +3606,15 @@ def build_parser() -> argparse.ArgumentParser:
             "complete."
         ),
     )
+    parser.add_argument(
+        "--models", default=None, metavar="NAME_OR_PATH",
+        help=(
+            "Model profile the roll's every seat resolves under: a built-in "
+            "name (gemini, claude, mock) or a TOML path (#3562). Forwarded to "
+            "every orchestrate.py child. A resume recorded under a different "
+            "profile is refused; --fresh rolls the issue under the new one."
+        ),
+    )
     # Set by --detach on the relaunch; not something anyone types.
     parser.add_argument("--detached-stdout", default=None, help=argparse.SUPPRESS)
     return parser
@@ -3543,6 +3623,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
+    # #3566: every orchestrate.py child rolls under the same model profile.
+    # extra rides the detached relaunch too, which parses --models back out.
+    if getattr(args, "models", None):
+        extra = [*extra, "--models", args.models]
 
     if args.detached_stdout:
         _redirect_stdio(Path(args.detached_stdout))
@@ -3551,6 +3635,15 @@ def main(argv: list[str] | None = None) -> int:
     if not (repo_root / ".git").exists():
         print(f"ERROR: {repo_root} is not a git repository root")
         return 91
+
+    # #3566: a profile that will not load is refused here, before any issue
+    # is reset or rolled, not inside the first child after --fresh has run.
+    if getattr(args, "models", None):
+        try:
+            requested_profile_name(args.models, repo_root, extra)
+        except ValueError as exc:
+            print(f"ERROR: model profile refused: {exc}")
+            return 91
 
     az_root = (
         Path(args.assemblyzero_root).resolve()
@@ -3875,6 +3968,21 @@ def main(argv: list[str] | None = None) -> int:
                         f"(continuing fresh): {exc}"
                     )
             if resume_from:
+                # #3566: a resume keeps its recorded model profile; a launch
+                # asking for another refuses rather than mixing the two.
+                refusal = profile_refusal(
+                    az_root, issue,
+                    requested_profile_name(getattr(args, "models", None), repo_root, extra),
+                )
+                if refusal:
+                    print(f"\nREFUSED {refusal}")
+                    session.write(f"REFUSED {refusal}")
+                    stopped_at = issue
+                    print(
+                        f"\nSTOPPED at #{issue} (exit {PROFILE_MISMATCH_EXIT}); "
+                        "nothing was spent; later issues not rolled."
+                    )
+                    return PROFILE_MISMATCH_EXIT
                 print(
                     f"\n#{issue}: resuming from '{resume_from}' -- the passed "
                     "stages are reused, not redrawn (--fresh for a full redraw)."

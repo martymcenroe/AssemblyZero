@@ -193,6 +193,11 @@ Examples:
             "without spending a roll"
         ),
     )
+    # #3566: the model profile every stage's seats resolve under, and the
+    # per-seat override (#3563). The roll forwards --models to every child.
+    from assemblyzero.core.seats import add_profile_arguments
+
+    add_profile_arguments(parser)
     parser.add_argument("--resume-from", type=str, default=None, choices=STAGE_ORDER, help="Stage to resume from")
     parser.add_argument("--skip-lld", action="store_true", help="Skip LLD stage if artifact exists")
     parser.add_argument("--no-skip-lld", action="store_true", help="Force LLD regeneration")
@@ -252,6 +257,19 @@ Examples:
     print(f"[ORCHESTRATOR] Starting pipeline for issue #{args.issue}")
     print(f"[ORCHESTRATOR] Target repo: {target_repo}")
 
+    # #3566: the run's model profile: --models, then AZ_MODEL_PROFILE, then
+    # the target's models.toml, then gemini.toml; --mock selects mock.toml.
+    from assemblyzero.core.model_record import announce_profile
+    from assemblyzero.core.seats import ProfileError, describe, profile_from_args
+
+    try:
+        model_profile = profile_from_args(args, target_repo)
+    except ProfileError as exc:
+        print(f"[ORCHESTRATOR] model profile refused: {exc}")
+        sys.exit(2)
+    print(describe(model_profile))
+    announce_profile(model_profile)
+
     # #1883: a run needs BOTH providers — Gemini designs and reviews, Claude
     # implements. Starting one while either is exhausted spends the healthy
     # provider's quota just to discover the dry one, and on a recorded take
@@ -303,6 +321,7 @@ Examples:
             target_repo=target_repo,
             assemblyzero_root=assemblyzero_root,
             base_branch=args.base_branch,
+            model_profile=model_profile,
         )
 
         # #1785: the summary IS the per-stage evidence — printed on every
