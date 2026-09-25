@@ -194,10 +194,16 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
         return False
 
     # Clean, but git would not remove it — typically a directory that is no
-    # longer registered as a worktree. Nothing uncommitted is at stake.
+    # longer registered as a worktree. #3518: "clean" is not "nothing at
+    # stake". `git status` is clean in a separate clone holding unpushed
+    # commits, and it never reports ignored files, so this directory is moved
+    # aside, stamped, never deleted.
     try:
-        _rmtree_clearing_readonly(worktree_path)
-        print(f"  Removed unregistered worktree directory: {worktree_path}")
+        aside = worktree_path.with_name(
+            f"{worktree_path.name}.bak-{_disposal_stamp()}"
+        )
+        worktree_path.rename(aside)
+        print(f"  Moved unregistered worktree directory aside: {worktree_path} -> {aside}")
         _prune_worktrees(repo_root)
         return True
     except OSError as e:
@@ -518,6 +524,8 @@ def archive_lineage_dirs(repo_root: Path, issue: int) -> int:
                 # filesystems, where a plain rmtree dies on them. Copy, then
                 # remove with the attribute-clearing variant.
                 shutil.copytree(str(d), str(target), dirs_exist_ok=True)
+                # #3518 gate: the source goes only once its copy is there.
+                assert target.is_dir()
                 _rmtree_clearing_readonly(d)
             print(f"  Archived lineage dir: {d.relative_to(repo_root)} -> "
                   f"{target.relative_to(repo_root)}")

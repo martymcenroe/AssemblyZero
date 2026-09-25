@@ -1043,8 +1043,9 @@ class TestShiftLineageVersions:
 
         operations = shift_lineage_versions(42, tmp_path)
 
-        # Should have removed old n2
-        assert any("Removed" in op and "oldest" in op for op in operations)
+        # #3518: the old n2 is moved aside to docs/lineage/discarded/, not deleted
+        assert any("Moved aside" in op and "oldest" in op for op in operations)
+        assert list((tmp_path / "docs" / "lineage" / "discarded").glob("42-lld-n2-*"))
 
         # n2 should now have n1's content
         lineage_n2 = active_dir / "42-lld-n2"

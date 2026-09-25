@@ -441,8 +441,30 @@ def _copy_writable(src: str, dst: str) -> None:
         pass
 
 
+def _is_our_archive(path: Path) -> bool:
+    """Whether ``path`` is an archive this module wrote, or an empty directory.
+
+    ``archive_run`` creates ``logs/``, ``artifacts/`` and ``orphans/`` before it
+    writes anything else and ``index.json`` last, so even a partial archive
+    carries ``logs/``. ``--out-dir`` can point anywhere; a directory without
+    that shape is someone else's and is not ours to remove (#3518).
+    """
+    return (
+        (path / "logs").is_dir()
+        or (path / "index.json").is_file()
+        or not any(path.iterdir())
+    )
+
+
 def _rmtree(path: Path) -> None:
-    """Remove a tree, clearing ReadOnly on whatever blocks it."""
+    """Remove a previous archive of this run, clearing ReadOnly on whatever
+    blocks it. Refuses anything that is not an archive this module wrote."""
+    if not _is_our_archive(path):
+        raise RuntimeError(
+            f"refusing to replace {path}: it is not an archive this tool wrote "
+            "(no logs/ or index.json, and not empty). Move it, or choose "
+            "another --out-dir (#3518)."
+        )
     shutil.rmtree(path, onexc=_on_permission_error)
 
 

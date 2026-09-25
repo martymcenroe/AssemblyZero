@@ -165,6 +165,9 @@ def render_round(
                 return error
             for png in sorted(sub.glob("*.png")):
                 shutil.move(str(png), round_dir / f"candidate{index}-{key}-{png.name}")
+            # #3518 ownership gate: `sub.mkdir()` above has no exist_ok, so
+            # this is the directory this iteration made, inside round_dir.
+            assert sub.parent == round_dir
             shutil.rmtree(sub)
         manifest.setdefault("candidates", {})[key] = [list(c) for c in candidates]
     if candidate_sets:

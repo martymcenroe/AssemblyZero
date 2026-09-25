@@ -142,7 +142,26 @@ class TestArchiveLineage:
 
 
 class TestCleanEphemeral:
-    """Tests for clean_ephemeral function."""
+    """Tests for clean_ephemeral function.
+
+    These pin the cache list on plain directories. The #3528 refusal (a
+    main checkout, or anything that is not a linked worktree) is tested
+    against real git in `test_rmtree_sites_are_gated.py`, so here it is
+    stood down.
+    """
+
+    @staticmethod
+    def setup_method(_method):
+        import archive_worktree_lineage
+
+        TestCleanEphemeral._saved = archive_worktree_lineage.require_linked_worktree
+        archive_worktree_lineage.require_linked_worktree = lambda path: None
+
+    @staticmethod
+    def teardown_method(_method):
+        import archive_worktree_lineage
+
+        archive_worktree_lineage.require_linked_worktree = TestCleanEphemeral._saved
 
     def test_removes_coverage_file(self, tmp_path):
         """Should remove .coverage file."""
@@ -252,9 +271,25 @@ class TestIntegration:
     """Integration tests for the full workflow."""
 
     def test_full_archive_workflow(self, tmp_path):
-        """Test complete archive workflow without git commit."""
+        """Test complete archive workflow without git commit.
+
+        #3528: clean_ephemeral refuses anything but a linked worktree, so
+        this builds a real one off a real main repository.
+        """
+        import subprocess
+
         worktree = tmp_path / "worktree"
         main_repo = tmp_path / "main"
+        main_repo.mkdir()
+        for args in (
+            ["init", "-q", "-b", "main"],
+            ["config", "user.email", "t@example.com"],
+            ["config", "user.name", "Test"],
+            ["commit", "-q", "--allow-empty", "-m", "base"],
+            ["worktree", "add", "-q", "--detach", str(worktree)],
+        ):
+            subprocess.run(["git", "-C", str(main_repo), *args], check=True,
+                           capture_output=True)
 
         # Set up worktree with lineage and ephemeral files
         lineage_dir = worktree / "docs" / "lineage" / "active" / "99-integration"
@@ -267,8 +302,6 @@ class TestIntegration:
 
         pycache = worktree / "__pycache__"
         pycache.mkdir()
-
-        main_repo.mkdir()
 
         from archive_worktree_lineage import archive_lineage, clean_ephemeral
 
