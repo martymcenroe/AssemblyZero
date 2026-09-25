@@ -585,6 +585,31 @@ def _nested_claude_env() -> dict[str, str]:
     return env
 
 
+def _spend_locked_result(provider_name: str, model: str) -> "LLMCallResult | None":
+    """A failed, non-retryable result if the Claude spend lock is on, else None (#3615).
+
+    The providers' own check, so a spec built by hand that never passed the
+    profile loader still spends nothing. Checked before anything is spawned or
+    sent.
+    """
+    from assemblyzero.core.seats import spend_lock_message, spend_locked
+
+    if not spend_locked():
+        return None
+    return LLMCallResult(
+        success=False,
+        response=None,
+        raw_response=None,
+        error_message=spend_lock_message(f"{provider_name}:{model} refused"),
+        provider=provider_name,
+        model_used=model,
+        duration_ms=0,
+        attempts=0,
+        retryable=False,
+        failure_class="permanent",
+    )
+
+
 class ClaudeCLIProvider(LLMProvider):
     """Claude provider using claude -p CLI (Max subscription).
 
@@ -791,6 +816,9 @@ class ClaudeCLIProvider(LLMProvider):
         Returns:
             LLMCallResult with response or error.
         """
+        locked = _spend_locked_result(self.provider_name, self._model)
+        if locked is not None:
+            return locked
         start_time = time.time()
 
         try:
@@ -1251,6 +1279,9 @@ class AnthropicProvider(LLMProvider):
         Returns:
             LLMCallResult with response or error.
         """
+        locked = _spend_locked_result(self.provider_name, self._model)
+        if locked is not None:
+            return locked
         start_time = time.time()
 
         try:
