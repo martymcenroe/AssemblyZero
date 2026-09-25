@@ -291,9 +291,9 @@ class TestInvokeViaStdin:
         argv = mock_popen.call_args[0][0]
         assert "-p" not in argv, "oversize prompt must NOT ride argv"
         assert argv[0] == "/fake/agy"
-        # #3608, #3605: no flag between the binary and the model; --sandbox
-        # requested Windows elevation and is withdrawn.
-        assert argv[1:3] == ["--model", "gemini-3.1-pro-high"]
+        # #3612: the pipeline's own tool-less agent, then the model; no
+        # --sandbox anywhere (#3608, #3605: it requested Windows elevation).
+        assert argv[1:5] == ["--agent", "assemblyzero-text", "--model", "gemini-3.1-pro-high"]
         assert mock_popen.call_args[1]["cwd"], "stdin path keeps temp-cwd isolation"
         sent = proc.communicate.call_args[1]["input"]
         assert len(sent) > 31000  # full composed prompt on stdin

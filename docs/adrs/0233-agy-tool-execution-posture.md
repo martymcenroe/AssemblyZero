@@ -3,12 +3,12 @@
 **Date:** 2026-09-24
 **Status:** Accepted, 2026-09-24. The operator ruled #3517 (agy in both seats, both workflows) with this finding in view; the `--sandbox` flag shipped with the ADR in PR #3545, as #3516 directed, and the blast-radius statement below stands as the record.
 **Amends:** ADR 0220 (Antigravity CLI migration), finding 2, which recorded that `--sandbox` exists and nothing about what it does.
-**Amended:** 2026-09-25 (#3605, #3603). The `--sandbox` decision below is withdrawn; see the amendment before section 1.
+**Amended:** 2026-09-25 (#3605, #3612, #3603). The `--sandbox` decision below is withdrawn; see the amendment before section 1.
 **Issue:** #3516 (parent #3502)
 
 ## The blast radius, stated for pointing at
 
-**Inside the workflow, `agy` executes whatever tool calls its own `toolPermission` setting allows. Under the documented default, `request-review`, a headless shell command is soft-denied and nothing runs; the transport refuses to call `agy` under any other value (#3605). It can still write a file at any path the operator's Windows account can write, without asking, and it keeps its own state under `~/.gemini/antigravity-cli/`.**
+**Inside the workflow, every `agy` call runs as the pipeline's own agent, `assemblyzero-text`, whose definition the transport writes into the call's temporary directory: `tools: []` and `commandExecutionPolicy: off`. The model has no tool to call, so it cannot run a command, write a file, or reach the network, and neither `agy` nor Windows has anything to ask (#3612). The machine's `agy` settings play no part. `agy` still keeps its own state under `~/.gemini/antigravity-cli/`.**
 
 ## Amendment, 2026-09-25: the flag requested elevation, and it is withdrawn
 
@@ -18,7 +18,9 @@ On 2026-09-25 a pipeline subprocess raised the same dialog three times in one ca
 
 The operator's ruling, 2026-09-25: elevated rights make a language model an advanced persistent threat; no agent ever gets elevated rights, never. A flag whose mechanism is a request for elevation is that request. `--sandbox` is withdrawn from `AGY_SAFETY_ARGS`, and `tests/unit/test_agy_sandbox_args.py` pins the list empty.
 
-What the results below establish, read again with the mechanism known: without the flag, `agy -p` ran `whoami` because this machine's `~/.gemini/antigravity-cli/settings.json` carries `"toolPermission": "always-proceed"`, which auto-approves every tool call the model proposes. The documented values are `request-review` (the default), `proceed-in-sandbox`, `strict` and `always-proceed`; in print mode there is no prompt to answer, and under `request-review` a shell command is soft-denied (exit 0, a notice on stderr). The decision that replaces the flag: `GeminiClient` reads that settings file before every call and refuses to run unless `toolPermission` is absent or `request-review` (`require_headless_tool_denial`, #3605). The file-write finding stands unchanged. The operator confirms the soft deny once, with him present, under #3603's T2.
+What the results below establish, read again with the mechanism known: without the flag, `agy -p` ran `whoami` because this machine's `~/.gemini/antigravity-cli/settings.json` carries `"toolPermission": "always-proceed"`, which auto-approves every tool call the model proposes. #3605 first answered that by reading the settings file and refusing to run unless it said `request-review`. The operator rejected that the same day: the control belongs on the pipeline's side of the call, and he will not be asked to approve anything he would always deny.
+
+The decision that replaces both the flag and the settings check (#3612): `agy` loads a custom agent from `<cwd>/.agents/agents/<name>/agent.md` and selects it with `--agent <name>`; a definition's `tools` list is the explicit set of tools the agent may call, and `commandExecutionPolicy: off` turns shell execution off. Both transports already run in a fresh temporary directory, so each call writes the pipeline's definition (`assemblyzero-text`: `tools: []`, `commandExecutionPolicy: "off"`, `inheritMcp: false`; the value is quoted because a YAML 1.1 parser reads a bare `off` as false) into that directory and passes `--agent assemblyzero-text`. A warning from `agy` about the flag is a failed call. Proved 2026-09-25 at about 12:15 PM Central with one call, no sandbox flag, the machine at `always-proceed`, a prompt asking for `whoami` and a file write: one turn, 7.1 s, no prompt from anything, no file, and the answer "I cannot run commands, read or write files, or reach the network because I have no tools available". The call's input fell from 15,983 tokens to 2,766, the tool schemas leaving the prompt. The file-write finding below is answered by the same definition, since the agent has no file tool.
 
 The premise the operator stated for using `agy` inside AssemblyZero was that, inside the workflow, `agy`'s lack of safety checks does not matter, and that the premise should be true by construction. **It is not true.** The fresh empty working directory bounds nothing `agy` chooses to write elsewhere. No flag in `agy --help` (v1, 2026-09-24) removes file writes. The `--mode plan` option was tried; the plan was "automatically approved" and the file was written. The only safety in place for file writes is that the prompts sent to `agy` ask for a review, not for action.
 
@@ -75,7 +77,7 @@ The two sandboxed runs above were slow (about 150 s) because `agy` retried the r
 
 ## 3. Decision
 
-- ~~`GeminiClient` passes `--sandbox` on both transports, the PTY path and the stdin path.~~ *(Withdrawn 2026-09-25, #3605.)* `AGY_SAFETY_ARGS` is empty and pinned empty by `tests/unit/test_agy_sandbox_args.py`. Before every call, `GeminiClient` reads `~/.gemini/antigravity-cli/settings.json` and refuses to run unless `toolPermission` is absent or `request-review`.
+- ~~`GeminiClient` passes `--sandbox` on both transports, the PTY path and the stdin path.~~ *(Withdrawn 2026-09-25, #3605.)* `AGY_SAFETY_ARGS` is empty and pinned empty by `tests/unit/test_agy_sandbox_args.py`. Every call runs as the pipeline's tool-less agent, written into the call's temporary directory and named with `--agent assemblyzero-text` (#3612); the same test pins the argv and the file.
 - The blast-radius statement above stands in for the premise it replaces. Until `agy` offers a way to refuse file writes, and a later experiment of this shape shows it working, AssemblyZero does not describe `agy` as confined.
 
 ## 4. Open, for the operator
