@@ -96,6 +96,60 @@ class ProfileError(ValueError):
     """A profile that cannot be used. Fails closed, naming what is wrong."""
 
 
+#: #3615: while this file exists, no seat may run on an Anthropic model. The
+#: operator throws the lock week by week as his quota runs out, with
+#: ``tools/claude_spend_lock.py --lock --apply`` and lifts it with
+#: ``--unlock --apply``. It covers ``claude:`` (the CLI, his subscription) and
+#: ``anthropic:`` (the API, billed): both spend Anthropic tokens.
+CLAUDE_SPEND_LOCK = Path.home() / ".claude" / "claude-spend.lock"
+ANTHROPIC_PROVIDERS = frozenset({"claude", "anthropic"})
+
+
+class ClaudeSpendLocked(ProfileError):
+    """A seat asks for an Anthropic model while the spend lock is on (#3615)."""
+
+
+def spend_locked(lock: Path | None = None) -> bool:
+    return (lock or CLAUDE_SPEND_LOCK).is_file()
+
+
+def spend_lock_message(what: str, lock: Path | None = None) -> str:
+    return (
+        f"{what}: the Claude spend lock is on ({lock or CLAUDE_SPEND_LOCK} exists), so no "
+        "seat runs on an Anthropic model. Use the default profile (Gemini through agy), or "
+        "have the operator lift the lock: tools/claude_spend_lock.py --unlock --apply."
+    )
+
+
+def anthropic_seats(profile: Mapping[str, Any]) -> list[str]:
+    """Every seat whose resolved spec names an Anthropic provider.
+
+    Resolved as `seat_in` resolves it: the seat's own spec, else the profile's
+    `[defaults]`. `claude.toml` names 7 seats and leaves 6 to its default of
+    `claude:opus`, so reading only the named seats would let those 6 through.
+    Seats named in the profile but not in the registry count too.
+    """
+    entries = profile.get("seats") or {}
+    default_spec = str((profile.get("defaults") or {}).get("spec") or "")
+    found = []
+    for seat_name in sorted(set(SEATS) | set(entries)):
+        spec = str((entries.get(seat_name) or {}).get("spec") or default_spec)
+        if spec.split(":", 1)[0].strip().lower() in ANTHROPIC_PROVIDERS:
+            found.append(seat_name)
+    return found
+
+
+def refuse_while_spend_locked(profile: Mapping[str, Any], lock: Path | None = None) -> None:
+    """Raise ``ClaudeSpendLocked`` naming every Anthropic seat, if the lock is on (#3615)."""
+    if not spend_locked(lock):
+        return
+    seats = anthropic_seats(profile)
+    if seats:
+        name = profile.get("name", "?")
+        what = f"profile {name!r} seats {len(seats)} on Anthropic ({', '.join(seats)})"
+        raise ClaudeSpendLocked(spend_lock_message(what, lock))
+
+
 @dataclass(frozen=True)
 class Seat:
     """One seat, resolved under one profile."""
@@ -340,6 +394,9 @@ def apply_overrides(
         for entry in result["seats"].values():
             entry["effort"] = effort
         result["overrides"]["effort"] = effort
+    # #3615: at run start, before anything is spent or reset. Every run's
+    # profile passes through here, `load_run_profile` included.
+    refuse_while_spend_locked(result)
     return result
 
 

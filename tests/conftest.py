@@ -204,6 +204,21 @@ def agy_discovery_stays_off_the_machine(monkeypatch):
     monkeypatch.setattr(gemini_client, "_ON_WINDOWS", False)
 
 
+@pytest.fixture(autouse=True)
+def no_spend_lock_from_the_machine(tmp_path, monkeypatch):
+    """A test sees the Claude spend lock only when it places one (#3615).
+
+    The operator's machine carries ``~/.claude/claude-spend.lock`` in the
+    weeks his quota is spent, and CI never does, so without this every test
+    that loads the Claude profile would pass in CI and fail on his machine.
+    Point the lock at a path that does not exist; a test of the lock writes
+    its own file there or patches the constant again.
+    """
+    from assemblyzero.core import seats
+
+    monkeypatch.setattr(seats, "CLAUDE_SPEND_LOCK", tmp_path / "no-spend-lock" / "claude-spend.lock")
+
+
 @pytest.fixture
 def mock_file_size(monkeypatch):
     """Factory fixture that patches os.path.getsize to return specified sizes for given paths.

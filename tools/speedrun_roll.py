@@ -1158,10 +1158,27 @@ def requested_profile_name(models: str | None, repo_root: Path, extra: list[str]
 
     The same precedence `orchestrate.py` applies: --models, AZ_MODEL_PROFILE,
     the target's models.toml, gemini.toml; a forwarded --mock selects mock.
+    Forwarded --seat overrides apply too (#3615), so a Claude seat is refused
+    here while the spend lock is on, not in the first child.
     """
-    from assemblyzero.core.seats import load_run_profile
+    from assemblyzero.core.seats import load_run_profile, parse_seat_overrides
 
-    return str(load_run_profile(models, repo_root, mock="--mock" in extra)["name"])
+    mock = "--mock" in extra
+    # Under --mock the child drops every override that is not offline, so a
+    # mock launch is judged without them.
+    overrides = {} if mock else parse_seat_overrides(_seats_in(extra))
+    return str(load_run_profile(models, repo_root, mock=mock, overrides=overrides)["name"])
+
+
+def _seats_in(extra: list[str]) -> list[str]:
+    """Every --seat value forwarded in the child argv (#3615)."""
+    found = []
+    for i, token in enumerate(extra):
+        if token == "--seat" and i + 1 < len(extra):
+            found.append(extra[i + 1])
+        elif token.startswith("--seat="):
+            found.append(token.split("=", 1)[1])
+    return found
 
 
 def _models_in(extra: list[str]) -> str | None:
@@ -3638,7 +3655,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # #3566: a profile that will not load is refused here, before any issue
     # is reset or rolled, not inside the first child after --fresh has run.
-    if getattr(args, "models", None):
+    # #3615: while the Claude spend lock is on, the check runs on every launch,
+    # so a Claude profile chosen by AZ_MODEL_PROFILE or the target's
+    # models.toml, or a forwarded --seat, is refused before --fresh too.
+    from assemblyzero.core.seats import spend_locked
+
+    if getattr(args, "models", None) or spend_locked():
         try:
             requested_profile_name(args.models, repo_root, extra)
         except ValueError as exc:
