@@ -1,9 +1,9 @@
-"""Every agy call the governance client makes is sandboxed (#3516, ADR 0233).
+"""No agy call the governance client makes passes --sandbox (#3608).
 
-Measured through `GeminiClient._invoke_via_cli`: without `--sandbox`, agy
-ran a shell command and wrote a file at an absolute path outside its temp
-cwd; with it, the shell was refused (the file write was not). The flag is
-what removes shell execution, so both transports must carry it.
+#3516 added `--sandbox` to every agy call. On Windows it builds an AppContainer and
+on 2026-09-25 raised a UAC administrator-rights prompt. Operator ruling: no agent
+ever requests elevation, and agents do not pass --sandbox. Both transports are
+pinned here so the flag cannot come back.
 """
 from __future__ import annotations
 
@@ -20,11 +20,15 @@ def _client() -> gc.GeminiClient:
     return client
 
 
-def test_the_safety_args_are_the_sandbox_flag():
-    assert gc.AGY_SAFETY_ARGS == ["--sandbox"]
+def _no_sandbox(argv: list[str]) -> bool:
+    return not any(a == "--sandbox" or a.startswith("--sandbox=") for a in argv)
 
 
-def test_the_pty_path_passes_sandbox(monkeypatch):
+def test_the_safety_args_are_empty():
+    assert gc.AGY_SAFETY_ARGS == []
+
+
+def test_the_pty_path_never_passes_sandbox(monkeypatch):
     seen = {}
 
     def spawn(argv, cwd, dimensions, *a, **kw):
@@ -37,14 +41,12 @@ def test_the_pty_path_passes_sandbox(monkeypatch):
     ok, _text, _err = _client()._invoke_via_cli("sys", "short prompt")
 
     assert ok is False
-    argv = seen["argv"]
-    assert argv[0] == "/fake/agy"
-    assert argv[1] == "--sandbox"
-    assert argv.index("--sandbox") < argv.index("-p")
+    assert seen["argv"][0] == "/fake/agy"
+    assert _no_sandbox(seen["argv"])
 
 
 @patch("assemblyzero.core.gemini_client.subprocess.Popen")
-def test_the_stdin_path_passes_sandbox(mock_popen):
+def test_the_stdin_path_never_passes_sandbox(mock_popen):
     proc = MagicMock()
     proc.pid = 1
     proc.communicate.return_value = ("fine", "")
@@ -54,4 +56,5 @@ def test_the_stdin_path_passes_sandbox(mock_popen):
     _client()._invoke_via_cli("sys", "x" * 31000)
 
     argv = mock_popen.call_args[0][0]
-    assert argv[:2] == ["/fake/agy", "--sandbox"]
+    assert argv[0] == "/fake/agy"
+    assert _no_sandbox(argv)

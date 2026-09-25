@@ -96,7 +96,12 @@ MAX_TOTAL_INVOKE_SECONDS = 600.0
 #:   --sandbox --mode plan -> the same: plan "auto-approved", file written
 #: So the flag removes shell execution and nothing else. agy can still write
 #: any file the operator's account can write; ADR 0233 states that plainly.
-AGY_SAFETY_ARGS = ["--sandbox"]
+#:
+#: REMOVED 2026-09-25 (#3608): on Windows `--sandbox` builds an AppContainer and
+#: raised a UAC administrator-rights prompt. Operator ruling: no agent ever
+#: requests elevation, and agents do not pass --sandbox. The fleet's shell guard
+#: now denies `agy --sandbox`, so this must stay empty.
+AGY_SAFETY_ARGS: list[str] = []
 MIN_ATTEMPT_SECONDS = 20.0
 
 #: Named in every failure this module hands back to a caller (#2476).
