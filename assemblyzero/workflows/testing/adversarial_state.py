@@ -36,16 +36,27 @@ class AdversarialNodeState(TypedDict, total=False):
     lld_content: str
     test_files: list[str]
     issue_id: int
+    #: #2926: the testing state carries `issue_number`, never `issue_id`, so
+    #: the writer named every adversarial file for issue 0. Declared here so
+    #: the boundary passes it; the node reads either.
+    issue_number: int
     # #1757: root the generated tests in the target repo/worktree. Without
-    # this key LangGraph filters repo_root out of the node input (same trap
-    # as mock_mode — see adversarial_node.py) and the writer's CWD-relative
-    # default drops target-repo tests into AssemblyZero's own tests tree.
+    # this key LangGraph filters repo_root out of the node input and the
+    # writer's CWD-relative default drops target-repo tests into
+    # AssemblyZero's own tests tree.
     repo_root: str
+    # #3546: the same trap held mock_mode until 2026-09-24. Filtered out at
+    # the boundary, the node could not see it, decided by whether a client
+    # could be built, and a --mock rehearsal called the paid Gemini API.
+    mock_mode: bool
 
     # Outputs (populated by adversarial node)
     adversarial_analysis: AdversarialAnalysis
     generated_test_files: dict[str, str]
-    adversarial_verdict: Literal["pass", "fail", "error"]
+    #: "skipped" (#2926): the review did not run, and
+    #: adversarial_skipped_reason says why. It used to be reported as "error"
+    #: or, for a client that could not be built, as "success".
+    adversarial_verdict: Literal["pass", "fail", "error", "skipped"]
     adversarial_error: str | None
     adversarial_test_count: int
     adversarial_skipped_reason: str | None

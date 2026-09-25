@@ -16,6 +16,7 @@ from assemblyzero.workflows.testing.adversarial_gemini import (
 from assemblyzero.workflows.testing.nodes.adversarial_node import (
     _collect_context,
     _parse_gemini_response,
+    adversarial_summary,
     run_adversarial_node,
 )
 
@@ -173,7 +174,8 @@ class TestRunAdversarialNode:
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
     def test_quota_skip(self, mock_client_cls):
-        """T020: On GeminiQuotaExhaustedError, sets skipped_reason and error verdict."""
+        """T020: On GeminiQuotaExhaustedError, sets skipped_reason and the
+        skipped verdict (#2926: a review that did not run is not an error)."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.generate_adversarial_tests.side_effect = (
@@ -189,7 +191,7 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "error"
+        assert result["adversarial_verdict"] == "skipped"
         assert "quota" in result["adversarial_skipped_reason"].lower()
         assert result["adversarial_test_count"] == 0
 
@@ -197,15 +199,12 @@ class TestRunAdversarialNode:
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
     def test_no_client_available_skips(self, mock_client_cls):
-        """#1602: if the Gemini client can't be constructed (no creds / mock env),
-        the non-blocking node skips gracefully instead of crashing the workflow.
-
-        Reproduces the CI failure: genai.Client() raises a ValueError at
-        construction when no api_key is present.
-        """
+        """#1602 / #2926: if the client cannot be built -- get_provider refuses
+        the spec, or the alias is forbidden -- the non-blocking node records
+        the reason and continues instead of halting the workflow. It used to
+        record this as verdict "success"."""
         mock_client_cls.side_effect = ValueError(
-            "Missing key inputs argument! To use the Google AI API, provide "
-            "(`api_key`) arguments."
+            "Unknown provider 'gemini'. Supported: claude, anthropic, gemini, mock, scripted"
         )
 
         state = {
@@ -218,8 +217,9 @@ class TestRunAdversarialNode:
         # Must NOT raise — the construction failure is caught and skipped.
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "success"
-        assert "no Gemini client available" in result["adversarial_skipped_reason"]
+        assert result["adversarial_verdict"] == "skipped"
+        assert result["adversarial_skipped_reason"].startswith("no adversarial client")
+        assert "Unknown provider" in result["adversarial_skipped_reason"]
         assert result["adversarial_test_count"] == 0
 
     @patch(
@@ -242,7 +242,7 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "error"
+        assert result["adversarial_verdict"] == "skipped"
         assert "Flash" in result["adversarial_skipped_reason"]
 
     def test_empty_implementation_skip(self):
@@ -256,7 +256,7 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "error"
+        assert result["adversarial_verdict"] == "skipped"
         assert "No implementation files" in result["adversarial_skipped_reason"]
         assert result["adversarial_test_count"] == 0
 
@@ -284,12 +284,16 @@ class TestRunAdversarialNode:
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_timeout_triggers_retry(self, mock_client_cls):
-        """On first timeout, retries once then skips if retry also fails."""
+    def test_a_reported_failure_is_recorded_once_and_not_retried(self, mock_client_cls):
+        """#2926: the transport has already retried and rotated before it
+        reports a failure (#1907). The node used to take a second lap with a
+        longer timeout, which doubled the gauntlet and printed "timeout --
+        retrying" on every run whose real cause was a dead API key. One
+        call, and the transport's own message is the recorded reason."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.generate_adversarial_tests.side_effect = GeminiTimeoutError(
-            "Gemini API response exceeded 120s timeout"
+            "Gemini API error (status=400): API key not valid. Please pass a valid API key."
         )
 
         state = {
@@ -301,10 +305,10 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "error"
-        assert "timeout" in result["adversarial_skipped_reason"].lower()
-        # Should have been called twice (initial + retry)
-        assert mock_client.generate_adversarial_tests.call_count == 2
+        assert result["adversarial_verdict"] == "skipped"
+        assert "API key not valid" in result["adversarial_skipped_reason"]
+        assert "retry" not in result["adversarial_skipped_reason"].lower()
+        assert mock_client.generate_adversarial_tests.call_count == 1
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
@@ -683,7 +687,7 @@ class TestARefusedModelDoesNotHaltThePipeline:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "error"
+        assert result["adversarial_verdict"] == "skipped"
         assert result["adversarial_test_count"] == 0
         assert "not permitted" in result["adversarial_skipped_reason"]
 
@@ -713,3 +717,116 @@ class TestARefusedModelDoesNotHaltThePipeline:
         )
 
         assert "downgraded to Flash" not in result["adversarial_skipped_reason"]
+
+
+def _refuse_network(monkeypatch) -> list:
+    """Patch the two socket entry points so any connect attempt is recorded
+    and fails loudly."""
+    import socket
+
+    connects: list = []
+
+    def refuse(*args, **kwargs):
+        connects.append(args)
+        raise AssertionError("network call during a mock run")
+
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    return connects
+
+
+class TestMockRunsMakeNoNetworkCall:
+    """#3546. A --mock rehearsal reached N7.5 and called the paid Gemini API,
+    because LangGraph filtered mock_mode out of the node's input and the
+    node decided by whether a client could be built."""
+
+    def test_the_flag_is_in_the_node_schema(self):
+        from assemblyzero.workflows.testing.adversarial_state import (
+            AdversarialNodeState,
+        )
+
+        assert "mock_mode" in AdversarialNodeState.__annotations__
+
+    def test_a_mock_run_skips_with_the_reason_and_opens_no_socket(self, monkeypatch):
+        """The client is NOT patched here: the node must decide from the
+        flag before it reaches for a transport."""
+        connects = _refuse_network(monkeypatch)
+
+        result = run_adversarial_node({
+            "implementation_files": ["/fake/module.py"],
+            "lld_content": "# LLD",
+            "test_files": [],
+            "issue_id": 3546,
+            "mock_mode": True,
+        })
+
+        assert connects == []
+        assert result["adversarial_verdict"] == "skipped"
+        assert "mock run" in result["adversarial_skipped_reason"]
+        assert result["adversarial_test_count"] == 0
+
+    def test_the_flag_crosses_the_langgraph_boundary(self, monkeypatch):
+        """The node is added to a graph typed on the full testing state, as
+        build_testing_workflow adds it, and invoked with mock_mode. Before
+        #3546 the key was dropped at the boundary and the node reached for a
+        client; before #2926 the node's own outputs were dropped on the way
+        back, so nothing downstream could say what it did."""
+        from langgraph.graph import END, StateGraph
+
+        from assemblyzero.workflows.testing.state import TestingWorkflowState
+
+        _refuse_network(monkeypatch)
+        graph = StateGraph(TestingWorkflowState)
+        graph.add_node("N7_5_adversarial", run_adversarial_node)
+        graph.set_entry_point("N7_5_adversarial")
+        graph.add_edge("N7_5_adversarial", END)
+
+        out = graph.compile().invoke({
+            "issue_number": 3546,
+            "implementation_files": ["/fake/module.py"],
+            "mock_mode": True,
+        })
+
+        assert out["adversarial_verdict"] == "skipped"
+        assert "mock run" in out["adversarial_skipped_reason"]
+        assert adversarial_summary(out) == (
+            "Adversarial review (N7.5): did not run: "
+            "mock run, no adversarial review is made"
+        )
+
+
+class TestAdversarialSummary:
+    """#2926: one line for the run report and the PR body, in every shape the
+    node can leave behind."""
+
+    def test_a_skip_names_the_reason(self):
+        line = adversarial_summary({
+            "adversarial_verdict": "skipped",
+            "adversarial_skipped_reason": "Gemini quota exhausted: 429",
+        })
+        assert line == "Adversarial review (N7.5): did not run: Gemini quota exhausted: 429"
+
+    def test_a_run_names_the_count_and_the_verdict(self):
+        line = adversarial_summary({
+            "adversarial_verdict": "pass",
+            "adversarial_test_count": 4,
+            "adversarial_skipped_reason": None,
+        })
+        assert line == (
+            "Adversarial review (N7.5): ran; 4 adversarial test(s) written; verdict pass"
+        )
+
+    def test_an_error_names_the_error(self):
+        line = adversarial_summary({
+            "adversarial_verdict": "error",
+            "adversarial_error": "Malformed Gemini response: Expecting value",
+            "adversarial_skipped_reason": None,
+        })
+        assert line == (
+            "Adversarial review (N7.5): errored: Malformed Gemini response: Expecting value"
+        )
+
+    def test_a_state_that_never_reached_the_node_says_so(self):
+        assert adversarial_summary({}) == (
+            "Adversarial review (N7.5): did not reach this step"
+        )

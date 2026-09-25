@@ -83,6 +83,46 @@ class TestStateEnrichment:
         assert "token_budget" not in data
 
 
+class TestAdversarialReviewIsOnTheRecord:
+    """#2926: the status file says whether N7.5 ran and, if not, why. A
+    skipped review used to reach the run log and nothing else."""
+
+    def test_a_skipped_review_names_its_reason(self, tmp_path):
+        state = {
+            "adversarial_verdict": "skipped",
+            "adversarial_test_count": 0,
+            "adversarial_skipped_reason": "Gemini call failed: API key not valid",
+        }
+        _write_status_file(tmp_path, 203, "SUCCESS", state=state)
+
+        data = _read_status(tmp_path, 203)
+        assert data["adversarial"]["verdict"] == "skipped"
+        assert data["adversarial"]["skipped_reason"] == "Gemini call failed: API key not valid"
+        assert data["adversarial"]["summary"] == (
+            "Adversarial review (N7.5): did not run: Gemini call failed: API key not valid"
+        )
+
+    def test_a_review_that_ran_names_its_count(self, tmp_path):
+        state = {
+            "adversarial_verdict": "pass",
+            "adversarial_test_count": 3,
+            "adversarial_skipped_reason": None,
+        }
+        _write_status_file(tmp_path, 204, "SUCCESS", state=state)
+
+        data = _read_status(tmp_path, 204)
+        assert data["adversarial"]["test_count"] == 3
+        assert "3 adversarial test(s) written; verdict pass" in data["adversarial"]["summary"]
+
+    def test_a_run_that_never_reached_the_node_says_so(self, tmp_path):
+        _write_status_file(tmp_path, 205, "FAILED", "halted at N3", state={"iteration_count": 0})
+
+        data = _read_status(tmp_path, 205)
+        assert data["adversarial"]["summary"] == (
+            "Adversarial review (N7.5): did not reach this step"
+        )
+
+
 class TestEventTimeline:
     """Verify event timeline from audit JSONL."""
 
