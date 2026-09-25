@@ -73,6 +73,9 @@ class OrchestrationState(TypedDict, total=False):
     #: #2926: one line saying what N7.5 did, written by the impl stage and
     #: read by the pr stage for the PR body. Declared for the #2018 reason.
     adversarial_summary: str
+    #: #3566: the run's model profile snapshot (core/seats.py); every
+    #: stage passes it to its sub-workflow, and a resume keeps it.
+    model_profile: dict
 
     # Progress tracking
     stage_results: dict[str, StageResult]

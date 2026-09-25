@@ -532,8 +532,13 @@ def orchestrate(
     target_repo: str | None = None,
     assemblyzero_root: str | None = None,
     base_branch: str | None = None,
+    model_profile: dict | None = None,
 ) -> OrchestrationResult:
     """Run full pipeline from issue to PR.
+
+    #3566: ``model_profile`` is the run's model profile (``orchestrate.py
+    --models``), snapshotted into state; every stage's seats resolve under it.
+    A resumed run keeps the snapshot it was persisted with.
 
     Args:
         issue_number: GitHub issue number to process
@@ -631,6 +636,12 @@ def orchestrate(
             state_dict["base_branch"] = (
                 base_branch or state_dict.get("base_branch") or resolved_base
             )
+            # #3566: a resumed run keeps the profile it started under; a new
+            # profile is a new attempt (the roll refuses a mismatch without
+            # --fresh). A state persisted before profiles existed takes the
+            # one this invocation was given.
+            if not isinstance(state_dict.get("model_profile"), dict) and model_profile:
+                state_dict["model_profile"] = model_profile
             state = OrchestrationState(**state_dict)
         else:
             state = create_initial_state(
@@ -640,6 +651,8 @@ def orchestrate(
             # #2383: explicit on the fresh path too, so the field is never
             # merely absent and a reader cannot mistake missing for "unknown".
             state["resumed_from"] = ""
+            if model_profile:
+                state["model_profile"] = model_profile
             # Detect existing artifacts and skip completed stages
             existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
             for stage in STAGE_ORDER:
@@ -655,6 +668,14 @@ def orchestrate(
                     state = update_stage_result(state, stage, result)
                 else:
                     break  # Stop skipping at first non-skippable stage
+
+        # #3566: seats no state reaches (triage summary, visual gate) follow
+        # the snapshot this run carries, which on a resume may differ from the
+        # profile this invocation loaded.
+        if isinstance(state.get("model_profile"), dict):
+            from assemblyzero.core.seats import set_run_profile
+
+            set_run_profile(state["model_profile"])
 
         # Dry run
         if dry_run:
