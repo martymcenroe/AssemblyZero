@@ -59,7 +59,7 @@ def reset_call_context():
 
 
 class TestThePerCallRecord:
-    def test_outside_a_run_nothing_is_wrapped(self):
+    def test_outside_a_run_nothing_is_wrapped(self, reset_call_context):
         """The scripted-provider identity contract (#2731) still holds."""
         assert not model_record_is_armed()
         assert type(get_provider("mock:review")).__name__ == "MockProvider"
