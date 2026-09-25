@@ -175,35 +175,18 @@ def test_stdin_path_fails_on_an_agent_warning():
     assert "did not run as assemblyzero-text" in err
 
 
-@pytest.mark.usefixtures("windows_pty")
-def test_pty_path_fails_on_an_agent_warning():
+@pytest.mark.parametrize("on_windows", [True, False])
+def test_every_short_prompt_rides_stdin(on_windows):
+    """#3624: there is one path, on every platform, for every agy."""
     client = gc.GeminiClient(model=MODEL)
-    client._agy_cli = "C:/fake/agy"
-    with patch.dict("sys.modules", {"winpty": MagicMock()}), \
-         patch.object(gc, "_spawn_pty_bounded", return_value=MagicMock()), \
-         patch.object(gc, "_read_pty_bounded", return_value=(True, WARNING + "\r\nI ran whoami\r\n", 0)):
-        ok, text, err = client._invoke_via_cli("sys", "content")
-    assert ok is False and text == ""
-    assert "did not run as assemblyzero-text" in err
-
-
-def test_off_windows_a_short_prompt_rides_stdin():
-    """#3623: the PTY path needs pywinpty, which Linux does not have."""
-    client = gc.GeminiClient(model=MODEL)
-    client._agy_cli = "/usr/bin/agy"
-    with patch.object(gc, "_ON_WINDOWS", False), \
+    client._agy_cli = "C:/fake/agy" if on_windows else "/usr/bin/agy"
+    with patch.object(gc, "_ON_WINDOWS", on_windows), \
          patch.object(client, "_invoke_via_stdin", return_value=(True, "ok", "")) as stdin:
         ok, _, _ = client._invoke_via_cli("sys", "short")
     assert ok is True
     stdin.assert_called_once()
 
 
-@pytest.mark.usefixtures("windows_pty")
-def test_pty_path_without_a_warning_still_succeeds():
-    client = gc.GeminiClient(model=MODEL)
-    client._agy_cli = "C:/fake/agy"
-    with patch.dict("sys.modules", {"winpty": MagicMock()}), \
-         patch.object(gc, "_spawn_pty_bounded", return_value=MagicMock()), \
-         patch.object(gc, "_read_pty_bounded", return_value=(True, "APPROVE\r\n", 0)):
-        ok, text, err = client._invoke_via_cli("sys", "content")
-    assert ok is True and text == "APPROVE", err
+def test_the_pty_helpers_are_gone():
+    for name in ("_spawn_pty_bounded", "_read_pty_bounded", "SPAWN_TIMEOUT_SECONDS"):
+        assert not hasattr(gc, name)

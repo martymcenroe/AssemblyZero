@@ -12,9 +12,7 @@ Issue #605: Systemic Model Refresh — Gemini 3.1, Claude 4.6
 
 import json
 import subprocess
-import sys
 import tempfile
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -143,116 +141,14 @@ class TestCredentialLoading:
             client._load_credentials()
 
 
-class _FakePty:
-    """Minimal PtyProcess stand-in for _invoke_via_cli boundary tests (#1765)."""
-
-    def __init__(self, chunks, exitstatus=0):
-        self._chunks = list(chunks)
-        self.exitstatus = exitstatus
-
-    @classmethod
-    def make_spawn(cls, chunks, exitstatus=0):
-        instance = cls(chunks, exitstatus)
-        spawner = MagicMock()
-        spawner.spawn.return_value = instance
-        return spawner, instance
-
-    def read(self, n):
-        if self._chunks:
-            return self._chunks.pop(0)
-        raise EOFError
-
-    def isalive(self):
-        return False
-
-    def terminate(self, force=False):
-        pass
-
-
-@pytest.mark.usefixtures("windows_pty")
-class TestInvokeViaCliErrorBoundary:
-    """#1765: CLI error banners must never be returned as model output.
-
-    Hardening-run evidence: an 'Error: invalid --model' banner was saved as
-    a draft and flowed through review and verdict as content.
-
-    winpty is Windows-only and absent on the Linux CI runner, so these
-    tests stub the whole module in sys.modules rather than patching into
-    a real import.
-    """
-
-    @staticmethod
-    def _patch_winpty(spawner):
-        return patch.dict(
-            sys.modules, {"winpty": types.SimpleNamespace(PtyProcess=spawner)}
-        )
-
-    def _client(self, temp_credentials_file, temp_state_file):
-        client = GeminiClient(
-            model="gemini-3.1-pro-high",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
-        )
-        # The Linux CI runner has no agy binary; _find_agy_cli() returns
-        # None there and _invoke_via_cli bails before the PTY layer these
-        # tests exercise. Force a fake path — the PTY itself is stubbed.
-        client._agy_cli = "/fake/agy"
-        return client
-
-    def test_nonzero_exit_is_failure(self, temp_credentials_file, temp_state_file):
-        client = self._client(temp_credentials_file, temp_state_file)
-        banner = (
-            'Error: invalid --model "gemini-3.1-pro-preview": model '
-            "gemini-3.1-pro-preview is not recognized\nAvailable models:\n"
-        )
-        spawner, _ = _FakePty.make_spawn([banner], exitstatus=1)
-        with self._patch_winpty(spawner):
-            ok, text, err = client._invoke_via_cli("sys", "content")
-        assert ok is False
-        assert text == ""
-        assert "agy exited 1" in err
-        assert "invalid --model" in err
-
-    def test_error_banner_with_clean_exit_is_failure(
-        self, temp_credentials_file, temp_state_file
-    ):
-        """agy can print errors under a PTY with ambiguous status — the
-        first-line 'Error:' shape alone must reject the output."""
-        client = self._client(temp_credentials_file, temp_state_file)
-        banner = "Error: something went sideways\ndetails...\n"
-        spawner, _ = _FakePty.make_spawn([banner], exitstatus=0)
-        with self._patch_winpty(spawner):
-            ok, text, err = client._invoke_via_cli("sys", "content")
-        assert ok is False
-        assert text == ""
-        assert "agy error output" in err
-
-    def test_normal_output_still_succeeds(
-        self, temp_credentials_file, temp_state_file
-    ):
-        client = self._client(temp_credentials_file, temp_state_file)
-        spawner, _ = _FakePty.make_spawn(["## Draft\n\nA legitimate response.\n"])
-        with self._patch_winpty(spawner):
-            ok, text, err = client._invoke_via_cli("sys", "content")
-        assert ok is True
-        assert "legitimate response" in text
-        assert err == ""
-
-    def test_empty_output_is_failure(self, temp_credentials_file, temp_state_file):
-        client = self._client(temp_credentials_file, temp_state_file)
-        spawner, _ = _FakePty.make_spawn([""])
-        with self._patch_winpty(spawner):
-            ok, text, err = client._invoke_via_cli("sys", "content")
-        assert ok is False
-        assert "no output" in err
-
-
 class TestInvokeViaStdin:
-    """#1772: prompts beyond the Windows argv ceiling ride stdin.
+    """Every prompt rides stdin (#1772; the only path since #3624).
 
     `agy --model X` with no -p reads the prompt from stdin and prints to a
-    plain pipe (verified live with a 39,954-char prompt). Same #1765 error
-    boundaries as the PTY path.
+    plain pipe (verified live with a 39,954-char prompt). #1765: a CLI error
+    banner must never be returned as model output -- hardening-run evidence
+    had an 'Error: invalid --model' banner saved as a draft and carried
+    through review and verdict as content.
     """
 
     def _client(self, temp_credentials_file, temp_state_file):
@@ -320,6 +216,48 @@ class TestInvokeViaStdin:
         ok, text, err = client._invoke_via_stdin("p" * 31000)
         assert ok is False
         assert "agy error output" in err
+
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
+    def test_short_prompt_rides_stdin_and_succeeds(
+        self, mock_popen, temp_credentials_file, temp_state_file
+    ):
+        """#3624: a short prompt no longer takes a PTY path; it rides stdin."""
+        proc = self._proc(stdout="## Draft\n\nA legitimate response.\n")
+        mock_popen.return_value = proc
+        client = self._client(temp_credentials_file, temp_state_file)
+        ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is True and err == ""
+        assert "legitimate response" in text
+        assert "-p" not in mock_popen.call_args[0][0]
+        assert "content" in proc.communicate.call_args[1]["input"]
+
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
+    def test_ansi_is_stripped(self, mock_popen, temp_credentials_file, temp_state_file):
+        mock_popen.return_value = self._proc(stdout='\x1b[32m{"verdict":"APPROVE"}\x1b[0m\r\n')
+        client = self._client(temp_credentials_file, temp_state_file)
+        ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is True and err == ""
+        assert text == '{"verdict":"APPROVE"}'
+
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
+    def test_empty_output_is_failure(self, mock_popen, temp_credentials_file, temp_state_file):
+        mock_popen.return_value = self._proc(stdout="")
+        client = self._client(temp_credentials_file, temp_state_file)
+        ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is False and "no output" in err
+
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
+    def test_agent_warning_on_stdout_is_failure(
+        self, mock_popen, temp_credentials_file, temp_state_file
+    ):
+        """#3624: the removed PTY path saw both streams merged; stdin reads both."""
+        mock_popen.return_value = self._proc(
+            stdout="Warning: --agent assemblyzero-text not found\nI ran whoami\n"
+        )
+        client = self._client(temp_credentials_file, temp_state_file)
+        ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is False and text == ""
+        assert "did not run as assemblyzero-text" in err
 
     @patch("assemblyzero.core.gemini_client.kill_process_tree")
     @patch("assemblyzero.core.gemini_client.subprocess.Popen")
@@ -553,37 +491,6 @@ class TestResetTimeParsing:
 # ── Antigravity (agy) CLI transport (#1335) ──────────────────────────
 
 
-class _FakeAgyProc:
-    """Minimal pywinpty PtyProcess stand-in: replays chunks then EOFErrors."""
-
-    def __init__(self, chunks):
-        self._chunks = list(chunks)
-        self.terminated = False
-
-    def read(self, _size):
-        if self._chunks:
-            return self._chunks.pop(0)
-        raise EOFError
-
-    def isalive(self):
-        return bool(self._chunks)
-
-    def terminate(self, force=False):
-        self.terminated = True
-
-
-def _fake_winpty(chunks):
-    """A fake `winpty` module whose PtyProcess.spawn yields the given chunks.
-
-    Lets the agy pseudo-console path be tested without real pywinpty (so the
-    tests run on Linux CI, where winpty is not installed).
-    """
-    mod = types.ModuleType("winpty")
-    mod.PtyProcess = MagicMock()
-    mod.PtyProcess.spawn.return_value = _FakeAgyProc(chunks)
-    return mod
-
-
 def test_strip_ansi_removes_codes_and_normalizes_newlines():
     assert _strip_ansi("\x1b[32mOK\x1b[0m\r\n") == "OK\n"
     assert _strip_ansi("a\r\nb\r\n") == "a\nb\n"
@@ -618,17 +525,6 @@ def test_invoke_via_cli_routes_oversized_prompt_to_stdin():
     assert ok is True and resp == "ok"
     mock_stdin.assert_called_once()
     assert len(mock_stdin.call_args[0][0]) > 31000  # full composed prompt
-
-
-@pytest.mark.usefixtures("windows_pty")
-def test_invoke_via_cli_strips_ansi_and_returns_text():
-    client = GeminiClient(model="gemini-3.1-pro-preview")
-    client._agy_cli = "agy"
-    chunks = ['\x1b[32m{"verdict":"APPROVE"}\x1b[0m\r\n']
-    with patch.dict(sys.modules, {"winpty": _fake_winpty(chunks)}):
-        ok, resp, err = client._invoke_via_cli("sys", "content")
-    assert ok is True and err == ""
-    assert resp == '{"verdict":"APPROVE"}'
 
 
 class TestTheFailureTextNamesTheTransport:
@@ -739,12 +635,3 @@ class TestTheFailureTextNamesTheTransport:
 
         assert ok is False
         assert "agy" in err
-
-
-@pytest.mark.usefixtures("windows_pty")
-def test_invoke_via_cli_empty_output_is_failure():
-    client = GeminiClient(model="gemini-3.1-pro-preview")
-    client._agy_cli = "agy"
-    with patch.dict(sys.modules, {"winpty": _fake_winpty([])}):
-        ok, resp, err = client._invoke_via_cli("sys", "content")
-    assert ok is False and "no output" in err

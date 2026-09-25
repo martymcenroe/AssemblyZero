@@ -189,6 +189,21 @@ def no_model_profile_from_the_machine(monkeypatch):
     close_sink()
 
 
+@pytest.fixture(autouse=True)
+def agy_discovery_stays_off_the_machine(monkeypatch):
+    """Every test sees the agy transport as CI does: off Windows (#3624).
+
+    On Windows, building a GeminiClient looks for agy inside WSL (#3623) by
+    running wsl.exe. The first client a session builds did that for real, so
+    a test that built its client under a mocked Popen failed on the operator's
+    machine and passed in CI, depending on which test ran first. A test of the
+    Windows branch patches `_ON_WINDOWS` itself, and its patch wins.
+    """
+    from assemblyzero.core import gemini_client
+
+    monkeypatch.setattr(gemini_client, "_ON_WINDOWS", False)
+
+
 @pytest.fixture
 def mock_file_size(monkeypatch):
     """Factory fixture that patches os.path.getsize to return specified sizes for given paths.

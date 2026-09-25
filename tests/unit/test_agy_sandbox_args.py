@@ -16,8 +16,6 @@ transport writes an agent definition with `tools: []` and
 """
 from __future__ import annotations
 
-import sys
-import types
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -68,27 +66,6 @@ def test_the_definition_has_no_tools_and_no_command_execution():
     assert parsed["commandExecutionPolicy"] == "off"
 
 
-@pytest.mark.usefixtures("windows_pty")
-def test_the_pty_path_runs_as_the_agent_written_into_its_cwd(monkeypatch):
-    seen = {}
-
-    def spawn(argv, cwd, dimensions, *a, **kw):
-        seen["argv"] = list(argv)
-        seen["agent_file"] = _agent_file_in(cwd)
-        raise TimeoutError("stop here; only the argv and the cwd matter")
-
-    monkeypatch.setitem(sys.modules, "winpty", types.ModuleType("winpty"))
-    monkeypatch.setattr(gc, "_spawn_pty_bounded", spawn)
-
-    ok, _text, _err = _client()._invoke_via_cli("sys", "short prompt")
-
-    assert ok is False
-    argv = seen["argv"]
-    assert argv[:4] == ["/fake/agy", "--agent", "assemblyzero-text", "-p"]
-    assert _no_elevating_flag(argv)
-    assert seen["agent_file"] == gc.AGY_AGENT_DEFINITION
-
-
 @patch("assemblyzero.core.gemini_client.subprocess.Popen")
 def test_the_stdin_path_runs_as_the_agent_written_into_its_cwd(mock_popen):
     seen = {}
@@ -104,7 +81,8 @@ def test_the_stdin_path_runs_as_the_agent_written_into_its_cwd(mock_popen):
 
     mock_popen.side_effect = popen
 
-    ok, text, _err = _client()._invoke_via_cli("sys", "x" * 31000)
+    # #3624: short and long prompts take the same path now.
+    ok, text, _err = _client()._invoke_via_cli("sys", "short prompt")
 
     assert ok is True and text == "fine"
     argv = seen["argv"]
