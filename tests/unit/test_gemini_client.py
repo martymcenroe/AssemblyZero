@@ -291,8 +291,9 @@ class TestInvokeViaStdin:
         argv = mock_popen.call_args[0][0]
         assert "-p" not in argv, "oversize prompt must NOT ride argv"
         assert argv[0] == "/fake/agy"
-        # #3516: sandboxed, then the model.
-        assert argv[1:4] == ["--sandbox", "--model", "gemini-3.1-pro-high"]
+        # #3605: no flag between the binary and the model; --sandbox requested
+        # elevation on Windows and is withdrawn.
+        assert argv[1:3] == ["--model", "gemini-3.1-pro-high"]
         assert mock_popen.call_args[1]["cwd"], "stdin path keeps temp-cwd isolation"
         sent = proc.communicate.call_args[1]["input"]
         assert len(sent) > 31000  # full composed prompt on stdin

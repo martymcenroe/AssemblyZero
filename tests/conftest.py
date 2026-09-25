@@ -151,6 +151,29 @@ def no_live_model_calls(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def agy_settings_deny_tools(request, tmp_path, monkeypatch):
+    """A unit test's agy settings come from the test, not the machine (#3605).
+
+    `GeminiClient` refuses to call agy unless `~/.gemini/antigravity-cli/
+    settings.json` leaves `toolPermission` at `request-review`, and the
+    transports are stubbed in this tier, so the check reads a settings file
+    under tmp_path that passes. A test of the check itself points the path
+    at its own fixture, and its monkeypatch runs later, so it wins. Scoped
+    to `tests/unit/` by path; the tiers that call real agy read the real file.
+    """
+    path = Path(str(request.node.fspath))
+    if path.parent.name != "unit":
+        yield
+        return
+    from assemblyzero.core import gemini_client
+
+    settings = tmp_path / "agy-settings.json"
+    settings.write_text('{"toolPermission": "request-review"}', encoding="utf-8")
+    monkeypatch.setattr(gemini_client, "AGY_SETTINGS_PATH", settings)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def home_state_stays_out_of_home(tmp_path, monkeypatch):
     """Every test's halt snapshots, resume contracts and audit lines land
     under its own tmp_path, never under ~/.assemblyzero/workflow_state or
