@@ -124,6 +124,30 @@ class TestAMockRunLeavesNothing:
         assert (runs / ".implement-status-42.json").exists(), out
         assert not list(target_repo.glob(".implement-status-*.json"))
 
+    def test_the_checkpoint_db_stays_in_the_target_not_home(
+        self, target_repo, tmp_path, monkeypatch,
+    ):
+        """#3547: with no --db-path a mock run wrote ~/.assemblyzero/
+        testing_42.db, where a later real --resume for issue 42 would read
+        the mock's checkpoints."""
+        from tools import run_implement_from_lld as tool
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        argv = ["prog", "--issue", "42", "--repo", str(target_repo), "--mock", "--auto"]
+        out = io.StringIO()
+        with patch("sys.argv", argv), redirect_stdout(out):
+            try:
+                tool.main()
+            except SystemExit:
+                pass
+
+        assert not (home / ".assemblyzero" / "testing_42.db").exists(), out.getvalue()
+        db = target_repo / "data" / "mock-runs" / "impl-42" / "checkpoints.db"
+        assert db.exists(), out.getvalue()
+        assert f"Checkpoint database (resume state): {db}" in out.getvalue()
+
 
 def _worktree_with_work(target: Path) -> Path:
     """What a successful real run hands `finish_standalone_run`: a worktree
