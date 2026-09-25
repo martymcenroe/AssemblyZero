@@ -86,6 +86,17 @@ QUOTA_EXHAUSTED_PATTERNS = [
 # below bounds ONE invoke() end to end, retries and rotation included.
 AGY_CALL_TIMEOUT_SECONDS = 300.0
 MAX_TOTAL_INVOKE_SECONDS = 600.0
+
+#: Every agy call runs sandboxed (#3516, ADR 0233). Measured 2026-09-24,
+#: through this client's own `_invoke_via_cli`, asked to run `whoami` and to
+#: write a file at an absolute path outside its temp cwd:
+#:   no flag              -> ran `whoami` (answered "mcwiz") and wrote the file
+#:   --sandbox            -> shell refused ("createAppContainer: ShellExecute
+#:                           failed"); the file was STILL written
+#:   --sandbox --mode plan -> the same: plan "auto-approved", file written
+#: So the flag removes shell execution and nothing else. agy can still write
+#: any file the operator's account can write; ADR 0233 states that plainly.
+AGY_SAFETY_ARGS = ["--sandbox"]
 MIN_ATTEMPT_SECONDS = 20.0
 
 #: Named in every failure this module hands back to a caller (#2476).
@@ -670,7 +681,7 @@ class GeminiClient:
 
         import tempfile
 
-        argv = [self._agy_cli, "-p", full_prompt, "--model", self.model]
+        argv = [self._agy_cli, *AGY_SAFETY_ARGS, "-p", full_prompt, "--model", self.model]
         chunks: list[str] = []
         exit_status = None
         try:
@@ -743,7 +754,7 @@ class GeminiClient:
             # temp cwd for a moment; that must not fail the call.
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_cwd:
                 proc = subprocess.Popen(
-                    [self._agy_cli, "--model", self.model],
+                    [self._agy_cli, *AGY_SAFETY_ARGS, "--model", self.model],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
