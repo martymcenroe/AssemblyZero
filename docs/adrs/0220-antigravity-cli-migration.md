@@ -27,6 +27,12 @@ shells out to the CLI (`_invoke_via_cli`).
 `--model <id>`; no `--output-format`; `--sandbox` for restricted mode. `-p -` reads the
 prompt from stdin.
 
+> **Amended by ADR 0233 (Proposed, 2026-09-24, #3516).** Measured through this
+> client: without `--sandbox`, `agy -p` runs shell commands and writes files at
+> absolute paths unattended. `--sandbox` blocks the shell and NOT file writes,
+> and `--mode plan` auto-approves itself. The client now passes `--sandbox`.
+> `agy` can still write any file the operator's account can write.
+
 **3. `agy` renders its response only to a TTY — SOLVED.** Called with a piped stdout it
 exits 0 with empty output (the model call still happens — the log shows successful
 keyring auth and `streamGenerateContent` to `daily-cloudcode-pa.googleapis.com` — but
