@@ -91,6 +91,40 @@ class TestItChecksTheTransport:
         assert "transport: the probe call raised FileNotFoundError" in r.warnings[0]
 
 
+class TestTheProbeUsesAGeminiModel:
+    """#3541: `GeminiClient()` with no model takes `REVIEWER_MODEL`, now a
+    Claude id, and raises -- so every Gemini-configured run halted at the
+    preflight. The fake-client tests above never built the real client."""
+
+    def test_the_real_client_is_built_without_raising(self):
+        from assemblyzero.core.gemini_client import GeminiClient
+
+        ok = SimpleNamespace(success=True, response="pong", error_message=None)
+        with patch.object(GeminiClient, "_find_agy_cli", return_value="agy.exe"), \
+                patch.object(GeminiClient, "invoke", return_value=ok):
+            result = preflight.check_gemini_transport()
+
+        assert result.passed, result.warnings
+
+    def test_the_runs_gemini_spec_picks_the_probe_model(self):
+        built: list[str] = []
+
+        class _Recording(_FakeClient):
+            def __init__(self, model):
+                super().__init__()
+                built.append(model)
+
+        with patch("assemblyzero.core.gemini_client.GeminiClient", _Recording):
+            result = preflight.preflight_for_specs("claude:sonnet", "gemini:3.1-pro")
+
+        assert result.passed
+        assert built == ["gemini-3.1-pro-high"]
+
+    def test_a_spec_without_a_known_name_still_gets_a_gemini_model(self):
+        assert preflight.gemini_model_for("gemini:something-new").startswith("gemini-")
+        assert preflight.gemini_model_for("claude:opus") == preflight.DEFAULT_PROBE_MODEL
+
+
 class TestN1ProceedsOnAClaudeOnlyRun:
     def test_n1_with_claude_specs_and_no_credential_file_drafts(self, tmp_path, monkeypatch):
         """The acceptance test: no credential file, Claude for every node,

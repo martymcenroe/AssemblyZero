@@ -187,20 +187,42 @@ def gemini_in_specs(*specs: str) -> bool:
     return any(str(s or "").strip().lower().startswith("gemini:") for s in specs)
 
 
-def check_gemini_transport(client=None) -> PreflightResult:
+#: The probe's model when no spec names one. Never ``config.REVIEWER_MODEL``:
+#: that is the reviewer default, now a Claude id, and ``GeminiClient`` rejects
+#: it (#3541).
+DEFAULT_PROBE_MODEL = "gemini-3.1-pro-high"
+
+
+def gemini_model_for(*specs: str) -> str:
+    """The Gemini model id the run's first ``gemini:`` spec names, mapped the
+    way ``get_provider`` maps it (``GeminiProvider.MODEL_MAP``)."""
+    from assemblyzero.core.llm_provider import GeminiProvider
+
+    for spec in specs:
+        text = str(spec or "").strip()
+        if text.lower().startswith("gemini:"):
+            name = text.split(":", 1)[1]
+            if name.startswith("gemini-"):
+                return name
+            return GeminiProvider.MODEL_MAP.get(name, DEFAULT_PROBE_MODEL)
+    return DEFAULT_PROBE_MODEL
+
+
+def check_gemini_transport(client=None, model: str = DEFAULT_PROBE_MODEL) -> PreflightResult:
     """What the sanctioned transport needs, checked end to end (#3506).
 
     Since ADR 0220 the governance client reaches Gemini through ``agy``. The
     credential file's presence (``check_gemini_available``) says nothing about
     whether ``agy`` is installed, logged in, or answering. So: resolve the
     binary, then send one minimal call through ``GeminiClient`` exactly as a
-    review would. A failure is reported as a TRANSPORT failure, by step.
+    review would, on the model the run will use. A failure is reported as a
+    TRANSPORT failure, by step.
     """
     try:
         if client is None:
             from assemblyzero.core.gemini_client import GeminiClient
 
-            client = GeminiClient()
+            client = GeminiClient(model=model)
         if not client._find_agy_cli():
             return PreflightResult(
                 passed=False, available_credentials=0, total_credentials=0,
@@ -244,5 +266,5 @@ def preflight_for_specs(*specs: str, client=None) -> Optional[PreflightResult]:
     if not gemini_in_specs(*specs):
         return None
     if _TRANSPORT_RESULT is None or client is not None:
-        _TRANSPORT_RESULT = check_gemini_transport(client)
+        _TRANSPORT_RESULT = check_gemini_transport(client, model=gemini_model_for(*specs))
     return _TRANSPORT_RESULT
