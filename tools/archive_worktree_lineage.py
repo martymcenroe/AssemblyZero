@@ -46,9 +46,16 @@ def archive_lineage(worktree_path: Path, issue_number: int, main_repo: Path) -> 
             dest_dir = main_repo / "docs" / "lineage" / "archived" / src_dir.name
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
 
-            # Copy entire directory (overwrite if exists)
+            # #3518: an earlier archive of the same lineage is a record too; it
+            # is moved aside, stamped, rather than deleted to make room.
             if dest_dir.exists():
-                shutil.rmtree(dest_dir)
+                from datetime import datetime
+
+                previous = dest_dir.with_name(
+                    f"{dest_dir.name}.prev-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+                )
+                dest_dir.rename(previous)
+                print(f"  Previous archive moved aside: {previous.name}")
             shutil.copytree(src_dir, dest_dir)
 
             archived_dirs.append(dest_dir)
@@ -57,12 +64,49 @@ def archive_lineage(worktree_path: Path, issue_number: int, main_repo: Path) -> 
     return archived_dirs
 
 
+def is_linked_worktree(path: Path) -> bool:
+    """Whether ``path`` is a LINKED worktree, not a repository's main checkout.
+
+    A linked worktree's git dir (``.git/worktrees/<name>``) differs from the
+    repository's common dir (``.git``); in the main checkout they are the
+    same. Anything git cannot answer for is not a linked worktree.
+    """
+    def _rev(flag: str) -> Path | None:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--path-format=absolute", flag],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        return Path(result.stdout.strip()).resolve()
+
+    git_dir, common = _rev("--git-dir"), _rev("--git-common-dir")
+    return git_dir is not None and common is not None and git_dir != common
+
+
+def require_linked_worktree(path: Path) -> None:
+    """#3528: refuse before anything is deleted or evicted. The script used
+    to accept the main checkout -- run through ``poetry -C <main>``, ``.``
+    resolved there -- and emptied its ``__pycache__``, stopping short of
+    ``poetry env remove --all`` only because it crashed first."""
+    if not is_linked_worktree(path):
+        raise SystemExit(
+            f"REFUSED: {path} is not a linked git worktree (it is a main "
+            "checkout, or not a repository). Nothing was deleted or evicted. "
+            "Pass the worktree's own path to --worktree."
+        )
+
+
 def clean_ephemeral(worktree_path: Path) -> None:
     """Remove ephemeral files that shouldn't persist.
+
+    Refuses unless ``worktree_path`` is a linked worktree (#3528). The list is
+    closed: regenerable caches and the workflow's scratch audit directory.
 
     Args:
         worktree_path: Path to the worktree being cleaned
     """
+    require_linked_worktree(worktree_path)
     ephemeral = [".coverage", "__pycache__", ".pytest_cache", ".assemblyzero/audit"]
 
     for name in ephemeral:
@@ -111,6 +155,9 @@ def evict_poetry_venv(worktree_path: Path) -> None:
     Args:
         worktree_path: Path to the worktree being cleaned.
     """
+    # #3528: `poetry env remove --all` run in a main checkout evicts the venv
+    # every worktree test run borrows.
+    require_linked_worktree(worktree_path)
     pyproject = worktree_path / "pyproject.toml"
     if not pyproject.exists():
         # Not a poetry project — skip silently.
@@ -150,6 +197,9 @@ def main():
 
     worktree = Path(args.worktree).resolve()
     main_repo = Path(args.main_repo).resolve()
+
+    # #3528: before any step that deletes, moves or evicts anything.
+    require_linked_worktree(worktree)
 
     print(f"Archiving lineage from {worktree}")
 

@@ -1735,6 +1735,9 @@ def _hill_climb(
         manifest: dict[str, str] = {}
         try:
             if snap_dir.exists():
+                # #3518: this function's own snapshot, rewritten below with
+                # the new best. The assertion is the ownership gate.
+                assert snap_dir.name == "best-iteration" and snap_dir.parent == snap_root
                 shutil.rmtree(snap_dir)
             snap_dir.mkdir(parents=True, exist_ok=True)
             for idx, file_str in enumerate(tracked):

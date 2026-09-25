@@ -51,13 +51,15 @@ def write_adversarial_tests(
         category = _sanitize_category(tc.get("category", "general"))
         grouped[category].append(tc)
 
-    # Write to temp directory first for atomicity
-    temp_dir = tempfile.mkdtemp(prefix="adversarial_")
+    # Write to a staging directory first for atomicity. #3518: staged INSIDE
+    # the destination, not the OS temp directory -- a hidden location the
+    # operator cannot see, and a different filesystem, across which the move
+    # below was a copy and never atomic.
+    os.makedirs(output_dir, exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix=".adversarial_", dir=output_dir)
     result: dict[str, str] = {}
 
     try:
-        os.makedirs(output_dir, exist_ok=True)
-
         for category, cases in grouped.items():
             filename = f"test_{issue_id}_{category}.py"
             filepath = os.path.join(output_dir, filename)
@@ -69,8 +71,8 @@ def write_adversarial_tests(
             with open(temp_filepath, "w", encoding="utf-8") as f:
                 f.write(content)
 
-            # Atomic move to final location
-            shutil.move(temp_filepath, filepath)
+            # Atomic rename to final location (same directory, same filesystem)
+            os.replace(temp_filepath, filepath)
             result[filepath] = content
 
             logger.info(
@@ -81,8 +83,10 @@ def write_adversarial_tests(
         logger.exception("Error writing adversarial test files")
         raise
     finally:
-        # Clean up temp directory
+        # Clean up the staging directory: the one mkdtemp made in this call,
+        # inside output_dir (the assertion is the #3518 ownership gate).
         if os.path.exists(temp_dir):
+            assert os.path.realpath(os.path.dirname(temp_dir)) == os.path.realpath(output_dir)
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     return result

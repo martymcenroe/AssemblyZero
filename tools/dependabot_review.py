@@ -793,6 +793,20 @@ def _remove_node_modules(pkg_dir: Path) -> None:
     if not nm.exists():
         return
 
+    # #3518 ownership gate: only inside a LINKED worktree (the audit's own),
+    # never a main checkout, whose node_modules is the operator's.
+    def _rev(flag: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(pkg_dir), "rev-parse", "--path-format=absolute", flag],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+    git_dir, common = _rev("--git-dir"), _rev("--git-common-dir")
+    if not git_dir or not common or Path(git_dir).resolve() == Path(common).resolve():
+        print(f"  REFUSED: {nm} is not inside a linked worktree; left in place.",
+              file=sys.stderr)
+        return
+
     def _onexc(func, path, exc):
         os.chmod(path, stat.S_IWRITE)
         func(path)

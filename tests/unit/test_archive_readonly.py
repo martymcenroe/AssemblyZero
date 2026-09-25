@@ -123,8 +123,12 @@ class TestTheArchiveItselfStaysWritable:
 
 
 class TestRemovingAReadOnlyTree:
+    """#3518: `_rmtree` removes only an archive this module wrote, so each
+    target carries the `logs/` directory `archive_run` creates first."""
+
     def test_rmtree_clears_and_removes(self, tmp_path):
         target = tmp_path / "archive"
+        (target / "logs").mkdir(parents=True)
         (target / "inner").mkdir(parents=True)
         locked = target / "inner" / "a.txt"
         locked.write_text("x", encoding="utf-8")
@@ -135,7 +139,7 @@ class TestRemovingAReadOnlyTree:
 
     def test_an_ordinary_tree_still_removes(self, tmp_path):
         target = tmp_path / "archive"
-        target.mkdir()
+        (target / "logs").mkdir(parents=True)
         (target / "a.txt").write_text("x", encoding="utf-8")
         _rmtree(target)
         assert not target.exists()

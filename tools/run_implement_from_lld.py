@@ -193,10 +193,17 @@ def create_worktree(
                 )
             return worktree_path, ""
         else:
-            # Directory exists but isn't a valid worktree - remove it
-            import shutil
-            shutil.rmtree(worktree_path)
-            # Continue to create proper worktree below
+            # #3231: the directory exists but is not a worktree. It used to be
+            # rmtree'd on the strength of one missing file, unattended; the
+            # ways a worktree loses its .git are the ways that leave work in
+            # it. Move it aside, say where, and cut the worktree fresh.
+            from datetime import datetime
+
+            aside = worktree_path.with_name(
+                f"{worktree_path.name}.bak-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+            )
+            worktree_path.rename(aside)
+            print(f"    [WARN] {worktree_path} was not a worktree; moved aside to {aside}")
 
     # Create worktree (from start_point if given, else current HEAD)
     add_cmd = ["git", "worktree", "add", str(worktree_path), "-b", branch_name]

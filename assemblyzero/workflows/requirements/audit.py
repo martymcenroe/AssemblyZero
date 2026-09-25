@@ -1090,10 +1090,21 @@ def shift_lineage_versions(issue_number: int, target_repo: Path) -> list[str]:
     # Step 1: Shift n1 -> n2 (if n1 exists)
     if lineage_n1.exists():
         if lineage_n2.exists():
-            # n2 already exists - remove it first (oldest version discarded)
-            import shutil
-            shutil.rmtree(lineage_n2)
-            operations.append(f"Removed: {lineage_n2.relative_to(target_repo)} (oldest)")
+            # #3518: n2 is a lineage record, and lineage records are not
+            # deleted. The oldest generation leaves the n-chain for
+            # docs/lineage/discarded/, stamped, rather than the bin.
+            from datetime import datetime
+
+            discarded = (
+                target_repo / "docs" / "lineage" / "discarded"
+                / f"{issue_number}-lld-n2-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+            )
+            discarded.parent.mkdir(parents=True, exist_ok=True)
+            lineage_n2.rename(discarded)
+            operations.append(
+                f"Moved aside: {lineage_n2.relative_to(target_repo)} -> "
+                f"{discarded.relative_to(target_repo)} (oldest)"
+            )
         lineage_n1.rename(lineage_n2)
         operations.append(
             f"Shifted: {lineage_n1.relative_to(target_repo)} -> "
