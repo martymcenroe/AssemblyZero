@@ -337,10 +337,10 @@ Full orchestrator configuration with defaults:
     "skip_existing_lld": True,
     "skip_existing_spec": True,
     "stages": {
-        "triage": {"drafter": "claude:opus-4.5", "timeout_seconds": 300},
-        "lld":    {"drafter": "claude:opus-4.5", "timeout_seconds": 600},
-        "spec":   {"drafter": "claude:opus-4.5", "timeout_seconds": 600},
-        "impl":   {"drafter": "claude:opus-4.5", "timeout_seconds": 1800},
+        "triage": {"drafter": "gemini:3.1-pro", "timeout_seconds": 300},
+        "lld":    {"drafter": "gemini:3.1-pro", "timeout_seconds": 600},
+        "spec":   {"drafter": "gemini:3.1-pro", "timeout_seconds": 600},
+        "impl":   {"drafter": "gemini:3.1-pro", "timeout_seconds": 1800},
         "pr":     {"drafter": "",                 "timeout_seconds": 120},
     },
     "gates": {

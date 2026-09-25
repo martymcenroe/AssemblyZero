@@ -7,7 +7,7 @@ that spends the healthy provider's quota to discover the dry one.
 Gemini already had half of this. Its rotation state records which credentials
 are exhausted and when they reset, and ``preflight.check_gemini_available()``
 reads that file with zero API calls — its docstring even states the intent:
-"Checks Gemini availability BEFORE spending money on Claude drafts." Claude
+"Checks Gemini availability before a run starts." Claude
 had none of it: usage limits were detected at call time (``errors.py`` matches
 "usage limit" / "wait until") and then discarded.
 

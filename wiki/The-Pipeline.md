@@ -17,7 +17,7 @@ AssemblyZero automates the full journey from an idea to tested, reviewed, and me
 │  run_requirements_       │
 │  workflow.py --type lld  │
 │                         │
-│  Claude drafts ──►      │
+│  Gemini drafts ──►      │
 │  Gemini reviews         │
 └────────┬────────────────┘
          │ produces: LLD (Low-Level Design)
@@ -28,7 +28,7 @@ AssemblyZero automates the full journey from an idea to tested, reviewed, and me
 │  spec_workflow.py        │
 │                         │
 │  Reads codebase ──►     │
-│  Claude drafts ──►      │
+│  Gemini drafts ──►      │
 │  Gemini reviews         │
 └────────┬────────────────┘
          │ produces: Implementation Spec
@@ -57,7 +57,7 @@ AssemblyZero automates the full journey from an idea to tested, reviewed, and me
 
 What it does:
 - Reads the issue body from GitHub
-- Claude drafts a Low-Level Design document following the LLD template
+- Gemini (agy) drafts a Low-Level Design document following the LLD template
 - Mechanical validation checks paths, structure, completeness
 - Gemini reviews for design quality
 - Iterates up to 3 times until approved

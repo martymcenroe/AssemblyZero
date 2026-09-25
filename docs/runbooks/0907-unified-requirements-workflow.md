@@ -136,12 +136,12 @@ Without `--repo`, it would target AssemblyZero itself.
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--drafter SPEC` | `claude:opus-4.5` | Drafter LLM provider:model |
-| `--reviewer SPEC` | `gemini:3-pro-preview` | Reviewer LLM provider:model |
+| `--drafter SPEC` | `gemini:3.1-pro` | Drafter LLM provider:model (Gemini in agy drafts; ADR 0234) |
+| `--reviewer SPEC` | `gemini:3.1-pro` | Reviewer LLM provider:model (Gemini in agy validates; ADR 0234) |
 
 **Provider specs:**
 - `claude:opus-4.5`, `claude:sonnet`, `claude:haiku`
-- `gemini:3-pro-preview`, `gemini:2.5-flash`, `gemini:2.5-pro`
+- `gemini:3.1-pro`, `gemini:2.5-flash`, `gemini:2.5-pro` (`gemini:3-pro-preview` is retired and on `FORBIDDEN_MODELS`)
 
 ### Review Configuration
 
@@ -185,7 +185,7 @@ poetry run python tools/run_requirements_workflow.py \
 ```
 
 Flow:
-1. Claude drafts issue from brief
+1. Gemini (agy) drafts issue from brief
 2. You edit in VS Code
 3. Gemini reviews
 4. You review verdict
@@ -201,7 +201,7 @@ poetry run python tools/run_requirements_workflow.py \
 
 Flow:
 1. Fetch issue from GitHub
-2. Claude drafts LLD
+2. Gemini (agy) drafts LLD
 3. Gemini reviews (auto-revise if BLOCKED)
 4. LLD saved when APPROVED
 
