@@ -36,9 +36,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("assemblyzero/workflows/testing/nodes/verify_phases.py", "_hill_climb"):
         "this function's own best-iteration snapshot, rewritten on the next "
         "line; asserted by name and parent",
-    ("tools/archive_worktree_lineage.py", "clean_ephemeral"):
-        "a closed list of caches, only inside a LINKED worktree "
-        "(require_linked_worktree, #3528)",
     ("tools/dependabot_review.py", "_remove_node_modules"):
         "node_modules inside the audit's own linked worktree (#1839); refuses "
         "in a main checkout",
@@ -109,7 +106,7 @@ class TestEveryRmtreeNamesItsGate:
 
     def test_the_walk_sees_the_sites_it_should(self, sites):
         """A walker that found nothing would pass the first test by vacuum."""
-        assert len(sites) == len(ALLOWLIST) == 7
+        assert len(sites) == len(ALLOWLIST) == 6
 
     def test_the_walker_catches_an_alias(self, tmp_path):
         f = tmp_path / "m.py"
@@ -210,38 +207,19 @@ class TestTheSitesThatBecameMoveAsides:
 
 class TestTheSitesThatAssertOwnership:
     def test_archive_worktree_lineage_refuses_a_main_checkout(self, tmp_path, monkeypatch):
-        """#3528: run against a main checkout it emptied __pycache__ and
-        would have evicted the venv."""
+        """#3528: run against a main checkout it would have evicted the venv
+        every worktree test run borrows. (It also emptied __pycache__ then;
+        that function is gone since #3558, and the tool deletes nothing.)"""
         import tools.archive_worktree_lineage as awl
 
         repo = _repo(tmp_path / "Repo")
-        (repo / "__pycache__").mkdir()
-        (repo / "__pycache__" / "x.pyc").write_bytes(b"\0")
-        (repo / ".coverage").write_text("c", encoding="utf-8")
         called = []
         monkeypatch.setattr(awl.subprocess, "run", _spy(awl.subprocess.run, called))
 
         with pytest.raises(SystemExit, match="REFUSED"):
-            awl.clean_ephemeral(repo)
-        with pytest.raises(SystemExit, match="REFUSED"):
             awl.evict_poetry_venv(repo)
 
-        assert (repo / "__pycache__" / "x.pyc").exists()
-        assert (repo / ".coverage").exists()
         assert not any("env" in c and "remove" in c for c in called)
-
-    def test_archive_worktree_lineage_cleans_a_linked_worktree(self, tmp_path):
-        import tools.archive_worktree_lineage as awl
-
-        repo = _repo(tmp_path / "Repo")
-        wt = tmp_path / "Repo-42"
-        _git(repo, "worktree", "add", "-q", "--detach", str(wt))
-        (wt / "__pycache__").mkdir()
-        (wt / "__pycache__" / "x.pyc").write_bytes(b"\0")
-
-        awl.clean_ephemeral(wt)
-
-        assert not (wt / "__pycache__").exists()
 
     def test_speedrun_archive_refuses_a_directory_it_did_not_write(self, tmp_path):
         from assemblyzero.speedrun.archive import _rmtree

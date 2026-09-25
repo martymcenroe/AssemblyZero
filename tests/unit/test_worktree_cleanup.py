@@ -141,92 +141,6 @@ class TestArchiveLineage:
         assert not (archived_dir / "old-file.md").exists()
 
 
-class TestCleanEphemeral:
-    """Tests for clean_ephemeral function.
-
-    These pin the cache list on plain directories. The #3528 refusal (a
-    main checkout, or anything that is not a linked worktree) is tested
-    against real git in `test_rmtree_sites_are_gated.py`, so here it is
-    stood down.
-    """
-
-    @staticmethod
-    def setup_method(_method):
-        import archive_worktree_lineage
-
-        TestCleanEphemeral._saved = archive_worktree_lineage.require_linked_worktree
-        archive_worktree_lineage.require_linked_worktree = lambda path: None
-
-    @staticmethod
-    def teardown_method(_method):
-        import archive_worktree_lineage
-
-        archive_worktree_lineage.require_linked_worktree = TestCleanEphemeral._saved
-
-    def test_removes_coverage_file(self, tmp_path):
-        """Should remove .coverage file."""
-        worktree = tmp_path / "worktree"
-        worktree.mkdir()
-        coverage_file = worktree / ".coverage"
-        coverage_file.write_text("coverage data")
-
-        from archive_worktree_lineage import clean_ephemeral
-
-        clean_ephemeral(worktree)
-
-        assert not coverage_file.exists()
-
-    def test_removes_pycache_directory(self, tmp_path):
-        """Should remove __pycache__ directory."""
-        worktree = tmp_path / "worktree"
-        pycache = worktree / "__pycache__"
-        pycache.mkdir(parents=True)
-        (pycache / "module.pyc").write_text("bytecode")
-
-        from archive_worktree_lineage import clean_ephemeral
-
-        clean_ephemeral(worktree)
-
-        assert not pycache.exists()
-
-    def test_removes_pytest_cache(self, tmp_path):
-        """Should remove .pytest_cache directory."""
-        worktree = tmp_path / "worktree"
-        pytest_cache = worktree / ".pytest_cache"
-        pytest_cache.mkdir(parents=True)
-        (pytest_cache / "v" / "cache").mkdir(parents=True)
-
-        from archive_worktree_lineage import clean_ephemeral
-
-        clean_ephemeral(worktree)
-
-        assert not pytest_cache.exists()
-
-    def test_removes_assemblyzero_audit(self, tmp_path):
-        """Should remove .assemblyzero/audit directory."""
-        worktree = tmp_path / "worktree"
-        audit_dir = worktree / ".assemblyzero" / "audit"
-        audit_dir.mkdir(parents=True)
-        (audit_dir / "trace.log").write_text("execution trace")
-
-        from archive_worktree_lineage import clean_ephemeral
-
-        clean_ephemeral(worktree)
-
-        assert not audit_dir.exists()
-
-    def test_handles_missing_ephemeral_files(self, tmp_path):
-        """Should not error when ephemeral files don't exist."""
-        worktree = tmp_path / "worktree"
-        worktree.mkdir()
-        # No ephemeral files exist
-
-        from archive_worktree_lineage import clean_ephemeral
-
-        # Should not raise
-        clean_ephemeral(worktree)
-
-
 class TestStageArchived:
     """Tests for stage_archived function."""
 
@@ -273,8 +187,9 @@ class TestIntegration:
     def test_full_archive_workflow(self, tmp_path):
         """Test complete archive workflow without git commit.
 
-        #3528: clean_ephemeral refuses anything but a linked worktree, so
-        this builds a real one off a real main repository.
+        Built on a real worktree off a real main repository (#3528). The
+        caches left in the worktree are asserted UNTOUCHED: since #3558 the
+        tool deletes nothing, and `git worktree remove` takes them later.
         """
         import subprocess
 
@@ -303,21 +218,17 @@ class TestIntegration:
         pycache = worktree / "__pycache__"
         pycache.mkdir()
 
-        from archive_worktree_lineage import archive_lineage, clean_ephemeral
+        from archive_worktree_lineage import archive_lineage
 
         # Archive
         archived = archive_lineage(worktree, 99, main_repo)
         assert len(archived) == 1
 
-        # Clean
-        clean_ephemeral(worktree)
-
         # Verify archived
         assert (main_repo / "docs" / "lineage" / "archived" / "99-integration" / "001-issue.md").exists()
 
-        # Verify cleaned
-        assert not coverage.exists()
-        assert not pycache.exists()
-
-        # Verify source still exists (we don't delete worktree)
+        # Verify nothing was deleted (#3558): the caches are git worktree
+        # remove's to take, and the source lineage stays with the worktree.
+        assert coverage.exists()
+        assert pycache.exists()
         assert lineage_dir.exists()

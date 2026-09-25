@@ -8,9 +8,16 @@ Usage:
 
 This script:
 1. Copies docs/lineage/active/{issue}-*/ to main repo's docs/lineage/archived/
-2. Commits the archived files to main
-3. Cleans ephemeral files (.coverage, __pycache__)
+2. Stages the archived files in main
+3. Evicts the poetry venv cached for the worktree, so it can be removed
 4. Does NOT remove the worktree (user does that after)
+
+It deletes nothing (#3558). It used to clean the worktree's caches first,
+with `shutil.rmtree`, and the shell guard reads that token and refused the
+whole script to an agent -- so the step CLAUDE.md prescribes before every PR
+could not be run as written. The caches are gitignored, and `git worktree
+remove`, the last step of the same sequence, deletes every ignored file in
+the worktree anyway.
 """
 
 import argparse
@@ -95,28 +102,6 @@ def require_linked_worktree(path: Path) -> None:
             "checkout, or not a repository). Nothing was deleted or evicted. "
             "Pass the worktree's own path to --worktree."
         )
-
-
-def clean_ephemeral(worktree_path: Path) -> None:
-    """Remove ephemeral files that shouldn't persist.
-
-    Refuses unless ``worktree_path`` is a linked worktree (#3528). The list is
-    closed: regenerable caches and the workflow's scratch audit directory.
-
-    Args:
-        worktree_path: Path to the worktree being cleaned
-    """
-    require_linked_worktree(worktree_path)
-    ephemeral = [".coverage", "__pycache__", ".pytest_cache", ".assemblyzero/audit"]
-
-    for name in ephemeral:
-        target = worktree_path / name
-        if target.exists():
-            if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
-            print(f"  Cleaned: {name}")
 
 
 def stage_archived(main_repo: Path, issue_number: int) -> None:
@@ -205,9 +190,6 @@ def main():
 
     # Archive lineage
     archived = archive_lineage(worktree, args.issue, main_repo)
-
-    # Clean ephemeral files
-    clean_ephemeral(worktree)
 
     # Stage in repo
     if archived and not args.no_stage:
