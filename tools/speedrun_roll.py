@@ -3636,6 +3636,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {repo_root} is not a git repository root")
         return 91
 
+    # #3566: a profile that will not load is refused here, before any issue
+    # is reset or rolled, not inside the first child after --fresh has run.
+    if getattr(args, "models", None):
+        try:
+            requested_profile_name(args.models, repo_root, extra)
+        except ValueError as exc:
+            print(f"ERROR: model profile refused: {exc}")
+            return 91
+
     az_root = (
         Path(args.assemblyzero_root).resolve()
         if args.assemblyzero_root
