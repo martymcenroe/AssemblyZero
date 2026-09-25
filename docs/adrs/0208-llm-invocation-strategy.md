@@ -60,6 +60,14 @@ Critical flags:
 - `--strict-mcp-config` prevents loading `.claude/tools.yaml` MCP configurations
 - Together, these ensure deterministic, side-effect-free LLM calls
 
+> **Amended by ADR 0232 (Proposed, 2026-09-24, #3504).** `--setting-sources user`
+> also loads every hook in `~/.claude/settings.json`, and measured on one nested
+> call the SessionStart and SessionEnd hooks both fired: a baseline file written
+> into the repository holding the cwd, and a full transcript-archive pass. Every
+> nested call now also carries `--settings '{"disableAllHooks": true}'`. The
+> command above predates `stream-json`; the provider's docstring and
+> `llm_provider.py` are the current form.
+
 ### Fallback Behavior
 
 `FallbackProvider` wraps CLI + API with automatic failover:
