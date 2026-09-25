@@ -49,6 +49,7 @@ class AdversarialNodeState(TypedDict, total=False):
     # the boundary, the node could not see it, decided by whether a client
     # could be built, and a --mock rehearsal called the paid Gemini API.
     mock_mode: bool
+    model_profile: dict  # #3563: read by resolve(state, "impl.adversarial")
 
     # Outputs (populated by adversarial node)
     adversarial_analysis: AdversarialAnalysis

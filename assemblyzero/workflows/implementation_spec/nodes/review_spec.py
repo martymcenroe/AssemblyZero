@@ -46,9 +46,6 @@ from assemblyzero.workflows.implementation_spec.state import ImplementationSpecS
 # Constants
 # =============================================================================
 
-# Default reviewer model spec (top-tier; AZ #1434)
-DEFAULT_REVIEWER = "gemini:3.1-pro"
-
 # Minimum spec size to be considered valid (bytes)
 MIN_SPEC_SIZE = 100
 
@@ -266,7 +263,6 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     issue_number = state.get("issue_number", 0)
     review_iteration = state.get("review_iteration", 0)
     max_iterations = state.get("max_iterations", 3)
-    mock_mode = state.get("config_mock_mode", False)
 
     print(f"\n[N5] Reviewing Implementation Spec (iteration {review_iteration})...")
 
@@ -357,15 +353,14 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Get reviewer provider
     # -------------------------------------------------------------------------
-    if mock_mode:
-        reviewer_spec = "mock:review"
-    else:
-        reviewer_spec = state.get("config_reviewer", DEFAULT_REVIEWER)
+    # #3563: the run profile's `spec.review` seat (`mock:review` under the
+    # mock profile), with the seat's effort (Issue #773's plumbing).
+    from assemblyzero.core.seats import resolve
 
-    # Issue #773: Pass effort level to Claude reviewer
-    effort = state.get("config_effort")
     try:
-        reviewer = get_provider(reviewer_spec, effort=effort)
+        reviewer_seat = resolve(state, "spec.review")
+        reviewer_spec = reviewer_seat.spec
+        reviewer = get_provider(reviewer_spec, effort=reviewer_seat.effort)
     except ValueError as e:
         print(f"    ERROR: Invalid reviewer: {e}")
         return {"error_message": f"Invalid reviewer: {e}"}

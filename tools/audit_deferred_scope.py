@@ -28,7 +28,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -567,13 +566,39 @@ def parse_json_response(text: str) -> Optional[dict]:
     return None
 
 
+#: #3563: the classifier's model is this seat of the active profile
+#: (``AZ_MODEL_PROFILE``, else the built-in default). It used to be a bare
+#: ``claude --print`` subprocess, outside the provider layer and so outside
+#: its hook isolation (ADR 0232) and its recording.
+CLASSIFIER_SEAT = "tools.audit_deferred_scope"
+
+
+def _invoke_classifier(prompt: str) -> tuple[bool, str]:
+    """``(succeeded, response text or error message)`` from the seat's model."""
+    from assemblyzero.core.seats import resolve_active
+
+    try:
+        seat = resolve_active(CLASSIFIER_SEAT)
+        result = seat.build().invoke(
+            system_prompt="", content=prompt, timeout_seconds=LLM_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 - a failed call is recorded per candidate
+        # fail-open: one candidate's classification fails and is recorded as
+        # an error on that candidate; the sweep continues to the next one,
+        # as it did when the subprocess exited non-zero.
+        return False, f"{type(exc).__name__}: {exc}"
+    if not result.success:
+        return False, result.error_message or "no response"
+    return True, result.response or ""
+
+
 def classify_candidate(
     c: Candidate,
     xref: list[int],
     cache: dict[str, dict],
     state_index: dict[int, dict] | None = None,
 ) -> Classification:
-    """Classify a candidate via `claude --print`, with cache.
+    """Classify a candidate via the classifier seat (#3563), with cache.
 
     When `state_index` is provided, also supplements the literal-#N xref
     with title-token-similar OPEN issues (#1049 bug 2) and annotates each
@@ -593,22 +618,21 @@ def classify_candidate(
         merged_xref = xref
 
     prompt = build_prompt(c, merged_xref, state_index)
-    env = {**os.environ, "CLAUDECODE": ""}
-    r = _run(["claude", "--print", "-p", prompt], timeout=LLM_TIMEOUT_S, env=env)
-    if r.returncode != 0:
+    ok, text = _invoke_classifier(prompt)
+    if not ok:
         cls = Classification(
             is_deferral=False, summary="", addressed_in=None,
             addressed_status=None, new_repo_related=False,
-            still_relevant=None, rationale="", raw_response=r.stderr[:500],
-            error=f"claude exit {r.returncode}",
+            still_relevant=None, rationale="", raw_response=text[:500],
+            error=f"classifier call failed: {text[:200]}",
         )
     else:
-        parsed = parse_json_response(r.stdout)
+        parsed = parse_json_response(text)
         if not parsed:
             cls = Classification(
                 is_deferral=False, summary="", addressed_in=None,
                 addressed_status=None, new_repo_related=False,
-                still_relevant=None, rationale="", raw_response=r.stdout[:500],
+                still_relevant=None, rationale="", raw_response=text[:500],
                 error="json parse failed",
             )
         else:

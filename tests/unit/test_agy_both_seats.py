@@ -17,28 +17,46 @@ AGY = "gemini:3.1-pro"
 
 
 class TestTheStandaloneDefaultsAreAgy:
-    def test_the_lld_workflow_drafts_and_reviews_on_agy(self):
-        from tools.run_requirements_workflow import parse_args
+    """#3563: the defaults live in the model profile, not in argparse. With no
+    flag, no AZ_MODEL_PROFILE and no target models.toml, every seat a tool
+    reaches resolves to agy."""
+
+    def test_the_lld_workflow_drafts_and_reviews_on_agy(self, tmp_path):
+        from assemblyzero.core.seats import seat_in
+        from tools.run_requirements_workflow import parse_args, run_profile_for
 
         args = parse_args(["--type", "lld", "--issue", "42"])
+        profile = run_profile_for(args, tmp_path)
 
-        assert (args.drafter, args.reviewer) == (AGY, AGY)
+        assert (args.drafter, args.reviewer) == (None, None)
+        for seat in ("requirements.analyze", "requirements.draft", "requirements.review"):
+            assert seat_in(profile, seat).spec == AGY, seat
 
-    def test_the_implementation_workflow_reviews_on_agy(self):
-        """The implementation tool has one seat flag; the test-plan revisor
-        reuses it (#1072), so the reviewer default covers both."""
+    def test_the_implementation_workflow_runs_every_seat_on_agy(self, tmp_path):
+        """The reviewer, the revisor (#1072) and, since the operator's ruling
+        of 2026-09-24, the coder (#3553)."""
+        from assemblyzero.core.seats import profile_from_args, seat_in
         from tools.run_implement_from_lld import create_argument_parser
 
         args = create_argument_parser().parse_args(["--issue", "42"])
+        profile = profile_from_args(args, tmp_path)
 
-        assert args.reviewer == AGY
+        for seat in (
+            "impl.test_plan.review", "impl.test_plan.revise", "impl.code",
+            "impl.code.small", "impl.augment_tests", "impl.adversarial",
+        ):
+            assert seat_in(profile, seat).spec == AGY, seat
 
-    def test_the_spec_workflow_drafts_and_reviews_on_agy(self):
+    def test_the_spec_workflow_drafts_and_reviews_on_agy(self, tmp_path):
+        from assemblyzero.core.seats import profile_from_args, seat_in
         from tools.run_implementation_spec_workflow import parse_args
 
         args = parse_args(["--issue", "42"])
+        profile = profile_from_args(args, tmp_path)
 
-        assert (args.drafter, args.reviewer) == (AGY, AGY)
+        assert (args.drafter, args.reviewer) == (None, None)
+        assert seat_in(profile, "spec.draft").spec == AGY
+        assert seat_in(profile, "spec.review").spec == AGY
 
     def test_the_defaults_match_the_orchestrator(self):
         from assemblyzero.workflows.orchestrator.config import get_default_config

@@ -279,6 +279,7 @@ class TestingWorkflowState(TypedDict, total=False):
     config_effort: str  # Issue #779: Effort level for Claude reviewer
     config_retry_policy: str  # Issue #1071: "default" | "aggressive" | "none"
     config_drafter: str  # Issue #1072: drafter spec for test-plan revision
+    model_profile: dict  # #3563: the run's model profile snapshot (core/seats.py)
     test_plan_policy: str  # Issue #1072: "revise" (default) | "auto" | "strict"
     test_plan_revision_count: int  # Issue #1072: incremented per revision cycle
     auto_mode: bool

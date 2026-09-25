@@ -749,20 +749,27 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Max estimated tokens before circuit breaker trips (0 = unlimited)",
     )
 
-    # Issue #773: Reviewer LLM configuration. #3517, operator directive of
-    # 2026-09-24: agy reviews, matching the orchestrator's impl stage. The
-    # test-plan revisor reuses this spec (#1072), so it is agy too. N4, the
-    # coder, is not a seat this flag names and stays where it was.
+    # Issue #773: Reviewer LLM configuration. #3563: every seat's model,
+    # the coder's included (#3553, the operator's 2026-09-24 ruling), comes
+    # from the run's model profile (--models; default gemini.toml). --reviewer
+    # overrides the test-plan reviewer and, as before (#1072), the revisor;
+    # --seat is the general form (e.g. --seat impl.code=claude:sonnet).
+    from assemblyzero.core.seats import add_profile_arguments
+
+    add_profile_arguments(parser)
     parser.add_argument(
         "--reviewer",
-        default="gemini:3.1-pro",
-        help="Reviewer LLM spec (default: gemini:3.1-pro, agy)",
+        default=None,
+        help=(
+            "Override the impl.test_plan.review and impl.test_plan.revise "
+            "seats. Default: the profile's"
+        ),
     )
     parser.add_argument(
         "--effort",
         choices=["low", "medium", "high", "max"],
-        default="max",
-        help="Claude reviewer effort level (default: max)",
+        default=None,
+        help="Effort for every seat, over the profile's (default: the profile's, max)",
     )
 
     # Issue #1071: Retry policy for transient LLM failures.
@@ -1179,14 +1186,31 @@ def main():
         if context_content:
             print(f"[implement] Context loaded: {len(context_content):,} chars")
 
+    # #3563: the run's model profile, snapshotted into state; a --resume
+    # reads the checkpoint's snapshot instead (LangGraph restores it).
+    from assemblyzero.core.seats import describe, profile_from_args, seat_in
+
+    try:
+        profile = profile_from_args(
+            args, original_repo_root,
+            {"reviewer": ("impl.test_plan.review", "impl.test_plan.revise")},
+        )
+    except ValueError as e:
+        print(f"[implement] ERROR: model profile: {e}")
+        record.finish("fail", f"model profile: {e}")
+        sys.exit(1)
+    print(describe(profile))
+    review_seat = seat_in(profile, "impl.test_plan.review")
+
     # Build initial state
     initial_state: TestingWorkflowState = {
         "issue_number": args.issue,
         "repo_root": str(repo_root),
-        "config_reviewer": args.reviewer,  # Issue #773
-        "config_effort": args.effort,  # Issue #773
+        "model_profile": profile,
+        "config_reviewer": review_seat.spec,  # Issue #773 (legacy, one release)
+        "config_effort": review_seat.effort or "",  # Issue #773 (legacy)
         "config_retry_policy": args.retry_policy,  # Issue #1071
-        "config_drafter": args.reviewer,  # Issue #1072: revisor reuses reviewer spec
+        "config_drafter": seat_in(profile, "impl.test_plan.revise").spec,  # Issue #1072 (legacy)
         "test_plan_policy": args.test_plan_policy,  # Issue #1072
         "test_plan_revision_count": 0,  # Issue #1072
         "auto_mode": args.auto_mode,

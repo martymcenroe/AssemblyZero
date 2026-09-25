@@ -22,6 +22,7 @@ from assemblyzero.core.interface_surface import (
     format_interface_map_section,
 )
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.seats import resolve
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.section_utils import (
     build_targeted_prompt,
@@ -326,20 +327,22 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     else:
         print("\n[N1] Generating initial draft...")
 
-    # Use mock provider in mock mode, otherwise use configured drafter.
-    # #3533: an LLD run drafts from `mock:lld`, which clears N1.5, so the
-    # rehearsal reaches review and finalize. A caller that names `mock:draft`
-    # explicitly (the e2e loop-to-halt harness) keeps the draft that fails.
-    if mock_mode:
-        configured = str(state.get("config_drafter", "") or "")
-        if configured.startswith("mock:"):
-            drafter_spec = configured
-        elif workflow_type == "lld":
-            drafter_spec = "mock:lld"
-        else:
-            drafter_spec = "mock:draft"
-    else:
-        drafter_spec = state.get("config_drafter", "gemini:3.1-pro")
+    # #3563: the drafter is the run profile's `requirements.draft` seat. The
+    # mock profile puts `mock:lld` there (#3533), so a rehearsal reaches
+    # review and finalize; the issue workflow's --mock makes it `mock:draft`.
+    # A seat that will not resolve is reported where an unbuildable drafter
+    # always was, below, so the node keeps one "Invalid drafter" halt site.
+    seat_error: ValueError | None = None
+    drafter_seat = None
+    drafter_spec = reviewer_spec = ""
+    try:
+        drafter_seat = resolve(state, "requirements.draft")
+        drafter_spec = drafter_seat.spec
+        reviewer_spec = resolve(state, "requirements.review").spec
+    except ValueError as e:
+        # fail-open: not here. The error is held and raised inside the drafter
+        # try below, so it halts with the node's one "Invalid drafter" message.
+        seat_error = e
 
     # Determine template path based on workflow type
     if workflow_type == "issue":
@@ -372,11 +375,9 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     # Issue #486: Pre-flight check — verify Gemini available before expensive
     # Claude call. #3506: only when some node of this run is Gemini, and then
     # the agy transport itself, not the credential file.
-    if not mock_mode:
+    if not mock_mode and seat_error is None:
         from assemblyzero.core.preflight import preflight_for_specs
-        preflight = preflight_for_specs(
-            drafter_spec, str(state.get("config_reviewer", "") or ""),
-        )
+        preflight = preflight_for_specs(drafter_spec, reviewer_spec)
         if preflight is None:
             print("    [PREFLIGHT] no Gemini node in this run; transport check skipped")
         elif not preflight.passed:
@@ -389,7 +390,9 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
 
     # Get drafter provider
     try:
-        drafter = get_provider(drafter_spec)
+        if seat_error is not None:
+            raise seat_error
+        drafter = get_provider(drafter_spec, effort=drafter_seat.effort)
     except ValueError as e:
         return {"error_message": f"Invalid drafter: {e}"}
 

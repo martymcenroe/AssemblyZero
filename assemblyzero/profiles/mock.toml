@@ -1,0 +1,29 @@
+# The mock profile: --mock selects it over every other source, so a mock run
+# never reaches a real transport. Each seat names the MockProvider response
+# set the node's own mock branch chose before profiles existed (#3563).
+name = "mock"
+description = "Every seat on MockProvider; no network, no credits."
+
+[defaults]
+spec = "mock:mock"
+
+# #3533: an LLD drafted from mock:lld clears N1.5, so a rehearsal reaches
+# review and finalize. The issue workflow's entry point overrides this seat
+# to mock:draft.
+[seats."requirements.draft"]
+spec = "mock:lld"
+
+[seats."requirements.review"]
+spec = "mock:review"
+
+[seats."requirements.contract_fidelity"]
+spec = "mock:review"
+
+[seats."spec.draft"]
+spec = "mock:draft"
+
+[seats."spec.review"]
+spec = "mock:review"
+
+[seats."impl.test_plan.review"]
+spec = "mock:review"

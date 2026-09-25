@@ -129,22 +129,25 @@ def decompose(text: str, manifest: dict, transport) -> list[FeedbackItem]:
 #: live Modify (#2521, run-issue331-172000) constructed GeminiClient bare,
 #: whose default model is core.config.REVIEWER_MODEL -- a Claude id -- and
 #: the Gemini validator rejected it before any call was made. get_provider
-#: is the house pattern every workflow node routes through; the spec is the
-#: reviewer default the spec stage already uses (AZ #1434).
-TRANSLATION_PROVIDER = "gemini:3.1-pro"
+#: is the house pattern every workflow node routes through. #3563: the spec
+#: is the active profile's `visual_gate.translate` seat (Gemini in every
+#: built-in profile, as it was before the law).
+TRANSLATION_SEAT = "visual_gate.translate"
 
 
 def default_transport(system: str, content: str) -> str:
     """The fleet's provider layer (ADR 0220 / #2521). Imported lazily so the
     gate's non-Modify paths never touch credentials."""
     from assemblyzero.core.llm_provider import get_provider
+    from assemblyzero.core.seats import resolve_active
 
-    result = get_provider(TRANSLATION_PROVIDER).invoke(system, content)
+    seat = resolve_active(TRANSLATION_SEAT)
+    result = get_provider(seat.spec, effort=seat.effort).invoke(system, content)
     response = (getattr(result, "response", None) or "").strip()
     if not getattr(result, "success", False) or not response:
         raise RuntimeError(
             f"visual-gate Modify translation failed via "
-            f"{TRANSLATION_PROVIDER}: "
+            f"{seat.spec}: "
             f"{getattr(result, 'error_message', '') or 'empty response'}"
         )
     return response

@@ -533,10 +533,16 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
     print("  [N0c] Requirements-ambiguity analysis (#1899)...")
 
     from assemblyzero.core.llm_provider import GeminiProvider, get_provider
+    from assemblyzero.core.seats import resolve
 
-    drafter_spec = state.get("config_drafter", "gemini:3.1-pro")
+    # #3563: the run profile's `requirements.analyze` seat, and its
+    # `requirements.analyze.escalation` seat for the one timeout retry.
+    drafter_spec = "(unresolved)"
     try:
-        provider = get_provider(drafter_spec)
+        seat = resolve(state, "requirements.analyze")
+        drafter_spec = seat.spec
+        escalation_spec = resolve(state, "requirements.analyze.escalation").spec
+        provider = get_provider(drafter_spec, effort=seat.effort)
     except ValueError as e:
         # #2474: halts immediately, with no backoff. The backoff exists to
         # outlast a transient outage; a provider spec that does not name a real
@@ -583,7 +589,9 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
     # again; on boostgauge #1's body sonnet did that three times for three
     # timeouts while opus answered inside the bound on its first attempt.
     if _is_timeout(result) and not _provider_storm_active():
-        stronger = escalated_drafter(drafter_spec)
+        # The escalation seat names the model for the retry; the same spec as
+        # the analysis seat means "re-ask the same model", #2290's retry.
+        stronger = escalation_spec if escalation_spec != drafter_spec else None
         if stronger:
             print(
                 f"  [N0c] analysis timed out at {REQUIREMENTS_GATE_TIMEOUT_SECONDS}s "
@@ -725,7 +733,7 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
             stage="lld",
             check="requirements-conflict",
             issue=int(state.get("issue_number") or 0) or None,
-            drafter_model=state.get("config_drafter", ""),
+            drafter_model=drafter_spec,
             run_id=run_id,
         )
     except Exception as exc:  # noqa: BLE001 - telemetry never breaks a halt

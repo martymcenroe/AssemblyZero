@@ -37,33 +37,37 @@ VALID_STAGES = ["triage", "lld", "spec", "impl", "pr"]
 
 def get_default_config() -> OrchestratorConfig:
     """Return default orchestrator configuration."""
+    # #3563: the stage specs are the built-in default profile's seats
+    # (`gemini.toml`, ADR 0234), read rather than restated, so this table and
+    # the profile cannot drift. A run's own profile, when it has one, is
+    # snapshotted into state and wins over these in every sub-workflow.
+    from assemblyzero.core.seats import default_profile, seat_table
+
+    seats = {name: seat.spec for name, seat in seat_table(default_profile()).items()}
     return OrchestratorConfig(
         skip_existing_lld=True,
         skip_existing_spec=True,
         stages={
-            # #1434: Default to Gemini 3.1 Pro (top-tier production model).
-            # Earlier #1432/PR #1433 incorrectly used gemini:2.5-flash; the
-            # operator runs top-tier models by default. This comment used to
-            # cite the Claude json_schema crash (#1431) as the reason for
-            # Gemini over Claude. On 2026-09-24 that crash did not reproduce
-            # on haiku or opus (#3519), so the reasons are #1434 and the
-            # operator's directive of the same day that agy drafts and
-            # validates in both workflows (#3517).
+            # #1434: top-tier production models by default; #1432/PR #1433
+            # had used gemini:2.5-flash. The model itself now comes from the
+            # profile: Gemini in agy drafts and validates (#3517, ADR 0234).
+            # The Claude json_schema crash (#1431) this comment once cited did
+            # not reproduce on 2026-09-24 (#3519) and is no reason for anything.
             "triage": StageConfig(
-                drafter="gemini:3.1-pro",
-                reviewer="gemini:3.1-pro",
+                drafter=seats["requirements.draft"],
+                reviewer=seats["requirements.review"],
                 max_revisions=3,
                 timeout_seconds=300,
             ),
             "lld": StageConfig(
-                drafter="gemini:3.1-pro",
-                reviewer="gemini:3.1-pro",
+                drafter=seats["requirements.draft"],
+                reviewer=seats["requirements.review"],
                 max_revisions=5,
                 timeout_seconds=600,
             ),
             "spec": StageConfig(
-                drafter="gemini:3.1-pro",
-                reviewer="gemini:3.1-pro",
+                drafter=seats["spec.draft"],
+                reviewer=seats["spec.review"],
                 max_revisions=3,
                 timeout_seconds=600,
             ),
@@ -72,8 +76,8 @@ def get_default_config() -> OrchestratorConfig:
                 # sub-workflow's N1 (review test plan) to halt with
                 # "Invalid provider spec ''". Top-tier Gemini matches every
                 # other LLM-bearing stage and the operator preference (#1434).
-                drafter="gemini:3.1-pro",
-                reviewer="gemini:3.1-pro",
+                drafter=seats["impl.test_plan.revise"],
+                reviewer=seats["impl.test_plan.review"],
                 max_revisions=3,
                 timeout_seconds=1800,
             ),

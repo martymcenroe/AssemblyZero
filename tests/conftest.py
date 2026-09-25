@@ -166,6 +166,17 @@ def home_state_stays_out_of_home(tmp_path, monkeypatch):
     redirect(monkeypatch, tmp_path / "home-state")
 
 
+@pytest.fixture(autouse=True)
+def no_model_profile_from_the_machine(monkeypatch):
+    """A test's model profile comes from the test (#3563).
+
+    ``AZ_MODEL_PROFILE`` outranks the built-in default, so an operator who
+    exported it for a comparison roll would otherwise change which provider
+    every seat resolves to across the whole suite.
+    """
+    monkeypatch.delenv("AZ_MODEL_PROFILE", raising=False)
+
+
 @pytest.fixture
 def mock_file_size(monkeypatch):
     """Factory fixture that patches os.path.getsize to return specified sizes for given paths.

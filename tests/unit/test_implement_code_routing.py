@@ -1,7 +1,10 @@
-"""Unit tests for model routing logic (Issue #641).
+"""Unit tests for the coder's routing (Issue #641; seats since #3553/#3563).
 
-Tests select_model_for_file(), the model parameter on call_claude_for_file(),
-and the routing integration in generate_file_with_retry().
+The routing picks a SEAT: ``impl.code.small`` for scaffolds, ``__init__.py``,
+``conftest.py`` and files under fifty lines, ``impl.code`` otherwise. Which
+model answers each seat is the run profile's decision: Gemini in both under
+``gemini.toml`` (the default, ADR 0234), and Sonnet/Haiku under ``claude.toml``,
+which reproduces the pre-law routing exactly.
 """
 
 import logging
@@ -10,421 +13,241 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from assemblyzero.core.seats import builtin_path, load_profile, using_profile
 from assemblyzero.workflows.testing.nodes.implementation.routing import (
-    select_model_for_file,
-    HAIKU_MODEL,
+    CODE_SEAT,
     SMALL_FILE_LINE_THRESHOLD,
+    SMALL_SEAT,
+    select_model_for_file,
+    select_seat_for_file,
 )
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-DEFAULT_MODEL = "claude-sonnet-4-6"
+ROUTING_LOGGER = "assemblyzero.workflows.testing.nodes.implementation.routing"
 
 
 @pytest.fixture(autouse=True)
-def _set_default_model(monkeypatch):
-    """Ensure a deterministic default model for all tests."""
-    monkeypatch.setenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
+def _no_profile_from_the_environment(monkeypatch):
+    """The active profile must come from the test, never the machine."""
+    monkeypatch.delenv("AZ_MODEL_PROFILE", raising=False)
+
+
+def _profile(name: str) -> dict:
+    return load_profile(builtin_path(name))
 
 
 # ---------------------------------------------------------------------------
-# T010 – __init__.py routes to Haiku (REQ-1)
+# The routing rules pick a seat
 # ---------------------------------------------------------------------------
 
 
-def test_init_py_routes_to_haiku():
-    """T010: select_model_for_file returns HAIKU_MODEL for __init__.py."""
-    result = select_model_for_file(
-        file_path="assemblyzero/__init__.py",
-        estimated_line_count=0,
-        is_test_scaffold=False,
-    )
-    assert result == HAIKU_MODEL
+@pytest.mark.parametrize(
+    "path, lines, scaffold, seat",
+    [
+        ("assemblyzero/__init__.py", 0, False, SMALL_SEAT),  # T010
+        ("tests/conftest.py", 0, False, SMALL_SEAT),  # T020
+        ("tests/unit/test_foo.py", 200, True, SMALL_SEAT),  # T030: scaffold wins
+        ("assemblyzero/utils/helper.py", 49, False, SMALL_SEAT),  # T040
+        ("assemblyzero/utils/helper.py", 50, False, CODE_SEAT),  # T050: < 50
+        ("assemblyzero/core/engine.py", 0, False, CODE_SEAT),  # T060: unknown
+        ("assemblyzero/workflows/testing/nodes/__init__.py", 0, False, SMALL_SEAT),  # T070
+        ("assemblyzero/core/engine.py", -1, False, CODE_SEAT),  # T120
+        ("assemblyzero/utils/tiny.py", 1, False, SMALL_SEAT),  # T130
+        ("assemblyzero/utils/medium.py", 51, False, CODE_SEAT),  # T140
+        ("tests/conftest.py", 0, True, SMALL_SEAT),
+        ("assemblyzero/core/engine.py", 200, False, CODE_SEAT),
+    ],
+)
+def test_routing_picks_the_seat(path, lines, scaffold, seat):
+    assert select_seat_for_file(path, lines, scaffold) == seat
+
+
+def test_type_error_on_non_string_path():
+    with pytest.raises(TypeError, match="file_path must be a str"):
+        select_seat_for_file(file_path=123)
+
+
+def test_type_error_on_path_object():
+    from pathlib import Path
+
+    with pytest.raises(TypeError, match="file_path must be a str"):
+        select_seat_for_file(file_path=Path("assemblyzero/__init__.py"))
+
+
+def test_small_file_threshold_constant():
+    assert SMALL_FILE_LINE_THRESHOLD == 50
 
 
 # ---------------------------------------------------------------------------
-# T020 – conftest.py routes to Haiku (REQ-2)
+# The profile decides the model (#3553)
 # ---------------------------------------------------------------------------
 
 
-def test_conftest_py_routes_to_haiku():
-    """T020: select_model_for_file returns HAIKU_MODEL for conftest.py."""
-    result = select_model_for_file(
-        file_path="tests/conftest.py",
-        estimated_line_count=0,
-        is_test_scaffold=False,
-    )
-    assert result == HAIKU_MODEL
+def test_the_default_profile_puts_the_coder_on_gemini():
+    """The operator's ruling of 2026-09-24: the coder moves to Gemini too."""
+    with using_profile(_profile("gemini")):
+        assert select_model_for_file("assemblyzero/core/engine.py", 200) == "gemini:3.1-pro"
+        assert select_model_for_file("assemblyzero/__init__.py") == "gemini:3.1-pro"
+
+
+def test_no_profile_in_hand_means_the_built_in_default():
+    """Outside a node, the precedence falls to gemini.toml, never to Claude."""
+    assert select_model_for_file("assemblyzero/core/engine.py", 200) == "gemini:3.1-pro"
+    assert select_model_for_file("assemblyzero/__init__.py") == "gemini:3.1-pro"
+
+
+def test_the_claude_profile_reproduces_the_pre_law_split():
+    with using_profile(_profile("claude")):
+        assert select_model_for_file("assemblyzero/core/engine.py", 200) == "claude:sonnet"
+        assert select_model_for_file("assemblyzero/__init__.py") == "claude:haiku"
 
 
 # ---------------------------------------------------------------------------
-# T030 – test scaffold flag overrides everything (REQ-3)
+# call_claude_for_file resolves the seat it is handed
 # ---------------------------------------------------------------------------
 
 
-def test_scaffold_flag_overrides_line_count():
-    """T030: is_test_scaffold=True routes to Haiku even with large line count."""
-    result = select_model_for_file(
-        file_path="tests/unit/test_foo.py",
-        estimated_line_count=200,
-        is_test_scaffold=True,
-    )
-    assert result == HAIKU_MODEL
-
-
-# ---------------------------------------------------------------------------
-# T040 – 49-line file routes to Haiku (REQ-4)
-# ---------------------------------------------------------------------------
-
-
-def test_49_line_file_routes_to_haiku():
-    """T040: File with 49 estimated lines routes to Haiku."""
-    result = select_model_for_file(
-        file_path="assemblyzero/utils/helper.py",
-        estimated_line_count=49,
-        is_test_scaffold=False,
-    )
-    assert result == HAIKU_MODEL
-
-
-# ---------------------------------------------------------------------------
-# T050 – 50-line boundary routes to Sonnet (REQ-5)
-# ---------------------------------------------------------------------------
-
-
-def test_50_line_boundary_routes_to_sonnet():
-    """T050: Exactly 50 lines routes to default (Sonnet). Threshold is < 50."""
-    result = select_model_for_file(
-        file_path="assemblyzero/utils/helper.py",
-        estimated_line_count=50,
-        is_test_scaffold=False,
-    )
-    assert result == DEFAULT_MODEL
-
-
-# ---------------------------------------------------------------------------
-# T060 – Unknown size complex file routes to Sonnet (REQ-5)
-# ---------------------------------------------------------------------------
-
-
-def test_unknown_size_routes_to_sonnet():
-    """T060: estimated_line_count=0 means unknown; routes to Sonnet."""
-    result = select_model_for_file(
-        file_path="assemblyzero/core/engine.py",
-        estimated_line_count=0,
-        is_test_scaffold=False,
-    )
-    assert result == DEFAULT_MODEL
-
-
-# ---------------------------------------------------------------------------
-# T070 – Deeply nested __init__.py (REQ-1)
-# ---------------------------------------------------------------------------
-
-
-def test_deeply_nested_init_py_routes_to_haiku():
-    """T070: Path depth is irrelevant; basename __init__.py matches."""
-    result = select_model_for_file(
-        file_path="assemblyzero/workflows/testing/nodes/__init__.py",
-    )
-    assert result == HAIKU_MODEL
-
-
-# ---------------------------------------------------------------------------
-# T080 – call_claude_for_file uses supplied model (REQ-7)
-# ---------------------------------------------------------------------------
-
-
-def test_call_claude_explicit_model():
-    """T080: a supplied model reaches the provider (REQ-7).
-
-    #3490: this previously patched `call_claude_for_file` and then called the
-    MOCK, asserting the mock had been called — a tautology that never reached
-    the code under test and would have passed with the routing deleted.
-
-    The real seam is `get_provider`: `call_claude_for_file` builds the provider
-    spec from the model it is handed, so patching that and reading the spec back
-    is what tests the stated requirement.
-    """
-    from assemblyzero.workflows.testing.nodes.implementation import claude_client
-
+def _fake_provider(text="generated content"):
     provider = MagicMock()
     provider.invoke.return_value = SimpleNamespace(
-        success=True, response="generated content", error_message=None, retryable=False
+        success=True, response=text, error_message=None, retryable=False
     )
+    return provider
 
-    with patch.object(
-        claude_client, "get_provider", return_value=provider
+
+def test_the_seat_reaches_the_provider_spec():
+    """T080 (#3490's seam): the resolved seat's spec is what get_provider gets."""
+    from assemblyzero.workflows.testing.nodes.implementation import claude_client
+
+    with using_profile(_profile("claude")), patch.object(
+        claude_client, "get_provider", return_value=_fake_provider()
     ) as mock_get_provider:
-        response, error = claude_client.call_claude_for_file(
-            "prompt text", model=HAIKU_MODEL
-        )
+        response, error = claude_client.call_claude_for_file("prompt text", seat=SMALL_SEAT)
 
-    spec = mock_get_provider.call_args.args[0]
-    assert spec == f"claude:{HAIKU_MODEL}", (
-        f"the supplied model must reach the provider spec; got {spec!r}"
-    )
+    assert mock_get_provider.call_args.args[0] == "claude:haiku"
     assert response == "generated content"
     assert error == ""
 
 
-def test_call_claude_default_model_when_none_supplied():
-    """The other half of REQ-7: no model means the default spec, not an empty one.
-
-    Without this, a regression that dropped the model argument entirely would
-    still satisfy the test above by never reaching it.
-    """
+def test_no_seat_means_impl_code_under_the_profile():
+    """The other half: no seat and no model is `impl.code`, never a Claude default."""
     from assemblyzero.workflows.testing.nodes.implementation import claude_client
 
-    provider = MagicMock()
-    provider.invoke.return_value = SimpleNamespace(
-        success=True, response="x", error_message=None, retryable=False
-    )
-
-    with patch.object(
-        claude_client, "get_provider", return_value=provider
+    with using_profile(_profile("gemini")), patch.object(
+        claude_client, "get_provider", return_value=_fake_provider("x")
     ) as mock_get_provider:
         claude_client.call_claude_for_file("prompt text")
+
+    assert mock_get_provider.call_args.args[0] == "gemini:3.1-pro"
+
+
+def test_an_explicit_spec_wins_over_the_seat():
+    from assemblyzero.workflows.testing.nodes.implementation import claude_client
+
+    with using_profile(_profile("gemini")), patch.object(
+        claude_client, "get_provider", return_value=_fake_provider()
+    ) as mock_get_provider:
+        claude_client.call_claude_for_file("prompt", model="claude:opus", seat=SMALL_SEAT)
 
     assert mock_get_provider.call_args.args[0] == "claude:opus"
 
 
+def test_a_bare_model_id_is_refused():
+    """The coder never falls to `claude:<id>` by string concatenation again."""
+    from assemblyzero.workflows.testing.nodes.implementation import claude_client
+
+    with patch.object(claude_client, "get_provider") as mock_get_provider:
+        response, error = claude_client.call_claude_for_file(
+            "prompt", model="claude-haiku-4-5-20251001"
+        )
+
+    mock_get_provider.assert_not_called()
+    assert response == ""
+    assert error.startswith("[NON-RETRYABLE]") and "not a provider spec" in error
+
+
+def test_the_seat_effort_rides_along_unless_given():
+    from assemblyzero.workflows.testing.nodes.implementation import claude_client
+
+    with using_profile(_profile("claude")), patch.object(
+        claude_client, "get_provider", return_value=_fake_provider()
+    ) as mock_get_provider:
+        claude_client.call_claude_for_file("prompt", seat=CODE_SEAT)
+        seat_effort = mock_get_provider.call_args.kwargs["effort"]
+        claude_client.call_claude_for_file("prompt", seat=CODE_SEAT, effort="low")
+        given_effort = mock_get_provider.call_args.kwargs["effort"]
+
+    assert seat_effort == "max"
+    assert given_effort == "low"
+
+
 # ---------------------------------------------------------------------------
-# T090 – call_claude_for_file default model (REQ-7)
+# The orchestrator hands the routed seat on (REQ-8)
 # ---------------------------------------------------------------------------
 
 
-def test_call_claude_default_model():
-    """T090: When model=None, backward-compatible default is used."""
-    with patch(
-        "assemblyzero.workflows.testing.nodes.implementation.claude_client.call_claude_for_file"
-    ) as mock_call:
-        mock_call.return_value = ("generated content", {"input_tokens": 10, "output_tokens": 20})
-        mock_call("prompt text")
-        mock_call.assert_called_once_with("prompt text")
-
-
-# ---------------------------------------------------------------------------
-# T100 – generate_file_with_retry routing integration (REQ-8)
-# ---------------------------------------------------------------------------
-
-
-def test_generate_file_with_retry_passes_routed_model():
-    """T100: generate_file_with_retry calls select_model and passes to call_claude."""
-    with patch(
-        "assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file"
-    ) as mock_call, patch(
-        "assemblyzero.workflows.testing.nodes.implementation.orchestrator.select_model_for_file",
-        return_value=HAIKU_MODEL,
-    ) as mock_route:
-        mock_call.return_value = ("'\"\"\"Tests package.\"\"\"\\n'", {"input_tokens": 10, "output_tokens": 5})
+def test_generate_file_with_retry_passes_the_routed_seat():
+    """T100: generate_file_with_retry routes, then passes the seat to the call."""
+    base = "assemblyzero.workflows.testing.nodes.implementation.orchestrator"
+    with patch(f"{base}.call_claude_for_file") as mock_call, patch(
+        f"{base}.select_seat_for_file", return_value=SMALL_SEAT,
+    ) as mock_route, patch(f"{base}.validate_code_response", return_value=True), patch(
+        f"{base}.extract_code_block", return_value='"""Tests package."""\n',
+    ), patch(f"{base}.detect_summary_response", return_value=False), patch(
+        f"{base}.save_audit_file",
+    ), patch(f"{base}.emit"):
+        mock_call.return_value = ("'\"\"\"Tests package.\"\"\"\\n'", {"input_tokens": 10})
 
         from assemblyzero.workflows.testing.nodes.implementation.orchestrator import (
             generate_file_with_retry,
         )
 
-        # Patch validate_code_response and extract_code_block to avoid validation
-        with patch(
-            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.validate_code_response",
-            return_value=True,
-        ), patch(
-            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.extract_code_block",
-            return_value='"""Tests package."""\n',
-        ), patch(
-            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.detect_summary_response",
-            return_value=False,
-        ), patch(
-            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.save_audit_file",
-        ), patch(
-            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.emit",
-        ):
-            # #2736 removed the orchestrator's `validate_file_write` import
-            # along with the raise it guarded, so there is nothing left to
-            # patch here. The call under test is `generate_file_with_retry`,
-            # which never consulted it in the first place.
-            generate_file_with_retry(
-                filepath="tests/__init__.py",
-                base_prompt="generate init",
-                estimated_line_count=5,
-            )
-            mock_route.assert_called_once_with("tests/__init__.py", 5, False)
-            mock_call.assert_called_once()
-            # Verify model kwarg was passed
-            _, kwargs = mock_call.call_args
-            assert kwargs.get("model") == HAIKU_MODEL
-
-
-# ---------------------------------------------------------------------------
-# T110 – Routing log emission (REQ-9)
-# ---------------------------------------------------------------------------
-
-
-def test_routing_logs_reason(caplog):
-    """T110: Routing decision logged at INFO with file path, model, and reason."""
-    with caplog.at_level(logging.INFO, logger="assemblyzero.workflows.testing.nodes.implementation.routing"):
-        select_model_for_file(
-            file_path="assemblyzero/__init__.py",
+        generate_file_with_retry(
+            filepath="tests/__init__.py",
+            base_prompt="generate init",
+            estimated_line_count=5,
         )
-
-    routing_records = [
-        r for r in caplog.records
-        if r.name == "assemblyzero.workflows.testing.nodes.implementation.routing"
-    ]
-    assert len(routing_records) == 1
-    record = routing_records[0]
-    assert "assemblyzero/__init__.py" in record.message
-    assert HAIKU_MODEL in record.message
-    assert "boilerplate_filename" in record.message
+        mock_route.assert_called_once_with("tests/__init__.py", 5, False)
+        mock_call.assert_called_once()
+        assert mock_call.call_args.kwargs.get("seat") == SMALL_SEAT
 
 
-# ---------------------------------------------------------------------------
-# T120 – Negative line count treated as unknown (REQ-6)
-# ---------------------------------------------------------------------------
+def test_the_n4_node_enters_the_run_profile():
+    """N4 makes the run's snapshot the active profile for everything it calls."""
+    from assemblyzero.core.seats import active_profile
+    from assemblyzero.workflows.testing.nodes.implementation import orchestrator
 
+    seen = {}
 
-def test_negative_line_count_routes_to_sonnet():
-    """T120: Negative estimated_line_count treated as unknown -> Sonnet."""
-    result = select_model_for_file(
-        file_path="assemblyzero/core/engine.py",
-        estimated_line_count=-1,
-        is_test_scaffold=False,
-    )
-    assert result == DEFAULT_MODEL
+    def body(state):
+        seen["name"] = active_profile()["name"]
+        return {}
+
+    with patch.object(orchestrator, "implement_code", side_effect=body):
+        orchestrator.implement_code_under_profile({"model_profile": _profile("claude")})
+
+    assert seen["name"] == "claude"
 
 
 # ---------------------------------------------------------------------------
-# T130 – 1-line file routes to Haiku (REQ-4)
+# Routing log emission (REQ-9)
 # ---------------------------------------------------------------------------
 
 
-def test_1_line_file_routes_to_haiku():
-    """T130: Lower boundary — 1 line routes to Haiku."""
-    result = select_model_for_file(
-        file_path="assemblyzero/utils/tiny.py",
-        estimated_line_count=1,
-        is_test_scaffold=False,
-    )
-    assert result == HAIKU_MODEL
+@pytest.mark.parametrize(
+    "path, lines, scaffold, reason",
+    [
+        ("assemblyzero/__init__.py", 0, False, "boilerplate_filename"),
+        ("tests/unit/test_foo.py", 0, True, "test_scaffold"),
+        ("assemblyzero/utils/tiny.py", 10, False, "small_file, lines=10"),
+        ("assemblyzero/core/engine.py", 200, False, "default"),
+    ],
+)
+def test_routing_logs_the_seat_and_reason(caplog, path, lines, scaffold, reason):
+    with caplog.at_level(logging.INFO, logger=ROUTING_LOGGER):
+        seat = select_seat_for_file(path, lines, scaffold)
 
-
-# ---------------------------------------------------------------------------
-# T140 – 51-line file routes to Sonnet (REQ-5)
-# ---------------------------------------------------------------------------
-
-
-def test_51_line_file_routes_to_sonnet():
-    """T140: Just above threshold — routes to Sonnet."""
-    result = select_model_for_file(
-        file_path="assemblyzero/utils/medium.py",
-        estimated_line_count=51,
-        is_test_scaffold=False,
-    )
-    assert result == DEFAULT_MODEL
-
-
-# ---------------------------------------------------------------------------
-# T150 – Coverage checked via pytest-cov CLI flag (REQ-10)
-# T160 – Regression checked via full test suite run (REQ-11)
-# These are CI-level checks, not individual test functions.
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Additional edge-case tests for robustness
-# ---------------------------------------------------------------------------
-
-
-def test_type_error_on_non_string_path():
-    """select_model_for_file raises TypeError when file_path is not a str."""
-    with pytest.raises(TypeError, match="file_path must be a str"):
-        select_model_for_file(file_path=123)
-
-
-def test_type_error_on_path_object():
-    """select_model_for_file raises TypeError for pathlib.Path input."""
-    from pathlib import Path
-
-    with pytest.raises(TypeError, match="file_path must be a str"):
-        select_model_for_file(file_path=Path("assemblyzero/__init__.py"))
-
-
-def test_scaffold_with_conftest_both_route_haiku():
-    """is_test_scaffold=True with conftest.py basename -> Haiku (scaffold fires first)."""
-    result = select_model_for_file(
-        file_path="tests/conftest.py",
-        estimated_line_count=0,
-        is_test_scaffold=True,
-    )
-    assert result == HAIKU_MODEL
-
-
-def test_200_line_complex_file_routes_to_sonnet():
-    """200-line complex file routes to Sonnet."""
-    result = select_model_for_file(
-        file_path="assemblyzero/core/engine.py",
-        estimated_line_count=200,
-        is_test_scaffold=False,
-    )
-    assert result == DEFAULT_MODEL
-
-
-def test_scaffold_log_reason(caplog):
-    """Scaffold routing logs 'test_scaffold' as reason."""
-    with caplog.at_level(logging.INFO, logger="assemblyzero.workflows.testing.nodes.implementation.routing"):
-        select_model_for_file(
-            file_path="tests/unit/test_foo.py",
-            is_test_scaffold=True,
-        )
-
-    routing_records = [
-        r for r in caplog.records
-        if r.name == "assemblyzero.workflows.testing.nodes.implementation.routing"
-    ]
-    assert len(routing_records) == 1
-    assert "test_scaffold" in routing_records[0].message
-
-
-def test_small_file_log_reason(caplog):
-    """Small file routing logs 'small_file' as reason."""
-    with caplog.at_level(logging.INFO, logger="assemblyzero.workflows.testing.nodes.implementation.routing"):
-        select_model_for_file(
-            file_path="assemblyzero/utils/tiny.py",
-            estimated_line_count=10,
-        )
-
-    routing_records = [
-        r for r in caplog.records
-        if r.name == "assemblyzero.workflows.testing.nodes.implementation.routing"
-    ]
-    assert len(routing_records) == 1
-    assert "small_file" in routing_records[0].message
-    assert "lines=10" in routing_records[0].message
-
-
-def test_default_log_reason(caplog):
-    """Default routing logs 'default' as reason."""
-    with caplog.at_level(logging.INFO, logger="assemblyzero.workflows.testing.nodes.implementation.routing"):
-        select_model_for_file(
-            file_path="assemblyzero/core/engine.py",
-            estimated_line_count=200,
-        )
-
-    routing_records = [
-        r for r in caplog.records
-        if r.name == "assemblyzero.workflows.testing.nodes.implementation.routing"
-    ]
-    assert len(routing_records) == 1
-    assert "default" in routing_records[0].message
-
-
-def test_small_file_threshold_constant():
-    """SMALL_FILE_LINE_THRESHOLD is 50 as specified in LLD."""
-    assert SMALL_FILE_LINE_THRESHOLD == 50
-
-
-def test_haiku_model_constant():
-    """HAIKU_MODEL matches the expected model string."""
-    assert HAIKU_MODEL == "claude-haiku-4-5-20251001"
+    records = [r for r in caplog.records if r.name == ROUTING_LOGGER]
+    assert len(records) == 1
+    assert path in records[0].message
+    assert seat in records[0].message
+    assert reason in records[0].message

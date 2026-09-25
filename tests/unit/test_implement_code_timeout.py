@@ -262,7 +262,9 @@ class TestProviderGate:
         ) as mock_get:
             response, error = call_claude_for_file("write code")
 
-            mock_get.assert_called_once_with("claude:opus", effort=None)
+            # #3553/#3563: no model means the `impl.code` seat of the profile
+            # in hand, the built-in default here, never `claude:opus`.
+            mock_get.assert_called_once_with("gemini:3.1-pro", effort="max")
             mock_provider.invoke.assert_called_once()
             assert response == "```python\nprint('hello')\n```"
             assert error == ""
@@ -290,9 +292,10 @@ class TestProviderGate:
             "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
             return_value=mock_provider,
         ) as mock_get:
-            call_claude_for_file("prompt", model="haiku")
+            # #3553: an explicit model is a full provider spec, passed as is.
+            call_claude_for_file("prompt", model="claude:haiku")
 
-            mock_get.assert_called_once_with("claude:haiku", effort=None)
+            mock_get.assert_called_once_with("claude:haiku", effort="max")
 
     def test_no_direct_anthropic_import(self):
         """claude_client.py must not import anthropic directly."""

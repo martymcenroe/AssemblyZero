@@ -168,19 +168,12 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     """
     workflow_type = state.get("workflow_type", "lld")
     assemblyzero_root = Path(state.get("assemblyzero_root", ""))
-    mock_mode = state.get("config_mock_mode", False)
     audit_dir = Path(state.get("audit_dir", ""))
     current_draft = state.get("current_draft", "")
     verdict_history = list(state.get("verdict_history", []))
 
     verdict_count = state.get("verdict_count", 0) + 1
     print(f"\n[N3] Reviewing draft (review #{verdict_count})...")
-
-    # Use mock provider in mock mode, otherwise use configured reviewer
-    if mock_mode:
-        reviewer_spec = "mock:review"
-    else:
-        reviewer_spec = state.get("config_reviewer", "gemini:3.1-pro")
 
     # Determine review prompt path based on workflow type
     if workflow_type == "issue":
@@ -195,10 +188,16 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
         return {"error_message": str(e)}
 
     # Get reviewer provider
-    # Issue #773: Pass effort level to Claude reviewer
-    effort = state.get("config_effort")
+    # Issue #773: Pass effort level to Claude reviewer. #3563: the reviewer
+    # is the run profile's `requirements.review` seat (`mock:review` under the
+    # mock profile), with the seat's effort.
+    from assemblyzero.core.seats import resolve
+
+    reviewer_spec = "(unresolved)"
     try:
-        reviewer = get_provider(reviewer_spec, effort=effort)
+        reviewer_seat = resolve(state, "requirements.review")
+        reviewer_spec = reviewer_seat.spec
+        reviewer = get_provider(reviewer_spec, effort=reviewer_seat.effort)
     except ValueError as e:
         return {"error_message": f"Invalid reviewer: {e}"}
 

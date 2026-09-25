@@ -13,6 +13,7 @@ Routes:
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.seats import resolve
 from assemblyzero.core.validation.test_plan_validator import (
     MAX_VALIDATION_ATTEMPTS,
     validate_test_plan,
@@ -132,7 +133,7 @@ def validate_test_plan_node(state: RequirementsWorkflowState) -> dict[str, Any]:
             check="test-plan",
             issue=int(state.get("issue_number") or 0) or None,
             draft_number=state.get("iteration_count", 0) + 1,
-            drafter_model=state.get("config_drafter", ""),
+            drafter_model=resolve(state, "requirements.draft").spec,
             run_id=run_id,
         )
     except Exception as exc:  # noqa: BLE001 - telemetry never breaks a roll

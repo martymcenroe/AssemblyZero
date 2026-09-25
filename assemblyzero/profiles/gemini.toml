@@ -1,0 +1,11 @@
+# The default profile: ADR 0234, the operator's law of 2026-09-24.
+# Gemini in agy drafts and Gemini in agy validates, both seats, both
+# workflows, and (his ruling at about 11:50 PM Central, #3553) the coder too.
+# A run with no --models flag, no AZ_MODEL_PROFILE, and no
+# <target>/.assemblyzero/models.toml uses this file.
+name = "gemini"
+description = "Every seat on Gemini 3.1 Pro through agy (ADR 0234)."
+
+[defaults]
+spec = "gemini:3.1-pro"
+effort = "max"

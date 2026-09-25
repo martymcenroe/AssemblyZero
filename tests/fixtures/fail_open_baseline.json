@@ -1,9 +1,9 @@
 {
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
-    "files_scanned": 305,
-    "sites_examined": 9327,
-    "findings_total": 567
+    "files_scanned": 306,
+    "sites_examined": 9454,
+    "findings_total": 568
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
@@ -326,7 +326,7 @@
     "assemblyzero/workflows/requirements/nodes/finalize.py::_finalize_repair_budget::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/finalize.py::_mirror_to_worktree::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/generate_draft.py::build_revision_context::except_handler::0",
-    "assemblyzero/workflows/requirements/nodes/generate_draft.py::generate_draft::except_handler::0",
+    "assemblyzero/workflows/requirements/nodes/generate_draft.py::generate_draft::except_handler::1",
     "assemblyzero/workflows/requirements/nodes/load_input.py::_get_repo_name::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/load_input.py::_load_issue::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/load_input.py::_load_issue::except_handler::1",

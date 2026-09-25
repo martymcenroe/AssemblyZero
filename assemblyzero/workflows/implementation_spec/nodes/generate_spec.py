@@ -80,9 +80,6 @@ def _spec_injection():
 # Template path relative to assemblyzero_root
 SPEC_TEMPLATE_PATH = Path("docs/standards/0701-implementation-spec-template.md")
 
-# Default drafter model spec (top-tier; AZ #1434)
-DEFAULT_DRAFTER = "gemini:3.1-pro"
-
 # Maximum characters for pattern reference excerpts in the prompt
 MAX_PATTERN_EXCERPT_CHARS = 3_000
 
@@ -381,12 +378,27 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # #3506: only when some node of this run is Gemini, and then the agy
     # transport itself, not the credential file.
-    if not mock_mode:
+    # #3563: the drafter is the run profile's `spec.draft` seat (`mock:draft`
+    # under the mock profile); the preflight also sees the `spec.review` seat.
+    from assemblyzero.core.seats import resolve
+
+    # A seat that will not resolve is reported where an unbuildable drafter
+    # always was, below, so the node keeps one "Invalid drafter" halt site.
+    seat_error: ValueError | None = None
+    drafter_seat = None
+    drafter_spec = reviewer_spec = ""
+    try:
+        drafter_seat = resolve(state, "spec.draft")
+        drafter_spec = drafter_seat.spec
+        reviewer_spec = resolve(state, "spec.review").spec
+    except ValueError as e:
+        # fail-open: not here. The error is held and raised inside the drafter
+        # try below, so it halts with the node's one "Invalid drafter" message.
+        seat_error = e
+
+    if not mock_mode and seat_error is None:
         from assemblyzero.core.preflight import preflight_for_specs
-        preflight = preflight_for_specs(
-            str(state.get("config_drafter", DEFAULT_DRAFTER) or ""),
-            str(state.get("config_reviewer", "") or ""),
-        )
+        preflight = preflight_for_specs(drafter_spec, reviewer_spec)
         if preflight is None:
             print("    [PREFLIGHT] no Gemini node in this run; transport check skipped")
         elif not preflight.passed:
@@ -402,13 +414,10 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Get drafter provider
     # -------------------------------------------------------------------------
-    if mock_mode:
-        drafter_spec = "mock:draft"
-    else:
-        drafter_spec = state.get("config_drafter", DEFAULT_DRAFTER)
-
     try:
-        drafter = get_provider(drafter_spec)
+        if seat_error is not None:
+            raise seat_error
+        drafter = get_provider(drafter_spec, effort=drafter_seat.effort)
     except ValueError as e:
         print(f"    ERROR: Invalid drafter: {e}")
         return {"error_message": f"Invalid drafter: {e}"}

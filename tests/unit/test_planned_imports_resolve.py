@@ -189,7 +189,7 @@ class TestValidateCodeResponse:
 def _claude_returns(code: str):
     calls: list[str] = []
 
-    def fake(prompt, file_path="", model="", system_prompt=""):
+    def fake(prompt, file_path="", seat="", system_prompt=""):
         calls.append(file_path)
         return f"```python\n{code}```", ""
 
@@ -232,7 +232,7 @@ class TestImplementCode:
             received.append(kwargs.get("planned_paths"))
             return "# generated\n", True
 
-        def no_batch(prompt, file_path="", model="", system_prompt=""):
+        def no_batch(prompt, file_path="", seat="", system_prompt=""):
             return "", "batch path is not under test"
 
         state = {

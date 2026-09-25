@@ -11,6 +11,7 @@ Provides:
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+from assemblyzero.core.seats import default_spec
 
 
 @dataclass
@@ -90,8 +91,8 @@ class WorkflowConfig:
     """
 
     workflow_type: Literal["issue", "lld"]
-    drafter: str = "gemini:3.1-pro"
-    reviewer: str = "gemini:3.1-pro"
+    drafter: str = field(default_factory=lambda: default_spec("requirements.draft"))
+    reviewer: str = field(default_factory=lambda: default_spec("requirements.review"))
     draft_template_path: Path = field(default_factory=lambda: Path(""))
     review_prompt_path: Path = field(default_factory=lambda: Path(""))
     gates: GateConfig = field(default_factory=GateConfig)
@@ -158,8 +159,8 @@ class WorkflowConfig:
 
 
 def create_issue_config(
-    drafter: str = "gemini:3.1-pro",
-    reviewer: str = "gemini:3.1-pro",
+    drafter: str | None = None,
+    reviewer: str | None = None,
     gates: str = "none",
     max_iterations: int = 3,
     auto_mode: bool = False,
@@ -184,8 +185,8 @@ def create_issue_config(
     """
     return WorkflowConfig(
         workflow_type="issue",
-        drafter=drafter,
-        reviewer=reviewer,
+        drafter=drafter or default_spec("requirements.draft"),
+        reviewer=reviewer or default_spec("requirements.review"),
         draft_template_path=Path("docs/templates/0101-issue-template.md"),
         review_prompt_path=Path("docs/skills/0701c-Issue-Review-Prompt.md"),
         gates=GateConfig.from_string(gates),
@@ -198,8 +199,8 @@ def create_issue_config(
 
 
 def create_lld_config(
-    drafter: str = "gemini:3.1-pro",
-    reviewer: str = "gemini:3.1-pro",
+    drafter: str | None = None,
+    reviewer: str | None = None,
     gates: str = "none",
     max_iterations: int = 3,
     auto_mode: bool = False,
@@ -224,8 +225,8 @@ def create_lld_config(
     """
     return WorkflowConfig(
         workflow_type="lld",
-        drafter=drafter,
-        reviewer=reviewer,
+        drafter=drafter or default_spec("requirements.draft"),
+        reviewer=reviewer or default_spec("requirements.review"),
         draft_template_path=Path("docs/templates/0102-feature-lld-template.md"),
         review_prompt_path=Path("docs/skills/0702c-LLD-Review-Prompt.md"),
         gates=GateConfig.from_string(gates),

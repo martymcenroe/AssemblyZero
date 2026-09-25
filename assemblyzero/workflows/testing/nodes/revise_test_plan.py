@@ -189,8 +189,8 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     Args:
         state: Current workflow state. Reads `gemini_feedback`,
             `lld_content`, `requirements`, `test_plan_revision_count`,
-            `config_drafter`, `config_effort`, `config_retry_policy`,
-            `mock_mode`.
+            `model_profile` (the `impl.test_plan.revise` seat, #3563),
+            `config_retry_policy`, `mock_mode`.
 
     Returns:
         Dict of state updates:
@@ -231,12 +231,15 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Lazy imports — keeps the test surface trivial when mock_mode is on.
     from assemblyzero.core.llm_provider import get_provider
+    from assemblyzero.core.seats import resolve
     from assemblyzero.utils.retry import get_policy, with_retry
 
-    revisor_spec = state.get("config_drafter", "gemini:3.1-pro")
-    effort = state.get("config_effort")
+    # #3563: the run profile's `impl.test_plan.revise` seat.
+    revisor_spec = "(unresolved)"
     try:
-        revisor = get_provider(revisor_spec, effort=effort)
+        revisor_seat = resolve(state, "impl.test_plan.revise")
+        revisor_spec = revisor_seat.spec
+        revisor = get_provider(revisor_spec, effort=revisor_seat.effort)
     except ValueError as e:
         return {
             "test_plan_revision_count": revision_count,

@@ -258,11 +258,15 @@ def gap_analyst_node(state: ScoutState) -> dict[str, Any]:
 Please also identify GAPS between our implementation and the external best practices.
 """
 
-    # Call Gemini using core client with credential rotation
+    # #3563: the run profile's `scout.analyze` seat, through get_provider. A
+    # bare GeminiClient() took REVIEWER_MODEL as its model, which was a Claude
+    # id until #3552 and was never this seat's to choose.
     try:
-        from assemblyzero.core.gemini_client import GeminiClient
+        from assemblyzero.core.llm_provider import get_provider
+        from assemblyzero.core.seats import resolve
 
-        client = GeminiClient()
+        seat = resolve(state, "scout.analyze")
+        client = get_provider(seat.spec, effort=seat.effort)
         system_instruction = "You are a technical analyst reviewing open source repositories to identify best practices and innovation opportunities."
         result = client.invoke(system_instruction, prompt)
 

@@ -58,6 +58,12 @@ from assemblyzero.workflows.requirements.audit import (
     generate_slug,
     shift_lineage_versions,
 )
+from assemblyzero.core.seats import (  # noqa: E402  (#3563)
+    add_profile_arguments,
+    describe,
+    seat_in,
+    profile_from_args,
+)
 from assemblyzero.utils.git import current_branch, validate_integration_branch
 from assemblyzero.workflows.requirements.config import GateConfig
 from assemblyzero.workflows.requirements.graph import create_requirements_graph
@@ -374,25 +380,29 @@ Examples:
         help="Resume LLD workflow at review stage, reusing existing validated draft (Issue #536)",
     )
 
-    # LLM configuration. #3517, operator directive of 2026-09-24: agy drafts
-    # and validates; Claude is out of both seats. These match the
-    # orchestrator's defaults (orchestrator/config.py) and the library's own
-    # (requirements/config.py), which the CLI had been overriding.
+    # LLM configuration. #3563: every seat's model comes from the run's model
+    # profile (--models; default gemini.toml, the 2026-09-24 law that agy
+    # drafts and validates, #3517). --drafter and --reviewer are kept as
+    # per-seat overrides on top of the profile; --seat is the general form.
+    add_profile_arguments(parser)
     parser.add_argument(
         "--drafter",
-        default="gemini:3.1-pro",
-        help="Drafter LLM spec (default: gemini:3.1-pro, agy)",
+        default=None,
+        help=(
+            "Override the drafter seats (requirements.analyze, "
+            "requirements.draft) with a provider spec. Default: the profile's"
+        ),
     )
     parser.add_argument(
         "--reviewer",
-        default="gemini:3.1-pro",
-        help="Reviewer LLM spec (default: gemini:3.1-pro, agy)",
+        default=None,
+        help="Override the requirements.review seat. Default: the profile's",
     )
     parser.add_argument(
         "--effort",
         choices=["low", "medium", "high", "max"],
-        default="max",
-        help="Claude reviewer effort level (default: max)",
+        default=None,
+        help="Effort for every seat, over the profile's (default: the profile's, max)",
     )
 
     # Issue #1071: Retry policy for transient LLM failures.
@@ -653,6 +663,10 @@ def build_initial_state(
     # Parse gate configuration
     gate_config = GateConfig.from_string(args.review)
 
+    # #3563: the run's model profile, snapshotted into state. The three
+    # legacy keys are written from it for one release.
+    profile = run_profile_for(args, target_repo)
+
     # Build state based on workflow type
     if args.type == "issue":
         # Detect if brief is in ideas/active/ for cleanup after success
@@ -667,14 +681,14 @@ def build_initial_state(
             workflow_type="issue",
             assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
-            drafter=args.drafter,
-            reviewer=args.reviewer,
+            drafter=seat_in(profile, "requirements.draft").spec,
+            reviewer=seat_in(profile, "requirements.review").spec,
             gates_draft=gate_config.draft_gate,
             gates_verdict=gate_config.verdict_gate,
             auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
-            effort=getattr(args, "effort", "max"),
+            effort=seat_in(profile, "requirements.review").effort or "",
             retry_policy=getattr(args, "retry_policy", "default"),
             brief_file=args.brief or "",
             source_idea=source_idea,
@@ -693,14 +707,14 @@ def build_initial_state(
             assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
             base_branch=base_branch,
-            drafter=args.drafter,
-            reviewer=args.reviewer,
+            drafter=seat_in(profile, "requirements.draft").spec,
+            reviewer=seat_in(profile, "requirements.review").spec,
             gates_draft=gate_config.draft_gate,
             gates_verdict=gate_config.verdict_gate,
             auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
-            effort=getattr(args, "effort", "max"),
+            effort=seat_in(profile, "requirements.review").effort or "",
             retry_policy=getattr(args, "retry_policy", "default"),
             issue_number=args.issue or 0,
             context_files=args.context or [],
@@ -709,8 +723,46 @@ def build_initial_state(
 
     # Issue #476: API cost budget
     state["cost_budget_usd"] = getattr(args, "budget", 5.0)
+    state["model_profile"] = profile
+    print(describe(profile))
 
     return state
+
+
+#: #3563: the seats the old flags override. The drafter flag reached N0c and
+#: N1 through `config_drafter`; its escalation follows #2375's map.
+LEGACY_SEAT_FLAGS = {
+    "drafter": ("requirements.analyze", "requirements.draft"),
+    "reviewer": ("requirements.review",),
+}
+
+
+def run_profile_for(args: argparse.Namespace, target_repo: Path) -> dict:
+    """The model profile this run uses (#3563): --models, then
+    AZ_MODEL_PROFILE, then the target's models.toml, then gemini.toml, with
+    --seat, --drafter, --reviewer and --effort applied on top. Under --mock
+    the issue workflow drafts from `mock:draft` and the LLD workflow from
+    `mock:lld` (#3533). A --drafter also sets the N0c escalation seat by
+    #2375's map, unless --seat names that seat itself."""
+    from assemblyzero.core.seats import apply_overrides
+
+    mock_overrides = (
+        {"requirements.draft": "mock:draft"} if getattr(args, "type", "") == "issue" else {}
+    )
+    profile = profile_from_args(
+        args, target_repo, LEGACY_SEAT_FLAGS, mock_overrides=mock_overrides,
+    )
+    drafter = profile["overrides"].get("requirements.analyze")
+    if drafter and "requirements.analyze.escalation" not in profile["overrides"]:
+        from assemblyzero.workflows.requirements.nodes.analyze_requirements import (
+            escalated_drafter,
+        )
+
+        profile = apply_overrides(
+            profile,
+            {"requirements.analyze.escalation": escalated_drafter(drafter) or drafter},
+        )
+    return profile
 
 
 def run_single_workflow(
@@ -1457,8 +1509,8 @@ def print_header(args: argparse.Namespace) -> None:
         print(f"Brief:    {args.brief}")
     else:
         print(f"Issue:    #{args.issue}")
-    print(f"Drafter:  {args.drafter}")
-    print(f"Reviewer: {args.reviewer}")
+    print(f"Models:   {getattr(args, 'models', None) or '(profile precedence; see [models] below)'}")
+    print(f"Overrides: drafter={getattr(args, 'drafter', None) or '-'} reviewer={getattr(args, 'reviewer', None) or '-'} seat={getattr(args, 'seat', None) or '-'}")
     print(f"Review:   {args.review}")
     if args.mock:
         print("Mode:     MOCK (no API calls)")

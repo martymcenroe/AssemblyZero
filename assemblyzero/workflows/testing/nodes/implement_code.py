@@ -10,6 +10,7 @@ All public names are re-exported here so existing imports continue to work:
 from assemblyzero.workflows.testing.nodes.implementation import *  # noqa: F401, F403
 from assemblyzero.workflows.testing.nodes.implementation import (  # noqa: F811
     implement_code,
+    implement_code_under_profile,
     extract_code_block,
     validate_code_response,
     call_claude_for_file,
@@ -44,7 +45,9 @@ from assemblyzero.workflows.testing.nodes.implementation import (  # noqa: F811
     LARGE_FILE_LINE_THRESHOLD,
     LARGE_FILE_BYTE_THRESHOLD,
     CODE_GEN_PROMPT_CAP,
-    HAIKU_MODEL,
+    CODE_SEAT,
+    SMALL_SEAT,
+    select_seat_for_file,
     SMALL_FILE_LINE_THRESHOLD,
 )
 
@@ -61,6 +64,7 @@ from assemblyzero.workflows.testing.nodes.implementation import (  # noqa: F811
 # and `_summarize_function` are imported by tests from this path today.
 __all__ = [
     "implement_code",
+    "implement_code_under_profile",
     "extract_code_block",
     "validate_code_response",
     "call_claude_for_file",
@@ -95,6 +99,8 @@ __all__ = [
     "LARGE_FILE_LINE_THRESHOLD",
     "LARGE_FILE_BYTE_THRESHOLD",
     "CODE_GEN_PROMPT_CAP",
-    "HAIKU_MODEL",
+    "CODE_SEAT",
+    "SMALL_SEAT",
+    "select_seat_for_file",
     "SMALL_FILE_LINE_THRESHOLD",
 ]

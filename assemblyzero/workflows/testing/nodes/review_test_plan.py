@@ -477,16 +477,15 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         }
     # --------------------------------------------------------------------------
 
-    # Issue #773: Use unified LLM provider instead of hardcoded GeminiClient
-    reviewer_spec = state.get("config_reviewer", "gemini:3.1-pro")
-    if state.get("mock_mode", False):
-        reviewer_spec = "mock:review"
-    print(f"    Reviewer: {reviewer_spec}")
+    # Issue #773: Use unified LLM provider instead of hardcoded GeminiClient.
+    # #3563: the run profile's `impl.test_plan.review` seat, with its effort.
+    from assemblyzero.core.seats import resolve
 
-    # Issue #773: Pass effort level to Claude reviewer
-    effort = state.get("config_effort")
     try:
-        reviewer = get_provider(reviewer_spec, effort=effort)
+        reviewer_seat = resolve(state, "impl.test_plan.review")
+        reviewer_spec = reviewer_seat.spec
+        print(f"    Reviewer: {reviewer_spec}")
+        reviewer = get_provider(reviewer_spec, effort=reviewer_seat.effort)
     except ValueError as e:
         return {
             "error_message": f"Invalid reviewer: {e}",

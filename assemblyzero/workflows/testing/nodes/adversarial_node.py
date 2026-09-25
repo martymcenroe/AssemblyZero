@@ -139,8 +139,12 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     # #2926: the sanctioned transport and nothing else. Construction fails
     # only on a forbidden alias or a spec get_provider refuses, and neither
     # blocks the run: the reason is recorded and the run continues.
+    # #3563: the model is the run profile's `impl.adversarial` seat.
     try:
-        client = AdversarialGeminiClient()
+        from assemblyzero.core.seats import resolve
+
+        seat = resolve(state, "impl.adversarial")
+        client = AdversarialGeminiClient(spec=seat.spec, effort=seat.effort)
     except (ForbiddenModelError, ValueError) as exc:
         logger.warning("[ADV] No adversarial client — skipping: %s", exc)
         return _skipped(state, f"no adversarial client: {exc}")
