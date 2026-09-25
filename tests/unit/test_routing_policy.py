@@ -15,11 +15,17 @@ keeps that number honest and falling.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from assemblyzero.core.gate_registry import (
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+
+import audit_halt_sites as cli  # noqa: E402
+
+from assemblyzero.core.gate_registry import (  # noqa: E402
     ACTION_ADVISE,
     ACTION_HALT,
     GATE_REGISTRY,
@@ -30,9 +36,9 @@ from assemblyzero.core.gate_registry import (
     gate_key_of,
     halt_counts,
     registry_by_key,
+    scan_halt_sites,
 )
 
-ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / "tests" / "fixtures" / "gate_registry_baseline.json"
 
 STAGNATION_KEYS = (
@@ -116,35 +122,20 @@ class TestTheRatchet:
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
         assert halt_counts() == baseline["halt_rows_per_stage"]
 
-    def test_the_denominator_matches_what_it_was_measured_against(self):
+    def test_the_baseline_states_a_denominator(self):
         """`measured_against` exists so a reader can see the denominator
-        without re-running anything, which only works while it is true (#2780).
-
-        The enforced counts were asserted and this block was not, so it could
-        only be right by accident of who last regenerated the baseline: #2736
-        wrote it against 184 walked files, #2733 then added
-        `workflows/testing/atlas.py` -- walked, no halt site in it -- and the
-        stated denominator quietly became wrong while every enforced number
-        stayed right.
-
-        Asserted by re-walking rather than against a literal, or this becomes
-        one more number nobody updates.
+        without re-running anything (#2780). Whether it is still TRUE is
+        `tools/audit_halt_sites.py --check --strict`'s question, not this
+        gate's (#3527): asserting it here by re-walking failed every PR that
+        added a walked file, halt site or not, and two PRs adding files
+        collided on the same `files_scanned` line. The enforced counts below
+        are what protect anything; this block is context for a reader, and
+        the gate only insists that it is written.
         """
-        from pathlib import Path
-
-        from assemblyzero.core.gate_registry import GATE_REGISTRY, scan_halt_sites
-
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-        sites, coverage = scan_halt_sites(Path(__file__).resolve().parents[2])
-        assert baseline["measured_against"] == {
-            "files_scanned": coverage.files_scanned,
-            "halt_sites": len(sites),
-            "gates": len(GATE_REGISTRY),
-        }, (
-            "the baseline's stated denominator no longer matches the tree it "
-            "claims to describe; regenerate with "
-            "`tools/audit_halt_sites.py --write-baseline`"
-        )
+        assert set(baseline["measured_against"]) == {
+            "files_scanned", "halt_sites", "gates",
+        }
 
     def test_the_ratchet_records_what_is_left(self):
         """2 model-output rows still halt. The number is pinned so it can only
@@ -208,3 +199,121 @@ class TestTheRatchet:
             if gate.action == ACTION_HALT and gate.judges == JUDGES_MODEL_OUTPUT
         }
         assert remaining.isdisjoint(STAGNATION_KEYS)
+
+
+class TestTheDenominatorLeftThePRGate:
+    """#3527. The denominator test failed every PR that added a walked file,
+    and two concurrent PRs collided on its `files_scanned` line. The PR gate
+    now fails only on what it enforces; the counts are checked by `--strict`.
+    Same shape as #3523's `TestTheDenominatorLeftThePRGate` for the fail-open
+    baseline, against this tool and this fixture."""
+
+    def _baselined_tree(self, tmp_path):
+        """A tree the walker recognises -- `assemblyzero/workflows/` under a
+        root -- holding one module with no halt site, and a baseline written
+        against it."""
+        src = tmp_path / "assemblyzero" / "workflows"
+        src.mkdir(parents=True)
+        (src / "mod.py").write_text(
+            "def step(state):\n    return {'answer': 1}\n", encoding="utf-8"
+        )
+        baseline = tmp_path / "baseline.json"
+        sites, coverage = scan_halt_sites(tmp_path)
+        cli.write_baseline(sites, coverage, baseline)
+        return src, baseline
+
+    def test_adding_a_walked_file_passes_the_gate_without_touching_the_baseline(
+        self, tmp_path
+    ):
+        src, baseline = self._baselined_tree(tmp_path)
+        before = baseline.read_bytes()
+        (src / "more.py").write_text(
+            "def helper(n):\n    return n + 1\n", encoding="utf-8"
+        )
+
+        sites, coverage = scan_halt_sites(tmp_path)
+        stated = json.loads(baseline.read_text(encoding="utf-8"))
+
+        # The PR gate's assertions, exactly as TestTheRatchet makes them.
+        assert halt_counts() == stated["halt_rows_per_stage"]
+        assert cli.model_output_halt_rows() == stated["model_output_halt_rows"]
+        assert set(stated["measured_against"]) == {"files_scanned", "halt_sites", "gates"}
+        assert baseline.read_bytes() == before
+        # ...while strict mode still sees the tree has moved, and only there.
+        assert cli.denominator_drift(sites, coverage, baseline) == {
+            "files_scanned": (1, 2),
+        }
+
+    def test_strict_is_clean_on_the_tree_it_was_measured_against(self, tmp_path):
+        _, baseline = self._baselined_tree(tmp_path)
+        sites, coverage = scan_halt_sites(tmp_path)
+        assert cli.denominator_drift(sites, coverage, baseline) == {}
+
+    def test_a_missing_denominator_is_drift_not_a_pass(self, tmp_path):
+        _, baseline = self._baselined_tree(tmp_path)
+        payload = json.loads(baseline.read_text(encoding="utf-8"))
+        del payload["measured_against"]
+        baseline.write_text(json.dumps(payload), encoding="utf-8")
+
+        sites, coverage = scan_halt_sites(tmp_path)
+        drift = cli.denominator_drift(sites, coverage, baseline)
+
+        assert set(drift) == {"files_scanned", "halt_sites", "gates"}
+        assert all(stated is None for stated, _ in drift.values())
+
+    def test_strict_mode_exits_one_when_the_file_count_moved(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Acceptance criterion 2: strict mode on a tree whose file count
+        differs from the baseline exits 1 and names the count. The baseline
+        is a copy of the real one with `files_scanned` moved off the live
+        value by one, so the drift is exactly one count whatever the tree
+        holds today."""
+        sites, coverage = scan_halt_sites(ROOT)
+        payload = json.loads(BASELINE.read_text(encoding="utf-8"))
+        payload["measured_against"] = dict(
+            cli.measured(sites, coverage),
+            files_scanned=coverage.files_scanned + 1,
+        )
+        moved = tmp_path / "baseline.json"
+        moved.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(cli, "BASELINE_PATH", moved)
+
+        rc = cli.main(["--check", "--strict", "--root", str(ROOT)])
+
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert (
+            f"files_scanned: baseline {coverage.files_scanned + 1}, "
+            f"tree {coverage.files_scanned}"
+        ) in out
+        assert "Regenerate with tools/audit_halt_sites.py --write-baseline." in out
+
+    def test_check_without_strict_ignores_the_denominator(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Requirement 1 at the command line: the same moved baseline, and
+        plain `--check` does not look at it."""
+        sites, coverage = scan_halt_sites(ROOT)
+        payload = json.loads(BASELINE.read_text(encoding="utf-8"))
+        payload["measured_against"] = dict(
+            cli.measured(sites, coverage),
+            files_scanned=coverage.files_scanned + 1,
+        )
+        moved = tmp_path / "baseline.json"
+        moved.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(cli, "BASELINE_PATH", moved)
+
+        rc = cli.main(["--check", "--root", str(ROOT)])
+
+        assert rc == 0
+        assert "measured_against" not in capsys.readouterr().out
+
+    def test_strict_without_check_is_a_usage_error(self, capsys):
+        """The message is asserted, not only the exit code: before #3527
+        argparse rejected `--strict` as an unrecognised flag with the same
+        code 2, so the code alone cannot tell the flag exists."""
+        with pytest.raises(SystemExit) as exc:
+            cli.main(["--strict"])
+        assert exc.value.code == 2
+        assert "--strict only applies with --check" in capsys.readouterr().err
