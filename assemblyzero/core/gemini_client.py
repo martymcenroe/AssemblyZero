@@ -17,7 +17,9 @@ Read anything about "credential rotation" below as describing that client, not
 the transport the pipeline uses.
 """
 
+import functools
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -152,6 +154,58 @@ def agent_warning(text: str) -> str:
         if "--agent" in line:
             return line.strip()
     return ""
+
+
+#: On Windows agy runs inside WSL, never as agy.exe (#3623). The Windows build
+#: wraps its shell in PowerShell, where the fleet's shell guard cannot see it,
+#: so the tool-less agent above would be the only thing between a pipeline
+#: prompt and an unguarded shell. Under WSL the guard's hooks cover agy. A
+#: discovered WSL agy is stored with this prefix, and every argv built from it
+#: goes through wsl.exe.
+#:
+#: Residue, stated: when a call times out, ``kill_process_tree`` ends wsl.exe
+#: and its Windows children. The Linux agy process normally ends with its relay,
+#: but nothing here proves it did.
+AGY_WSL_PREFIX = "wsl:"
+_ON_WINDOWS = os.name == "nt"
+
+
+@functools.lru_cache(maxsize=1)
+def _find_wsl_agy() -> Optional[str]:
+    """The Linux path of agy inside the default WSL distribution, or None.
+
+    ``wsl.exe --exec`` starts a program with no shell, so no profile runs and
+    ``~/.local/bin`` (agy's install location) is usually not on PATH. Two
+    lookups, both argv-only: ``which agy``, then ``$HOME/.local/bin/agy`` if
+    it is executable. Cached: every GeminiClient asks, and each lookup starts
+    a WSL process.
+    """
+    wsl = shutil.which("wsl.exe") or shutil.which("wsl")
+    if not wsl:
+        return None
+
+    def run(*argv: str) -> Optional[subprocess.CompletedProcess]:
+        try:
+            return subprocess.run(
+                [wsl, "--exec", *argv], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            # fail-open: None becomes "agy not found", which the preflight and
+            # every invoke report as a failed call; no answer is invented.
+            return None
+
+    found = run("which", "agy")
+    if found and found.returncode == 0 and found.stdout.strip().startswith("/"):
+        return found.stdout.strip().splitlines()[0]
+    home = run("printenv", "HOME")
+    if not (home and home.returncode == 0 and home.stdout.strip().startswith("/")):
+        return None
+    candidate = home.stdout.strip() + "/.local/bin/agy"
+    probe = run("test", "-x", candidate)
+    if probe and probe.returncode == 0:
+        return candidate
+    return None
 
 #: Named in every failure this module hands back to a caller (#2476).
 #:
@@ -674,15 +728,27 @@ class GeminiClient:
 
         Replaces the retired Gemini CLI (#1335); agy is the subscription
         (OAuth) governance transport.
+
+        On Windows this is agy inside WSL, never agy.exe (#3623): the Windows
+        build's shell runs outside the fleet's shell guard. The result then
+        carries ``AGY_WSL_PREFIX`` so every call knows to go through wsl.exe.
         """
-        cli = shutil.which("agy")
-        if cli:
-            return cli
-        # Default Windows install location (agy is not always on PATH).
-        candidate = Path.home() / "AppData" / "Local" / "agy" / "bin" / "agy.exe"
-        if candidate.exists():
-            return str(candidate)
-        return None
+        if _ON_WINDOWS:
+            linux_path = _find_wsl_agy()
+            return AGY_WSL_PREFIX + linux_path if linux_path else None
+        return shutil.which("agy")
+
+    def _agy_argv(self, cwd: str, *tail: str) -> list[str]:
+        """The argv that runs agy with ``tail``, in ``cwd``.
+
+        A WSL agy runs as ``wsl.exe --cd <cwd> --exec <agy> ...``: ``--cd``
+        takes the Windows path of the temporary directory, and ``--exec``
+        starts agy with no shell in between.
+        """
+        cli = self._agy_cli or ""
+        if cli.startswith(AGY_WSL_PREFIX):
+            return ["wsl.exe", "--cd", cwd, "--exec", cli[len(AGY_WSL_PREFIX):], *tail]
+        return [cli, *tail]
 
     def _invoke_via_cli(
         self,
@@ -724,8 +790,12 @@ class GeminiClient:
         # headroom. #1772: oversize prompts ride stdin instead of argv —
         # `agy --model X` with no -p reads the prompt from stdin and prints
         # the response to a plain pipe (verified with a 39,954-char prompt).
-        # Small prompts keep the proven PTY path below.
-        if len(full_prompt) > 30000:
+        # Small prompts keep the proven PTY path below. #3623: a WSL agy, and
+        # any agy off Windows, always rides stdin. The PTY path needs pywinpty,
+        # which exists only on Windows, so on Linux every short prompt failed
+        # here; a Linux agy answers on plain pipes (proved through WSL).
+        via_wsl = (self._agy_cli or "").startswith(AGY_WSL_PREFIX)
+        if len(full_prompt) > 30000 or via_wsl or not _ON_WINDOWS:
             return self._invoke_via_stdin(full_prompt, timeout_seconds)
 
         try:
@@ -768,6 +838,14 @@ class GeminiClient:
             return False, "", f"agy CLI invocation failed: {e}"
 
         text = _strip_ansi("".join(chunks)).strip()
+
+        # #3612, #3623: the PTY carries stderr and stdout on one stream, so an
+        # agent agy could not load shows up in the text. The default agent,
+        # with its tools, answered; that is a failed call. This check was on
+        # the stdin path only until #3623.
+        warned = agent_warning(text)
+        if warned:
+            return False, "", f"agy did not run as {AGY_AGENT_NAME}: {warned[:400]}"
 
         # #1765: never hand a CLI error banner to callers as model output.
         # (Boundary checks below are mirrored in _invoke_via_stdin.)
@@ -815,10 +893,10 @@ class GeminiClient:
                 # #3612: the agent this call runs as lives in this directory.
                 write_text_only_agent(tmp_cwd)
                 proc = subprocess.Popen(
-                    [
-                        self._agy_cli, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
+                    self._agy_argv(
+                        tmp_cwd, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
                         "--model", self.model,
-                    ],
+                    ),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

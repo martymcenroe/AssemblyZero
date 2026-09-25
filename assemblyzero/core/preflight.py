@@ -229,8 +229,9 @@ def check_gemini_transport(client=None, model: str = DEFAULT_PROBE_MODEL) -> Pre
             return PreflightResult(
                 passed=False, available_credentials=0, total_credentials=0,
                 model_reachable=False,
-                warnings=["transport: the agy CLI was not found (PATH, or "
-                          "%LOCALAPPDATA%\\agy\\bin\\agy.exe)"],
+                warnings=["transport: the agy CLI was not found (on Windows, "
+                          "inside WSL: `which agy` or ~/.local/bin/agy; "
+                          "elsewhere, PATH). agy.exe is never used (#3623)"],
             )
         result = client.invoke(
             system_instruction="Respond with exactly: pong", content="ping",
