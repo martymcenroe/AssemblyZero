@@ -41,7 +41,11 @@ def test_hourglass_age_meter_state_path_is_absolute():
 
 
 def test_workflow_audit_file_is_absolute():
-    from assemblyzero.workflows.testing.audit import WORKFLOW_AUDIT_FILE
+    # #3531: the autouse guard has redirected the module attribute by the
+    # time this runs; the design value is the one recorded before that.
+    from tests.home_state_guard import real_bindings
+
+    WORKFLOW_AUDIT_FILE = real_bindings()["WORKFLOW_AUDIT_FILE"]
     assert WORKFLOW_AUDIT_FILE.is_absolute(), (
         f"WORKFLOW_AUDIT_FILE={WORKFLOW_AUDIT_FILE} must be absolute "
         "(#1151: workflow audit log lives outside any repo tree)"
@@ -67,13 +71,15 @@ def test_all_relocated_paths_live_under_claude_home():
         AGE_METER_STATE_PATH,
         HISTORY_PATH,
     )
-    from assemblyzero.workflows.testing.audit import WORKFLOW_AUDIT_FILE
+    # #3531: the design value, recorded before the autouse guard redirected
+    # the module attribute for this test.
+    from tests.home_state_guard import real_bindings
 
     claude_home = Path.home() / ".claude"
     for label, p in [
         ("HISTORY_PATH", Path(HISTORY_PATH)),
         ("AGE_METER_STATE_PATH", Path(AGE_METER_STATE_PATH)),
-        ("WORKFLOW_AUDIT_FILE", WORKFLOW_AUDIT_FILE),
+        ("WORKFLOW_AUDIT_FILE", real_bindings()["WORKFLOW_AUDIT_FILE"]),
         # LLD_STATUS_RELATIVE is deliberately NOT here: #1970 moved the LLD
         # approval cache back INTO the target repo. It is application state,
         # not harness state, and consolidating it under ~/.claude is what made
