@@ -180,10 +180,11 @@ class TestWorktreeSweepPreservesWork:
         assert removed is True
         assert not worktree.exists()
 
-    def test_successful_removal_prunes_stale_registration(self, tmp_path):
+    def test_successful_removal_never_prunes(self, tmp_path):
         """
-        Without a prune, git keeps the path registered and the next
-        `worktree add` there fails as already-registered.
+        #3649: a successful `git worktree remove` already drops the
+        registration, and a repo-wide prune would drop the other side's
+        live worktrees on a Windows + WSL machine.
         """
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -198,7 +199,8 @@ class TestWorktreeSweepPreservesWork:
         with patch("speedrun_reset._run", side_effect=fake_run):
             assert remove_worktree(repo, 1234) is True
 
-        assert ["git", "worktree", "prune"] in calls
+        assert ["git", "worktree", "prune"] not in calls
+        assert ["git", "worktree", "remove", str(worktree)] in calls
 
     def test_missing_worktree_is_not_an_error(self, tmp_path):
         repo = tmp_path / "repo"

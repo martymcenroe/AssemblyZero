@@ -354,6 +354,8 @@ def sweep_pipeline_worktrees(repo: Path | str, *, log=None) -> SweepResult:
         result.entries.append(entry)
         log(f"  {entry.describe()}")
 
-    _run(["git", "-C", str(repo), "worktree", "prune"])
+    # No repo-wide prune: on a Windows + WSL machine it drops the other side's
+    # live worktrees, which each side sees as stale (#3649). Each worktree above
+    # was removed by name.
     log(f"  {result.summary()}")
     return result
