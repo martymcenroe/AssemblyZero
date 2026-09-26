@@ -1036,8 +1036,9 @@ def sync_binding_docs_to_arc(
                     f"from '{default}'"
                 )
     finally:
+        # This removal also clears the registration if the directory is already
+        # gone; a repo-wide prune would drop the other side's worktrees (#3649).
         _run(["git", "worktree", "remove", "--", str(sync_tree)], cwd=repo_root)
-        _run(["git", "worktree", "prune"], cwd=repo_root)
     return problems
 
 

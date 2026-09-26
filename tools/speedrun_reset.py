@@ -184,7 +184,6 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
     )
     if result.returncode == 0:
         print(f"  Removed worktree: {worktree_path}")
-        _prune_worktrees(repo_root)
         return True
 
     if worktree_is_dirty(worktree_path):
@@ -204,22 +203,27 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
         )
         worktree_path.rename(aside)
         print(f"  Moved unregistered worktree directory aside: {worktree_path} -> {aside}")
-        _prune_worktrees(repo_root)
+        _forget_worktree(repo_root, worktree_path)
         return True
     except OSError as e:
         print(f"  WARNING: could not remove worktree {worktree_path}: {e}")
         return False
 
 
-def _prune_worktrees(repo_root: Path) -> None:
+def _forget_worktree(repo_root: Path, worktree_path: Path) -> None:
     """
-    Drop stale worktree registrations.
+    Drop the registration of this one worktree, whose directory is gone.
 
-    Without this, git keeps the removed path registered and the next
-    `git worktree add` at that path fails as already-registered — the
-    exact state a reset is supposed to clear.
+    Without this, git keeps the path registered and the next `git worktree
+    add` there fails as already-registered. `git worktree remove` on a
+    registered path whose directory is missing clears exactly that
+    registration (git 2.53, measured 2026-09-26), and fails harmlessly on a
+    path that was never registered. It replaced a repo-wide prune, which
+    drops EVERY registration git thinks is stale: on a machine running agents
+    on both Windows and WSL, each side sees the other side's live worktrees
+    that way (#3649).
     """
-    _run(["git", "worktree", "prune"], cwd=repo_root)
+    _run(["git", "worktree", "remove", str(worktree_path)], cwd=repo_root)
 
 
 def current_branch(repo_root: Path) -> str:

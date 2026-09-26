@@ -213,7 +213,8 @@ def check_0834_worktree_hygiene(repo_root: Path) -> AuditResult:
                 audit_id="0834",
                 message=f"Worktree path missing: {wt_path}",
                 details="Worktree registered in git but directory does not exist. "
-                        "Run: git worktree prune",
+                        f"Run: git worktree remove {wt_path} (clears this one registration; "
+                        "never prune, which drops the other side's worktrees on a WSL machine)",
             ))
             continue
 
