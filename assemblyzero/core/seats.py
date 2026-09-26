@@ -123,41 +123,52 @@ def other_side_claude_home() -> Path | None:
     if sys.platform == "win32":
         return Path(f"//wsl.localhost/Ubuntu/home/{name}/.claude")
     try:
-        if "microsoft" in Path("/proc/version").read_text(encoding="utf-8").lower():
-            return Path("/mnt/c/Users") / name / ".claude"
-    except OSError:
-        pass
-    return None
+        version = Path("/proc/version").read_text(encoding="utf-8").lower()
+    except OSError:  # fail-open: no /proc/version means not Linux, so not WSL: there is no other side
+        return None
+    return Path("/mnt/c/Users") / name / ".claude" if "microsoft" in version else None
 
 
 def claude_homes() -> list[Path]:
     """Every ``~/.claude`` the spend lock lives in: the running home, then the other
-    side's when it exists (#3647). The one derivation; the lock tool uses it too."""
+    side's when it exists (#3647). The one derivation; the lock tool uses it too.
+
+    An other-side home that cannot be read is kept, so the lock check fails closed on it.
+    """
     homes = [Path.home() / ".claude"]
     other = other_side_claude_home()
-    try:
-        if other is not None and other.is_dir():
-            homes.append(other)
-    except OSError:
-        pass
+    if other is not None and _present(other):
+        homes.append(other)
     return homes
+
+
+def _present(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:  # fail-open: unreadable is not proof of absence; kept, and the lock check fails closed on it
+        return True
 
 
 def spend_lock_found(lock: Path | None = None) -> Path | None:
     """The lock file that is on, or None. With ``lock`` given, only that path is read.
 
     The running side's lock is ``CLAUDE_SPEND_LOCK``, read at call time so a test can
-    point it elsewhere; the other side's comes from ``claude_homes()``.
+    point it elsewhere; the other side's comes from ``claude_homes()``. A candidate
+    that cannot be read counts as on: an unreadable lock is not proof it is lifted.
     """
     others = [h / LOCK_NAME for h in claude_homes()[1:]]
     candidates = [lock] if lock is not None else [CLAUDE_SPEND_LOCK, *others]
     for candidate in candidates:
-        try:
-            if candidate.is_file():
-                return candidate
-        except OSError:
-            continue
+        if _lock_on(candidate):
+            return candidate
     return None
+
+
+def _lock_on(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:  # fail-open: this is the closed side; an unreadable lock counts as on, so seats stop
+        return True
 
 
 def spend_locked(lock: Path | None = None) -> bool:

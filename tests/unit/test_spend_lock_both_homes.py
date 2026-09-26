@@ -48,6 +48,20 @@ def test_a_lock_on_the_running_side_binds(two_homes):
     assert seats.spend_locked()
 
 
+def test_an_unreadable_lock_counts_as_on(two_homes, monkeypatch):
+    """Failing closed: an unreadable other side is not proof the lock is lifted."""
+    _, other = two_homes
+    real = Path.is_file
+
+    def flaky(self):
+        if self.parent == other:
+            raise PermissionError(13, "denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "is_file", flaky)
+    assert seats.spend_locked()
+
+
 def test_no_other_side_means_the_running_home_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(seats, "other_side_claude_home", lambda: None)
