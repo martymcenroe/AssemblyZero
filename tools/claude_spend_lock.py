@@ -13,6 +13,11 @@ Dry run by default: the exact settings diff is printed and nothing is written.
 ``--apply`` writes, after copying the current settings to ``~/.claude/backups/``.
 Nothing else in the settings file is touched.
 
+On a machine with both Windows and WSL, every mode acts on both homes, the
+running side's and the other side's, so a lock thrown on either side binds both
+(#3647). The homes come from ``assemblyzero.core.seats.claude_homes``, the same
+list the workflow reads.
+
     poetry run python tools/claude_spend_lock.py --status
     poetry run python tools/claude_spend_lock.py --lock --apply
     poetry run python tools/claude_spend_lock.py --unlock --apply
@@ -27,6 +32,8 @@ import stat
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from assemblyzero.core.seats import LOCK_NAME, claude_homes
 
 SETTINGS = Path.home() / ".claude" / "settings.json"
 LOCK_FILE = Path.home() / ".claude" / "claude-spend.lock"
@@ -157,30 +164,58 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--unlock", action="store_true", help="remove the deny entries and delete the lock file")
     mode.add_argument("--status", action="store_true", help="report both halves and exit")
     ap.add_argument("--apply", action="store_true", help="write; without it, print what would change")
-    ap.add_argument("--settings", type=Path, default=SETTINGS)
-    ap.add_argument("--lock-file", type=Path, default=LOCK_FILE)
-    ap.add_argument("--backup-dir", type=Path, default=BACKUP_DIR)
+    ap.add_argument("--settings", type=Path, default=None)
+    ap.add_argument("--lock-file", type=Path, default=None)
+    ap.add_argument("--backup-dir", type=Path, default=None)
+    ap.add_argument(
+        "--claude-home", type=Path, action="append", default=[],
+        help="a ~/.claude directory to act on; repeatable. Default: every home this machine has (#3647)",
+    )
     args = ap.parse_args(argv)
 
+    targets = targets_for(args)
     if args.status:
-        for line in status_lines(args.settings, args.lock_file):
-            print(line)
+        for settings, lock_file, _ in targets:
+            for line in status_lines(settings, lock_file):
+                print(line)
         return EXIT_OK
 
+    worst = EXIT_OK
+    for settings, lock_file, backup_dir in targets:
+        if len(targets) > 1:
+            print(f"\n== {settings.parent} ==")
+        worst = max(worst, run_one(args.lock, args.apply, settings, lock_file, backup_dir))
+    return worst
+
+
+def targets_for(args: argparse.Namespace) -> list[tuple[Path, Path, Path]]:
+    """(settings, lock file, backup dir) for each home to act on.
+
+    Explicit --settings/--lock-file/--backup-dir name one home, as before. Otherwise
+    each --claude-home, or by default every home the machine has: the running side's
+    and the other side's (#3647), so a lock thrown on either side binds both.
+    """
+    if args.settings or args.lock_file or args.backup_dir:
+        return [(args.settings or SETTINGS, args.lock_file or LOCK_FILE, args.backup_dir or BACKUP_DIR)]
+    homes = args.claude_home or claude_homes()
+    return [(h / "settings.json", h / LOCK_NAME, h / "backups") for h in homes]
+
+
+def run_one(lock: bool, apply: bool, settings: Path, lock_file: Path, backup_dir: Path) -> int:
     try:
-        obj, text = load(args.settings)
+        obj, text = load(settings)
         deny_list(obj)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        print(f"REFUSED: {args.settings} is not usable JSON ({exc}); nothing written")
+        print(f"REFUSED: {settings} is not usable JSON ({exc}); nothing written")
         return EXIT_BAD_JSON
 
-    new = with_lock(obj) if args.lock else without_lock(obj)
+    new = with_lock(obj) if lock else without_lock(obj)
     new_text = render(new)
     settings_changed = new != obj
-    lock_changed = args.lock != args.lock_file.is_file()
+    lock_changed = lock != lock_file.is_file()
 
     if not settings_changed and not lock_changed:
-        print(f"already {'locked' if args.lock else 'unlocked'}; nothing to change")
+        print(f"already {'locked' if lock else 'unlocked'}; nothing to change")
         return EXIT_OK
 
     if settings_changed:
@@ -191,31 +226,31 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print(line)
     if lock_changed:
-        print(f"lock file: {'create' if args.lock else 'delete'} {args.lock_file}")
+        print(f"lock file: {'create' if lock else 'delete'} {lock_file}")
 
-    if not args.apply:
+    if not apply:
         print("\nDry run. Add --apply to do it.")
         return EXIT_OK
 
     if settings_changed:
-        saved = backup(args.settings, args.backup_dir)
+        saved = backup(settings, backup_dir)
         try:
-            write_settings(args.settings, new_text)
+            write_settings(settings, new_text)
         except OSError as exc:
-            print(f"FAILED: could not replace {args.settings} ({exc}); it is unchanged; backup at {saved}")
+            print(f"FAILED: could not replace {settings} ({exc}); it is unchanged; backup at {saved}")
             return EXIT_VERIFY
-        check, _ = load(args.settings)
+        check, _ = load(settings)
         if check != new:
-            print(f"FAILED: {args.settings} did not read back as written; backup at {saved}")
+            print(f"FAILED: {settings} did not read back as written; backup at {saved}")
             return EXIT_VERIFY
-        print(f"updated {args.settings}; backup at {saved}")
+        print(f"updated {settings}; backup at {saved}")
     if lock_changed:
-        if args.lock:
-            args.lock_file.write_text(LOCK_TEXT, encoding="utf-8")
-            print(f"created {args.lock_file}")
+        if lock:
+            lock_file.write_text(LOCK_TEXT, encoding="utf-8")
+            print(f"created {lock_file}")
         else:
-            args.lock_file.unlink()
-            print(f"deleted {args.lock_file}")
+            lock_file.unlink()
+            print(f"deleted {lock_file}")
     return EXIT_OK
 
 
