@@ -41,10 +41,13 @@ from pathlib import Path
 # The capture group is the repo name only. We deliberately exclude "." from the
 # character class because real repo directory names don't contain dots, and
 # admitting "." causes "Projects/CLAUDE.md" -> "CLAUDE.md" false positives.
+# #3648: a name followed by ".<ext>" is a file directly under Projects
+# (CLAUDE.md, a .log), never a repository, so it is not captured at all.
+_NOT_A_FILE = r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9])"  # the first branch stops backtracking to "CLAUD"
 _PATH_PATTERNS = [
-    re.compile(r"/c/Users/mcwiz/Projects/([A-Za-z0-9_-]+)", re.IGNORECASE),
-    re.compile(r"C:\\Users\\mcwiz\\Projects\\([A-Za-z0-9_-]+)", re.IGNORECASE),
-    re.compile(r"(?<![A-Za-z0-9_-])Projects/([A-Za-z0-9_-]+)"),
+    re.compile(r"/c/Users/mcwiz/Projects/([A-Za-z0-9_-]+)" + _NOT_A_FILE, re.IGNORECASE),
+    re.compile(r"C:\\Users\\mcwiz\\Projects\\([A-Za-z0-9_-]+)" + _NOT_A_FILE, re.IGNORECASE),
+    re.compile(r"(?<![A-Za-z0-9_-])Projects/([A-Za-z0-9_-]+)" + _NOT_A_FILE),
 ]
 
 # Marker delimiters for the most-recent handoff inside a handoff-log.md.
@@ -63,7 +66,11 @@ _REPO_DENYLIST = {
 # Hard timeout for any git subprocess call (seconds). Network ops should never block /onboard.
 _GIT_TIMEOUT = 30
 
-PROJECTS_ROOT = Path("C:/Users/mcwiz/Projects")
+# #3648: derived, never spelled. The Projects root is the parent of this
+# repository's root, on Windows and on Ubuntu alike. The old literal
+# "C:/Users/mcwiz/Projects" is a relative path on Linux that never exists, so
+# every repository was skipped and the check printed a silent false clean.
+PROJECTS_ROOT = Path(__file__).resolve().parents[2]
 
 
 def extract_handoff_body(text: str) -> str:
@@ -126,13 +133,12 @@ def extract_repo_names(text: str) -> list[str]:
         stripped = re.sub(r"-\d+$", "", name)
         if stripped != name and (PROJECTS_ROOT / stripped).is_dir():
             candidate = stripped
-        elif (PROJECTS_ROOT / name).is_dir():
-            candidate = name
         else:
-            # Not a real repo directory -- skip silently. (Common case: file
-            # names like "CLAUDE" extracted from "Projects/CLAUDE.md" after
-            # the dot was already stripped by the regex char class.)
-            continue
+            # #3648: a repository the handoff names that is not here is
+            # reported as missing by check_repo_drift, never dropped: dropping
+            # it is how a missing root read as "no drift". File names never
+            # reach this point; the patterns do not capture them.
+            candidate = name
         seen.setdefault(candidate, None)
     return list(seen.keys())
 

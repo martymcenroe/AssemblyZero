@@ -1,6 +1,7 @@
 """Tests for tools/repo_drift_check.py (Issue #1077)."""
 import importlib.util
 import json
+import re
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -63,13 +64,12 @@ def test_parse_repo_names_filters_denylist():
 
 
 def test_parse_repo_names_skips_filenames_with_extensions():
-    # "Projects/CLAUDE.md" should not produce "CLAUDE.md" because "." is excluded
-    # from the capture char class. The regex stops at the dot, so the capture is
-    # "CLAUDE" -- which extract_repo_names then filters via the directory check.
+    # "Projects/CLAUDE.md" names a file, not a repository. #3648: it is not
+    # captured at all, since a missing repository is now reported rather than
+    # dropped, and a file must not be mistaken for one.
     text = "/c/Users/mcwiz/Projects/CLAUDE.md was edited"
     names = repo_drift_check.parse_repo_names(text)
-    assert "CLAUDE.md" not in names
-    assert names == ["CLAUDE"]  # the dot truncates the match
+    assert names == []
 
 
 def test_parse_repo_names_empty_when_no_paths():
@@ -97,14 +97,34 @@ def test_extract_repo_names_strips_worktree_suffix_when_parent_exists(tmp_path, 
     assert names == ["alpha"]
 
 
-def test_extract_repo_names_skips_suffix_name_when_neither_parent_nor_full_exists(tmp_path, monkeypatch):
+def test_extract_repo_names_keeps_a_missing_repo_so_it_is_reported(tmp_path, monkeypatch):
+    """#3648: dropping a named repo that is not there is how a wrong root read as clean."""
     fake_root = tmp_path / "Projects"
     fake_root.mkdir(parents=True)
     monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
 
     text = "/c/Users/mcwiz/Projects/standalone-1077"
     names = repo_drift_check.extract_repo_names(text)
-    assert names == []  # neither "standalone-1077" nor "standalone" exists -> dropped
+    assert names == ["standalone-1077"]
+    report = repo_drift_check.build_report(text)
+    assert [r["status"] for r in report["repos"]] == ["missing"]
+    assert "standalone-1077" in repo_drift_check.format_error_report(report)
+
+
+def test_two_present_and_one_missing(tmp_path, monkeypatch):
+    fake_root = tmp_path / "Projects"
+    for name in ("one", "two"):
+        (fake_root / name).mkdir(parents=True)
+    (fake_root / "CLAUDE.md").write_text("x")
+    monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
+    text = "Projects/one, Projects/two, Projects/gone and Projects/CLAUDE.md."
+    assert repo_drift_check.extract_repo_names(text) == ["one", "two", "gone"]
+
+
+def test_the_root_is_derived_not_spelled():
+    source = Path(repo_drift_check.__file__).read_text(encoding="utf-8")
+    assert not re.search(r"""Path\(\s*["'][A-Za-z]:""", source)
+    assert repo_drift_check.PROJECTS_ROOT == Path(repo_drift_check.__file__).resolve().parents[2]
 
 
 def test_extract_repo_names_keeps_suffix_name_when_full_path_exists(tmp_path, monkeypatch):
