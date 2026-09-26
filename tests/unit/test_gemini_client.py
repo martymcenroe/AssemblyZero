@@ -506,6 +506,30 @@ def test_find_agy_cli_uses_path():
     assert client._agy_cli == "/usr/bin/agy"
 
 
+def test_linux_agy_prefers_local_bin_over_path(tmp_path, monkeypatch):
+    """#3651: ~/.local/bin/agy is found even when PATH lacks it (a non-login shell)."""
+    from assemblyzero.core import gemini_client as gc
+
+    agy = tmp_path / ".local" / "bin" / "agy"
+    agy.parent.mkdir(parents=True)
+    agy.write_text("#!/bin/sh\n")
+    agy.chmod(0o755)
+    monkeypatch.setattr(gc.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(gc.os, "access", lambda p, mode: True)
+    monkeypatch.setattr(gc.shutil, "which", lambda name: None)
+    assert gc._find_linux_agy() == str(agy)
+
+
+def test_linux_agy_never_takes_a_windows_build(tmp_path, monkeypatch):
+    from assemblyzero.core import gemini_client as gc
+
+    monkeypatch.setattr(gc.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(gc.shutil, "which", lambda name: "/mnt/c/Users/x/AppData/Local/agy/bin/agy")
+    assert gc._find_linux_agy() is None
+    monkeypatch.setattr(gc.shutil, "which", lambda name: "/usr/bin/agy")
+    assert gc._find_linux_agy() == "/usr/bin/agy"
+
+
 def test_invoke_via_cli_agy_not_found():
     client = GeminiClient(model="gemini-3.1-pro-preview")
     client._agy_cli = None
