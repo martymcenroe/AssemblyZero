@@ -22,6 +22,8 @@ When registering ANY new task — agent or operator:
 2. **Always include `-WindowStyle Hidden -NoProfile`** in the PowerShell argument string. Without those, the scheduled run pops a console that steals focus from whatever the user is doing — twice/hour for hourly tasks, daily for nightly tasks. The popup can intercept keystrokes and break the user's flow mid-sentence.
 3. **Verify subprocess silence too.** `-WindowStyle Hidden` only affects the parent `powershell.exe`. Children that allocate their own console (winpty `PtyProcess.spawn`, interactive REPLs like `claude`/`gh auth`, `cmd /c start`) WILL still appear regardless of the parent's window-style. Test by manually firing the task (`Start-ScheduledTask -TaskName <name>`) and watching for window flashes.
 4. **Use the user's gh credentials when the task does GitHub work.** Tasks running as the current user inherit `gh auth` from the user's profile. Don't try to thread a PAT through env vars or set up a service account; both lose review-attribution credit (cf. AssemblyZero #1091/#1092). The default current-user principal is also the right principal for credit.
+5. **Runbook 0918's elevation claim is wrong.** It predates these rules. If a document tells you to "Run as Administrator" for a user-context `Register-ScheduledTask`, ignore it and follow this runbook (#1099).
+6. **Never invoke `powershell.exe -NoProfile -Command "..."` from bash when the inline script contains `WindowStyle Hidden` or changes scheduled tasks.** Windows Defender flags it as `Trojan:Win32/PowhidSubExec.B`, quarantines the shell snapshot, and the command fails anyway. The operator runs such a command in his own PowerShell window, given verbatim on its own line.
 
 ---
 
@@ -402,3 +404,4 @@ Register-ScheduledTask -TaskName 'Claude-Heartbeat' -Action $action -Trigger $tr
 |---------|------|---------|
 | 1.0 | 2026-01-17 | Initial version documenting existing scheduled tasks |
 | 1.1 | 2026-05-10 | (#1099) Added Hard Rules section — no-admin requirement, mandatory `-WindowStyle Hidden -NoProfile`, subprocess-silence verification, current-user principal for credit attribution. Added Claude-Capture + Claude-DependabotFleet to the overview. |
+| 1.2 | 2026-09-26 | (#3644) Hard Rules 5 and 6: runbook 0918's elevation claim is wrong, and the Defender flag on inline `WindowStyle Hidden` PowerShell. Both moved here from the universal instruction file, which now points at this runbook. |
