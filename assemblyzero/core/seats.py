@@ -40,6 +40,7 @@ import contextvars
 import copy
 import hashlib
 import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,6 +103,7 @@ class ProfileError(ValueError):
 #: ``--unlock --apply``. It covers ``claude:`` (the CLI, his subscription) and
 #: ``anthropic:`` (the API, billed): both spend Anthropic tokens.
 CLAUDE_SPEND_LOCK = Path.home() / ".claude" / "claude-spend.lock"
+LOCK_NAME = "claude-spend.lock"
 ANTHROPIC_PROVIDERS = frozenset({"claude", "anthropic"})
 
 
@@ -109,13 +111,64 @@ class ClaudeSpendLocked(ProfileError):
     """A seat asks for an Anthropic model while the spend lock is on (#3615)."""
 
 
+def other_side_claude_home() -> Path | None:
+    """The other side's ``~/.claude`` on a machine that runs both Windows and WSL (#3647).
+
+    Under WSL it is the Windows home, ``/mnt/c/Users/<user>/.claude``; on Windows it
+    is the Ubuntu home over ``//wsl.localhost/Ubuntu/home/<user>/.claude``. The user
+    name is the running home's, the same on both sides. None where there is no
+    other side (Linux CI, macOS).
+    """
+    name = Path.home().name
+    if sys.platform == "win32":
+        return Path(f"//wsl.localhost/Ubuntu/home/{name}/.claude")
+    try:
+        if "microsoft" in Path("/proc/version").read_text(encoding="utf-8").lower():
+            return Path("/mnt/c/Users") / name / ".claude"
+    except OSError:
+        pass
+    return None
+
+
+def claude_homes() -> list[Path]:
+    """Every ``~/.claude`` the spend lock lives in: the running home, then the other
+    side's when it exists (#3647). The one derivation; the lock tool uses it too."""
+    homes = [Path.home() / ".claude"]
+    other = other_side_claude_home()
+    try:
+        if other is not None and other.is_dir():
+            homes.append(other)
+    except OSError:
+        pass
+    return homes
+
+
+def spend_lock_found(lock: Path | None = None) -> Path | None:
+    """The lock file that is on, or None. With ``lock`` given, only that path is read.
+
+    The running side's lock is ``CLAUDE_SPEND_LOCK``, read at call time so a test can
+    point it elsewhere; the other side's comes from ``claude_homes()``.
+    """
+    others = [h / LOCK_NAME for h in claude_homes()[1:]]
+    candidates = [lock] if lock is not None else [CLAUDE_SPEND_LOCK, *others]
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 def spend_locked(lock: Path | None = None) -> bool:
-    return (lock or CLAUDE_SPEND_LOCK).is_file()
+    """True when a lock thrown on either side is on (#3647); with ``lock``, that path only."""
+    return spend_lock_found(lock) is not None
 
 
 def spend_lock_message(what: str, lock: Path | None = None) -> str:
+    found = spend_lock_found(lock) or lock or CLAUDE_SPEND_LOCK
     return (
-        f"{what}: the Claude spend lock is on ({lock or CLAUDE_SPEND_LOCK} exists), so no "
+        f"{what}: the Claude spend lock is on ({found} exists), so no "
         "seat runs on an Anthropic model. Use the default profile (Gemini through agy), or "
         "have the operator lift the lock: tools/claude_spend_lock.py --unlock --apply."
     )

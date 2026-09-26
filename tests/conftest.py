@@ -217,6 +217,8 @@ def no_spend_lock_from_the_machine(tmp_path, monkeypatch):
     from assemblyzero.core import seats
 
     monkeypatch.setattr(seats, "CLAUDE_SPEND_LOCK", tmp_path / "no-spend-lock" / "claude-spend.lock")
+    # #3647: the other side's home is read too; a test sees it only when it sets one.
+    monkeypatch.setattr(seats, "other_side_claude_home", lambda: None)
 
 
 @pytest.fixture
