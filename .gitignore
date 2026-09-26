@@ -112,3 +112,39 @@ docs/dom-dumps/
 data/branch-protection-audit.csv
 data/session-index.jsonl
 data/sextant-build-spec.md
+
+# --- backfilled from new_repo.py template (2026-09-15) ---
+# Patterns this repo predates. Appended by tools/retrofit_data_dl_disk_only.py;
+# nothing above this line was changed.
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+node_modules/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.log
+data/
+data-g/probe
+data-unleashed/
+data-dl/*
+!data-dl/README.md
+!data-dl/audio/
+!data-dl/audio/.gitkeep
+!data-dl/transcripts/
+!data-dl/transcripts/.gitkeep
+!data-dl/reference/
+!data-dl/reference/.gitkeep
+*.bak
+*.parked-*
