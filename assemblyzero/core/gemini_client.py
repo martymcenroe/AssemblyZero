@@ -170,6 +170,23 @@ AGY_WSL_PREFIX = "wsl:"
 _ON_WINDOWS = os.name == "nt"
 
 
+def _find_linux_agy() -> Optional[str]:
+    """agy on Linux: ``~/.local/bin/agy`` first, then PATH, never a Windows build (#3651).
+
+    agy installs into ``~/.local/bin``, which a non-login shell and a process
+    started with ``wsl.exe --exec`` do not have on PATH. A PATH answer under
+    ``/mnt/`` is a Windows build reached through WSL interop, which runs outside
+    the guard that governs the Linux agy, so it is never used.
+    """
+    local = Path.home() / ".local" / "bin" / "agy"
+    if local.is_file() and os.access(local, os.X_OK):
+        return str(local)
+    found = shutil.which("agy")
+    if found and found.startswith("/mnt/"):
+        return None
+    return found
+
+
 @functools.lru_cache(maxsize=1)
 def _find_wsl_agy() -> Optional[str]:
     """The Linux path of agy inside the default WSL distribution, or None.
@@ -607,7 +624,7 @@ class GeminiClient:
         if _ON_WINDOWS:
             linux_path = _find_wsl_agy()
             return AGY_WSL_PREFIX + linux_path if linux_path else None
-        return shutil.which("agy")
+        return _find_linux_agy()
 
     def _agy_argv(self, cwd: str, *tail: str) -> list[str]:
         """The argv that runs agy with ``tail``, in ``cwd``.
