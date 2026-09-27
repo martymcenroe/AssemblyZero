@@ -5,3 +5,7 @@ account_id = "4fe1c5e241425c85d0f2c35c69fb45b8"
 
 [vars]
 CHECK_NAME = "pr-sentinel / issue-reference"
+# #3660: off | warn | enforce. warn adds a neutral driver-provenance check and
+# blocks nothing; the switch to enforce is the operator's decision.
+DRIVER_STAMP_MODE = "warn"
+DRIVER_STAMP_EXEMPT_AUTHORS = ""
