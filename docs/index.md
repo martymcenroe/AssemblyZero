@@ -124,6 +124,7 @@ Projects use **5-digit numbers** (prefix `1` + AssemblyZero number) for implemen
 | [0006](standards/0006-standard-labels.md) | Standard Labels | GitHub labels convention |
 | [0007](standards/0007-testing-strategy.md) | Testing Strategy | Test-first philosophy |
 | [0008](standards/0008-documentation-convention.md) | Documentation Convention | c/p pattern for CLI vs Prompt docs |
+| [0033](standards/0033-verification-doctrine.md) | Verification Doctrine | What makes a check trustworthy: how a check is built, calibrated and reported |
 
 ### Templates (01xx)
 
