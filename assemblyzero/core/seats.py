@@ -42,6 +42,7 @@ import hashlib
 import os
 import sys
 import tomllib
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -166,9 +167,34 @@ def spend_lock_found(lock: Path | None = None) -> Path | None:
 
 def _lock_on(path: Path) -> bool:
     try:
-        return path.is_file()
+        if not path.is_file():
+            return False
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:  # fail-open: this is the closed side; an unreadable lock counts as on, so seats stop
         return True
+    until = lock_until(text)
+    return until is None or datetime.now(timezone.utc) < until
+
+
+def lock_until(text: str) -> datetime | None:
+    """When a lock lifts itself, from its `until: <ISO time>` line, or None: it binds until lifted by hand.
+
+    #3646: the operator throws the lock as his weekly quota runs out and it used
+    to bind past the reset. `claude_spend_lock.py --lock --until` writes the line.
+    An `until:` line that cannot be read is treated as no lift time, so the lock
+    binds: an unreadable promise to lift is not a lift.
+    """
+    for line in text.splitlines():
+        if line.startswith(UNTIL_PREFIX):
+            try:
+                when = datetime.fromisoformat(line[len(UNTIL_PREFIX):].strip())
+            except ValueError:  # fail-open: None means no lift time, so the lock binds; this is the closed side
+                return None
+            return when if when.tzinfo else when.astimezone()
+    return None
+
+
+UNTIL_PREFIX = "until:"
 
 
 def spend_locked(lock: Path | None = None) -> bool:

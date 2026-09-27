@@ -30,10 +30,10 @@ import json
 import os
 import stat
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from assemblyzero.core.seats import LOCK_NAME, claude_homes
+from assemblyzero.core.seats import LOCK_NAME, UNTIL_PREFIX, claude_homes, lock_until
 
 SETTINGS = Path.home() / ".claude" / "settings.json"
 LOCK_FILE = Path.home() / ".claude" / "claude-spend.lock"
@@ -108,7 +108,28 @@ def status_lines(settings: Path, lock_file: Path) -> list[str]:
     lines.append(
         f"lock file: {'present' if lock_file.is_file() else 'absent'} ({lock_file})"
     )
+    if lock_file.is_file():
+        # #3646: when it was thrown, when it lifts, and whether it binds now.
+        thrown = datetime.fromtimestamp(lock_file.stat().st_mtime).astimezone()
+        until = lock_until(lock_file.read_text(encoding="utf-8", errors="replace"))
+        lifts = until.astimezone().strftime("%Y-%m-%d %I:%M %p %Z") if until else "only when lifted by hand"
+        binding = "binding" if until is None or datetime.now(timezone.utc) < until else "expired, not binding"
+        lines.append(f"  thrown {thrown.strftime('%Y-%m-%d %I:%M %p %Z')}; lifts {lifts}; now {binding}")
     return lines
+
+
+def lock_text(until: datetime | None) -> str:
+    """The lock file's text: the explanation, and the lift time when there is one (#3646)."""
+    return LOCK_TEXT + (f"{UNTIL_PREFIX} {until.isoformat()}\n" if until else "")
+
+
+def parse_until(value: str) -> datetime:
+    """`YYYY-MM-DD HH:MM`, read as this machine's local time (US Central here), made aware."""
+    try:
+        naive = datetime.strptime(value.strip(), "%Y-%m-%d %H:%M")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"--until wants 'YYYY-MM-DD HH:MM' (local time): {exc}") from exc
+    return naive.astimezone()
 
 
 def backup(settings: Path, backup_dir: Path) -> Path:
@@ -164,6 +185,10 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--unlock", action="store_true", help="remove the deny entries and delete the lock file")
     mode.add_argument("--status", action="store_true", help="report both halves and exit")
     ap.add_argument("--apply", action="store_true", help="write; without it, print what would change")
+    ap.add_argument(
+        "--until", type=parse_until, default=None,
+        help="with --lock: 'YYYY-MM-DD HH:MM' local time, the weekly reset; the lock stops binding then (#3646)",
+    )
     ap.add_argument("--settings", type=Path, default=None)
     ap.add_argument("--lock-file", type=Path, default=None)
     ap.add_argument("--backup-dir", type=Path, default=None)
@@ -172,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
         help="a ~/.claude directory to act on; repeatable. Default: every home this machine has (#3647)",
     )
     args = ap.parse_args(argv)
+    if args.until is not None and not args.lock:
+        ap.error("--until goes with --lock")
 
     targets = targets_for(args)
     if args.status:
@@ -184,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     for settings, lock_file, backup_dir in targets:
         if len(targets) > 1:
             print(f"\n== {settings.parent} ==")
-        worst = max(worst, run_one(args.lock, args.apply, settings, lock_file, backup_dir))
+        worst = max(worst, run_one(args.lock, args.apply, settings, lock_file, backup_dir, args.until))
     return worst
 
 
@@ -201,7 +228,9 @@ def targets_for(args: argparse.Namespace) -> list[tuple[Path, Path, Path]]:
     return [(h / "settings.json", h / LOCK_NAME, h / "backups") for h in homes]
 
 
-def run_one(lock: bool, apply: bool, settings: Path, lock_file: Path, backup_dir: Path) -> int:
+def run_one(
+    lock: bool, apply: bool, settings: Path, lock_file: Path, backup_dir: Path, until: datetime | None = None
+) -> int:
     try:
         obj, text = load(settings)
         deny_list(obj)
@@ -212,7 +241,12 @@ def run_one(lock: bool, apply: bool, settings: Path, lock_file: Path, backup_dir
     new = with_lock(obj) if lock else without_lock(obj)
     new_text = render(new)
     settings_changed = new != obj
-    lock_changed = lock != lock_file.is_file()
+    wanted = lock_text(until)
+    if lock:
+        # #3646: re-throwing with a different lift time rewrites the file.
+        lock_changed = not lock_file.is_file() or lock_file.read_text(encoding="utf-8") != wanted
+    else:
+        lock_changed = lock_file.is_file()
 
     if not settings_changed and not lock_changed:
         print(f"already {'locked' if lock else 'unlocked'}; nothing to change")
@@ -246,8 +280,9 @@ def run_one(lock: bool, apply: bool, settings: Path, lock_file: Path, backup_dir
         print(f"updated {settings}; backup at {saved}")
     if lock_changed:
         if lock:
-            lock_file.write_text(LOCK_TEXT, encoding="utf-8")
-            print(f"created {lock_file}")
+            lock_file.write_text(wanted, encoding="utf-8")
+            lifts = f"; lifts {until.strftime('%Y-%m-%d %I:%M %p %Z')}" if until else ""
+            print(f"created {lock_file}{lifts}")
         else:
             lock_file.unlink()
             print(f"deleted {lock_file}")
