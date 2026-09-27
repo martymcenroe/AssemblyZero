@@ -1,0 +1,72 @@
+name: auto-reviewer
+
+# Reusable workflow: auto-approves PRs when all required checks pass.
+#
+# RETIRED (#3663). pr-sentinel now approves as Cerberus in the same request
+# that posts a passing `issue-reference`, the one check every caller passes as
+# `required_checks`. This job waited seconds for that check on a GitHub-hosted
+# runner and billed a whole minute per PR, about half of all Actions runs. The
+# `if: false` below skips it for every caller at once: a job skipped by its
+# `if:` starts no runner and bills nothing. Callers need no change. To restore
+# it, put back the previous `if:` (in git history) through the workflow-scope
+# landing.
+#
+# This uses a GitHub App identity (not the repo owner) to submit an
+# approving review, breaking the self-authorization loop where agents
+# create issues, create PRs, and merge their own PRs.
+#
+# Prerequisites:
+#   1. GitHub App "AssemblyZero Reviewer" created and installed on all repos
+#   2. App ID stored as org/repo variable: REVIEWER_APP_ID
+#   3. App private key stored as org/repo secret: REVIEWER_APP_PRIVATE_KEY
+#   4. Branch protection: require 1 approving review, enforce admins
+#
+# Called from each repo via:
+#   uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
+#
+# Issue: #736 | Related: #732
+
+on:
+  workflow_call:
+    inputs:
+      required_checks:
+        description: >
+          Comma-separated list of check names that must pass before approval.
+          Default: pr-sentinel. Override per-repo if additional checks exist.
+        required: false
+        type: string
+        default: "issue-reference"
+    secrets:
+      REVIEWER_APP_ID:
+        required: true
+      REVIEWER_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  pull-requests: write
+  checks: read
+
+
+jobs:
+  auto-review:
+    runs-on: ubuntu-latest
+    # Retired by #3663: pr-sentinel approves as Cerberus. See the header.
+    if: false
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      - name: Approve PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api \
+            "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+            -f event="APPROVE" \
+            -f body="Auto-approved: all required checks passed. 🤖"

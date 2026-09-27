@@ -1,6 +1,7 @@
 // Webhook handler — HMAC-SHA256 signature verification + event dispatch.
 
 import { getInstallationToken } from "./auth.js";
+import { approveAsCerberus, shouldApprove } from "./cerberus.js";
 import { createCheckRun } from "./checks.js";
 import {
   DRIVER_STAMP_MESSAGE,
@@ -153,6 +154,16 @@ export async function handleWebhook(request, env) {
         title: warned ? "Not opened by the merge driver" : "Opened by the merge driver",
         reason: warned ? DRIVER_STAMP_MESSAGE : "The body carries the merge driver's stamp.",
       });
+    }
+
+    // Cerberus's approval, in the same request that passed issue-reference
+    // (#3663). Without Cerberus's secrets this is skipped and nothing changes.
+    // A failure is logged and never fails the webhook.
+    if (shouldApprove({ valid: result.valid, author: pr.user?.login, env })) {
+      const approval = await approveAsCerberus(env, owner, repo, pr.number, headSha);
+      if (!approval.approved) {
+        console.log(`Cerberus approval for ${owner}/${repo}#${pr.number}: ${approval.reason}`);
+      }
     }
 
     return new Response(
