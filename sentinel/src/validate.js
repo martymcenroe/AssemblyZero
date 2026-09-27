@@ -137,5 +137,39 @@ export function validatePRBody(body) {
   };
 }
 
+// The merge driver's stamp: the last line of every PR body it opens (#3660).
+// A convention, not a secret. It separates the casual hand-rolled PR from a
+// driver PR; copying it is deliberate evasion and is left in the PR body.
+export const DRIVER_STAMP = /^Landed-By: merge-driver \d{8}T\d{6}-[0-9a-f]{6}$/m;
 
+export const DRIVER_STAMP_MESSAGE =
+  "This PR was not opened by the merge driver: its body has no " +
+  "`Landed-By: merge-driver <run_id>` line. Land it with the driver, which " +
+  "opens, merges and cleans up in one run, instead of by hand.";
 
+/**
+ * Decide what the driver-stamp check says about a PR.
+ * @param {{ body: string|null, author: string|null, mode: string|undefined,
+ *           exemptAuthors: string|undefined }} input
+ *   mode: "off" | "warn" | "enforce" (anything else is "off");
+ *   exemptAuthors: comma-separated logins.
+ * @returns {{ mode: string, stamped: boolean, exempt: boolean,
+ *             verdict: "skip"|"pass"|"warn"|"fail" }}
+ *   skip: mode off, no check at all. pass: stamped or exempt.
+ *   warn: missing, mode warn (neutral check, merge not blocked).
+ *   fail: missing, mode enforce (issue-reference fails).
+ */
+export function driverProvenance({ body, author, mode, exemptAuthors }) {
+  const m = mode === "warn" || mode === "enforce" ? mode : "off";
+  const stamped = DRIVER_STAMP.test(body || "");
+  const exempt =
+    author === "dependabot[bot]" ||
+    (exemptAuthors || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .includes(author || "");
+  if (m === "off") return { mode: m, stamped, exempt, verdict: "skip" };
+  if (stamped || exempt) return { mode: m, stamped, exempt, verdict: "pass" };
+  return { mode: m, stamped, exempt, verdict: m === "warn" ? "warn" : "fail" };
+}

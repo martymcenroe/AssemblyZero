@@ -22,11 +22,13 @@ export async function createCheckRun(
     name: checkName,
     head_sha: headSha,
     status: "completed",
-    conclusion: result.valid ? "success" : "action_required",
+    // A caller may set its own conclusion and title (the driver-provenance
+    // check's `neutral`, #3660); otherwise the issue-reference defaults apply.
+    conclusion: result.conclusion || (result.valid ? "success" : "action_required"),
     output: {
-      title: result.valid
-        ? "Issue reference found"
-        : "Missing issue reference",
+      title:
+        result.title ||
+        (result.valid ? "Issue reference found" : "Missing issue reference"),
       summary: result.reason,
     },
   };

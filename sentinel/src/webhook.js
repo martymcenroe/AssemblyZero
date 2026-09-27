@@ -2,7 +2,11 @@
 
 import { getInstallationToken } from "./auth.js";
 import { createCheckRun } from "./checks.js";
-import { validatePRBody } from "./validate.js";
+import {
+  DRIVER_STAMP_MESSAGE,
+  driverProvenance,
+  validatePRBody,
+} from "./validate.js";
 import { verifyIssueRefs } from "./verify-issues.js";
 
 /**
@@ -127,7 +131,29 @@ export async function handleWebhook(request, env) {
       }
     }
 
+    // The merge driver's stamp (#3660). `warn` adds a neutral check and blocks
+    // nothing; `enforce` fails issue-reference, which the auto-reviewer requires.
+    const provenance = driverProvenance({
+      body: pr.body,
+      author: pr.user?.login,
+      mode: env.DRIVER_STAMP_MODE,
+      exemptAuthors: env.DRIVER_STAMP_EXEMPT_AUTHORS,
+    });
+    if (provenance.verdict === "fail" && result.valid) {
+      result = { valid: false, reason: DRIVER_STAMP_MESSAGE };
+    }
+
     await createCheckRun(token, owner, repo, headSha, checkName, result);
+
+    if (provenance.mode === "warn") {
+      const warned = provenance.verdict === "warn";
+      await createCheckRun(token, owner, repo, headSha, "pr-sentinel / driver-provenance", {
+        valid: !warned,
+        conclusion: warned ? "neutral" : "success",
+        title: warned ? "Not opened by the merge driver" : "Opened by the merge driver",
+        reason: warned ? DRIVER_STAMP_MESSAGE : "The body carries the merge driver's stamp.",
+      });
+    }
 
     return new Response(
       JSON.stringify({ conclusion: result.valid ? "success" : "action_required" }),
