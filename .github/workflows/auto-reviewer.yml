@@ -2,6 +2,15 @@ name: auto-reviewer
 
 # Reusable workflow: auto-approves PRs when all required checks pass.
 #
+# RETIRED (#3663). pr-sentinel now approves as Cerberus in the same request
+# that posts a passing `issue-reference`, the one check every caller passes as
+# `required_checks`. This job waited seconds for that check on a GitHub-hosted
+# runner and billed a whole minute per PR, about half of all Actions runs. The
+# `if: false` below skips it for every caller at once: a job skipped by its
+# `if:` starts no runner and bills nothing. Callers need no change. To restore
+# it, put back the previous `if:` (in git history) through the workflow-scope
+# landing.
+#
 # This uses a GitHub App identity (not the repo owner) to submit an
 # approving review, breaking the self-authorization loop where agents
 # create issues, create PRs, and merge their own PRs.
@@ -41,16 +50,8 @@ permissions:
 jobs:
   auto-review:
     runs-on: ubuntu-latest
-    # Only run on PRs, not on the PR created by the App itself (prevent loops).
-    #
-    # Cerberus is the AGENT fence, not the Dependabot enabler (#1251).
-    # On an agent PR the author is the repo owner, so GitHub's no-self-approval
-    # rule leaves no eligible reviewer and one has to be manufactured -- that is
-    # what this workflow is for. On a Dependabot PR the author is Dependabot, so
-    # the owner already IS an eligible third-party reviewer and there is nothing
-    # at that gate to guard. Dependabot gets its own lane: tools/dependabot_review.py
-    # runs the suite and approves as the owner.
-    if: (github.event_name == 'pull_request' || github.event_name == 'workflow_call') && github.event.pull_request.user.login != 'dependabot[bot]'
+    # Retired by #3663: pr-sentinel approves as Cerberus. See the header.
+    if: false
     steps:
       - name: Generate App token
         id: app-token
@@ -59,94 +60,13 @@ jobs:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
-      - name: Wait for required checks
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REQUIRED_CHECKS: ${{ inputs.required_checks }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          echo "PR #${PR_NUMBER} — waiting for required checks: ${REQUIRED_CHECKS}"
-
-          IFS=',' read -ra CHECKS <<< "$REQUIRED_CHECKS"
-          # #2627: was 30 (10 minutes). With the terminal-state test below, the
-          # only path that still reaches this ceiling is "the check was never
-          # created at all" -- a name mismatch, or the reporting service being
-          # unreachable. Five minutes is far beyond normal reporting latency and
-          # halves what an outage costs in billed minutes.
-          MAX_ATTEMPTS=15   # 15 × 20s = 5 minutes max wait
-          ATTEMPT=0
-
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            ALL_PASSED=true
-
-            for check_name in "${CHECKS[@]}"; do
-              check_name=$(echo "$check_name" | xargs)  # trim whitespace
-
-              # Query check runs for this SHA and check name
-              STATUS=$(gh api \
-                "repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
-                --jq ".check_runs[] | select(.name | contains(\"${check_name}\")) | .conclusion" \
-                2>/dev/null | head -1)
-
-              # #2627: ANY non-empty conclusion is terminal. GitHub populates
-              # `conclusion` only when a check run has COMPLETED -- while one is
-              # genuinely in flight the field is null -- so polling a non-empty
-              # conclusion cannot change the answer, it just spends minutes.
-              #
-              # This was previously an allowlist of `failure` and `cancelled`,
-              # which meant `action_required` (what the sentinel posts when its
-              # issue-reference regex extracts a ref it cannot validate) fell
-              # through to "pending" and was polled for the full ten minutes.
-              # Measured across the fleet in August: 29 runs died this way,
-              # ~300 billed minutes, roughly 10% of the monthly allowance.
-              #
-              # Deliberately a test for "completed and not success" rather than
-              # a longer allowlist. Enumerating states is how action_required
-              # was missed in the first place, and the next unlisted conclusion
-              # would be discovered the same way, in ten-minute increments.
-              #
-              # No outcome changes: every state that used to time out already
-              # ended in step failure. It now gets there in ~20s instead of
-              # ~600s.
-              if [ "$STATUS" = "success" ]; then
-                echo "  ✅ ${check_name}: passed"
-              elif [ -n "$STATUS" ]; then
-                echo "  ❌ ${check_name}: ${STATUS} (completed, not success) — will NOT approve"
-                exit 1
-              else
-                echo "  ⏳ ${check_name}: no conclusion yet (attempt $((ATTEMPT+1))/${MAX_ATTEMPTS})"
-                ALL_PASSED=false
-              fi
-            done
-
-            if [ "$ALL_PASSED" = true ]; then
-              echo ""
-              echo "All required checks passed."
-              exit 0
-            fi
-
-            ATTEMPT=$((ATTEMPT+1))
-            sleep 20
-          done
-
-          echo "❌ Timed out after $((MAX_ATTEMPTS * 20))s — required check never reported a conclusion."
-          echo "   Most likely the check was never created: verify the name in"
-          echo "   the required_checks input matches what the reporting service posts."
-          exit 1
-
       - name: Approve PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          echo "Submitting approving review as GitHub App..."
-
           gh api \
             "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
             -f event="APPROVE" \
             -f body="Auto-approved: all required checks passed. 🤖"
-
-          echo "✅ PR #${PR_NUMBER} approved by AssemblyZero Reviewer"
