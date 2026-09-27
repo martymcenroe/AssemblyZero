@@ -8,8 +8,7 @@ threat model) and an agent's child process is the agent's.
     cd /c/Users/mcwiz/Projects/AssemblyZero
     poetry run python tools/cerberus_worker_key.py
 
-It asks for the Cerberus App ID (shown on the App's settings page; not
-confidential), decrypts ~/.secrets/cerberus-pem.gpg (pinentry asks for the
+It sets the Cerberus App ID (3079970; not confidential), decrypts ~/.secrets/cerberus-pem.gpg (pinentry asks for the
 passphrase), converts the PEM to base64 PKCS#8, the form the Worker's WebCrypto
 import takes, and pipes each value to `wrangler secret put` on stdin. The key
 never reaches argv, the environment, a file, or the screen. It ends by listing
@@ -37,11 +36,23 @@ from _pat_session import cerberus_pem_session  # noqa: E402
 SENTINEL = Path(__file__).resolve().parents[1] / "sentinel"
 
 
-def put(npx: str, name: str, value: str) -> None:
-    r = subprocess.run(
-        [npx, "wrangler", "secret", "put", name],
-        input=value, text=True, cwd=SENTINEL, capture_output=True,
+# Not secret: an App ID only identifies the App; the private key is what signs.
+# The operator confirmed the value on 2026-09-27. The fleet ID registry is a
+# separate issue; until it lands, the value lives here.
+CERBERUS_APP_ID = "3079970"
+
+
+def run(args: list[str], value: str | None = None) -> subprocess.CompletedProcess[str]:
+    # wrangler prints emoji; Windows' default cp1252 decode crashed the reader
+    # thread on the first run (2026-09-27), so decode as UTF-8 explicitly.
+    return subprocess.run(
+        args, input=value, text=True, encoding="utf-8", errors="replace",
+        cwd=SENTINEL, capture_output=True,
     )
+
+
+def put(npx: str, name: str, value: str) -> None:
+    r = run([npx, "wrangler", "secret", "put", name], value)
     if r.returncode != 0:
         # wrangler's stderr names the secret and the error, never the value.
         sys.exit(f"FAILED: wrangler secret put {name}: {r.stderr.strip()[-400:]}")
@@ -52,9 +63,6 @@ def main() -> int:
     npx = shutil.which("npx")
     if not npx:
         sys.exit("FAILED: npx not found on PATH")
-    app_id = input("Cerberus App ID (from the App's settings page): ").strip()
-    if not app_id.isdigit():
-        sys.exit("FAILED: the App ID is a number")
     with cerberus_pem_session(reason="pr-sentinel Worker, Cerberus approval (#3663)") as pem:
         key = serialization.load_pem_private_key(pem.encode(), password=None)
         pkcs8 = key.private_bytes(
@@ -66,8 +74,8 @@ def main() -> int:
         del key, pkcs8
         put(npx, "CERBERUS_PRIVATE_KEY_B64", b64)
         del b64
-    put(npx, "CERBERUS_APP_ID", app_id)
-    r = subprocess.run([npx, "wrangler", "secret", "list"], cwd=SENTINEL, capture_output=True, text=True)
+    put(npx, "CERBERUS_APP_ID", CERBERUS_APP_ID)
+    r = run([npx, "wrangler", "secret", "list"])
     names = [ln.split('"name":')[1].split('"')[1] for ln in r.stdout.splitlines() if '"name":' in ln]
     print("Worker secrets now:", ", ".join(names) if names else r.stdout.strip())
     return 0
