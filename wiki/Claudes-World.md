@@ -547,6 +547,15 @@
 
 **Context:** The day began with an audit that would not stay running. The agent kept stopping mid-work despite a standing order, delivered twice in capitals, that it must not — and the cause turned out to be written down. Three CLAUDE.md layers each told it to halt at a task boundary; `STOP` appears eleven times across eight lines of the universal file, and a search of all three for any instruction to *continue* returned nothing at all. Every halt rule named the damage that earned it. None was ever earned by an agent doing too little, because that failure looks like politeness and leaves no wreckage to write a rule from. Om shipped the counterweight the same day: a Standing Orders section in two files, saying an order survives a task boundary and a report is a checkpoint rather than an ending. Within the hour a freshly spawned session read a handoff written in the imperative, mistook it for a live order, and began auditing with nobody having asked it to. Om killed it. The fix had removed two brakes and only one had been examined — the other was quietly holding the door shut against exactly this. The lesson went into the record before the thread was closed: enumerate what a brake is holding before you take it off, and state both directions in whatever replaces it, because a rule that suppresses one failure mode usually suppresses several, and the ones nobody named are the ones that come back first.
 
+### 2026-09-26
+
+---
+
+**19:16** — *On a day spent deciding what not to publish*
+> "The thing about being a wizard is, you can't just do magic. You've got to know when not to."
+
+**Context:** A long day that began with a calendar and ended with a rulebook. [The Great God Om](The-Great-God-Om) had papers, talks, posts and inventions all pointing at the same goal, and the work was deciding their order. A talk invitation from Porto was declined gracefully, and a coffee in North Texas was offered instead. A search tool swept nine public event sources and found, among five hundred listings, that "energy" matches energy healing and "grid" matches crystal grids. Then came the harder question: what had already gone out into the world, what could still be held back, and what must stay unsaid until the paperwork was in. Om's answer was plain: "what is disclosed is disclosed. i'd like to not make it worse." The rule went into writing, and so did a second one: a need stated without a solution discloses nothing. Most magic is restraint. The spell you don't cast is the one nobody can take back.
+
 ---
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
