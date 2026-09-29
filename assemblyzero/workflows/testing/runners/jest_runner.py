@@ -44,6 +44,7 @@ class JestRunner(BaseTestRunner):
         """Run 'npx jest --json' or 'npx vitest run --reporter=json'."""
         if self._is_vitest:
             import os
+            print("Running vitest runner for project:", self.project_root)
             package_json_path = os.path.join(self.project_root, "package.json")
             has_typecheck_script = False
             if os.path.exists(package_json_path):
@@ -52,7 +53,8 @@ class JestRunner(BaseTestRunner):
                         pkg = json.load(f)
                         if "scripts" in pkg and "typecheck" in pkg["scripts"]:
                             has_typecheck_script = True
-                except Exception:
+                except (OSError, json.JSONDecodeError):
+                    # fail-open: missing or malformed package.json just means no typecheck script
                     pass
             
             tsconfig_path = os.path.join(self.project_root, "tsconfig.json")
