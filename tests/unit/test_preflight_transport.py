@@ -25,11 +25,7 @@ def _bypass_gemini_preflight():
     check is the thing under test, and the credential-file check must never
     be called at all."""
     preflight._TRANSPORT_RESULT = None
-    with patch(
-        "assemblyzero.core.preflight.check_gemini_available",
-        side_effect=AssertionError("the credential-file check must not run"),
-    ):
-        yield
+    yield
     preflight._TRANSPORT_RESULT = None
 
 
@@ -135,7 +131,6 @@ class TestN1ProceedsOnAClaudeOnlyRun:
         from assemblyzero.core import config
         from assemblyzero.workflows.requirements.state import create_initial_state
 
-        monkeypatch.setattr(config, "CREDENTIALS_FILE", tmp_path / "absent.json")
         template_dir = tmp_path / "docs" / "templates"
         template_dir.mkdir(parents=True)
         (template_dir / "0102-feature-lld-template.md").write_text("# T", encoding="utf-8")

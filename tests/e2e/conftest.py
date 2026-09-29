@@ -27,8 +27,6 @@ ASSEMBLYZERO_ROOT = Path(__file__).resolve().parent.parent.parent
 # Known API key environment variable names to strip for REQ-2 tests
 # ------------------------------------------------------------------
 API_KEY_ENV_VARS = [
-    "GOOGLE_API_KEY",
-    "GEMINI_API_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "AZURE_OPENAI_API_KEY",

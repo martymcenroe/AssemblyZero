@@ -246,45 +246,8 @@ def classify_gemini_error(exc: Exception) -> APIError:
     """
     msg = str(exc)
 
-    # Try isinstance checks against google.api_core.exceptions (lazy import)
-    try:
-        from google.api_core import exceptions as gexc
-
-        if isinstance(exc, gexc.ResourceExhausted):
-            # Distinguish quota (429) from capacity (503-like)
-            msg_lower = msg.lower()
-            if any(p in msg_lower for p in ("quota", "rate", "per minute", "per day")):
-                return RateLimitError(msg, provider="gemini")
-            return CapacityError(msg, provider="gemini", status_code=429)
-
-        if isinstance(exc, gexc.ServiceUnavailable):
-            return CapacityError(msg, provider="gemini", status_code=503)
-
-        if isinstance(exc, gexc.Unauthenticated):
-            return AuthenticationError(msg, provider="gemini", status_code=401)
-
-        if isinstance(exc, gexc.PermissionDenied):
-            return AuthenticationError(msg, provider="gemini", status_code=403)
-
-        if isinstance(exc, gexc.DeadlineExceeded):
-            return TimeoutError_(msg, provider="gemini")
-
-        if isinstance(exc, gexc.NotFound):
-            return NotFoundError(msg, provider="gemini")
-
-        if isinstance(exc, gexc.InternalServerError):
-            return ServerError(msg, provider="gemini", status_code=500)
-
-        # Generic google.api_core error with a grpc_status_code or code
-        status = getattr(exc, "code", None)
-        if status is not None and isinstance(status, int):
-            return classify_http_status(status, msg)
-
-    except ImportError:
-        pass
-
     # Fallback: pattern-match on the stringified exception (covers cases
-    # where the SDK wraps errors in generic Exception or RuntimeError)
+    # where the CLI wraps errors in generic Exception or RuntimeError)
     msg_lower = msg.lower()
     if any(p in msg_lower for p in ("429", "quota", "resource_exhausted", "resource has been exhausted")):
         return RateLimitError(msg, provider="gemini")

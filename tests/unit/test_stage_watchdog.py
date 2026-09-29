@@ -104,8 +104,6 @@ class TestProgrammingErrorsAreNotRetried:
         )
         return GeminiClient(
             model="gemini-3.1-pro-high",
-            credentials_file=creds,
-            state_file=tmp_path / "state.json",
         )
 
     def test_type_error_fails_immediately_without_sleeping(self, tmp_path):

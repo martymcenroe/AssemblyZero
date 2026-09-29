@@ -110,6 +110,7 @@ def test_windows_without_wsl_at_all_is_not_found():
 def test_off_windows_uses_path():
     """Test 3."""
     with patch.object(gc, "_ON_WINDOWS", False), \
+         patch.object(gc.os, "access", return_value=False), \
          patch.object(gc.shutil, "which", return_value="/usr/bin/agy"):
         client = gc.GeminiClient(model=MODEL)
     assert client._agy_cli == "/usr/bin/agy"
