@@ -68,6 +68,7 @@ from assemblyzero.workflows.testing.nodes import (
     e2e_validation,
     finalize,
     implement_code_under_profile,
+    mechanical_hooks,
     load_lld,
     route_after_document,
     review_test_plan,
@@ -573,6 +574,7 @@ def build_testing_workflow() -> StateGraph:
     # #3563: N4 runs under the run's model profile.
     _add("N4_implement_code", _wrap_with_checkpoint(implement_code_under_profile, "post-impl"))
     _add("N4b_completeness_gate", completeness_gate)  # Issue #147
+    _add("N4_5_mechanical_hooks", mechanical_hooks)
     _add("N4c_augment_tests", augment_tests_for_coverage)  # #2327
     _add("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))
     _add("N6_e2e_validation", e2e_validation)
@@ -682,7 +684,7 @@ def build_testing_workflow() -> StateGraph:
         "N4b_completeness_gate",
         route_after_completeness_gate,
         {
-            "N5_verify_green": "N5_verify_green",
+            "N4_5_mechanical_hooks": "N4_5_mechanical_hooks",
             "N4_implement_code": "N4_implement_code",
             "end": END,
             "HALT": "HALT",  # #2756
@@ -708,6 +710,7 @@ def build_testing_workflow() -> StateGraph:
     # routes to implementation, so a coverage shortfall cannot become an
     # implementation edit by any path.
     workflow.add_edge("N4c_augment_tests", "N5_verify_green")
+    workflow.add_edge("N4_5_mechanical_hooks", "N5_verify_green")
 
     # N6 -> N7 or N4 (iteration loop)
     workflow.add_conditional_edges(

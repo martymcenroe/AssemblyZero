@@ -161,7 +161,7 @@ _STAGE_ORDER: tuple[str, ...] = (
 #: Kept honest by test_factory_report.py, which greps the testing workflow
 #: for every `[N..]` literal it prints.
 _IMPL_NODE_ORDER: tuple[str, ...] = (
-    "N0", "N1", "N1.5", "N2", "N2.5", "N3", "N4", "N4b", "N4c",
+    "N0", "N1", "N1.5", "N2", "N2.5", "N3", "N4", "N4b", "N4c", "N4.5",
     "N5", "N6", "N7", "N8", "N9",
 )
 
