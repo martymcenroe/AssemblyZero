@@ -325,7 +325,7 @@ def _completeness_issue_identity(issue: dict) -> tuple:
 
 def route_after_completeness_gate(
     state: TestingWorkflowState,
-) -> Literal["N5_verify_green", "N4_implement_code", "end", "HALT"]:
+) -> Literal["N4_5_mechanical_hooks", "N4_implement_code", "end", "HALT"]:
     """Route based on completeness verdict and iteration count.
 
     Issue #147, Requirements 7, 8, 12:
@@ -345,7 +345,7 @@ def route_after_completeness_gate(
         state: Current workflow state with completeness_verdict set.
 
     Returns:
-        Next node name: "N5_verify_green", "N4_implement_code", "end", or
+        Next node name: "N4_5_mechanical_hooks", "N4_implement_code", "end", or
         "HALT".
     """
     error = state.get("error_message", "")
@@ -387,7 +387,7 @@ def route_after_completeness_gate(
 
     # PASS or WARN — proceed to N5
     gate_log(f"    [N4b] {verdict} — routing to N5_verify_green")
-    return "N5_verify_green"
+    return "N4_5_mechanical_hooks"
 
 
 # =============================================================================

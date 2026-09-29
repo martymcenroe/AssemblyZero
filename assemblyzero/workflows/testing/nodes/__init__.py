@@ -34,6 +34,7 @@ from assemblyzero.workflows.testing.nodes.implement_code import (
     implement_code,
     implement_code_under_profile,
 )
+from assemblyzero.workflows.testing.nodes.mechanical_hooks import mechanical_hooks
 from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
@@ -57,6 +58,7 @@ __all__ = [
     "implement_code",
     "implement_code_under_profile",
     "completeness_gate",
+    "mechanical_hooks",
     "verify_green_phase",
     "e2e_validation",
     "finalize",

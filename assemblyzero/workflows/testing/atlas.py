@@ -26,7 +26,7 @@ from __future__ import annotations
 #: The forward path: N0, N1, N2, N2.5, N3, N4, N4b, N5, N6, N7, N7.5, N8, N9.
 #: `N1_5_revise_test_plan` and `N4c_augment_tests` are loops and are excluded,
 #: as is `HALT`.
-TOTAL_STEPS = 13
+TOTAL_STEPS = 14
 
 ATLAS: dict[str, dict] = {
     "N0_load_lld": {
@@ -157,11 +157,20 @@ ATLAS: dict[str, dict] = {
             "iterations remain."
         ),
         "successors": {
-            "N5_verify_green": "every requirement has code",
+            "N4_5_mechanical_hooks": "every requirement has code",
             "N4_implement_code": "something is missing; implement it",
             "HALT": "the gate itself failed and left a reason",
             "END": "still incomplete at the iteration cap; the orchestrator "
                    "reads the BLOCK verdict (#1779)",
+        },
+    },
+    "N4_5_mechanical_hooks": {
+        "title": "mechanical hooks",
+        "ordinal": 8,
+        "goal": "Execute build scripts before testing.",
+        "teach": "Runs the post_implement_command hook.",
+        "successors": {
+            "N5_verify_green": "the hook completed (or was skipped)",
         },
     },
     "N4c_augment_tests": {
@@ -179,7 +188,7 @@ ATLAS: dict[str, dict] = {
     },
     "N5_verify_green": {
         "title": "verify green phase",
-        "ordinal": 8,
+        "ordinal": 9,
         "goal": "Run the suite against the code and drive it to passing.",
         "teach": (
             "The iterate loop, and where the furthest recorded run stopped. "
@@ -199,7 +208,7 @@ ATLAS: dict[str, dict] = {
     },
     "N6_e2e_validation": {
         "title": "end-to-end validation",
-        "ordinal": 9,
+        "ordinal": 10,
         "goal": "Exercise the feature as a user would, not as a unit test does.",
         "teach": (
             "Unit tests can all pass on a feature that does not work. This "
@@ -215,7 +224,7 @@ ATLAS: dict[str, dict] = {
     },
     "N7_finalize": {
         "title": "finalize",
-        "ordinal": 10,
+        "ordinal": 11,
         "goal": "Write the test and implementation reports and commit them.",
         "teach": (
             "The artifacts a human reads afterwards are produced here and "
@@ -231,7 +240,7 @@ ATLAS: dict[str, dict] = {
     },
     "N7_5_adversarial": {
         "title": "adversarial review",
-        "ordinal": 11,
+        "ordinal": 12,
         "goal": "Attack the finished work looking for what the tests missed.",
         "teach": (
             "Non-blocking by design: its findings are recorded and the run "
@@ -245,7 +254,7 @@ ATLAS: dict[str, dict] = {
     },
     "N8_document": {
         "title": "document",
-        "ordinal": 12,
+        "ordinal": 13,
         "goal": "Generate the wiki page, runbook and README the work needs.",
         "teach": (
             "Committed into the implementation worktree for the same reason "
@@ -259,7 +268,7 @@ ATLAS: dict[str, dict] = {
     },
     "N9_cleanup": {
         "title": "cleanup",
-        "ordinal": 13,
+        "ordinal": 14,
         "goal": "Leave the target repository as the run found it.",
         "teach": (
             "The last forward step. What it removes is scaffolding the run "

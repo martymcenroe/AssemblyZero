@@ -750,7 +750,7 @@ class TestCompletenessGateRouting:
             iteration_count=0,
         )
         result = route_after_completeness_gate(state)
-        assert result == "N5_verify_green"
+        assert result == "N4_5_mechanical_hooks"
 
     def test_completeness_gate_warn_routing(self, mock_state) -> None:
         """WARN verdict routes to N5_verify_green."""
@@ -759,7 +759,7 @@ class TestCompletenessGateRouting:
             iteration_count=0,
         )
         result = route_after_completeness_gate(state)
-        assert result == "N5_verify_green"
+        assert result == "N4_5_mechanical_hooks"
 
     def test_max_iterations_ends(self, mock_state) -> None:
         """T100: BLOCK at max iterations (3) routes to end."""
