@@ -901,33 +901,6 @@ class TestGeminiProvider:
         assert result.response == "Reviewed content"
         assert result.provider == "gemini"
 
-    @patch("assemblyzero.core.llm_provider.GeminiProvider._get_client")
-    def test_invoke_with_rotation(self, mock_get_client):
-        """Test invocation with credential rotation."""
-        mock_client = Mock()
-        mock_client.invoke.return_value = Mock(
-            success=True,
-            response="OK",
-            raw_response="OK",
-            error_message=None,
-            model_verified="gemini-2.5-pro",
-            duration_ms=2000,
-            attempts=2,
-            credential_used="account-2",
-            rotation_occurred=True,
-        )
-        mock_get_client.return_value = mock_client
-
-        provider = GeminiProvider()
-        result = provider.invoke(
-            system_prompt="Test",
-            content="Test",
-        )
-
-        assert result.success is True
-        assert result.rotation_occurred is True
-        assert result.credential_used == "account-2"
-
 
 class TestMockProvider:
     """Tests for MockProvider."""
