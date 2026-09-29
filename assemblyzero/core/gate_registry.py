@@ -579,7 +579,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.no_test_files", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "No test",
         _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 0)
-        + _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 0, 1)
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_pytest_single::return", 0, 1)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 0),
         notes=(
             "no scenarios, no test files, or the named file is not on disk. "
@@ -615,7 +615,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.coverage_unreadable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "COVERAGE MEASUREMENT FAILED",
         _s(f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage::return", 0)
-        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 1),
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 1),
         decided_in=f"{_TS}/coverage_report.py",
         notes="a harness defect, never a test gap; see #2690's mapping",
     ),
@@ -645,20 +645,20 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.circuit_breaker", "impl", JUDGES_BUDGET, ACTION_HALT,
         "[CIRCUIT]",
         _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 2)
-        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 5, 7)
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 5, 7)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 2, 4),
         decided_in=f"{_TS}/circuit_breaker.py::check_circuit_breaker",
     ),
     Gate(
         "impl.green_phase_stopped", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Green phase stopped",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 0),
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 0),
         notes="pytest exit 2 or 3: interrupted or an internal error",
     ),
     Gate(
         "impl.red_phase_stopped", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Red phase stopped",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 2),
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_red_pytest_single::return", 2),
     ),
     Gate(
         "impl.red.import_errors", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
@@ -705,7 +705,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         # perform the marker-and-prior-writes check this text describes. It
         # is registered here for what it concludes -- the worktree's state,
         # deterministic on an unchanged tree -- not for how it got there.
-        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 3)
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_red_pytest_single::return", 3)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 2),
         decided_in=f"{_TS}/nodes/verify_phases.py::verify_red_phase",
         created_by="#2337", justified_by="#2761",
@@ -729,7 +729,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         # rather than the module that defines the token, which is the honest
         # pointer and the narrowest the check can currently be given.
         "Test(s) failing for a reason no implementation can fix",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 4),
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 4),
         decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase",
         justified_by="#2761",
         notes=(
@@ -774,7 +774,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.green.collection_broken", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "collected 0 tests",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 2),
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 2),
         created_by="#2546", justified_by="#2723",
         notes=(
             "infrastructure since #2765 (operator ruling 2026-09-04 on "
@@ -787,7 +787,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.green.iteration_cap", "impl", JUDGES_BUDGET, ACTION_HALT,
         "Green phase failed after",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 3, 6)
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 3, 6)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 1, 3),
     ),
     Gate(

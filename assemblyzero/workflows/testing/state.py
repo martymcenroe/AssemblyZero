@@ -355,6 +355,7 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Issue #381: Multi-framework TDD support
     framework_config: dict | None   # FrameworkConfig from runner_registry (None = pytest default)
+    framework_configs: list[dict] | None # Issue #3677: multiple frameworks
     test_run_result: dict | None    # TestRunResult from runner (non-pytest frameworks)
     total_scenarios: int            # For scenario-based coverage (Playwright)
 

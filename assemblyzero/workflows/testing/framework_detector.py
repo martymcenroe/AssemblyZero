@@ -118,7 +118,7 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
 ]
 
 
-def detect_framework_from_lld(lld_content: str) -> TestFramework:
+def detect_framework_from_lld(lld_content: str) -> list[TestFramework]:
     """Parse LLD content for test framework indicators.
 
     Scans for:
@@ -126,35 +126,44 @@ def detect_framework_from_lld(lld_content: str) -> TestFramework:
     2. File patterns in Section 2.1 (e.g., .spec.ts, .test.ts, test_*.py)
     3. Keywords anywhere in the LLD
 
-    Returns TestFramework.PYTEST as default if no framework detected.
+    Returns [TestFramework.PYTEST] as default if no framework detected.
     """
     if not lld_content:
-        return TestFramework.PYTEST
+        return [TestFramework.PYTEST]
+
+    detected = []
 
     # Priority 1: Explicit declarations
     for pattern, framework in _EXPLICIT_PATTERNS:
-        if pattern.search(lld_content):
+        if pattern.search(lld_content) and framework not in detected:
             logger.info("Detected framework from explicit declaration: %s", framework.value)
-            return framework
+            detected.append(framework)
 
     # Priority 2: File patterns
     for pattern, framework in _FILE_PATTERNS:
-        if pattern.search(lld_content):
+        if pattern.search(lld_content) and framework not in detected:
             logger.info("Detected framework from file pattern: %s", framework.value)
-            return framework
+            detected.append(framework)
 
-    # Priority 3: Keywords (skip pytest keyword — it's the default fallback
-    # and would match almost any Python project LLD)
+    # Priority 3: Keywords
     for pattern, framework in _KEYWORD_PATTERNS:
-        if framework != TestFramework.PYTEST and pattern.search(lld_content):
+        if framework != TestFramework.PYTEST and pattern.search(lld_content) and framework not in detected:
             logger.info("Detected framework from keyword: %s", framework.value)
-            return framework
+            detected.append(framework)
+            
+    # Include PYTEST if there are pytest keywords but only if we didn't find it yet
+    if TestFramework.PYTEST not in detected and re.search(r"\bpytest\b", lld_content, re.IGNORECASE):
+        logger.info("Detected framework from keyword: pytest")
+        detected.append(TestFramework.PYTEST)
 
-    logger.info("No framework detected from LLD; defaulting to pytest")
-    return TestFramework.PYTEST
+    if not detected:
+        logger.info("No framework detected from LLD; defaulting to pytest")
+        return [TestFramework.PYTEST]
+        
+    return detected
 
 
-def detect_framework_from_project(project_root: str) -> TestFramework | None:
+def detect_framework_from_project(project_root: str) -> list[TestFramework]:
     """Inspect project files to infer the test framework.
 
     Checks for:
@@ -164,10 +173,10 @@ def detect_framework_from_project(project_root: str) -> TestFramework | None:
     - package.json "scripts.test" field
     - pyproject.toml with pytest configuration
 
-    Returns None if ambiguous or not found.
+    Returns empty list if not found.
     """
     if not project_root or not os.path.isdir(project_root):
-        return None
+        return []
 
     detected: list[TestFramework] = []
 
@@ -213,43 +222,37 @@ def detect_framework_from_project(project_root: str) -> TestFramework | None:
     if os.path.isfile(pyproject_path):
         try:
             with open(pyproject_path, "r") as f:
-                content = f.read()
-            if "[tool.pytest" in content or "pytest" in content:
+                toml_content = f.read()
+            if "[tool.pytest" in toml_content or "pytest" in toml_content:
                 if TestFramework.PYTEST not in detected:
                     detected.append(TestFramework.PYTEST)
         except OSError as e:
             logger.warning("Failed to read pyproject.toml: %s", e)
 
-    if len(detected) == 1:
-        return detected[0]
-    elif len(detected) > 1:
-        logger.warning("Ambiguous framework detection: %s", [d.value for d in detected])
-        return None
-    return None
+    if detected:
+        logger.info("Detected frameworks from project files: %s", [d.value for d in detected])
+    return detected
 
 
-def resolve_framework(lld_content: str, project_root: str) -> TestFramework:
+def resolve_framework(lld_content: str, project_root: str) -> list[TestFramework]:
     """Resolve test framework using LLD as primary signal, project files as fallback.
 
-    Priority:
-    1. LLD explicit declaration (e.g., "Test Framework: Playwright")
-    2. LLD file patterns (e.g., .spec.ts files in Section 2.1)
-    3. Project file inspection (package.json scripts, config files)
-    4. Default: PYTEST
+    Returns a list of all detected frameworks.
     """
     # Try LLD detection first
-    lld_result = detect_framework_from_lld(lld_content)
-    if lld_result != TestFramework.PYTEST:
-        # LLD found a non-default framework → high confidence
-        logger.info("Framework resolved from LLD: %s", lld_result.value)
-        return lld_result
+    lld_results = detect_framework_from_lld(lld_content)
+    
+    # If LLD is explicitly something other than just PYTEST default, use it.
+    if len(lld_results) > 1 or (len(lld_results) == 1 and lld_results[0] != TestFramework.PYTEST):
+        logger.info("Frameworks resolved from LLD: %s", [f.value for f in lld_results])
+        return lld_results
 
-    # LLD returned default pytest — check if project files disagree
-    project_result = detect_framework_from_project(project_root)
-    if project_result is not None:
-        logger.info("Framework resolved from project files: %s", project_result.value)
-        return project_result
+    # LLD returned default pytest — check if project files disagree or add more
+    project_results = detect_framework_from_project(project_root)
+    if project_results:
+        logger.info("Frameworks resolved from project files: %s", [f.value for f in project_results])
+        return project_results
 
     # Both returned default or None → use pytest
     logger.info("Framework resolved to default: pytest")
-    return TestFramework.PYTEST
+    return [TestFramework.PYTEST]

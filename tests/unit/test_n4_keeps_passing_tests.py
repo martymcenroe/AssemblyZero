@@ -573,7 +573,7 @@ class TestTheVerifierAlignsTwins:
             Path(__file__).resolve().parents[2]
             / "assemblyzero" / "workflows" / "testing" / "nodes" / "verify_phases.py"
         ).read_text(encoding="utf-8")
-        node = source.index("def verify_green_phase(")
+        node = source.index("def _verify_green_pytest_single(")
         align = source.index("_align_plan_files_with_the_spec(state, repo_root, test_files)", node)
         measure = source.index("Running pytest with coverage target", node)
         assert align < measure

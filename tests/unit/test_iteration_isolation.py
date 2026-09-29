@@ -109,7 +109,7 @@ class TestTheStagnantHaltNamesTheTests:
 
         from assemblyzero.workflows.testing.nodes import verify_phases
 
-        source = inspect.getsource(verify_phases.verify_green_phase)
+        source = inspect.getsource(verify_phases._verify_green_pytest_single)
         segment = source[source.index("Full suite regression stagnant"):]
         assert "{named}" in segment.split("Halting.")[0], (
             "the stagnant halt must name the failing tests, not just count them"
