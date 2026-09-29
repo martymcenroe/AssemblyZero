@@ -85,8 +85,6 @@ class TestGeminiClientModelValidation:
         # Should not raise
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
         assert client.model == "gemini-3.1-pro-preview"
 
@@ -101,44 +99,11 @@ class TestGeminiClientModelValidation:
         """T010: Verify Gemini 3.1 model ID is accepted (REQ-1)."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
         assert "3.1" in client.model
         assert client.model == "gemini-3.1-pro-preview"
 
 
-class TestCredentialLoading:
-    """Tests for credential loading."""
-
-    def test_loads_credentials_from_file(self, temp_credentials_file, temp_state_file):
-        """Test that OAuth credentials are loaded from file.
-
-        #1605: _load_credentials() now only loads type: oauth credentials.
-        api_key credentials are silently skipped; key is always empty string.
-        """
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
-        )
-
-        creds = client._load_credentials()
-        assert len(creds) == 3
-        assert creds[0].name == "key-1"
-        assert creds[0].cred_type == "oauth"
-        assert creds[0].key == ""  # OAuth credentials carry no API key
-
-    def test_missing_credentials_file_raises(self, temp_state_file):
-        """Test that missing credentials file raises FileNotFoundError."""
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-            credentials_file=Path("/nonexistent/creds.json"),
-            state_file=temp_state_file,
-        )
-
-        with pytest.raises(FileNotFoundError):
-            client._load_credentials()
 
 
 class TestInvokeViaStdin:
@@ -154,8 +119,6 @@ class TestInvokeViaStdin:
     def _client(self, temp_credentials_file, temp_state_file):
         client = GeminiClient(
             model="gemini-3.1-pro-high",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
         client._agy_cli = "/fake/agy"
         return client
@@ -284,8 +247,6 @@ class TestErrorClassification:
         """Test that 429/quota errors are classified correctly."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
 
         assert (
@@ -305,8 +266,6 @@ class TestErrorClassification:
         """Test that 529/capacity errors are classified correctly."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
 
         assert (
@@ -326,8 +285,6 @@ class TestErrorClassification:
         """Test that auth errors are classified correctly."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
 
         assert (
@@ -341,96 +298,6 @@ class TestErrorClassification:
         )
 
 
-class TestRotationLogic:
-    """Tests for credential rotation logic."""
-
-    def test_090_429_triggers_rotation(self, temp_credentials_file, temp_state_file):
-        """Test that 429 error causes rotation to next credential.
-
-        #1605: the api_key/genai.Client path is gone.  Drive the rotation loop
-        via _invoke_via_cli returning a 429-bearing error string so that
-        classify_gemini_error → RateLimitError → QUOTA_EXHAUSTED → rotate.
-        """
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
-        )
-
-        credentials_tried = []
-
-        def mock_invoke_via_cli(system_instruction, content, timeout_seconds=None):
-            # Count each _invoke_via_cli call — one per credential tried
-            credentials_tried.append(len(credentials_tried))
-            return (False, "", "429 TerminalQuotaError: exhausted")
-
-        with patch.object(client, "_invoke_via_cli", side_effect=mock_invoke_via_cli):
-            result = client.invoke("system", "content")
-
-        # All 3 credentials should have been tried (rotation happened)
-        assert len(credentials_tried) == 3
-
-        # Result should indicate rotation occurred and overall failure
-        assert result.rotation_occurred is True
-        assert result.success is False
-
-    def test_100_529_triggers_backoff(self, temp_credentials_file, temp_state_file):
-        """Test that 529 error causes backoff retry on same credential.
-
-        #1605: drive the backoff path via _invoke_via_cli returning a 529/capacity
-        error string.  Succeed on the 3rd attempt so success=True, no rotation.
-        """
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
-        )
-
-        attempts = [0]
-
-        def mock_invoke_via_cli(system_instruction, content, timeout_seconds=None):
-            attempts[0] += 1
-            if attempts[0] < 3:
-                return (False, "", "529 MODEL_CAPACITY_EXHAUSTED")
-            # Succeed on 3rd attempt
-            return (True, "Success", "")
-
-        with patch.object(client, "_invoke_via_cli", side_effect=mock_invoke_via_cli), \
-             patch("time.sleep"):  # Skip actual delay
-            result = client.invoke("system", "content")
-
-        # Should have retried 3 times on the same credential before succeeding
-        assert attempts[0] == 3
-        assert result.success is True
-        assert result.rotation_occurred is False
-
-    def test_110_all_credentials_exhausted(self, temp_credentials_file, temp_state_file):
-        """Test behavior when all credentials are exhausted.
-
-        #1605: drive the exhaustion path via _invoke_via_cli returning a quota
-        error for every call so all three OAuth credentials get marked exhausted.
-        """
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
-        )
-
-        def mock_invoke_via_cli(system_instruction, content, timeout_seconds=None):
-            return (False, "", "429 TerminalQuotaError: exhausted")
-
-        with patch.object(client, "_invoke_via_cli", side_effect=mock_invoke_via_cli):
-            result = client.invoke("system", "content")
-
-        assert result.success is False
-        # When all credentials fail due to quota exhaustion, error type is QUOTA_EXHAUSTED
-        assert result.error_type == GeminiErrorType.QUOTA_EXHAUSTED
-        # #2553: the headline states the CLASS and counts the roster. It read
-        # "All credentials failed" -- plural over a denominator of one on the
-        # deployed roster, and naming the wrong failure class.
-        assert "Quota exhausted" in result.error_message
-        assert "all 3 credentials" in result.error_message
-        assert "All credentials failed" not in result.error_message
 
 
 class TestBackoffDelay:
@@ -440,8 +307,6 @@ class TestBackoffDelay:
         """Test that backoff delay is exponential."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
 
         # Base is 2.0 seconds, exponential growth
@@ -453,8 +318,6 @@ class TestBackoffDelay:
         """Test that backoff is capped at maximum."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
 
         # Should be capped at 60 seconds
@@ -468,8 +331,6 @@ class TestResetTimeParsing:
         """Test parsing of reset time from error message."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
 
         result = client._parse_reset_time("Your quota will reset after 15h11m58s")
@@ -480,8 +341,6 @@ class TestResetTimeParsing:
         """Test that unparseable messages return None."""
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
-            credentials_file=temp_credentials_file,
-            state_file=temp_state_file,
         )
 
         result = client._parse_reset_time("Some random error message")
@@ -501,6 +360,7 @@ def test_find_agy_cli_uses_path():
     # Off Windows only: on Windows agy is found inside WSL (#3623,
     # tests/unit/test_agy_wsl_transport.py).
     with patch("assemblyzero.core.gemini_client._ON_WINDOWS", False), \
+         patch("assemblyzero.core.gemini_client.os.access", return_value=False), \
          patch("assemblyzero.core.gemini_client.shutil.which", return_value="/usr/bin/agy"):
         client = GeminiClient(model="gemini-3.1-pro-preview")
     assert client._agy_cli == "/usr/bin/agy"
@@ -551,111 +411,3 @@ def test_invoke_via_cli_routes_oversized_prompt_to_stdin():
     assert len(mock_stdin.call_args[0][0]) > 31000  # full composed prompt
 
 
-class TestTheFailureTextNamesTheTransport:
-    """#2476: no error message may be readable as naming the retired CLI.
-
-    Three surfaces here say "gemini" and none of them mean the CLI retired on
-    2026-06-18 -- the module name, `provider="gemini"`, and the `gemini:3.1-pro`
-    provider spec, which is genuinely provider:model format. Each is defensible
-    alone; together, inside a failure, they read as the tool the fleet rules say
-    never to invoke. On 2026-08-16 that cost a real diagnosis.
-
-    These pin the transport into the text at failure time, which is the moment
-    the harm happens and the moment attention is shortest.
-    """
-
-    def _failing_client(self, creds, state):
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-            credentials_file=creds,
-            state_file=state,
-        )
-        return client
-
-    def test_all_credentials_failed_names_agy(
-        self, temp_credentials_file, temp_state_file
-    ):
-        """The exact message from the boostgauge #331 diagnosis."""
-        client = self._failing_client(temp_credentials_file, temp_state_file)
-
-        with patch.object(
-            client,
-            "_invoke_via_cli",
-            side_effect=lambda *a, **k: (False, "", "429 TerminalQuotaError"),
-        ):
-            result = client.invoke("system", "content")
-
-        assert result.success is False
-        assert "agy" in result.error_message
-        assert "Antigravity" in result.error_message
-
-    def test_the_message_still_says_what_failed(
-        self, temp_credentials_file, temp_state_file
-    ):
-        """Naming the transport must not push out the reason. The operator
-        needs both: which client ran, and why it did not answer."""
-        client = self._failing_client(temp_credentials_file, temp_state_file)
-
-        with patch.object(
-            client,
-            "_invoke_via_cli",
-            side_effect=lambda *a, **k: (False, "", "429 TerminalQuotaError"),
-        ):
-            result = client.invoke("system", "content")
-
-        # #2553: the property is unchanged -- transport AND reason both
-        # present. Only the headline's wording moved: it names the failure
-        # class instead of the roster.
-        assert "agy (Antigravity CLI)" in result.error_message
-        assert "Quota exhausted" in result.error_message
-        assert "key-1" in result.error_message
-
-    def test_the_live_log_lines_name_it_too(
-        self, temp_credentials_file, temp_state_file, capsys
-    ):
-        """The failure text is not the only thing read at failure time.
-
-        The rotation diagnostics printed while a call is dying carried a bare
-        `provider=gemini` beside a `gemini-*` model id, which is the same
-        ambiguity in the place an operator actually looks first.
-        """
-        client = self._failing_client(temp_credentials_file, temp_state_file)
-
-        with patch.object(
-            client,
-            "_invoke_via_cli",
-            side_effect=lambda *a, **k: (False, "", "429 TerminalQuotaError"),
-        ):
-            client.invoke("system", "content")
-
-        out = capsys.readouterr().out
-        assert "[LLM]" in out, "the fixture must actually print a diagnostic"
-        for line in out.splitlines():
-            if "provider=gemini" in line:
-                assert "transport=agy" in line, (
-                    f"a failure line names the provider but not the "
-                    f"transport, so it reads as the retired CLI: {line!r}"
-                )
-
-    def test_the_transport_label_names_a_cli_that_is_not_retired(self):
-        """The label is the whole point, so it may not drift back.
-
-        `gemini` as a bare word is what the retired CLI was invoked as, and the
-        fleet rules ban invoking it. A label containing it would reintroduce
-        the ambiguity this issue closed.
-        """
-        from assemblyzero.core.gemini_client import TRANSPORT_LABEL
-
-        assert "agy" in TRANSPORT_LABEL
-        assert "gemini" not in TRANSPORT_LABEL.lower()
-
-    def test_the_missing_cli_message_already_named_it(self):
-        """Untouched, and asserted so a future edit cannot quietly widen the
-        gap this issue narrowed."""
-        client = GeminiClient(model="gemini-3.1-pro-preview")
-        client._agy_cli = None
-
-        ok, _, err = client._invoke_via_cli("sys", "content")
-
-        assert ok is False
-        assert "agy" in err

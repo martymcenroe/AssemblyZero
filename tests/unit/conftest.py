@@ -26,9 +26,6 @@ def _bypass_gemini_preflight():
 
     preflight._TRANSPORT_RESULT = None
     with patch(
-        "assemblyzero.core.preflight.check_gemini_available",
-        return_value=_FakePreflightResult(),
-    ), patch(
         "assemblyzero.core.preflight.check_gemini_transport",
         return_value=_FakePreflightResult(),
     ):

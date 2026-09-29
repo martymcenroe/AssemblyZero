@@ -135,7 +135,6 @@ class TestN1ProceedsOnAClaudeOnlyRun:
         from assemblyzero.core import config
         from assemblyzero.workflows.requirements.state import create_initial_state
 
-        monkeypatch.setattr(config, "CREDENTIALS_FILE", tmp_path / "absent.json")
         template_dir = tmp_path / "docs" / "templates"
         template_dir.mkdir(parents=True)
         (template_dir / "0102-feature-lld-template.md").write_text("# T", encoding="utf-8")

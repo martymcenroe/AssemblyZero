@@ -233,22 +233,8 @@ def _claude_capacity(
 
 
 def _gemini_capacity(now: Optional[datetime] = None) -> ProviderCapacity:
-    """Derive Gemini's state from the rotation state that already tracks it."""
-    from assemblyzero.core.preflight import check_gemini_available
-
-    now = now or datetime.now(timezone.utc)
-    result = check_gemini_available()
-    if result.passed and result.available_credentials > 0:
-        return ProviderCapacity(provider="gemini", available=True)
-
-    detail = ", ".join(result.warnings) if result.warnings else ""
-    if result.exhausted_names:
-        detail = f"exhausted credentials: {', '.join(result.exhausted_names)}"
-    return ProviderCapacity(
-        provider="gemini",
-        available=False,
-        detail=detail or "no credentials available",
-    )
+    """Gemini's state is not tracked locally (handled by agy)."""
+    return ProviderCapacity(provider="gemini", available=True)
 
 
 def check_capacity(
