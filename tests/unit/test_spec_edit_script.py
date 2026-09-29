@@ -173,17 +173,13 @@ class TestGenerateSpecEditScriptIntegration:
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.check_spec_size_or_raise", create=True)
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
-    @patch("assemblyzero.core.preflight.check_gemini_available")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     def test_edit_blocks_patch_without_regeneration(
-        self, mock_get_provider, mock_preflight, mock_template, _sz, tmp_path
+        self, mock_get_provider, mock_template, _sz, tmp_path
     ):
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
         mock_template.return_value = "# Template"
-        mock_preflight.return_value = Mock(
-            passed=True, available_credentials=4, total_credentials=4, warnings=[]
-        )
         drafter = MagicMock()
         drafter.invoke.return_value = Mock(
             success=True,
@@ -204,19 +200,15 @@ class TestGenerateSpecEditScriptIntegration:
         assert drafter.invoke.call_count == 1
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
-    @patch("assemblyzero.core.preflight.check_gemini_available")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     def test_prose_response_reprompts_and_the_correction_applies(
-        self, mock_get_provider, mock_preflight, mock_template, tmp_path
+        self, mock_get_provider, mock_template, tmp_path
     ):
         """#2569: no full-revision fallback. A prose response re-prompts
         with the failure, and the corrected edit-script applies."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
         mock_template.return_value = "# Template"
-        mock_preflight.return_value = Mock(
-            passed=True, available_credentials=4, total_credentials=4, warnings=[]
-        )
         drafter = MagicMock()
         drafter.invoke.side_effect = [
             Mock(  # attempt 1: prose, no blocks
@@ -245,10 +237,9 @@ class TestGenerateSpecEditScriptIntegration:
         assert "no well-formed" in reprompt
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
-    @patch("assemblyzero.core.preflight.check_gemini_available")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     def test_unmatched_search_reprompts_with_the_exact_failure(
-        self, mock_get_provider, mock_preflight, mock_template, tmp_path
+        self, mock_get_provider, mock_template, tmp_path
     ):
         """#2569: the observed recoverable class — seven of the sixteen
         counted fallbacks were SEARCH-not-found. The re-prompt carries the
@@ -256,9 +247,6 @@ class TestGenerateSpecEditScriptIntegration:
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
         mock_template.return_value = "# Template"
-        mock_preflight.return_value = Mock(
-            passed=True, available_credentials=4, total_credentials=4, warnings=[]
-        )
         drafter = MagicMock()
         drafter.invoke.side_effect = [
             Mock(  # attempt 1: block whose SEARCH isn't verbatim
@@ -284,10 +272,9 @@ class TestGenerateSpecEditScriptIntegration:
         assert "text that is not in the spec" in reprompt
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
-    @patch("assemblyzero.core.preflight.check_gemini_available")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     def test_exhausted_attempts_halt_naming_the_blocks(
-        self, mock_get_provider, mock_preflight, mock_template, tmp_path
+        self, mock_get_provider, mock_template, tmp_path
     ):
         """#2569: on exhaustion the stage halts naming the unappliable
         blocks — never a regeneration, mirroring the lld stage's #2200."""
@@ -297,9 +284,6 @@ class TestGenerateSpecEditScriptIntegration:
         )
 
         mock_template.return_value = "# Template"
-        mock_preflight.return_value = Mock(
-            passed=True, available_credentials=4, total_credentials=4, warnings=[]
-        )
         drafter = MagicMock()
         drafter.invoke.return_value = Mock(
             success=True,
@@ -317,10 +301,9 @@ class TestGenerateSpecEditScriptIntegration:
         assert "spec_draft" not in result, "a halt never overwrites the draft"
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
-    @patch("assemblyzero.core.preflight.check_gemini_available")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     def test_transport_failure_retries_the_same_prompt(
-        self, mock_get_provider, mock_preflight, mock_template, tmp_path
+        self, mock_get_provider, mock_template, tmp_path
     ):
         """#2569: three of the sixteen counted fallbacks were provider
         failures falling to the wide channel — the wrong remedy. The same
@@ -328,9 +311,6 @@ class TestGenerateSpecEditScriptIntegration:
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
         mock_template.return_value = "# Template"
-        mock_preflight.return_value = Mock(
-            passed=True, available_credentials=4, total_credentials=4, warnings=[]
-        )
         drafter = MagicMock()
         drafter.invoke.side_effect = [
             Mock(success=False, response=None,

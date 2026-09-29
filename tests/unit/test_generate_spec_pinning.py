@@ -164,9 +164,6 @@ class TestTheEditScriptPathIsPinned:
         ), patch(
             "assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template",
             return_value="# Template",
-        ), patch(
-            "assemblyzero.core.preflight.check_gemini_available",
-            return_value=preflight,
         ):
             out = generate_spec(state)
         assert out["error_message"] == ""

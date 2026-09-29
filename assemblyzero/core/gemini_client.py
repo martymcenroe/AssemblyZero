@@ -658,7 +658,7 @@ class GeminiClient:
 
                 last_error_type = error_type
 
-                if error_type in (GeminiErrorType.AUTH_FAILED, GeminiErrorType.INVALID_MODEL):
+                if error_type in (GeminiErrorType.AUTH_ERROR, GeminiErrorType.MODEL_MISMATCH):
                     return GeminiCallResult(
                         success=False,
                         response=None,

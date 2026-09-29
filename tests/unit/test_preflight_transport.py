@@ -25,11 +25,7 @@ def _bypass_gemini_preflight():
     check is the thing under test, and the credential-file check must never
     be called at all."""
     preflight._TRANSPORT_RESULT = None
-    with patch(
-        "assemblyzero.core.preflight.check_gemini_available",
-        side_effect=AssertionError("the credential-file check must not run"),
-    ):
-        yield
+    yield
     preflight._TRANSPORT_RESULT = None
 
 
