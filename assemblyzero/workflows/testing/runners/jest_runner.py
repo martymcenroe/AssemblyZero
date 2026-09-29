@@ -43,6 +43,31 @@ class JestRunner(BaseTestRunner):
     ) -> TestRunResult:
         """Run 'npx jest --json' or 'npx vitest run --reporter=json'."""
         if self._is_vitest:
+            import os
+            package_json_path = os.path.join(self.project_root, "package.json")
+            has_typecheck_script = False
+            if os.path.exists(package_json_path):
+                try:
+                    with open(package_json_path, "r") as f:
+                        pkg = json.load(f)
+                        if "scripts" in pkg and "typecheck" in pkg["scripts"]:
+                            has_typecheck_script = True
+                except Exception:
+                    pass
+            
+            tsconfig_path = os.path.join(self.project_root, "tsconfig.json")
+            
+            typecheck_command = None
+            if has_typecheck_script:
+                typecheck_command = ["npm", "run", "typecheck"]
+            elif os.path.exists(tsconfig_path):
+                typecheck_command = ["npx", "tsc", "--noEmit"]
+                
+            if typecheck_command:
+                raw_out, code = self._run_subprocess(typecheck_command)
+                if code != 0:
+                    return self._fallback_result(raw_out, code)
+
             command = ["npx", "vitest", "run", "--reporter=json"]
         else:
             command = ["npx", "jest", "--json"]
