@@ -1257,33 +1257,7 @@ def _describe_hollow_suite(state: TestingWorkflowState) -> str:
     )
 
 
-def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
-    """N3: Verify all tests fail (TDD red phase).
-
-    The red phase confirms that:
-    1. All tests are syntactically valid and runnable
-    2. All tests fail (no pre-existing implementation)
-    3. Failures are the expected "TDD: Implementation pending" assertions
-
-    Args:
-        state: Current workflow state.
-
-    Returns:
-        State updates with red phase results.
-    """
-    gate_log("[N3] Verifying red phase (all tests should fail)...")
-
-    # Check for mock mode
-    if state.get("mock_mode"):
-        return _mock_verify_red_phase(state)
-
-    # Issue #381: Framework-aware red phase
-    framework_config = state.get("framework_config")
-    if framework_config:
-        fw_enum = _resolve_framework_enum(framework_config)
-        if fw_enum and fw_enum != TestFramework.PYTEST:
-            return _verify_red_non_pytest(state, framework_config, fw_enum)
-
+def _verify_red_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # Get data from state
     test_files = state.get("test_files", [])
     repo_root_str = state.get("repo_root", "")
@@ -1691,6 +1665,81 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
 COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
 
 
+
+
+def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
+    """N3: Verify all tests fail (TDD red phase)."""
+    gate_log("[N3] Verifying red phase (all tests should fail)...")
+
+    if state.get("mock_mode"):
+        return _mock_verify_red_phase(state)
+
+    framework_configs = state.get("framework_configs")
+    if not framework_configs:
+        framework_config = state.get("framework_config")
+        framework_configs = [framework_config] if framework_config else [{"framework": TestFramework.PYTEST}]
+
+    aggregated_output = ""
+    aggregated_passed = 0
+    aggregated_failed = 0
+    aggregated_errors = 0
+    aggregated_total = 0
+    highest_exit = 0
+    final_next_node = "N4_implement_code"
+    file_counter = state.get("file_counter", 0)
+    
+    for idx, fwc in enumerate(framework_configs):
+        if not fwc:
+            continue
+            
+        fw_enum = _resolve_framework_enum(fwc) if "framework" in fwc else TestFramework.PYTEST
+        
+        if fw_enum and fw_enum != TestFramework.PYTEST:
+            res = _verify_red_non_pytest(state, fwc, fw_enum)
+        else:
+            res = _verify_red_pytest_single(state)
+            
+        aggregated_output += f"=== Framework: {fw_enum.value if fw_enum else 'pytest'} ===\n"
+        aggregated_output += res.get("red_phase_output", "") + "\n\n"
+        
+        trr = res.get("test_run_result", {})
+        if trr:
+            aggregated_passed += trr.get("passed", 0)
+            aggregated_failed += trr.get("failed", 0)
+            aggregated_errors += trr.get("errors", 0)
+            aggregated_total += trr.get("total", 0)
+            
+        exit_code = res.get("pytest_exit_code", 0)
+        highest_exit = max(highest_exit, exit_code)
+        
+        file_counter = max(file_counter, res.get("file_counter", 0))
+        state["file_counter"] = file_counter
+        
+        next_node = res.get("next_node")
+        if next_node not in ("N4_implement_code", "N5_verify_green") or res.get("error_message"):
+            res["red_phase_output"] = aggregated_output
+            res["file_counter"] = file_counter
+            if highest_exit:
+                res["pytest_exit_code"] = highest_exit
+            return res
+            
+        if next_node == "N5_verify_green":
+            final_next_node = "N5_verify_green"
+            
+    if 'res' not in locals():
+        res = {}
+    res["red_phase_output"] = aggregated_output
+    res["file_counter"] = file_counter
+    res["pytest_exit_code"] = highest_exit
+    res["next_node"] = final_next_node
+    res["error_message"] = ""
+    res["test_run_result"] = {
+        "passed": aggregated_passed,
+        "failed": aggregated_failed,
+        "errors": aggregated_errors,
+        "total": aggregated_total,
+    }
+    return res
 def _hill_climb(
     state, repo_root, passed_count, coverage_achieved, current_green_failures,
     updates, passing_tests: list[str] | None = None,
@@ -2233,32 +2282,7 @@ def _align_plan_files_with_the_spec(
     return rewritten
 
 
-def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
-    """N5: Verify all tests pass with coverage target.
-
-    The green phase confirms that:
-    1. All tests pass
-    2. Coverage meets target (default 90%)
-
-    Args:
-        state: Current workflow state.
-
-    Returns:
-        State updates with green phase results.
-    """
-    gate_log("[N5] Verifying green phase (all tests should pass)...")
-
-    # Check for mock mode
-    if state.get("mock_mode"):
-        return _mock_verify_green_phase(state)
-
-    # Issue #381: Framework-aware green phase
-    framework_config = state.get("framework_config")
-    if framework_config:
-        fw_enum = _resolve_framework_enum(framework_config)
-        if fw_enum and fw_enum != TestFramework.PYTEST:
-            return _verify_green_non_pytest(state, framework_config, fw_enum)
-
+def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # Get data from state
     test_files = state.get("test_files", [])
     coverage_target = state.get("coverage_target", 90)
@@ -3235,6 +3259,116 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     }
 
 
+
+
+def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
+    """N5: Verify all tests pass (TDD green phase)."""
+    gate_log("[N5] Verifying green phase (all tests should pass)...")
+
+    if state.get("mock_mode"):
+        return _mock_verify_green_phase(state)
+
+    framework_configs = state.get("framework_configs")
+    if not framework_configs:
+        framework_config = state.get("framework_config")
+        framework_configs = [framework_config] if framework_config else [{"framework": TestFramework.PYTEST}]
+
+    aggregated_output = ""
+    aggregated_passed = 0
+    aggregated_failed = 0
+    aggregated_errors = 0
+    aggregated_total = 0
+    min_coverage = 100.0
+    highest_exit = 0
+    file_counter = state.get("file_counter", 0)
+    final_next_node = None
+    iteration_count = state.get("iteration_count", 0)
+    previous_passed = state.get("previous_passed", 0)
+    previous_coverage = state.get("previous_coverage", 0.0)
+    
+    for idx, fwc in enumerate(framework_configs):
+        if not fwc:
+            continue
+            
+        fw_enum = _resolve_framework_enum(fwc) if "framework" in fwc else TestFramework.PYTEST
+        
+        if fw_enum and fw_enum != TestFramework.PYTEST:
+            res = _verify_green_non_pytest(state, fwc, fw_enum)
+        else:
+            res = _verify_green_pytest_single(state)
+            
+        aggregated_output += f"=== Framework: {fw_enum.value if fw_enum else 'pytest'} ===\n"
+        aggregated_output += res.get("green_phase_output", "") + "\n\n"
+        
+        trr = res.get("test_run_result", {})
+        if trr:
+            aggregated_passed += trr.get("passed", 0)
+            aggregated_failed += trr.get("failed", 0)
+            aggregated_errors += trr.get("errors", 0)
+            aggregated_total += trr.get("total", 0)
+            
+        cov = res.get("coverage_achieved", 100.0)
+        min_coverage = min(min_coverage, cov)
+        
+        file_counter = max(file_counter, res.get("file_counter", 0))
+        state["file_counter"] = file_counter
+        
+        if "iteration_count" in res:
+            iteration_count = max(iteration_count, res["iteration_count"])
+        if "previous_passed" in res:
+            previous_passed = max(previous_passed, res["previous_passed"])
+        if "previous_coverage" in res:
+            previous_coverage = max(previous_coverage, res["previous_coverage"])
+            
+        exit_code = res.get("pytest_exit_code", 0)
+        highest_exit = max(highest_exit, exit_code)
+        
+        next_node = res.get("next_node")
+        
+        if next_node in ("N4_implement_code", "N4c_augment_tests", "end") or res.get("error_message"):
+            res["green_phase_output"] = aggregated_output
+            res["file_counter"] = file_counter
+            if highest_exit:
+                res["pytest_exit_code"] = highest_exit
+            if "iteration_count" not in res and iteration_count:
+                res["iteration_count"] = iteration_count
+            if next_node:
+                res["next_node"] = next_node
+            return res
+            
+        if next_node == "N2_scaffold_tests":
+            res["green_phase_output"] = aggregated_output
+            res["file_counter"] = file_counter
+            res["pytest_exit_code"] = highest_exit
+            if iteration_count:
+                res["iteration_count"] = iteration_count
+            if next_node:
+                res["next_node"] = next_node
+            return res
+            
+        if not final_next_node:
+            final_next_node = next_node
+            
+    if min_coverage == 100.0 and not framework_configs:
+        min_coverage = 0.0
+        
+    if 'res' not in locals():
+        res = {}
+    res["green_phase_output"] = aggregated_output
+    res["coverage_achieved"] = min_coverage
+    res["previous_coverage"] = previous_coverage
+    res["previous_passed"] = previous_passed
+    res["file_counter"] = file_counter
+    res["pytest_exit_code"] = highest_exit
+    res["test_run_result"] = {
+        "passed": aggregated_passed,
+        "failed": aggregated_failed,
+        "errors": aggregated_errors,
+        "total": aggregated_total,
+    }
+    res["next_node"] = final_next_node or "N6_e2e_validation"
+    res["error_message"] = ""
+    return res
 def _resolve_framework_enum(framework_config: dict) -> TestFramework | None:
     """Extract TestFramework enum from framework_config dict.
 

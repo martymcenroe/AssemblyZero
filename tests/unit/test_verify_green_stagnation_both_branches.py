@@ -134,7 +134,7 @@ class TestBothBranchesAgree:
 
         from assemblyzero.workflows.testing.nodes import verify_phases
 
-        source = inspect.getsource(verify_phases.verify_green_phase)
+        source = inspect.getsource(verify_phases._verify_green_pytest_single)
         # #2711: the strike count wraps the decision, and BOTH branches go
         # through the wrapper; the wrapper is the only caller of the decision.
         assert source.count("coverage_plateau_verdict(") == 2, (

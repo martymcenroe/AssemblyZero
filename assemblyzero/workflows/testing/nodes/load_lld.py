@@ -986,10 +986,11 @@ def _load_from_issue(  # pragma: no cover
     file_num = next_file_number(audit_dir)
     save_audit_file(audit_dir, file_num, "issue-only-spec.md", lld_content)
 
-    # Issue #381: Detect test framework
-    framework = resolve_framework(lld_content, str(repo_root))
-    fw_config = get_framework_config(framework)
-    gate_log(f"    Framework: {framework.value}")
+    # Issue #381: Detect test framework(s)
+    frameworks = resolve_framework(lld_content, str(repo_root))
+    fw_configs = [get_framework_config(fw) for fw in frameworks]
+    gate_log(f"    Frameworks: {[f.value for f in frameworks]}")
+    fw_config = fw_configs[0] if fw_configs else None
 
     # Log workflow start
     log_workflow_execution(
@@ -1002,7 +1003,7 @@ def _load_from_issue(  # pragma: no cover
             "title": title,
             "body_length": len(body),
             "scenario_count": len(test_scenarios),
-            "framework": framework.value,
+            "frameworks": [f.value for f in frameworks],
         },
     )
 
@@ -1236,10 +1237,11 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         test_plan_content += f"- Description: {scenario['description']}\n\n"
     save_audit_file(audit_dir, file_num, "test-plan.md", test_plan_content)
 
-    # Issue #381: Detect test framework
-    framework = resolve_framework(lld_content, str(repo_root))
-    fw_config = get_framework_config(framework)
-    print(f"    Framework: {framework.value}")
+    # Issue #381: Detect test framework(s)
+    frameworks = resolve_framework(lld_content, str(repo_root))
+    fw_configs = [get_framework_config(fw) for fw in frameworks]
+    print(f"    Frameworks: {[f.value for f in frameworks]}")
+    fw_config = fw_configs[0] if fw_configs else None
 
     # Log workflow start
     log_workflow_execution(
@@ -1251,7 +1253,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
             "lld_path": str(lld_path_obj),
             "scenario_count": len(test_scenarios),
             "test_types": detected_types,
-            "framework": framework.value,
+            "frameworks": [f.value for f in frameworks],
         },
     )
 
@@ -1357,8 +1359,9 @@ Requirement: REQ-2
     save_audit_file(audit_dir, file_num, "lld.md", mock_lld)
 
     # Issue #381: Detect test framework (even in mock mode)
-    framework = resolve_framework(mock_lld, str(repo_root))
-    fw_config = get_framework_config(framework)
+    frameworks = resolve_framework(mock_lld, str(repo_root))
+    fw_configs = [get_framework_config(fw) for fw in frameworks]
+    fw_config = fw_configs[0] if fw_configs else None
 
     print(f"    [MOCK] Loaded mock LLD for issue #{issue_number}")
 
