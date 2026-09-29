@@ -661,7 +661,7 @@ def build_testing_workflow() -> StateGraph:
         route_after_red,
         {
             "N4_implement_code": "N4_implement_code",
-            "N4_5_mechanical_hooks": "N4_5_mechanical_hooks",  # #2337
+            "N5_verify_green": "N5_verify_green",  # #2337
             "N2_scaffold_tests": "N2_scaffold_tests",
             "end": END,
             "HALT": "HALT",  # #2756

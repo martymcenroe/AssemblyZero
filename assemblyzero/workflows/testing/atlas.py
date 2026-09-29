@@ -168,7 +168,7 @@ ATLAS: dict[str, dict] = {
         "title": "mechanical hooks",
         "ordinal": 8,
         "goal": "Execute build scripts before testing.",
-        "teach": "Runs the post_implement_command hook.",
+        "teach": "Runs the post_implement_command hook defined in .unleashed.json to compile the code.",
         "successors": {
             "N5_verify_green": "the hook completed (or was skipped)",
         },

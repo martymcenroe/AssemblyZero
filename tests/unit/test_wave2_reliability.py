@@ -269,7 +269,7 @@ class TestCompletenessGateStagnation:
             "completeness_issues": [],
         }
 
-        assert route_after_completeness_gate(state) == "N5_verify_green"
+        assert route_after_completeness_gate(state) == "N4_5_mechanical_hooks"
 
     def test_warn_verdict_proceeds(self):
         """WARN verdict routes to N5."""
@@ -292,7 +292,7 @@ class TestCompletenessGateStagnation:
             ],
         }
 
-        assert route_after_completeness_gate(state) == "N5_verify_green"
+        assert route_after_completeness_gate(state) == "N4_5_mechanical_hooks"
 
 
 class TestCompletenessGateStoresIssueIds:
