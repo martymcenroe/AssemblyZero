@@ -1740,8 +1740,6 @@ class GeminiProvider(LLMProvider):
                 model_used=result.model_verified or self._model,
                 duration_ms=result.duration_ms,
                 attempts=result.attempts,
-                credential_used=result.credential_used,
-                rotation_occurred=result.rotation_occurred,
                 rate_limited=was_rate_limited,
                 # #1907: a failure GeminiClient.invoke() REPORTS is
                 # post-exhaustion — it already retried per credential,
