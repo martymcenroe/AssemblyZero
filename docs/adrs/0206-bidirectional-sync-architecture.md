@@ -1,8 +1,18 @@
 # 0206 - ADR: Bidirectional Sync Architecture
 
-**Status:** Proposed
-**Date:** 2026-01-13
+**Status:** Accepted
+**Date:** 2026-01-13 (proposed) · 2026-10-01 (accepted; #3689)
 **Categories:** Architecture, Infrastructure, Multi-Agent
+
+> **Accepted retrospectively, because it shipped.** This sat at `Status: Proposed`
+> for nearly nine months while the mechanism it proposes was built, maintained and
+> wired in: `tools/assemblyzero-harvest.py` is the harvester,
+> `assemblyzero/workflows/janitor/probes/harvest.py` runs it as a janitor probe and
+> parses its output for cross-project drift, and `docs/0003-file-inventory.md` lists
+> its CLI and prompt as `Stable`. A reader could not tell from this document whether
+> the proposal had been adopted, rejected or forgotten, and its open questions read
+> as live design work on a design that was already running. Section 11 records what
+> was measured on 2026-10-01 instead of asking.
 
 ## 1. Context
 
@@ -336,12 +346,33 @@ The full cleanup mode will include:
 - **Learning curve:** Agents must learn when to promote vs. keep local
 - **Registry maintenance:** Must keep project list current
 
-## 11. Open Questions
+## 11. The four questions, answered
 
-1. **Should harvest run automatically?** (e.g., GitHub Action on schedule)
-2. **Version AssemblyZero?** (breaking changes could affect all projects)
-3. **Cross-org projects?** (what if AssemblyZero is used by external teams)
-4. **Rollback mechanism?** (if promoted content causes issues)
+Measured 2026-10-01 (#3689). Three were answered by the implementation; one was
+real and is tracked. **Nothing in this section is outstanding, and no row asks
+anyone anything** — a decision record that holds a question is read again by every
+later session as live design work, which is what these four did for nine months.
+
+1. **Harvest automation: it already runs automatically, as a janitor probe.**
+   `assemblyzero/workflows/janitor/probes/harvest.py` invokes
+   `assemblyzero-harvest.py` and parses its output for cross-project drift. There is
+   no scheduled GitHub Action and none is wanted: five workflows exist and none
+   carries a `schedule` trigger, so the janitor is this repo's automation route
+   rather than cron.
+2. **AssemblyZero is not versioned, and that is consistent with how it is
+   consumed.** `pyproject.toml` declares `0.1.0` and one tag exists. `CLAUDE.md`
+   states that tools execute from `AssemblyZero/tools/` and are not copied locally,
+   so nothing installs this as a package and a version number would have no
+   consumer. Revisit only if something starts consuming it as a dependency.
+3. **Cross-org use is not a current requirement.** No external consumer exists; the
+   repo is consumed by path. A real external consumer would be a new ADR, not a
+   question held open here against the possibility.
+4. **Rollback is the one real gap, and it is tracked in #3690.** No rollback or
+   revert path exists in the harvest or downstream-push tooling. Git history is the
+   de facto procedure and is written down nowhere, which means it gets re-derived
+   under pressure while the fleet is broken. #3690 covers writing the manual
+   sequence down first, naming the child-side state a revert cannot reach, and
+   deciding whether a tool is wanted.
 
 ## 12. References
 
