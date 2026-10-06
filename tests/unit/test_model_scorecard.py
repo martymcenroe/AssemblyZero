@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
 from model_scorecard import (
+    MODEL_PRICING,
     extract_tokens_from_raw,
     estimate_cost,
     parse_review_logs,
@@ -17,6 +18,37 @@ from model_scorecard import (
     aggregate_workflow_stats,
     parse_timestamp,
 )
+
+from unittest.mock import patch
+
+from assemblyzero.core.config import FORBIDDEN_MODELS, REVIEWER_MODEL
+from assemblyzero.core.gemini_client import GeminiClient
+from assemblyzero.core.llm_provider import GeminiProvider
+
+# The Gemini id the pipeline sends to the reviewer seat (#3700).
+FIXTURE_MODEL = REVIEWER_MODEL
+
+
+class TestPricingTable:
+    """The pricing table prices only models a run can produce (#3700)."""
+
+    def test_no_pricing_key_is_forbidden(self):
+        assert sorted(set(MODEL_PRICING) & set(FORBIDDEN_MODELS)) == []
+
+    def test_every_gemini_key_is_an_id_the_provider_sends(self):
+        gemini_keys = {k for k in MODEL_PRICING if k.startswith("gemini-")}
+        assert gemini_keys
+        assert gemini_keys <= set(GeminiProvider.MODEL_MAP.values())
+
+    def test_fixture_model_is_priced(self):
+        assert FIXTURE_MODEL in MODEL_PRICING
+
+    def test_gemini_client_accepts_fixture_model(self):
+        with patch.object(GeminiClient, "_find_agy_cli", return_value=None):
+            assert GeminiClient(model=FIXTURE_MODEL).model == FIXTURE_MODEL
+
+    def test_gemini_on_subscription_costs_nothing(self):
+        assert estimate_cost(FIXTURE_MODEL, 1_000_000, 1_000_000) == 0.0
 
 
 class TestExtractTokens:
@@ -67,9 +99,9 @@ class TestEstimateCost:
     """Tests for cost estimation."""
 
     def test_known_model(self):
-        # gemini-3-pro-preview: $1.25/M input, $10.00/M output
-        cost = estimate_cost("gemini-3-pro-preview", 1_000_000, 1_000_000)
-        assert cost == pytest.approx(11.25)
+        # claude:sonnet: $3.00/M input, $15.00/M output
+        cost = estimate_cost("claude:sonnet", 1_000_000, 1_000_000)
+        assert cost == pytest.approx(18.00)
 
     def test_unknown_model_uses_default(self):
         cost = estimate_cost("unknown-model", 1_000_000, 1_000_000)
@@ -77,12 +109,12 @@ class TestEstimateCost:
         assert cost == pytest.approx(30.00)
 
     def test_zero_tokens(self):
-        assert estimate_cost("gemini-3-pro-preview", 0, 0) == 0.0
+        assert estimate_cost(FIXTURE_MODEL, 0, 0) == 0.0
 
     def test_small_token_count(self):
-        # 3000 input, 1500 output for gemini-3-pro
-        cost = estimate_cost("gemini-3-pro-preview", 3000, 1500)
-        expected = (3000 * 1.25 + 1500 * 10.00) / 1_000_000
+        # 3000 input, 1500 output for claude:sonnet
+        cost = estimate_cost("claude:sonnet", 3000, 1500)
+        expected = (3000 * 3.00 + 1500 * 15.00) / 1_000_000
         assert cost == pytest.approx(expected)
 
 
@@ -116,7 +148,7 @@ class TestParseReviewLogs:
             {
                 "timestamp": "2026-02-01T10:00:00+00:00",
                 "node": "review_lld",
-                "model": "gemini-3-pro-preview",
+                "model": FIXTURE_MODEL,
                 "verdict": "APPROVED",
                 "issue_id": 42,
                 "duration_ms": 5000,
@@ -125,7 +157,7 @@ class TestParseReviewLogs:
         ])
         entries = parse_review_logs(logs_dir)
         assert len(entries) == 1
-        assert entries[0]["model"] == "gemini-3-pro-preview"
+        assert entries[0]["model"] == FIXTURE_MODEL
         assert entries[0]["verdict"] == "APPROVED"
         assert entries[0]["input_tokens"] == 3000
         assert entries[0]["output_tokens"] == 800

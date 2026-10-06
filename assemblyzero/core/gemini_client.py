@@ -229,8 +229,9 @@ def _find_wsl_agy() -> Optional[str]:
 #: errors.py, and the ``gemini:3.1-pro`` provider spec, which is genuinely
 #: ``provider:model`` format. Each is defensible alone -- the MODEL is Gemini --
 #: and together, inside an error message, they read as the tool the fleet rules
-#: say never to invoke. A real `gemini` binary is still on PATH on the
-#: workstation, so the misreading is plausible rather than paranoid.
+#: say never to invoke. A real `gemini` binary was still on PATH on the
+#: workstation when the misreading below happened (2026-08-16); it is no longer
+#: installed on Windows or WSL, but the label stays for the reason above.
 #:
 #: On 2026-08-16 that cost a real diagnosis: ``analysis unavailable on
 #: gemini:3.1-pro (All credentials failed: ...)`` was read as "we regressed to
