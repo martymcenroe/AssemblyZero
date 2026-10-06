@@ -79,7 +79,7 @@ class WorkflowConfig:
     Attributes:
         workflow_type: Either "issue" or "lld".
         drafter: LLM provider spec for drafting (e.g., "claude:opus").
-        reviewer: LLM provider spec for reviewing (e.g., "gemini:2.5-pro").
+        reviewer: LLM provider spec for reviewing (e.g., "gemini:3.1-pro").
         draft_template_path: Path to template file (relative to assemblyzero_root).
         review_prompt_path: Path to review prompt (relative to assemblyzero_root).
         gates: Human gate configuration.

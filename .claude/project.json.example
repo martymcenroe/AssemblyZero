@@ -29,11 +29,10 @@
   },
 
   "// GEMINI INTEGRATION": {
-    "description": "The generator creates Gemini prompts and tools for dual-AI review",
+    "description": "The generator creates Gemini review prompts for dual-AI review",
     "prerequisites": [
-      "Gemini CLI v0.23.0+ installed and authenticated",
-      "Google AI Pro subscription (for gemini-3-pro access)",
-      "jq installed for JSON parsing"
+      "Antigravity CLI (agy) installed and signed in on the subscription (ADR 0220); there is no paid-API fallback",
+      "The reviewer model is config.REVIEWER_MODEL in AssemblyZero; never one on config.FORBIDDEN_MODELS"
     ],
     "usage": [
       "Replace {{LLD_PATH}} and {{LLD_CONTENT}} placeholders before invoking"

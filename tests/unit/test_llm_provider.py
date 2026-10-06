@@ -831,10 +831,28 @@ class TestGeminiProvider:
         assert provider.provider_name == "gemini"
         assert provider.model == "2.5-pro"
 
-    def test_valid_model_flash(self):
-        """Test creating provider with flash model."""
-        provider = GeminiProvider(model="flash")
-        assert provider.model == "flash"
+    @pytest.mark.parametrize("alias", ["flash", "2.5-flash", "3.1-flash-preview"])
+    def test_flash_aliases_are_refused(self, alias):
+        """#3710: the Flash aliases named dead ids, one of them forbidden."""
+        with pytest.raises(ValueError, match="Unknown Gemini model"):
+            GeminiProvider(model=alias)
+
+    @pytest.mark.parametrize("alias", ["2.5-pro", "pro"])
+    def test_legacy_pro_aliases_resolve_to_living_id(self, alias):
+        """#3710: gemini-2.5-pro is gone from agy; the aliases remap as #1764 did."""
+        assert GeminiProvider.MODEL_MAP[alias] == "gemini-3.1-pro-high"
+
+    def test_every_map_value_is_an_id_agy_serves(self):
+        """#3710: one declared set of living ids, and the map stays inside it."""
+        from assemblyzero.core.config import AGY_GEMINI_MODELS
+
+        assert set(GeminiProvider.MODEL_MAP.values()) <= AGY_GEMINI_MODELS
+
+    def test_no_map_value_is_forbidden(self):
+        """#3710: no alias may resolve to a FORBIDDEN_MODELS id."""
+        from assemblyzero.core.config import FORBIDDEN_MODELS
+
+        assert set(GeminiProvider.MODEL_MAP.values()) & set(FORBIDDEN_MODELS) == set()
 
     def test_valid_model_3_pro_preview(self):
         """Test creating provider with 3.1-pro-preview model."""
@@ -856,11 +874,6 @@ class TestGeminiProvider:
         provider whose resolved model ID is servable (#1764)."""
         provider = GeminiProvider(model="3.1-pro-preview")
         assert provider._model_id == "gemini-3.1-pro-high"
-
-    def test_valid_model_3_flash_preview(self):
-        """Test creating provider with 3.1-flash-preview model."""
-        provider = GeminiProvider(model="3.1-flash-preview")
-        assert provider.model == "3.1-flash-preview"
 
     def test_invalid_model(self):
         """Test that invalid model raises ValueError."""
