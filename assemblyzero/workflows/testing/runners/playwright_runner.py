@@ -46,6 +46,7 @@ class PlaywrightRunner(BaseTestRunner):
         if extra_args:
             command.extend(extra_args)
 
+        test_paths = self._paths_for_runner(test_paths)  # #3707
         if test_paths:
             command.extend(test_paths)
 

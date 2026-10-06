@@ -146,10 +146,14 @@ class TestDetectFrameworkFromProject:
             assert set(detect_framework_from_project(tmpdir)) == {TestFramework.PLAYWRIGHT, TestFramework.JEST}
 
     def test_invalid_package_json(self):
-        """Malformed package.json is handled gracefully."""
+        """A malformed package.json is a broken project, not a missing one:
+        detection refuses it (#3707) instead of reporting no framework."""
+        import pytest
+
         with tempfile.TemporaryDirectory() as tmpdir:
             Path(tmpdir, "package.json").write_text("not valid json")
-            assert detect_framework_from_project(tmpdir) == []
+            with pytest.raises(ValueError, match="package.json could not be read"):
+                detect_framework_from_project(tmpdir)
 
 
 class TestResolveFramework:

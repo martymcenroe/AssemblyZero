@@ -30,10 +30,40 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     save_audit_file,
 )
-from assemblyzero.workflows.testing.framework_detector import resolve_framework
+from assemblyzero.workflows.testing.framework_detector import (
+    TestFramework,
+    detect_framework_dirs,
+    resolve_framework,
+)
 from assemblyzero.workflows.testing.knowledge.patterns import detect_test_types
 from assemblyzero.workflows.testing.runner_registry import get_framework_config
 from assemblyzero.workflows.testing.state import TestingWorkflowState, TestScenario
+
+
+def _configs_with_directories(frameworks: list[TestFramework], repo_root: str) -> list[dict]:
+    """Each framework's registry config with `working_directory` set to where
+    detection, or a `test_dirs` declaration in .unleashed.json, places its
+    project beneath the repository root; None for the root (#3707).
+
+    A framework the LLD names that the project does not declare anywhere
+    runs at the root, as before.
+    """
+    dirs = detect_framework_dirs(repo_root)
+    configs: list[dict] = []
+    for framework in frameworks:
+        config = dict(get_framework_config(framework))
+        directory = dirs.get(framework, ".")
+        config["working_directory"] = None if directory == "." else directory
+        configs.append(config)
+    return configs
+
+
+def _frameworks_with_directories(configs: list[dict]) -> dict[str, str]:
+    """`{framework: directory}` for the run record (#3707)."""
+    return {
+        str(getattr(c["framework"], "value", c["framework"])): c.get("working_directory") or "."
+        for c in configs
+    }
 
 
 class WorkflowParsingError(ValueError):
@@ -988,8 +1018,8 @@ def _load_from_issue(  # pragma: no cover
 
     # Issue #381: Detect test framework(s)
     frameworks = resolve_framework(lld_content, str(repo_root))
-    fw_configs = [get_framework_config(fw) for fw in frameworks]
-    gate_log(f"    Frameworks: {[f.value for f in frameworks]}")
+    fw_configs = _configs_with_directories(frameworks, str(repo_root))  # #3707
+    gate_log(f"    Frameworks: {_frameworks_with_directories(fw_configs)}")
     fw_config = fw_configs[0] if fw_configs else None
 
     # Log workflow start
@@ -1239,8 +1269,8 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
 
     # Issue #381: Detect test framework(s)
     frameworks = resolve_framework(lld_content, str(repo_root))
-    fw_configs = [get_framework_config(fw) for fw in frameworks]
-    print(f"    Frameworks: {[f.value for f in frameworks]}")
+    fw_configs = _configs_with_directories(frameworks, str(repo_root))  # #3707
+    print(f"    Frameworks: {_frameworks_with_directories(fw_configs)}")
     fw_config = fw_configs[0] if fw_configs else None
 
     # Log workflow start
@@ -1360,7 +1390,7 @@ Requirement: REQ-2
 
     # Issue #381: Detect test framework (even in mock mode)
     frameworks = resolve_framework(mock_lld, str(repo_root))
-    fw_configs = [get_framework_config(fw) for fw in frameworks]
+    fw_configs = _configs_with_directories(frameworks, str(repo_root))  # #3707
     fw_config = fw_configs[0] if fw_configs else None
 
     print(f"    [MOCK] Loaded mock LLD for issue #{issue_number}")

@@ -42,10 +42,11 @@ class JestRunner(BaseTestRunner):
         extra_args: list[str] | None = None,
     ) -> TestRunResult:
         """Run 'npx jest --json' or 'npx vitest run --reporter=json'."""
+        test_paths = self._paths_for_runner(test_paths)  # #3707
         if self._is_vitest:
             import os
-            print("Running vitest runner for project:", self.project_root)
-            package_json_path = os.path.join(self.project_root, "package.json")
+            print("Running vitest runner for project:", self.project_dir)
+            package_json_path = os.path.join(self.project_dir, "package.json")
             has_typecheck_script = False
             if os.path.exists(package_json_path):
                 try:
@@ -57,7 +58,7 @@ class JestRunner(BaseTestRunner):
                     # fail-open: missing or malformed package.json just means no typecheck script
                     pass
             
-            tsconfig_path = os.path.join(self.project_root, "tsconfig.json")
+            tsconfig_path = os.path.join(self.project_dir, "tsconfig.json")
             
             typecheck_command = None
             if has_typecheck_script:

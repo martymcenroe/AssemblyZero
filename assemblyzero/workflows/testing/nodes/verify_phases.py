@@ -3407,7 +3407,10 @@ def _verify_red_non_pytest(
     print(f"    Running {framework.value} on {len(test_files)} test file(s)...")
 
     try:
-        runner = get_runner(framework, str(repo_root))
+        runner = get_runner(
+            framework, str(repo_root),
+            working_directory=framework_config.get("working_directory"),  # #3707
+        )
     except (ValueError, EnvironmentError) as e:
         return {"error_message": f"Runner unavailable for {framework.value}: {e}"}
 
@@ -3580,7 +3583,10 @@ def _verify_green_non_pytest(
     print(f"    Running {framework.value} with coverage target: {coverage_target}%")
 
     try:
-        runner = get_runner(framework, str(repo_root))
+        runner = get_runner(
+            framework, str(repo_root),
+            working_directory=framework_config.get("working_directory"),  # #3707
+        )
     except (ValueError, EnvironmentError) as e:
         return {"error_message": f"Runner unavailable for {framework.value}: {e}"}
 

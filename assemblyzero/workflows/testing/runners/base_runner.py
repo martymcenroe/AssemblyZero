@@ -5,6 +5,7 @@ Issue #381: Defines the interface all test runners must implement.
 
 from assemblyzero.utils.shell import run_command
 import logging
+import os
 import subprocess
 from abc import ABC, abstractmethod
 
@@ -26,6 +27,36 @@ class BaseTestRunner(ABC):
         """Initialize with framework config and project root path."""
         self.config = config
         self.project_root = project_root
+
+    @property
+    def project_dir(self) -> str:
+        """Where the framework's project lives: the project root, or the
+        config's `working_directory` beneath it (#3707)."""
+        working_directory = self.config.get("working_directory")
+        if working_directory:
+            return os.path.join(self.project_root, working_directory)
+        return self.project_root
+
+    def _paths_for_runner(self, test_paths: list[str] | None) -> list[str] | None:
+        """Test paths as the runner must see them from `project_dir` (#3707).
+
+        The workflow names test files relative to the project root
+        (`web/tests/a.test.ts`), or absolutely. A runner started in `web/`
+        would not find either, so a path inside `project_dir` is made
+        relative to it. A path outside it is passed through unchanged.
+        """
+        if not test_paths:
+            return test_paths
+        root = os.path.abspath(self.project_root)
+        base = os.path.abspath(self.project_dir)
+        out: list[str] = []
+        for path in test_paths:
+            absolute = os.path.normpath(path if os.path.isabs(path) else os.path.join(root, path))
+            if absolute == base or absolute.startswith(base + os.sep):
+                out.append(os.path.relpath(absolute, base))
+            else:
+                out.append(path)
+        return out
 
     @abstractmethod
     def run_tests(
