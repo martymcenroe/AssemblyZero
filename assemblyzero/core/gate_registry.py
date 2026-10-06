@@ -630,6 +630,18 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 1),
     ),
     Gate(
+        "impl.build_hook_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "N4.5: post_implement_command failed",
+        _s(f"{_TS}/nodes/mechanical_hooks.py::_halt::return", 0),
+        decided_in=f"{_TS}/nodes/mechanical_hooks.py::mechanical_hooks",
+        created_by="#3706",
+        notes="the target's own build hook (.unleashed.json post_implement_command) "
+              "exited non-zero, or the file could not be read; the operator's rule "
+              "of 2026-09-25 (#3585, no fall-throughs) is the ruling that raised "
+              "the ratchet for this row. Until #3706 the failure was a warning and "
+              "the green phase ran on a build that did not build.",
+    ),
+    Gate(
         "impl.stagnation.e2e", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "E2E stagnant",
         decided_in=f"{_TS}/nodes/e2e_validation.py::e2e_validation (advisory)",

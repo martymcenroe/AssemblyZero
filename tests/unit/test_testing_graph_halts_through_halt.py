@@ -26,6 +26,7 @@ from assemblyzero.workflows.testing.graph import (
     route_after_green,
     route_after_implement,
     route_after_load,
+    route_after_mechanical_hooks,
     route_after_scaffold,
 )
 
@@ -74,6 +75,7 @@ class TestTheGraphReachesHalt:
             "N3_verify_red",
             "N4_implement_code",
             "N4b_completeness_gate",
+            "N4_5_mechanical_hooks",  # #3706: a failed build hook halts
             "N5_verify_green",
             "N6_e2e_validation",
             "N7_finalize",
@@ -92,6 +94,10 @@ class TestTheGraphReachesHalt:
 
         assert route_after_implement({"error_message": "boom"}) == "HALT"
         assert route_after_implement({}) == "N4b_completeness_gate"
+
+        # #3706: a failed build hook is a recorded reason like any other.
+        assert route_after_mechanical_hooks({"error_message": "boom"}) == "HALT"
+        assert route_after_mechanical_hooks({}) == "N5_verify_green"
 
         # A scaffold-only run finished; it did not fail, and there is no
         # reason to record. It must NOT produce a halt bundle.

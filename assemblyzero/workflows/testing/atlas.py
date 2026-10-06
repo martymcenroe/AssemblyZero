@@ -170,7 +170,8 @@ ATLAS: dict[str, dict] = {
         "goal": "Execute build scripts before testing.",
         "teach": "Runs the post_implement_command hook defined in .unleashed.json to compile the code.",
         "successors": {
-            "N5_verify_green": "the hook completed (or was skipped)",
+            "N5_verify_green": "the hook completed (or there was none)",
+            "HALT": "the hook failed, or .unleashed.json could not be read (#3706)",
         },
     },
     "N4c_augment_tests": {
