@@ -1,7 +1,7 @@
 # Implementation Report: Multi-framework Execution (#3677)
 
 ## Overview
-Implemented Phase 3 of the testing pipeline upgrades to support repositories with a "physics split" (e.g. Palaestra) by allowing concurrent testing frameworks (Pytest and Vitest).
+Implemented Phase 3 of the testing pipeline upgrades to support repositories with a "physics split" (a Python package at the root and a web app under its own directory) by allowing concurrent testing frameworks (Pytest and Vitest).
 
 ## Changes Made
 1. **Framework Detection**: Upgraded `framework_detector.py` to return a `list[TestFramework]` instead of a singular framework.

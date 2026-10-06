@@ -163,75 +163,149 @@ def detect_framework_from_lld(lld_content: str) -> list[TestFramework]:
     return detected
 
 
-def detect_framework_from_project(project_root: str) -> list[TestFramework]:
-    """Inspect project files to infer the test framework.
+#: Directories the detector never descends into (#3707).
+SKIPPED_DIRS = frozenset({
+    "node_modules", "data", "dist", "build", "coverage", "__pycache__",
+    ".git", ".venv", "venv",
+})
 
-    Checks for:
-    - playwright.config.ts / playwright.config.js
-    - jest.config.ts / jest.config.js
-    - vitest.config.ts / vitest.config.js
-    - package.json "scripts.test" field
-    - pyproject.toml with pytest configuration
+#: How far below the project root the detector looks for a JavaScript
+#: project. Two levels covers `web/` and `apps/web/`; deeper is a monorepo
+#: question nobody has asked.
+MAX_DETECT_DEPTH = 2
 
-    Returns empty list if not found.
-    """
-    if not project_root or not os.path.isdir(project_root):
-        return []
+_CONFIG_FILES: dict[str, TestFramework] = {
+    "playwright.config.ts": TestFramework.PLAYWRIGHT,
+    "playwright.config.js": TestFramework.PLAYWRIGHT,
+    "jest.config.ts": TestFramework.JEST,
+    "jest.config.js": TestFramework.JEST,
+    "jest.config.json": TestFramework.JEST,
+    "vitest.config.ts": TestFramework.VITEST,
+    "vitest.config.js": TestFramework.VITEST,
+}
 
+
+def _js_frameworks_in(directory: str) -> list[TestFramework]:
+    """The JavaScript test frameworks one directory declares: by its config
+    files first, then by its package.json `test` script."""
     detected: list[TestFramework] = []
-
-    # Check for config files
-    config_map = {
-        "playwright.config.ts": TestFramework.PLAYWRIGHT,
-        "playwright.config.js": TestFramework.PLAYWRIGHT,
-        "jest.config.ts": TestFramework.JEST,
-        "jest.config.js": TestFramework.JEST,
-        "jest.config.json": TestFramework.JEST,
-        "vitest.config.ts": TestFramework.VITEST,
-        "vitest.config.js": TestFramework.VITEST,
-    }
-
-    for filename, framework in config_map.items():
-        if os.path.isfile(os.path.join(project_root, filename)):
-            if framework not in detected:
-                detected.append(framework)
-                # Closes #1493: ASCII-only log (Windows cp1252).
-                logger.info("Found config file %s -> %s", filename, framework.value)
-
-    # Check package.json scripts
-    package_json_path = os.path.join(project_root, "package.json")
+    for filename, framework in _CONFIG_FILES.items():
+        if os.path.isfile(os.path.join(directory, filename)) and framework not in detected:
+            detected.append(framework)
+            # Closes #1493: ASCII-only log (Windows cp1252).
+            logger.info("Found config file %s in %s -> %s", filename, directory, framework.value)
+    package_json_path = os.path.join(directory, "package.json")
     if os.path.isfile(package_json_path):
         try:
             with open(package_json_path, "r") as f:
                 pkg = json.load(f)
             test_script = pkg.get("scripts", {}).get("test", "")
-            if "playwright" in test_script:
-                if TestFramework.PLAYWRIGHT not in detected:
-                    detected.append(TestFramework.PLAYWRIGHT)
-            elif "vitest" in test_script:
-                if TestFramework.VITEST not in detected:
-                    detected.append(TestFramework.VITEST)
-            elif "jest" in test_script:
-                if TestFramework.JEST not in detected:
-                    detected.append(TestFramework.JEST)
+            for word, framework in (
+                ("playwright", TestFramework.PLAYWRIGHT),
+                ("vitest", TestFramework.VITEST),
+                ("jest", TestFramework.JEST),
+            ):
+                if word in test_script:
+                    if framework not in detected:
+                        detected.append(framework)
+                    break
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to read package.json: %s", e)
-
-    # Check pyproject.toml for pytest
-    pyproject_path = os.path.join(project_root, "pyproject.toml")
-    if os.path.isfile(pyproject_path):
-        try:
-            with open(pyproject_path, "r") as f:
-                toml_content = f.read()
-            if "[tool.pytest" in toml_content or "pytest" in toml_content:
-                if TestFramework.PYTEST not in detected:
-                    detected.append(TestFramework.PYTEST)
-        except OSError as e:
-            logger.warning("Failed to read pyproject.toml: %s", e)
-
-    if detected:
-        logger.info("Detected frameworks from project files: %s", [d.value for d in detected])
+            # A package.json that cannot be read is a broken project, not a
+            # missing one; the run stops here rather than testing half of it.
+            raise ValueError(f"{package_json_path} could not be read: {e}") from e
     return detected
+
+
+def _candidate_dirs(root: str) -> list[str]:
+    """Subdirectories of `root` to MAX_DETECT_DEPTH, in path order, skipping
+    SKIPPED_DIRS and hidden directories."""
+    out: list[str] = []
+    for current, dirnames, _files in os.walk(root):
+        depth = 0 if current == root else os.path.relpath(current, root).count(os.sep) + 1
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in SKIPPED_DIRS and not d.startswith(".")
+        )
+        if depth >= MAX_DETECT_DEPTH:
+            dirnames[:] = []
+        if current != root:
+            out.append(current)
+    return out
+
+
+def _declared_test_dirs(project_root: str) -> dict[TestFramework, str]:
+    """`test_dirs` from the target's .unleashed.json, e.g. {"vitest": "web"}:
+    where a framework's project lives, when the target says so (#3707). A
+    declaration wins over detection. A name that is not a framework, or a
+    file that is not JSON, raises: a wrong declaration is not a missing one.
+    """
+    path = os.path.join(project_root, ".unleashed.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    declared = config.get("test_dirs") or {}
+    out: dict[TestFramework, str] = {}
+    for name, directory in declared.items():
+        try:
+            framework = TestFramework(name)
+        except ValueError as e:
+            raise ValueError(
+                f"{path}: test_dirs names {name!r}, which is not a test framework "
+                f"({[f.value for f in TestFramework]})"
+            ) from e
+        out[framework] = os.path.normpath(str(directory))
+    return out
+
+
+def detect_framework_dirs(project_root: str) -> dict[TestFramework, str]:
+    """Which test frameworks the project has, and where each one lives, as a
+    path relative to `project_root` ("." for the root) (#3707).
+
+    pytest is looked for at the root (`pyproject.toml`). The JavaScript
+    frameworks are looked for at the root and up to MAX_DETECT_DEPTH levels
+    below it, skipping SKIPPED_DIRS and hidden directories, so a target that
+    keeps its web app in `web/` beside a Python package is seen as both. The
+    first directory found for a framework wins: the root, then subdirectories
+    in path order. A `test_dirs` declaration in the target's .unleashed.json
+    wins over detection. Order: the root's JavaScript frameworks, pytest,
+    then the subdirectories', which is the order the root-only detector gave.
+    """
+    if not project_root or not os.path.isdir(project_root):
+        return {}
+    root = os.path.abspath(project_root)
+    found: dict[TestFramework, str] = {}
+
+    for framework in _js_frameworks_in(root):
+        found.setdefault(framework, ".")
+
+    pyproject_path = os.path.join(root, "pyproject.toml")
+    if os.path.isfile(pyproject_path):
+        with open(pyproject_path, "r") as f:
+            toml_content = f.read()
+        if "[tool.pytest" in toml_content or "pytest" in toml_content:
+            found.setdefault(TestFramework.PYTEST, ".")
+
+    for directory in _candidate_dirs(root):
+        for framework in _js_frameworks_in(directory):
+            found.setdefault(framework, os.path.relpath(directory, root))
+
+    for framework, directory in _declared_test_dirs(root).items():
+        found[framework] = directory
+
+    if found:
+        logger.info("Detected frameworks from project files: %s",
+                    {k.value: v for k, v in found.items()})
+    return found
+
+
+def detect_framework_from_project(project_root: str) -> list[TestFramework]:
+    """The frameworks `detect_framework_dirs` finds, in that order.
+
+    Before #3707 this looked at the root alone, so a target with its web app
+    in a subdirectory was seen as pytest only and its JavaScript suite never
+    ran. Returns an empty list if nothing is found.
+    """
+    return list(detect_framework_dirs(project_root))
 
 
 def resolve_framework(lld_content: str, project_root: str) -> list[TestFramework]:
