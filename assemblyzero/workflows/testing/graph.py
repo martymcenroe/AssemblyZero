@@ -374,6 +374,26 @@ def route_after_implement(
     return "N4b_completeness_gate"
 
 
+def route_after_mechanical_hooks(
+    state: TestingWorkflowState,
+) -> Literal["N5_verify_green", "HALT"]:
+    """Route after N4.5 (mechanical hooks).
+
+    #3706: a hook that failed, or a `.unleashed.json` that could not be read,
+    leaves `error_message` set, and the run halts there. Nothing is tested
+    against a build that did not build.
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        N5 when the hook succeeded or there was none; HALT on a recorded reason.
+    """
+    if state.get("error_message", ""):
+        return "HALT"
+    return "N5_verify_green"
+
+
 #: #2327: how many times to ask for coverage-targeting test additions before
 #: halting. Each attempt is an LLM call; if two rounds of tests aimed at named
 #: uncovered lines have not reached the gate, a third is unlikely to, and the
@@ -710,7 +730,16 @@ def build_testing_workflow() -> StateGraph:
     # routes to implementation, so a coverage shortfall cannot become an
     # implementation edit by any path.
     workflow.add_edge("N4c_augment_tests", "N5_verify_green")
-    workflow.add_edge("N4_5_mechanical_hooks", "N5_verify_green")
+
+    # #3706: a failed build hook halts; the green phase never runs on it.
+    workflow.add_conditional_edges(
+        "N4_5_mechanical_hooks",
+        route_after_mechanical_hooks,
+        {
+            "N5_verify_green": "N5_verify_green",
+            "HALT": "HALT",
+        },
+    )
 
     # N6 -> N7 or N4 (iteration loop)
     workflow.add_conditional_edges(
