@@ -77,14 +77,28 @@ def _rmtree_sites(path: Path) -> list[tuple[int, str]]:
     return found
 
 
+def _tracked_python_files(root: Path) -> list[Path]:
+    """The scanned tree's Python files as git tracks them (#3709).
+
+    `rglob` saw every file on disk, so an ignored local script under tools/
+    made this guard red on one machine while CI on the same commit was green.
+    The guard judges the commit, and git says what is in it.
+    """
+    out = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--",
+         *(f"{sub}/*.py" for sub in SCANNED)],
+        capture_output=True, text=True, check=True,
+    )
+    return sorted(root / rel for rel in out.stdout.split("\0") if rel)
+
+
 @pytest.fixture(scope="module")
 def sites() -> dict[tuple[str, str], list[int]]:
     out: dict[tuple[str, str], list[int]] = {}
-    for sub in SCANNED:
-        for path in sorted((ROOT / sub).rglob("*.py")):
-            rel = path.relative_to(ROOT).as_posix()
-            for line, qual in _rmtree_sites(path):
-                out.setdefault((rel, qual), []).append(line)
+    for path in _tracked_python_files(ROOT):
+        rel = path.relative_to(ROOT).as_posix()
+        for line, qual in _rmtree_sites(path):
+            out.setdefault((rel, qual), []).append(line)
     return out
 
 
@@ -107,6 +121,22 @@ class TestEveryRmtreeNamesItsGate:
     def test_the_walk_sees_the_sites_it_should(self, sites):
         """A walker that found nothing would pass the first test by vacuum."""
         assert len(sites) == len(ALLOWLIST) == 6
+
+    def test_the_walk_judges_the_commit_not_the_disk(self, tmp_path):
+        """An ignored local file is not the commit's, so the guard never sees
+        it (#3709): one developer's leftover cannot make the tier red."""
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        (tmp_path / "tools").mkdir()
+        tracked = tmp_path / "tools" / "tracked.py"
+        tracked.write_text("import shutil\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(tmp_path), "add", "tools/tracked.py"], check=True)
+        exclude = tmp_path / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text("tools/local.py\n", encoding="utf-8")
+        (tmp_path / "tools" / "local.py").write_text(
+            "import shutil\nshutil.rmtree('x')\n", encoding="utf-8"
+        )
+        assert _tracked_python_files(tmp_path) == [tracked]
 
     def test_the_walker_catches_an_alias(self, tmp_path):
         f = tmp_path / "m.py"
