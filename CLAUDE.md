@@ -39,7 +39,7 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
 ## Key Files
 
 - `WORKFLOW.md` — Development workflow gates (worktrees, reviews, reports)
-- `tools/` — Shared tooling (merge, batch-workflow, gemini-model-check)
+- `tools/` — Shared tooling (merge, batch-workflow)
 - `docs/standards/` — Engineering standards (0001–0999)
 
 ## Cascade Prevention

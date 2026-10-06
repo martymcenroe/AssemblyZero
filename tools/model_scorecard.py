@@ -22,10 +22,11 @@ from typing import Any
 # Known pricing per 1M tokens (USD). Update as pricing changes.
 # Source: public pricing pages as of 2026-03.
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    # Gemini models (Google AI Studio / Vertex)
-    "gemini-3-pro-preview": {"input": 1.25, "output": 10.00},
-    "gemini-2.5-pro-preview": {"input": 1.25, "output": 10.00},
-    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
+    # Gemini models: only the ids the pipeline sends, never one on
+    # config.FORBIDDEN_MODELS (#3700). agy runs them on the subscription,
+    # so a token costs nothing per call.
+    "gemini-3.1-pro-high": {"input": 0.0, "output": 0.0},
+    "gemini-3.1-pro-low": {"input": 0.0, "output": 0.0},
     # Claude models (Anthropic API)
     "claude:opus": {"input": 15.00, "output": 75.00},
     "claude:sonnet": {"input": 3.00, "output": 15.00},

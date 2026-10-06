@@ -25,8 +25,7 @@
     "settings.json": "Claude Code settings",
     "gemini-prompts/lld-review.txt": "Gemini LLD review prompt",
     "gemini-prompts/implementation-review.txt": "Gemini implementation review prompt",
-    "gemini-prompts/issue-review.txt": "Gemini issue review prompt",
-    "tools/gemini-model-check.sh": "Gemini CLI wrapper with model validation"
+    "gemini-prompts/issue-review.txt": "Gemini issue review prompt"
   },
 
   "// GEMINI INTEGRATION": {
@@ -37,7 +36,6 @@
       "jq installed for JSON parsing"
     ],
     "usage": [
-      "LLD Review: ./tools/gemini-model-check.sh \"$(cat gemini-prompts/lld-review.txt)\"",
       "Replace {{LLD_PATH}} and {{LLD_CONTENT}} placeholders before invoking"
     ]
   },
@@ -46,7 +44,6 @@
     "1. Copy this file to your project: cp .claude/project.json.example YourProject/.claude/project.json",
     "2. Edit the values in 'variables' section",
     "3. Run the generator: poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project YourProject",
-    "4. The generator will create concrete configs from templates",
-    "5. Make tools/gemini-model-check.sh executable: chmod +x tools/gemini-model-check.sh"
+    "4. The generator will create concrete configs from templates"
   ]
 }
