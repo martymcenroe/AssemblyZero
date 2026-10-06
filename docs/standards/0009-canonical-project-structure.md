@@ -75,7 +75,6 @@ project/
 ├── tests/                      # All tests
 ├── tools/                      # Development utilities (project-specific)
 ├── CLAUDE.md                   # Claude agent instructions (REQUIRED)
-├── GEMINI.md                   # Gemini agent instructions (REQUIRED)
 ├── README.md                   # Project overview (REQUIRED)
 ├── pyproject.toml              # Python config (if applicable)
 ├── package.json                # Node.js config (if applicable)

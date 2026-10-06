@@ -198,10 +198,6 @@
       "required": true,
       "description": "Claude agent instructions"
     },
-    "GEMINI.md": {
-      "required": true,
-      "description": "Gemini agent instructions"
-    },
     "README.md": {
       "required": true,
       "description": "Project overview"

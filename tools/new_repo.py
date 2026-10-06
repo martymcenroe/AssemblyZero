@@ -747,64 +747,6 @@ The `-g` is for git-tracked. If a file is here because you downloaded it, it bel
     claude_md_path.write_text(content, encoding='utf-8')
 
 
-def create_gemini_md(project_path: Path, name: str, github_user: str) -> None:
-    """
-    Create the project GEMINI.md file.
-
-    Args:
-        project_path: Path to the project root
-        name: Project name
-        github_user: GitHub username
-    """
-    assemblyzero_root_windows = config.assemblyzero_root()
-    projects_root_unix = config.projects_root_unix()
-
-    content = f"""# Gemini Operational Protocols
-
-## FIRST: Read Core Rules
-
-**Before doing any work, read the AssemblyZero core rules:**
-`{assemblyzero_root_windows}\\CLAUDE.md`
-
-Those rules apply to every project and every agent. They are not restated
-here, because a restatement drifts on every universal edit (ADR 0219).
-
----
-
-## 2. Execution Rules
-
-- **Authority:** `AssemblyZero:standards/0002-coding-standards` is the law for Git workflows.
-- **One Step Per Turn:** Provide one distinct step, then wait for confirmation.
-- **Check First:** Verify paths/content before changing them.
-- **Copy-Paste Ready:** No placeholders.
-
----
-
-## 3. Project-Specific Context
-
-**Project:** {name}
-**Repository:** {github_user}/{name}
-**Project Root (Windows):** {project_path}
-**Project Root (Unix):** {projects_root_unix}/{name}
-
----
-
-## 4. Session Logging
-
-At session end, append a summary to `docs/session-logs/YYYY-MM-DD.md`:
-- **Day boundary:** 3:00 AM CT to following day 2:59 AM CT
-- **Include:** date/time, model name (from handshake), summary, files touched, state on exit
-
----
-
-## 5. You Are Not Alone
-
-Other agents (Claude, human orchestrators) work on this project. Check `docs/session-logs/` for recent context before starting work.
-"""
-    gemini_md_path = project_path / "GEMINI.md"
-    gemini_md_path.write_text(content, encoding='utf-8')
-
-
 def create_readme(project_path: Path, name: str) -> None:
     """
     Create the README.md file.
@@ -1341,7 +1283,6 @@ This document provides a complete inventory of files in the {name} project, orga
 │   └── harness/                # Test utilities
 ├── tools/                      # Development utilities
 ├── CLAUDE.md                   # Claude agent instructions
-├── GEMINI.md                   # Gemini agent instructions
 ├── README.md                   # Project overview
 ├── LICENSE                     # PolyForm Noncommercial 1.0.0
 ├── .gitignore                  # Git ignore rules
@@ -1355,7 +1296,6 @@ This document provides a complete inventory of files in the {name} project, orga
 | File | Purpose |
 |------|---------|
 | `CLAUDE.md` | Instructions for Claude agents working on this project |
-| `GEMINI.md` | Instructions for Gemini agents working on this project |
 | `README.md` | Project overview and quick start guide |
 | `.claude/project.json` | Project variables for AssemblyZero template generation |
 
@@ -3322,11 +3262,6 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     print("\n6. Creating CLAUDE.md...")
     create_claude_md(project_path, args.name, github_user, args.project_type)
     print("  Created CLAUDE.md")
-
-    # Step 7: Create GEMINI.md
-    print("\n7. Creating GEMINI.md...")
-    create_gemini_md(project_path, args.name, github_user)
-    print("  Created GEMINI.md")
 
     # Step 8: Create README.md
     print("\n8. Creating README.md...")
