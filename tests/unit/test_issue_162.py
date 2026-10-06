@@ -278,32 +278,48 @@ def test_commit_and_pr_returns_empty_for_empty_created_files():
     assert url == ""
 
 
-def test_commit_and_pr_emits_no_issue_for_pr_body(tmp_path):
-    """The LLD PR body must contain `No-Issue:` (not `Closes #N`) so the
-    referenced issue stays open through the implementation phase.
-    Encodes the architectural decision from Issue #238."""
-    from unittest.mock import MagicMock, patch
-    from assemblyzero.workflows.requirements.git_operations import commit_and_pr
-
-    captured = {}
+def _fake_git(seen: list[list[str]]):
+    """A run_command that answers git and records every command. There is no
+    gh branch: since #3704 nothing on this path may call gh."""
+    from unittest.mock import MagicMock
 
     def fake_run(cmd, *args, **kwargs):
+        seen.append(list(cmd))
         out = MagicMock()
         out.returncode = 0
-        if cmd[:1] == ["git"] and len(cmd) > 1 and cmd[1] == "add":
-            out.stdout = ""
-        elif cmd[:2] == ["git", "commit"]:
-            out.stdout = "[main abc123] commit message\n"
-        elif cmd[:2] == ["git", "push"]:
-            out.stdout = ""
-        elif cmd[:3] == ["gh", "pr", "create"]:
-            captured["pr_argv"] = list(cmd)
-            out.stdout = "https://github.com/owner/repo/pull/9999\n"
+        if cmd[:2] == ["git", "commit"]:
+            out.stdout = "[4-lld abc123] commit message\n"
         elif cmd[:1] == ["git"] and "remote" in cmd:
             out.stdout = "https://github.com/owner/repo.git\n"
         else:
             out.stdout = ""
         return out
+
+    return fake_run
+
+
+def _fake_landing(captured: dict, pr_number: int = 9999):
+    from assemblyzero.core.merge_driver import Landing
+
+    def fake_land(**kwargs):
+        captured.update(kwargs)
+        captured["body"] = Path(kwargs["body_file"]).read_text(encoding="utf-8")
+        return Landing(pr_number=pr_number, squash_sha="0123abcd", output="[OK] stage=landed")
+
+    return fake_land
+
+
+def test_commit_and_pr_emits_no_issue_for_pr_body(tmp_path):
+    """The LLD PR body must contain `No-Issue:` (not `Closes #N`) so the
+    referenced issue stays open through the implementation phase.
+    Encodes the architectural decision from Issue #238. Since #3704 the PR
+    is opened and merged by the fleet merge driver, which this test stands
+    in for; nothing here pushes or calls gh."""
+    from unittest.mock import patch
+    from assemblyzero.workflows.requirements.git_operations import commit_and_pr
+
+    captured: dict = {}
+    seen: list[list[str]] = []
 
     target = tmp_path / "repo"
     target.mkdir()
@@ -314,7 +330,9 @@ def test_commit_and_pr_emits_no_issue_for_pr_body(tmp_path):
     file_in_wt.write_text("# LLD")
 
     with patch("assemblyzero.workflows.requirements.git_operations.run_command",
-               side_effect=fake_run):
+               side_effect=_fake_git(seen)), \
+         patch("assemblyzero.workflows.requirements.git_operations.merge_driver.land",
+               side_effect=_fake_landing(captured)):
         sha, url = commit_and_pr(
             created_files=[str(file_in_wt)],
             worktree_path=wt,
@@ -326,15 +344,17 @@ def test_commit_and_pr_emits_no_issue_for_pr_body(tmp_path):
 
     assert sha == "abc123"
     assert url == "https://github.com/owner/repo/pull/9999"
-    pr_argv = captured["pr_argv"]
-    body = pr_argv[pr_argv.index("--body") + 1]
-    title = pr_argv[pr_argv.index("--title") + 1]
+    body, title = captured["body"], captured["title"]
     assert "No-Issue:" in body, f"PR body must contain No-Issue: — got {body!r}"
     assert "Closes #4" not in body, f"LLD PR must NOT close — got {body!r}"
     assert "Closes #4" not in title, f"LLD PR title must NOT close — got {title!r}"
     assert "Ref #4" in title, f"PR title should reference — got {title!r}"
-    # The branch is pushed by its real name with --set-upstream
-    # (mirrors orchestrator/stages.py:493-509 pattern for impl stage).
+    assert captured["no_issue"] is True
+    assert captured["worktree"] == wt and captured["branch"] == "4-lld"
+    assert not any(c[:1] == ["gh"] for c in seen), f"gh was called: {seen}"
+    assert not any(c[:2] == ["git", "push"] for c in seen), (
+        "nothing is pushed before the driver runs (#3704)"
+    )
 
 
 def test_commit_and_pr_targets_given_base_branch(tmp_path):
@@ -342,32 +362,19 @@ def test_commit_and_pr_targets_given_base_branch(tmp_path):
     captured at invocation, never a hardcoded main. On a speedrun the
     target repo stands on `speedrun-attempt-N` and the LLD PR must
     target it."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
     from assemblyzero.workflows.requirements.git_operations import commit_and_pr
 
-    captured = {}
-
-    def fake_run(cmd, *args, **kwargs):
-        out = MagicMock()
-        out.returncode = 0
-        if cmd[:3] == ["gh", "pr", "create"]:
-            captured["pr_argv"] = list(cmd)
-            out.stdout = "https://github.com/owner/repo/pull/1\n"
-        elif cmd[:2] == ["git", "commit"]:
-            out.stdout = "[4-lld abc123] commit message\n"
-        elif cmd[:1] == ["git"] and "remote" in cmd:
-            out.stdout = "https://github.com/owner/repo.git\n"
-        else:
-            out.stdout = ""
-        return out
-
+    captured: dict = {}
     wt = tmp_path / "repo-4-lld"
     wt.mkdir()
     lld = wt / "LLD-004.md"
     lld.write_text("# LLD")
 
     with patch("assemblyzero.workflows.requirements.git_operations.run_command",
-               side_effect=fake_run):
+               side_effect=_fake_git([])), \
+         patch("assemblyzero.workflows.requirements.git_operations.merge_driver.land",
+               side_effect=_fake_landing(captured, pr_number=1)):
         commit_and_pr(
             created_files=[str(lld)],
             worktree_path=wt,
@@ -377,16 +384,47 @@ def test_commit_and_pr_targets_given_base_branch(tmp_path):
             base_branch="speedrun-attempt-1",
         )
 
-    pr_argv = captured["pr_argv"]
-    base = pr_argv[pr_argv.index("--base") + 1]
-    assert base == "speedrun-attempt-1", (
-        f"PR must target the captured integration branch — got {base!r}"
+    assert captured["base"] == "speedrun-attempt-1", (
+        f"PR must target the captured integration branch — got {captured['base']!r}"
     )
-    body = pr_argv[pr_argv.index("--body") + 1]
-    assert "speedrun-attempt-1" in body, (
+    assert "speedrun-attempt-1" in captured["body"], (
         "PR body should name the branch the LLD lands on"
     )
-    assert "land it on main" not in body
+    assert "land it on main" not in captured["body"]
+
+
+def test_commit_and_pr_reports_the_drivers_refusal_and_pushes_nothing(tmp_path):
+    """A refused landing is a GitOperationError carrying the driver's own
+    words, and the branch was never pushed (#3704)."""
+    from unittest.mock import patch
+    from assemblyzero.core.merge_driver import MergeDriverError
+    from assemblyzero.workflows.requirements.git_operations import (
+        GitOperationError,
+        commit_and_pr,
+    )
+
+    seen: list[list[str]] = []
+    wt = tmp_path / "repo-4-lld"
+    wt.mkdir()
+    (wt / "LLD-004.md").write_text("# LLD")
+
+    def refusing_land(**kwargs):
+        raise MergeDriverError("PRE-FLIGHT FAILED: parasitic directive in body")
+
+    with patch("assemblyzero.workflows.requirements.git_operations.run_command",
+               side_effect=_fake_git(seen)), \
+         patch("assemblyzero.workflows.requirements.git_operations.merge_driver.land",
+               side_effect=refusing_land), \
+         pytest.raises(GitOperationError, match="PRE-FLIGHT FAILED"):
+        commit_and_pr(
+            created_files=[str(wt / "LLD-004.md")],
+            worktree_path=wt,
+            target_repo=tmp_path / "repo",
+            issue_number=4,
+            branch_name="4-lld",
+            base_branch="main",
+        )
+    assert not any(c[:2] == ["git", "push"] for c in seen)
 
 
 # Issue #238 - Ref instead of Closes

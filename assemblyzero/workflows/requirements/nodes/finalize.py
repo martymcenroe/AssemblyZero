@@ -224,7 +224,9 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
                 state["commit_sha"] = commit_sha
             if pr_url:
                 state["final_lld_pr_url"] = pr_url
-                print(f"    LLD PR opened: {pr_url}")
+                # #3704: the driver opened, merged and cleaned up; the LLD is
+                # on the base branch and the worktree and branch are gone.
+                print(f"    LLD PR landed by the merge driver: {pr_url}")
         else:
             # Issue workflow remains on the legacy direct-push path.
             commit_sha = commit_and_push(

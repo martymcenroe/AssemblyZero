@@ -837,7 +837,8 @@ def run_single_workflow(
                 print("  Worktree: none (--mock cuts no worktree and fetches nothing, #3512)")
             elif base:
                 print(f"  Worktree would be cut at: {target_repo}/data/worktrees/{args.issue}-lld")
-                print(f"  Branch would be: {args.issue}-lld from origin/{base}, pushed with a PR on APPROVED")
+                print(f"  Branch would be: {args.issue}-lld from origin/{base}, landed on APPROVED "
+                      f"by the merge driver named in AZ_MERGE_DRIVER (#3704)")
         print("DRY RUN: nothing was written, deleted, shifted, cut or pushed.")
         return 0
 
@@ -1676,6 +1677,15 @@ def main() -> int:
     # data/mock-runs/ (git_operations.mock_output_root) and has no business
     # shifting a real run's lineage for the same issue number.
     if args.type == "lld" and args.issue and not args.dry_run and not args.mock:
+        # #3704: an APPROVED LLD lands through the fleet merge driver, which
+        # the machine names in AZ_MERGE_DRIVER. Refuse here, before a model is
+        # called, rather than after the draft is written.
+        from assemblyzero.core import merge_driver
+
+        reason = merge_driver.check_configured()
+        if reason:
+            print(f"[preflight] {reason}")
+            return 1
         if not check_and_shift_existing_lld(args.issue, target_repo, args.yes):
             return 0  # User aborted
 
