@@ -4,6 +4,7 @@ Issue #381: Factory pattern for obtaining framework-specific test runners.
 """
 
 import logging
+from enum import Enum
 
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
@@ -77,6 +78,23 @@ def get_framework_config(framework: TestFramework) -> FrameworkConfig:
         raise ValueError(f"Unsupported framework: {framework}")
     # Return a copy to prevent mutation
     return dict(_FRAMEWORK_CONFIGS[framework])  # type: ignore[return-value]
+
+
+def checkpoint_safe(config: FrameworkConfig | dict) -> dict:
+    """The configuration as the checkpoint may hold it: enum members become
+    their string values (#3708).
+
+    LangGraph's serializer stores an Enum as a Python object and has announced
+    it will refuse unregistered types; `TestFramework` and `CoverageType` in
+    `framework_config` drew that warning on every implementation run. Every
+    reader already accepts the string (`_resolve_framework_enum`, and the
+    `CoverageType(...)` conversion in verify_phases), so the state carries
+    strings and the checkpoint carries nothing LangGraph has to be told about.
+    """
+    return {
+        key: value.value if isinstance(value, Enum) else value
+        for key, value in dict(config).items()
+    }
 
 
 def get_runner(
