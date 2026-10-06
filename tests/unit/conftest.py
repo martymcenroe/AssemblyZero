@@ -1,10 +1,18 @@
 """Shared fixtures for unit tests."""
 
+import os
 import sys
 from dataclasses import dataclass, field
 from unittest.mock import patch
 
 import pytest
+
+# #3708: the unit tier runs LangGraph's serializer in the strict mode it has
+# announced as the future default, so a new unregistered type in a checkpoint
+# fails a test here instead of printing a warning on every run and breaking on
+# the next dependency bump. Production stays lenient so checkpoints written
+# before #3708 still load.
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
 
 @dataclass
