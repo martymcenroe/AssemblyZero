@@ -59,7 +59,6 @@ These items are ALWAYS required and cannot be exempted:
 
 ### Files
 - `CLAUDE.md` - Agent instructions (required for AssemblyZero governance)
-- `GEMINI.md` - Gemini agent instructions
 - `README.md` - Project overview
 - `.gitignore` - Git ignore rules
 - `.claude/project.json` - Project variables

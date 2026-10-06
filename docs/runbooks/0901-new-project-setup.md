@@ -114,7 +114,6 @@ MyNewProject/
 | `.claude/settings.json` | Hook configuration — wires the `secret-file-guard.sh` PreToolUse hook |
 | `.claude/hooks/secret-file-guard.sh` | Blocks file tools (Read/Write/Edit/Grep/NotebookEdit) on `.env`, `.dev.vars`, credentials. Copied from AZ's canonical hook |
 | `CLAUDE.md` | Claude agent instructions |
-| `GEMINI.md` | Gemini agent instructions |
 | `README.md` | Project overview |
 | `LICENSE` | PolyForm Noncommercial 1.0.0 (default; pass `--license mit` for MIT) |
 | `.gitignore` | Standard ignore patterns |
@@ -270,7 +269,7 @@ If you need fine-grained control, see the manual process:
 1. Create directory and `git init`
 2. Create `.claude/project.json` with variables
 3. Run `assemblyzero-generate.py` for configs
-4. Create CLAUDE.md, GEMINI.md, README.md
+4. Create CLAUDE.md, README.md
 5. Create directory structure manually
 6. `git add . && git commit`
 7. `gh repo create`

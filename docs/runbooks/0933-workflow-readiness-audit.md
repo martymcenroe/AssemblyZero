@@ -47,7 +47,7 @@ For the target repo at `{target}`:
 | Surface | What to check | Source |
 |---|---|---|
 | Repo bootstrap | `git log --oneline | grep "initialize project with AssemblyZero"` | Indicates `new_repo.py` ran |
-| `CLAUDE.md` + `GEMINI.md` | Both present, ≥50 lines each | Files |
+| `CLAUDE.md` | Present, ≥50 lines; no `GEMINI.md` beside it (#3633) | Files |
 | `.unleashed.json` | Present; `assemblyZero: true`; no deprecated `pickupThresholdMinutes` | File |
 | Security hooks | `.claude/hooks/secret-file-guard.sh` present | File |
 | Canonical structure | `docs/lld/active/`, `docs/lld/done/`, `docs/reports/active/` exist | Directories |
@@ -351,7 +351,7 @@ present / missing / misconfigured with a one-line evidence excerpt:
 
 - Repo bootstrap commit ("initialize project with AssemblyZero")
 - CLAUDE.md present and ≥50 lines
-- GEMINI.md present and ≥40 lines
+- no GEMINI.md (#3633)
 - .unleashed.json present, assemblyZero=true
 - .claude/hooks/secret-file-guard.sh present
 - docs/lld/active, docs/lld/done, docs/reports/active directories
