@@ -97,14 +97,24 @@ def checkpoint_safe(config: FrameworkConfig | dict) -> dict:
     }
 
 
-def get_runner(framework: TestFramework, project_root: str = ".") -> BaseTestRunner:
+def get_runner(
+    framework: TestFramework,
+    project_root: str = ".",
+    working_directory: str | None = None,
+) -> BaseTestRunner:
     """Factory method returning the appropriate runner instance.
+
+    `working_directory` is where the framework's project lives beneath
+    `project_root` (#3707: `web/` for a target whose web app is not at the
+    root); the runner runs there. "." or None means the root.
 
     Raises ValueError for unsupported frameworks.
     Raises EnvironmentError if required external tools are missing
     (propagated from runner __init__).
     """
     config = get_framework_config(framework)
+    if working_directory and working_directory != ".":
+        config["working_directory"] = working_directory
 
     if framework == TestFramework.PYTEST:
         from assemblyzero.workflows.testing.runners.pytest_runner import PytestRunner

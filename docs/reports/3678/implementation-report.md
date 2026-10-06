@@ -1,7 +1,7 @@
 # Implementation Report: Phase 2 (Mechanical hooks)
 
 ## Overview
-Added support for mechanical build hooks via `.unleashed.json` to allow projects like Palaestra to compile code before testing.
+Added support for mechanical build hooks via `.unleashed.json` to let a target compile generated data before its tests run.
 
 ## Changes Made
 1. **New Node (`N4_5_mechanical_hooks`)**:
