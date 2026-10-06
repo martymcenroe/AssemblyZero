@@ -1146,6 +1146,40 @@ class TestMainWithPreGenerationCheck:
     Issue #237: Automate lineage n-1 versioning on LLD regeneration.
     """
 
+    @pytest.fixture(autouse=True)
+    def _driver_configured(self, tmp_path, monkeypatch):
+        """#3704: a real LLD run refuses at start unless AZ_MERGE_DRIVER names
+        the fleet merge driver, before the pre-generation check runs."""
+        driver = tmp_path / "tracked_pr_land.py"
+        driver.write_text("", encoding="utf-8")
+        monkeypatch.setenv("AZ_MERGE_DRIVER", str(driver))
+
+    @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
+    @patch("tools.run_requirements_workflow.run_single_workflow")
+    @patch("tools.run_requirements_workflow.resolve_roots")
+    def test_main_refuses_a_real_lld_run_without_the_merge_driver(
+        self, mock_roots, mock_run, mock_check, tmp_path, monkeypatch, capsys
+    ):
+        """#3704: the refusal comes before the check and before any model
+        call, and says what to set."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        monkeypatch.delenv("AZ_MERGE_DRIVER", raising=False)
+        mock_roots.return_value = (tmp_path, tmp_path)
+
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "lld", "--issue", "42", "--yes"]
+        try:
+            result = main()
+        finally:
+            sys.argv = original_argv
+
+        assert result == 1
+        assert "AZ_MERGE_DRIVER is not set" in capsys.readouterr().out
+        mock_check.assert_not_called()
+        mock_run.assert_not_called()
+
     @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
     @patch("tools.run_requirements_workflow.run_single_workflow")
     @patch("tools.run_requirements_workflow.resolve_roots")
