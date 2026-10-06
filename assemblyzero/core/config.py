@@ -29,6 +29,11 @@ FORBIDDEN_MODELS = [
     "gemini-3-pro",
 ]
 
+# The Gemini ids GeminiProvider may send: the Pro models `agy models` lists
+# (catalog read 2026-10-06, #3710). Every GeminiProvider.MODEL_MAP value must
+# be one of these; update this when agy's catalog changes.
+AGY_GEMINI_MODELS = frozenset({"gemini-3.1-pro-high", "gemini-3.1-pro-low"})
+
 # =============================================================================
 # Claude Model (REQ-2: Claude 4.6)
 # =============================================================================

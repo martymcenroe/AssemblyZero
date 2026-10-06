@@ -40,6 +40,10 @@ class TestPricingTable:
         assert gemini_keys
         assert gemini_keys <= set(GeminiProvider.MODEL_MAP.values())
 
+    def test_every_id_the_provider_sends_is_priced(self):
+        # Possible once MODEL_MAP carried only living ids (#3710).
+        assert set(GeminiProvider.MODEL_MAP.values()) <= set(MODEL_PRICING)
+
     def test_fixture_model_is_priced(self):
         assert FIXTURE_MODEL in MODEL_PRICING
 

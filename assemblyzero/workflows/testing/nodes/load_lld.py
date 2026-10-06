@@ -32,7 +32,7 @@ from assemblyzero.workflows.testing.audit import (
 )
 from assemblyzero.workflows.testing.framework_detector import resolve_framework
 from assemblyzero.workflows.testing.knowledge.patterns import detect_test_types
-from assemblyzero.workflows.testing.runner_registry import get_framework_config
+from assemblyzero.workflows.testing.runner_registry import checkpoint_safe, get_framework_config
 from assemblyzero.workflows.testing.state import TestingWorkflowState, TestScenario
 
 
@@ -1018,7 +1018,7 @@ def _load_from_issue(  # pragma: no cover
         "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
         "file_counter": next_file_number(audit_dir),
-        "framework_config": dict(fw_config),
+        "framework_config": checkpoint_safe(fw_config),  # #3708: strings, not enums
         "total_scenarios": len(test_scenarios),
     }
 
@@ -1282,7 +1282,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         "file_counter": file_num,
         "iteration_count": 0,
         "error_message": "",
-        "framework_config": dict(fw_config),
+        "framework_config": checkpoint_safe(fw_config),  # #3708: strings, not enums
         "total_scenarios": len(test_scenarios),
     }
 
@@ -1377,6 +1377,6 @@ Requirement: REQ-2
         "file_counter": file_num,
         "iteration_count": 0,
         "error_message": "",
-        "framework_config": dict(fw_config),
+        "framework_config": checkpoint_safe(fw_config),  # #3708: strings, not enums
         "total_scenarios": len(mock_scenarios),
     }

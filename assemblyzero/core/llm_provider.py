@@ -1631,12 +1631,12 @@ class GeminiProvider(LLMProvider):
     Issue #605: Updated to Gemini 3.1 models (REQ-1). Removed deprecated
     3-pro-preview and 3-flash-preview entries superseded by 3.1 equivalents.
 
-    Supported models:
-    - 2.5-pro (alias: pro) - Pro-tier governance model (legacy)
-    - 2.5-flash (alias: flash) - Fast Flash model (legacy)
-    - 3.1-pro-preview - Latest Pro preview (default)
-    - 3.1-pro - Production Pro model
-    - 3.1-flash-preview - Latest Flash preview
+    Supported models (every alias resolves to an id in config.AGY_GEMINI_MODELS):
+    - 3.1-pro (default) - gemini-3.1-pro-high
+    - 3.1-pro-high - gemini-3.1-pro-high
+    - 3.1-pro-low - gemini-3.1-pro-low
+    - 3.1-pro-preview, 2.5-pro, pro - legacy aliases kept so older configs
+      keep working; all resolve to gemini-3.1-pro-high
     """
 
     # Model mapping from friendly names to actual model IDs
@@ -1644,18 +1644,18 @@ class GeminiProvider(LLMProvider):
     # Issue #1764: agy retired the -preview IDs (catalog verified 2026-07-14
     # via `agy models` + live probe). Pro-line aliases remap to the living
     # gemini-3.1-pro-{low,high} so persisted states and older configs keep
-    # working instead of erroring at the CLI. Legacy flash/2.5 entries are
-    # untouched (already dead at the CLI; flash is forbidden for governance).
+    # working instead of erroring at the CLI.
+    # Issue #3710: gemini-2.5-pro, gemini-2.5-flash and gemini-3.1-flash-preview
+    # are absent from `agy models` (read 2026-10-06). The 2.5 Pro aliases remap
+    # the same way; the Flash aliases are removed, since Flash is forbidden for
+    # governance and no Pro id stands in for it.
     MODEL_MAP = {
-        "2.5-pro": "gemini-2.5-pro",
-        "pro": "gemini-2.5-pro",
-        "2.5-flash": "gemini-2.5-flash",
-        "flash": "gemini-2.5-flash",
+        "2.5-pro": "gemini-3.1-pro-high",  # dead at the CLI (#3710)
+        "pro": "gemini-3.1-pro-high",  # dead at the CLI (#3710)
         "3.1-pro-preview": "gemini-3.1-pro-high",  # superseded preview (#1764)
         "3.1-pro": "gemini-3.1-pro-high",
         "3.1-pro-high": "gemini-3.1-pro-high",
         "3.1-pro-low": "gemini-3.1-pro-low",
-        "3.1-flash-preview": "gemini-3.1-flash-preview",
     }
 
     def __init__(self, model: str = "3.1-pro"):
