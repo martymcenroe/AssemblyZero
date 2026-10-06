@@ -1,8 +1,24 @@
-"""Drive .claude/hooks/bare-claude-guard.sh with real PreToolUse JSON (#1734).
+"""Drive the installed bare-claude guard with real PreToolUse JSON (#1734, #3686).
 
-Each case pipes a JSON payload through the actual bash script via subprocess
-(Git Bash is a hard dependency of this environment). exit 0 = allowed,
-exit 2 = blocked.
+Each case pipes a JSON payload through the actual bash script via subprocess.
+exit 0 = allowed, exit 2 = blocked.
+
+WHICH COPY THIS DRIVES, AND WHY IT CHANGED (#3686)
+--------------------------------------------------
+It used to drive a copy of the script tracked in this repository under `.claude/hooks/`.
+That copy was registered by nothing: it sat on disk, no settings file referenced it, and
+it gated no tool call. These tests were the only thing still pointing at it, which is
+exactly what made it look alive while it was not.
+
+The script that actually runs is the one installed in the user's hook directory and
+registered by the machine-wide managed settings file, so that is what these cases drive
+now. Keeping a tracked second copy and testing that instead is how the dead file came to
+exist, and would recreate it.
+
+The consequence, stated rather than hidden: where the guard is not installed, such as a
+CI runner, these cases skip. They assert a property of an installed guard, and a runner
+has none to assert it about. Verifying that every registered hook across the machine
+returns the right exit code is a separate program, run where the hooks actually are.
 """
 from __future__ import annotations
 
@@ -12,7 +28,12 @@ from pathlib import Path
 
 import pytest
 
-HOOK = Path(__file__).resolve().parents[2] / ".claude" / "hooks" / "bare-claude-guard.sh"
+HOOK = Path.home() / ".claude" / "hooks" / "bare-claude-guard.sh"
+
+pytestmark = pytest.mark.skipif(
+    not HOOK.is_file(),
+    reason=f"no installed guard at {HOOK}; these cases drive the installed copy (#3686)",
+)
 
 
 def run_hook(command: str | None) -> subprocess.CompletedProcess:
