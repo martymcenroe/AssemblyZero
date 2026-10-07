@@ -171,12 +171,28 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
         }
 
     # -------------------------------------------------------------------------
-    # Resolve repo root
+    # GUARD: repo root and audit directory (#3891)
     # -------------------------------------------------------------------------
-    if repo_root_str:
-        repo_root = Path(repo_root_str)
-    else:
-        repo_root = Path(".")
+    # The spec used to be written under the process's working directory when
+    # repo_root was empty, and the audit save was skipped without a word when
+    # audit_dir was missing. Both stop the run now, through HALT.
+    if not repo_root_str:
+        return {
+            "spec_path": "",
+            "error_message": f"N6 finalize for issue #{issue_number}: repo_root is not set in state",
+        }
+    repo_root = Path(repo_root_str)
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
+    if audit_dir is None or not audit_dir.is_dir():
+        return {
+            "spec_path": "",
+            "error_message": (
+                f"N6 finalize for issue #{issue_number}: the audit directory "
+                f"{audit_dir_str or '(none in state)'} does not exist, so the final spec "
+                f"cannot be recorded in lineage"
+            ),
+        }
 
     # -------------------------------------------------------------------------
     # Add review log to spec
@@ -194,13 +210,15 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     spec_filename = generate_spec_filename(issue_number)
     output_dir = repo_root / SPEC_OUTPUT_DIR
-    output_dir.mkdir(parents=True, exist_ok=True)
     spec_path = output_dir / spec_filename
 
     # -------------------------------------------------------------------------
     # Atomic write: temp file then rename
     # -------------------------------------------------------------------------
     try:
+        # #3891: the directory is made inside the handler, so a failure to
+        # create it is reported like a failed write, not raised past the node.
+        output_dir.mkdir(parents=True, exist_ok=True)
         # Write to temp file in the same directory (same filesystem for rename)
         fd, tmp_path_str = tempfile.mkstemp(
             suffix=".md",
@@ -245,39 +263,34 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # #2311: the durable handoff copy, written before the lineage move below
     # -------------------------------------------------------------------------
-    # This is the copy the next launch's impl stage loads. If it cannot be
-    # written the stage still passes -- the drafts copy exists and this run's
-    # impl reads it from memory -- but the RESUME contract is broken for the
-    # relaunch, so the failure is loud rather than swallowed.
+    # This is the copy the next launch's impl stage loads. #3891: when it cannot
+    # be written the RESUME contract is broken -- a relaunch will not find the
+    # spec and will redraw it (#2311) -- so the stage fails here, through HALT,
+    # where it used to print a warning and pass.
     handoff_path = durable_spec_path(repo_root, issue_number)
     try:
         handoff_path.parent.mkdir(parents=True, exist_ok=True)
         handoff_path.write_text(finalized_content, encoding="utf-8")
-        print(f"    Handoff copy (janitor-immune): {handoff_path}")
     except OSError as e:
-        handoff_path = None
-        print(
-            f"    WARNING: could not write the durable handoff copy ({e}). "
-            f"This run is unaffected, but a relaunch will not find the spec "
-            f"and will redraw it (#2311)."
-        )
+        return {
+            "spec_path": "",
+            "error_message": (
+                f"N6 finalize for issue #{issue_number}: could not write the durable "
+                f"hand-off copy {handoff_path} ({e}); a relaunch would not find the "
+                f"spec (#2311)"
+            ),
+        }
+    print(f"    Handoff copy (janitor-immune): {handoff_path}")
 
     # -------------------------------------------------------------------------
-    # Save to audit trail
+    # Save to audit trail, then move lineage from active/ to done/ (Issue #100)
     # -------------------------------------------------------------------------
-    audit_dir_str = state.get("audit_dir", "")
-    audit_dir = Path(audit_dir_str) if audit_dir_str else None
-
-    if audit_dir and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        audit_path = save_audit_file(
-            audit_dir, file_num, "final-spec.md", finalized_content
-        )
-        print(f"    Audit trail: {audit_path.name}")
-
-    # Issue #100: Move lineage from active/ to done/
-    if audit_dir and audit_dir.exists():
-        move_lineage_to_done(audit_dir, repo_root)
+    file_num = next_file_number(audit_dir)
+    audit_path = save_audit_file(
+        audit_dir, file_num, "final-spec.md", finalized_content
+    )
+    print(f"    Audit trail: {audit_path.name}")
+    move_lineage_to_done(audit_dir, repo_root)
 
     # -------------------------------------------------------------------------
     # Return state updates
@@ -289,7 +302,7 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
         # to a file the same run had already deleted -- which is why the #2414
         # artifact lookup could not rescue it. Finalize must record wherever it
         # writes, and it now writes somewhere that survives.
-        "spec_path": str(handoff_path or spec_path),
+        "spec_path": str(handoff_path),
         # #2297: the only place this is set to "completed". The orchestrator
         # requires it, so a run that never reached finalize cannot be recorded
         # as a passed stage however many draft files it left on disk.

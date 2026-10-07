@@ -529,12 +529,20 @@ class TestRouteAfterHumanGate:
         state = {"error_message": "Something went wrong", "next_node": "N5_review_spec"}
         assert route_after_human_gate(state) == "HALT"
 
-    def test_routes_to_end_on_empty_next_node(self):
-        """Empty next_node → END."""
+    def test_routes_to_halt_on_empty_next_node(self):
+        """#3887: an empty next_node is a decision the gate never makes, so it halts.
+
+        It used to end the run as if the human had chosen manual handling.
+        """
         from assemblyzero.workflows.implementation_spec.graph import route_after_human_gate
 
         state = {"error_message": "", "next_node": ""}
-        assert route_after_human_gate(state) == "END"
+        assert route_after_human_gate(state) == "HALT"
+
+    def test_routes_to_end_on_the_manual_exit(self):
+        from assemblyzero.workflows.implementation_spec.graph import route_after_human_gate
+
+        assert route_after_human_gate({"error_message": "", "next_node": "END"}) == "END"
 
 
 class TestRouteAfterReview:
@@ -2360,6 +2368,13 @@ class TestFinalizeSpec:
 
         return finalize_spec(state)
 
+    @staticmethod
+    def _lineage(repo: Path) -> str:
+        """#3891: finalize needs a real lineage directory; a missing one halts."""
+        audit_dir = repo / "docs" / "lineage" / "active" / "999-implspec" / "20261007T000000Z"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        return str(audit_dir)
+
     def test_t090_writes_spec_file(self, tmp_path, base_state):
         """T090: Finalize writes spec file at expected path."""
         base_state["spec_draft"] = "# Implementation Spec\n\n" + ("Content line\n" * 50)
@@ -2367,6 +2382,7 @@ class TestFinalizeSpec:
         base_state["review_feedback"] = "Looks good."
         base_state["review_iteration"] = 1
         base_state["repo_root"] = str(tmp_path)
+        base_state["audit_dir"] = self._lineage(tmp_path)
 
         result = self._run_finalize(base_state)
 
@@ -2436,6 +2452,7 @@ class TestFinalizeSpec:
         base_state["spec_draft"] = "# Spec\n" + ("Content\n" * 50)
         base_state["review_verdict"] = "APPROVED"
         base_state["repo_root"] = str(new_repo)
+        base_state["audit_dir"] = self._lineage(new_repo)
 
         result = self._run_finalize(base_state)
         assert result["error_message"] == ""

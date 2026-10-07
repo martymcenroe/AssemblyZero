@@ -1,17 +1,11 @@
 {
-  "count": 326,
+  "count": 325,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
       "issue": 3581,
       "kind": "unrouted_error",
       "line": 91
-    },
-    "assemblyzero.workflows.implementation_spec.graph::N6_finalize_spec::unrouted_error::1": {
-      "detail": "node N6_finalize_spec returns error_message; no conditional edge",
-      "issue": 3581,
-      "kind": "unrouted_error",
-      "line": 90
     },
     "assemblyzero.workflows.requirements.graph::N0b_analyze_codebase::unrouted_error::1": {
       "detail": "node N0b_analyze_codebase returns error_message; no conditional edge",
@@ -65,13 +59,13 @@
       "detail": "# fail-open: a row naming something that is not a site key at all",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1454
+      "line": 1468
     },
     "assemblyzero/core/gate_registry.py::scan_halt_sites::fail_open_tag::1": {
       "detail": "# fail-open: a file that will not parse is recorded in",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1241
+      "line": 1255
     },
     "assemblyzero/core/gemini_client.py::GeminiClient.invoke::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

@@ -82,6 +82,10 @@ def repo(tmp_path):
 
 
 def _state(repo, issue=1):
+    # #3891: finalize requires a real lineage directory, the run-scoped layout
+    # the orchestrator creates (stages.py), since a missing one now halts.
+    audit_dir = Path(repo) / "docs" / "lineage" / "active" / f"{issue}-implspec" / "20261007T000000Z"
+    audit_dir.mkdir(parents=True, exist_ok=True)
     return {
         "issue_number": issue,
         "spec_draft": SPEC_BODY,
@@ -90,7 +94,7 @@ def _state(repo, issue=1):
         "review_iteration": 1,
         # The node reads `repo_root`; `target_repo` is the orchestrator's key.
         "repo_root": str(repo),
-        "audit_dir": "",
+        "audit_dir": str(audit_dir),
     }
 
 

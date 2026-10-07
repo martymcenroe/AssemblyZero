@@ -2,8 +2,8 @@
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
     "files_scanned": 312,
-    "sites_examined": 9622,
-    "findings_total": 547
+    "sites_examined": 9629,
+    "findings_total": 546
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
@@ -210,7 +210,6 @@
     "assemblyzero/workflows/implementation_spec/nodes/analyze_codebase.py::_find_tool_patterns::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/analyze_codebase.py::analyze_codebase::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/analyze_codebase.py::gather_symbols::except_handler::0",
-    "assemblyzero/workflows/implementation_spec/nodes/finalize_spec.py::finalize_spec::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/retry_prompt_builder.py::_estimate_tokens::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/review_spec.py::_file_conflict_if_any::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/review_spec.py::review_spec::except_handler::0",

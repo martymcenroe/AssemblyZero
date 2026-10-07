@@ -120,7 +120,7 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N5_review_spec": "the human approved",
             "N2_generate_spec": "the human asked for a revision",
-            "HALT": "an error at the gate",
+            "HALT": "an error at the gate, or a decision it never makes (#3887)",
             "END": "the human took over manually",
         },
     },
@@ -149,7 +149,8 @@ ATLAS: dict[str, dict] = {
             "stage builds from this file, not from this run's transcript."
         ),
         "successors": {
-            "END": "always",
+            "END": "the spec is written, with its durable hand-off copy",
+            "HALT": "the spec could not be finalized; the node left a reason (#3887)",
         },
     },
     "HALT": {
