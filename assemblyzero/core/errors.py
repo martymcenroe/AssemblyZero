@@ -227,33 +227,32 @@ def classify_anthropic_error(exc: Exception) -> APIError:
 
 
 # ---------------------------------------------------------------------------
-# Classifier: Gemini (google.genai / google.api_core)
+# Classifier: Gemini through agy (ADR 0237)
 # ---------------------------------------------------------------------------
 
 
-def classify_gemini_error(exc: Exception) -> APIError:
-    """Translate a Gemini/google-api exception into the unified hierarchy.
+def classify_agy_error(exc: Exception) -> APIError:
+    """Translate a failed agy call into the unified hierarchy.
 
-    Import ``google.api_core.exceptions`` lazily so this module has no hard
-    dependency on the Google SDK.
+    ADR 0237: agy is the only Gemini transport, so a Gemini failure arrives as
+    agy's own failure text, wrapped by the caller in an exception. That text
+    is all there is to classify; no SDK exception type reaches this module.
+    The words it is matched against are the closed set agy reports for a rate
+    limit, a capacity shortfall, an authentication refusal and a timeout.
 
     Args:
-        exc: An exception raised by the ``google.genai`` or ``google.api_core``
-             packages, or any generic exception from a Gemini API call.
+        exc: The exception a caller raised around agy's failure text.
 
     Returns:
-        The appropriate ``APIError`` subclass wrapping the original exception.
+        The appropriate ``APIError`` subclass wrapping the message.
     """
     msg = str(exc)
-
-    # Fallback: pattern-match on the stringified exception (covers cases
-    # where the CLI wraps errors in generic Exception or RuntimeError)
     msg_lower = msg.lower()
     if any(p in msg_lower for p in ("429", "quota", "resource_exhausted", "resource has been exhausted")):
         return RateLimitError(msg, provider="gemini")
     if any(p in msg_lower for p in ("503", "529", "capacity", "overloaded")):
         return CapacityError(msg, provider="gemini", status_code=503)
-    if any(p in msg_lower for p in ("401", "403", "api_key_invalid", "unauthenticated", "permission_denied")):
+    if any(p in msg_lower for p in ("401", "403", "unauthenticated", "permission_denied")):
         return AuthenticationError(msg, provider="gemini")
     if "timeout" in msg_lower or "deadline" in msg_lower:
         return TimeoutError_(msg, provider="gemini")

@@ -241,61 +241,39 @@ class TestInvokeViaStdin:
 
 
 class TestErrorClassification:
-    """Tests for error classification."""
+    """agy's failure text through the live path: classify_agy_error, then
+    _error_type_from_classified (#3583, ADR 0237)."""
 
-    def test_quota_exhausted_detection(self, temp_credentials_file, temp_state_file):
-        """Test that 429/quota errors are classified correctly."""
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-        )
+    @staticmethod
+    def _type(message: str) -> GeminiErrorType:
+        from assemblyzero.core.errors import classify_agy_error
 
-        assert (
-            client._classify_error("TerminalQuotaError: exhausted")
-            == GeminiErrorType.QUOTA_EXHAUSTED
-        )
-        assert (
-            client._classify_error("You have exhausted your capacity")
-            == GeminiErrorType.QUOTA_EXHAUSTED
-        )
-        assert (
-            client._classify_error("429 Too Many Requests")
-            == GeminiErrorType.QUOTA_EXHAUSTED
+        return GeminiClient._error_type_from_classified(
+            classify_agy_error(RuntimeError(message))
         )
 
-    def test_capacity_exhausted_detection(self, temp_credentials_file, temp_state_file):
-        """Test that 529/capacity errors are classified correctly."""
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-        )
+    @pytest.mark.parametrize(
+        "message",
+        ["TerminalQuotaError: exhausted", "429 Too Many Requests", "RESOURCE_EXHAUSTED"],
+    )
+    def test_quota_exhausted_detection(self, message):
+        assert self._type(message) == GeminiErrorType.QUOTA_EXHAUSTED
 
-        assert (
-            client._classify_error("MODEL_CAPACITY_EXHAUSTED")
-            == GeminiErrorType.CAPACITY_EXHAUSTED
-        )
-        assert (
-            client._classify_error("503 Service Unavailable")
-            == GeminiErrorType.CAPACITY_EXHAUSTED
-        )
-        assert (
-            client._classify_error("The model is overloaded")
-            == GeminiErrorType.CAPACITY_EXHAUSTED
-        )
+    @pytest.mark.parametrize(
+        "message",
+        ["MODEL_CAPACITY_EXHAUSTED", "503 Service Unavailable", "The model is overloaded"],
+    )
+    def test_capacity_exhausted_detection(self, message):
+        assert self._type(message) == GeminiErrorType.CAPACITY_EXHAUSTED
 
-    def test_auth_error_detection(self, temp_credentials_file, temp_state_file):
-        """Test that auth errors are classified correctly."""
-        client = GeminiClient(
-            model="gemini-3.1-pro-preview",
-        )
+    @pytest.mark.parametrize("message", ["401 Unauthorized", "PERMISSION_DENIED", "UNAUTHENTICATED"])
+    def test_auth_error_detection(self, message):
+        assert self._type(message) == GeminiErrorType.AUTH_ERROR
 
-        assert (
-            client._classify_error("API_KEY_INVALID") == GeminiErrorType.AUTH_ERROR
-        )
-        assert (
-            client._classify_error("401 Unauthorized") == GeminiErrorType.AUTH_ERROR
-        )
-        assert (
-            client._classify_error("PERMISSION_DENIED") == GeminiErrorType.AUTH_ERROR
-        )
+    def test_a_key_error_is_not_an_agy_classification(self):
+        """There is no key path (ADR 0237), so the key-only token is not a
+        class of agy failure; it falls to UNKNOWN, which fails closed."""
+        assert self._type("API_KEY_INVALID") == GeminiErrorType.UNKNOWN
 
 
 

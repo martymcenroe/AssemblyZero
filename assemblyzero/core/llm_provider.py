@@ -1755,9 +1755,9 @@ class GeminiProvider(LLMProvider):
 
         except Exception as e:
             # Issue #546: Classify through the typed error hierarchy
-            from assemblyzero.core.errors import classify_gemini_error
+            from assemblyzero.core.errors import classify_agy_error
 
-            classified = classify_gemini_error(e)
+            classified = classify_agy_error(e)
             is_rate_limit = isinstance(classified, RateLimitError)
             if is_rate_limit:
                 # #2476: name the transport. This prints when something has
