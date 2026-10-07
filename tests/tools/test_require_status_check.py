@@ -120,6 +120,67 @@ class TestApply:
         assert rsc.run(PAT, cfg(apply=True)) == 0
 
 
+class TestVerdictLine:
+    """Every exit path ends with one line saying whether it worked (#3734)."""
+
+    @staticmethod
+    def last_line(capsys) -> str:
+        return capsys.readouterr().out.rstrip().splitlines()[-1]
+
+    def test_a_successful_write_ends_with_ok(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            rsc, "read_protection", lambda *_: {"required_status_checks": {"contexts": []}}
+        )
+        monkeypatch.setattr(rsc, "add_context", lambda *_: ["pytest"])
+        assert rsc.run(PAT, cfg(apply=True)) == 0
+        assert self.last_line(capsys) == "OK"
+
+    def test_a_dry_run_ends_with_ok(self, monkeypatch, no_writes, capsys):
+        monkeypatch.setattr(
+            rsc, "read_protection", lambda *_: {"required_status_checks": {"contexts": []}}
+        )
+        assert rsc.run(PAT, cfg()) == 0
+        assert self.last_line(capsys) == "OK"
+
+    def test_already_required_ends_with_ok(self, monkeypatch, no_writes, capsys):
+        monkeypatch.setattr(
+            rsc, "read_protection", lambda *_: {"required_status_checks": {"contexts": ["pytest"]}}
+        )
+        assert rsc.run(PAT, cfg(apply=True)) == 0
+        assert self.last_line(capsys) == "OK"
+
+    def test_an_unprotected_branch_ends_with_failed_naming_it(self, monkeypatch, no_writes, capsys):
+        monkeypatch.setattr(rsc, "read_protection", lambda *_: None)
+        assert rsc.run(PAT, cfg(apply=True)) == 1
+        line = self.last_line(capsys)
+        assert line.startswith("FAILED at: branch protection") and line.endswith(rsc.PASTE)
+
+    def test_checks_switched_off_ends_with_failed_naming_it(self, monkeypatch, no_writes, capsys):
+        monkeypatch.setattr(rsc, "read_protection", lambda *_: {"enforce_admins": {}})
+        assert rsc.run(PAT, cfg(apply=True)) == 1
+        assert self.last_line(capsys).startswith("FAILED at: required status checks")
+
+    def test_an_api_error_on_the_write_ends_with_failed_naming_it(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            rsc, "read_protection", lambda *_: {"required_status_checks": {"contexts": []}}
+        )
+
+        def boom(*_args):
+            raise rsc.requests.HTTPError("422 Unprocessable")
+
+        monkeypatch.setattr(rsc, "add_context", boom)
+        assert rsc.run(PAT, cfg(apply=True)) == 1
+        assert self.last_line(capsys).startswith("FAILED at: adding the required check")
+
+    def test_an_api_error_on_the_read_ends_with_failed(self, monkeypatch, capsys):
+        def boom(*_args):
+            raise rsc.requests.ConnectionError("down")
+
+        monkeypatch.setattr(rsc, "read_protection", boom)
+        assert rsc.run(PAT, cfg()) == 1
+        assert self.last_line(capsys).startswith("FAILED at: the GitHub API call")
+
+
 class TestArgs:
     def test_defaults(self):
         c = cfg()
