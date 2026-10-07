@@ -1,12 +1,11 @@
 {
   "$schema": "project-registry-schema.json",
-  "$comment": "Registry of child projects that inherit from AssemblyZero. Used by bidirectional sync (ADR 0206).",
+  "$comment": "Registry of child projects that inherit from AssemblyZero. Used by bidirectional sync (ADR 0206). Each path is relative to the AssemblyZero checkout (#3609).",
 
   "children": [
     {
       "name": "Aletheia",
-      "path": "C:\\Users\\mcwiz\\Projects\\Aletheia",
-      "pathUnix": "/c/Users/mcwiz/Projects/Aletheia",
+      "path": "../Aletheia",
       "github": "martymcenroe/Aletheia",
       "description": "Browser extension for vocabulary learning",
       "lastSync": "2026-01-13T00:00:00Z",
@@ -15,8 +14,7 @@
     },
     {
       "name": "Talos",
-      "path": "C:\\Users\\mcwiz\\Projects\\Talos",
-      "pathUnix": "/c/Users/mcwiz/Projects/Talos",
+      "path": "../Talos",
       "github": "martymcenroe/Talos",
       "description": "Job application automation (Talent-OS)",
       "lastSync": "2026-01-13T00:00:00Z",
@@ -26,8 +24,7 @@
     },
     {
       "name": "maintenance",
-      "path": "C:\\Users\\mcwiz\\Projects\\maintenance",
-      "pathUnix": "/c/Users/mcwiz/Projects/maintenance",
+      "path": "../maintenance",
       "github": "martymcenroe/maintenance",
       "description": "Infrastructure maintenance scripts",
       "lastSync": "2026-01-13T00:00:00Z",
@@ -36,8 +33,7 @@
     },
     {
       "name": "RCA-PDF-extraction-pipeline",
-      "path": "C:\\Users\\mcwiz\\Projects\\RCA-PDF-extraction-pipeline",
-      "pathUnix": "/c/Users/mcwiz/Projects/RCA-PDF-extraction-pipeline",
+      "path": "../RCA-PDF-extraction-pipeline",
       "github": "martymcenroe/RCA-PDF-extraction-pipeline",
       "description": "PDF extraction pipeline for Routine Core Analysis reports + G-FIAT forensic image analysis",
       "lastSync": "2026-02-01T00:00:00Z",

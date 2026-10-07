@@ -19,6 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
+from assemblyzero.core.projects_root import PROJECTS
 from assemblyzero.speedrun.timing import (  # noqa: E402
     AUTOMATION_OVERHEAD_SECONDS,
     CSV_COLUMNS,
@@ -31,7 +32,7 @@ from assemblyzero.speedrun.timing import (  # noqa: E402
     write_csv,
 )
 
-BOOSTGAUGE = Path("C:/Users/mcwiz/Projects/boostgauge")
+BOOSTGAUGE = PROJECTS / "boostgauge"  # #3609: derived, never spelled
 
 
 def _write_run(

@@ -92,7 +92,8 @@ for THIS repo specifically._
 
 def test_lean_template_passes(tmp_path: Path) -> None:
     """Lean reference template per ADR 0219 must trip zero detectors."""
-    # Note: lean template uses C:\Users\someone\ NOT mcwiz, so marker 9 doesn't fire
+    # Note: the lean template's C:\Users\<user>\ path sits in the Project
+    # Identifiers block, which marker 9 skips (#3609 generalised the pattern).
     repo = make_repo(tmp_path, "lean-repo", lean_template("lean-repo"))
     result = detect_drift(repo / "CLAUDE.md", repo)
     assert result.status == "PASS", f"Expected PASS, got {result.status}, findings: {[(f.marker, f.description) for f in result.findings]}"
@@ -255,8 +256,8 @@ def test_marker_8_stub_under_threshold(tmp_path: Path) -> None:
     assert any(f.marker == 8 for f in result.findings)
 
 
-def test_marker_9_hardcoded_mcwiz_path(tmp_path: Path) -> None:
-    content = lean_template() + "\n\nSee C:\\Users\\mcwiz\\Projects\\X\\foo.md\n"
+def test_marker_9_hardcoded_user_path(tmp_path: Path) -> None:
+    content = lean_template() + "\n\nSee C:\\Users\\dev\\Projects\\X\\foo.md\n"
     repo = make_repo(tmp_path, "drifted", content)
     result = detect_drift(repo / "CLAUDE.md", repo)
     assert any(f.marker == 9 for f in result.findings)
@@ -271,8 +272,8 @@ You are a team member on the test project, not a tool.
 ## Project Identifiers
 
 - **Repository:** `martymcenroe/test`
-- **Project Root (Windows):** `C:\\Users\\mcwiz\\Projects\\test`
-- **Project Root (Unix):** `/c/Users/mcwiz/Projects/test`
+- **Project Root (Windows):** `C:\\Users\\dev\\Projects\\test`
+- **Project Root (Unix):** `/c/Users/dev/Projects/test`
 - **Worktree Pattern:** `test-{IssueID}`
 
 ## Project-Specific Context
@@ -302,13 +303,13 @@ You are a team member on the test project, not a tool.
 ## Project Identifiers
 
 - **Repository:** `martymcenroe/test`
-- **Project Root (Windows):** `C:\\Users\\mcwiz\\Projects\\test`
-- **Project Root (Unix):** `/c/Users/mcwiz/Projects/test`
+- **Project Root (Windows):** `C:\\Users\\dev\\Projects\\test`
+- **Project Root (Unix):** `/c/Users/dev/Projects/test`
 - **Worktree Pattern:** `test-{IssueID}`
 
 ## Notes
 
-For more info see `C:\\Users\\mcwiz\\Projects\\SomeOther\\bar.md` in the body.
+For more info see `C:\\Users\\dev\\Projects\\SomeOther\\bar.md` in the body.
 Filler to clear stub threshold.
 More filler.
 And more.
@@ -324,7 +325,7 @@ def test_marker_9_fires_when_no_identifiers_heading(tmp_path: Path) -> None:
 
 Body content with no Identifiers heading.
 
-See `C:\\Users\\mcwiz\\Projects\\X\\foo.md` for details.
+See `C:\\Users\\dev\\Projects\\X\\foo.md` for details.
 Filler to clear stub threshold.
 More filler.
 And more.

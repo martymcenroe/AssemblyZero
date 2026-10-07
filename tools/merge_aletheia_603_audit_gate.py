@@ -35,13 +35,16 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _pat_session import classic_pat_session  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import PROJECTS  # #3609
+
 REPO_OWNER = "martymcenroe"
 REPO_NAME = "Aletheia"
 GH_API = "https://api.github.com"
 ISSUE_NUMBER = 603
 BRANCH_NAME = "603-remove-audit-schedule-gate"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
-LOCAL_FILE = Path("C:/Users/mcwiz/Projects/Aletheia/.github/workflows/ci.yml")
+LOCAL_FILE = PROJECTS / "Aletheia" / ".github" / "workflows" / "ci.yml"
 COMPANION_PR = 584
 HTTP_TIMEOUT_S = 30
 POLL_INTERVAL_S = 10

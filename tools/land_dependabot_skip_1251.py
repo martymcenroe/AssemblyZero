@@ -34,7 +34,7 @@ What it does
 
 Usage
 -----
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_dependabot_skip_1251.py            # dry run
     poetry run python tools/land_dependabot_skip_1251.py --apply    # live
 

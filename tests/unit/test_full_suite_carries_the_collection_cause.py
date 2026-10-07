@@ -31,7 +31,7 @@ from assemblyzero.workflows.testing.nodes.verify_phases import collection_error_
 RUN_41_FULL_SUITE = """\
 =================================== ERRORS ====================================
 _____________ ERROR collecting tests/benchmark/test_sweep_cost.py _____________
-ImportError while importing test module 'C:\\Users\\mcwiz\\Projects\\boostgauge-run41\\tests\\benchmark\\test_sweep_cost.py'.
+ImportError while importing test module 'C:\\Users\\dev\\Projects\\boostgauge-run41\\tests\\benchmark\\test_sweep_cost.py'.
 Hint: make sure your test modules/packages have valid Python names.
 Traceback:
 tests\\benchmark\\test_sweep_cost.py:7: in <module>
@@ -42,7 +42,7 @@ src\\boostgauge\\collector.py:114: in <module>
     from boostgauge.collectors.windows import WindowsCollector
 E   ImportError: cannot import name 'WindowsCollector' from partially initialized module 'boostgauge.collectors.windows' (most likely due to a circular import) (src/boostgauge/collectors/windows.py)
 _____ ERROR collecting tests/integration/test_windows_sweep_crosscheck.py _____
-ImportError while importing test module 'C:\\Users\\mcwiz\\Projects\\boostgauge-run41\\tests\\integration\\test_windows_sweep_crosscheck.py'.
+ImportError while importing test module 'C:\\Users\\dev\\Projects\\boostgauge-run41\\tests\\integration\\test_windows_sweep_crosscheck.py'.
 Hint: make sure your test modules/packages have valid Python names.
 Traceback:
 tests\\integration\\test_windows_sweep_crosscheck.py:6: in <module>

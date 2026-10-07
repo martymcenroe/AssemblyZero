@@ -13,7 +13,7 @@ THE OPERATOR RUNS THIS, NOT AN AGENT. When an agent invokes it through its own
 Bash tool the Python process is the agent's child, and ADR 0216's "the PAT
 lives only in the Python heap" guarantee assumes the process is the operator's.
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_windows_ci_job.py --apply
 
 Without --apply it prints the change and exits, touching nothing.

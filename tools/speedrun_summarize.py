@@ -9,11 +9,11 @@ Reads the run log and prints two sections:
 Usage:
 
     poetry run python tools/speedrun_summarize.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge
+        --repo ../boostgauge
 
     # Filter to a single issue:
     poetry run python tools/speedrun_summarize.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --issue 35
+        --repo ../boostgauge --issue 35
 
 The output is plain text suitable for between-attempt review or for
 pasting into a session log. Designed to be useful with `tail -1` style

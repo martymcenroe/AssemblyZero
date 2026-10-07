@@ -11,7 +11,7 @@ routers, the gates, the pinning enforcement, the file writes and the halt path
 all run for real against a throwaway clone.
 
     poetry run python tools/replay_run.py \\
-        --recording C:/Users/mcwiz/Projects/boostgauge \\
+        --recording ../boostgauge \\
         --clone data/replay/boostgauge \\
         --issue 4 --base hardening-run-20
 

@@ -52,7 +52,8 @@ def load_registry(registry_path: Path) -> list[Path]:
 
     repos = []
     for repo_str in data:
-        repo_path = Path(repo_str)
+        # #3609: a relative entry is relative to the registry file itself.
+        repo_path = (registry_path.parent / repo_str).resolve()
         if repo_path.exists():
             repos.append(repo_path)
         else:

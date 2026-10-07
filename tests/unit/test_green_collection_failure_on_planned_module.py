@@ -44,12 +44,12 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
 RUN_30_OUTPUT = """\
 ==================== ERRORS ====================
 ____________ ERROR collecting tests/test_issue_4.py ____________
-ImportError while importing test module 'C:\\Users\\mcwiz\\Projects\\boostgauge\\data\\worktrees\\4\\tests\\test_issue_4.py'.
+ImportError while importing test module 'C:\\Users\\dev\\Projects\\boostgauge\\data\\worktrees\\4\\tests\\test_issue_4.py'.
 Hint: make sure your test modules/packages have valid Python names.
 Traceback:
 tests\\test_issue_4.py:12: in <module>
     from boostgauge.collector import Band, CollectorThread, ProcessRow, WindowsCollector, _psutil_cmdline, make_collector, normalize  # noqa: F401
-E   ImportError: cannot import name '_psutil_cmdline' from 'boostgauge.collector' (C:\\Users\\mcwiz\\Projects\\boostgauge\\data\\worktrees\\4\\src\\boostgauge\\collector.py)
+E   ImportError: cannot import name '_psutil_cmdline' from 'boostgauge.collector' (C:\\Users\\dev\\Projects\\boostgauge\\data\\worktrees\\4\\src\\boostgauge\\collector.py)
 !!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!
 """
 
@@ -268,12 +268,12 @@ tests/unit/test_collector.py::test_req_6_cmdline_access_denied_handled PASSED
 tests/benchmark/test_sweep_cost.py::test_full_collect_tick_is_under_one_percent_of_a_core PASSED
 ==================== ERRORS ====================
 ____________ ERROR collecting tests/test_issue_4.py ____________
-ImportError while importing test module 'C:\\Users\\mcwiz\\Projects\\boostgauge\\data\\worktrees\\4\\tests\\test_issue_4.py'.
+ImportError while importing test module 'C:\\Users\\dev\\Projects\\boostgauge\\data\\worktrees\\4\\tests\\test_issue_4.py'.
 Hint: make sure your test modules/packages have valid Python names.
 Traceback:
 tests\\test_issue_4.py:12: in <module>
     from boostgauge.collector import Band, CollectorThread, ProcessRow, WindowsCollector, _psutil_cmdline, make_collector, normalize  # noqa: F401
-E   ImportError: cannot import name '_psutil_cmdline' from 'boostgauge.collector' (C:\\Users\\mcwiz\\Projects\\boostgauge\\data\\worktrees\\4\\src\\boostgauge\\collector.py)
+E   ImportError: cannot import name '_psutil_cmdline' from 'boostgauge.collector' (C:\\Users\\dev\\Projects\\boostgauge\\data\\worktrees\\4\\src\\boostgauge\\collector.py)
 ---------- coverage: platform win32, python 3.14.7-final-0 ----------
 Name                                   Stmts   Miss  Cover   Missing
 --------------------------------------------------------------------

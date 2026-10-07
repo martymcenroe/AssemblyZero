@@ -121,7 +121,17 @@ def test_the_guard_would_have_caught_the_original_incident(tmp_path):
 # --- the machine-level coverage (part 1) --------------------------------
 
 
-GLOBAL_IGNORE = Path("C:/Users/mcwiz/.gitignore_global")
+def _global_excludes_file() -> Path:
+    """The machine's global gitignore, as git itself names it (#3609)."""
+    # Exit 1 with no output means the setting is unset; the test then skips.
+    out = subprocess.run(
+        ["git", "config", "--global", "core.excludesFile"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    return Path(out).expanduser() if out else Path("/nonexistent/.gitignore_global")
+
+
+GLOBAL_IGNORE = _global_excludes_file()
 
 
 @pytest.mark.skipif(not GLOBAL_IGNORE.is_file(), reason="fleet global gitignore absent")

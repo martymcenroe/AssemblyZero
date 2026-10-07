@@ -5,7 +5,7 @@ OPERATOR-RUN, in your own Git Bash, never through an agent's Bash tool: the
 key is decrypted into this process's heap (cerberus_pem_session, ADR-0216's
 threat model) and an agent's child process is the agent's.
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/cerberus_worker_key.py
 
 It sets the Cerberus App ID (3079970; not confidential), decrypts ~/.secrets/cerberus-pem.gpg (pinentry asks for the

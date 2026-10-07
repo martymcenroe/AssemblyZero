@@ -50,7 +50,7 @@ Usage (RUN THIS YOURSELF in your own Git Bash — never through an agent's Bash
 tool, per the _pat_session operational rule: a script the agent invokes is a
 process the agent parents, which dissolves the heap-only guarantee):
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_polybolos_ci_workflow.py
 
 That is the dry run and it writes nothing, nor does it ask for the passphrase.

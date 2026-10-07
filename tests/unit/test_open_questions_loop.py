@@ -323,7 +323,7 @@ class TestPromptFile:
         possible_paths = [
             Path(__file__).parent.parent.parent / "docs" / "skills" / "0702c-LLD-Review-Prompt.md",
             Path("docs/skills/0702c-LLD-Review-Prompt.md"),
-            Path("C:/Users/mcwiz/Projects/AssemblyZero-248/docs/skills/0702c-LLD-Review-Prompt.md"),
+            Path("C:/Users/dev/Projects/AssemblyZero-248/docs/skills/0702c-LLD-Review-Prompt.md"),
         ]
 
         content = None
@@ -344,7 +344,7 @@ class TestPromptFile:
         possible_paths = [
             Path(__file__).parent.parent.parent / "docs" / "skills" / "0702c-LLD-Review-Prompt.md",
             Path("docs/skills/0702c-LLD-Review-Prompt.md"),
-            Path("C:/Users/mcwiz/Projects/AssemblyZero-248/docs/skills/0702c-LLD-Review-Prompt.md"),
+            Path("C:/Users/dev/Projects/AssemblyZero-248/docs/skills/0702c-LLD-Review-Prompt.md"),
         ]
 
         content = None

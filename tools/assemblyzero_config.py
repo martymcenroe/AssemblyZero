@@ -58,8 +58,8 @@ def _spellings(path: Path) -> dict:
 
 
 # Default paths (SINGLE SOURCE OF TRUTH), derived from where this checkout sits
-# rather than spelled (#3536). The spelled defaults were `C:\Users\mcwiz\...` and
-# `/c/Users/mcwiz/...`; under WSL the 'unix' one pointed at a directory that does
+# rather than spelled (#3536). The spelled defaults were the Windows user
+# directory in its Windows and Git Bash forms; under WSL the 'unix' one pointed at a directory that does
 # not exist, so every tool using this module resolved the tree wrongly there. On
 # the Windows machine the derived values equal the old ones.
 # ~/.assemblyzero/config.json still overrides every one of them.

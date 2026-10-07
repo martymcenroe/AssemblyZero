@@ -17,7 +17,7 @@ squash merge. No branch protection is touched, nothing is forced.
 
 Run it yourself (the agent must not):
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/widen_boostgauge_auto_reviewer_trigger.py            # dry run
     poetry run python tools/widen_boostgauge_auto_reviewer_trigger.py --apply    # do it
 """

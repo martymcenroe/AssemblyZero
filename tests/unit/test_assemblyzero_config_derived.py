@@ -18,16 +18,16 @@ def test_projects_root_is_this_checkouts_parent():
 
 
 def test_a_windows_drive_gets_both_spellings():
-    assert _spellings(Path("C:/Users/mcwiz/Projects")) == {
-        "windows": "C:\\Users\\mcwiz\\Projects",
-        "unix": "/c/Users/mcwiz/Projects",
+    assert _spellings(Path("C:/Users/dev/Projects")) == {
+        "windows": "C:\\Users\\dev\\Projects",
+        "unix": "/c/Users/dev/Projects",
     }
 
 
 def test_wsl_view_of_a_drive_gets_its_windows_twin():
-    assert _spellings(Path("/mnt/c/Users/mcwiz/Projects")) == {
-        "windows": "C:\\Users\\mcwiz\\Projects",
-        "unix": "/mnt/c/Users/mcwiz/Projects",
+    assert _spellings(Path("/mnt/c/Users/dev/Projects")) == {
+        "windows": "C:\\Users\\dev\\Projects",
+        "unix": "/mnt/c/Users/dev/Projects",
     }
 
 

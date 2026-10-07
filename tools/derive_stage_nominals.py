@@ -14,7 +14,7 @@ rather than an afternoon.
 
 Usage:
     poetry run python tools/derive_stage_nominals.py \\
-        --runs /c/Users/mcwiz/Projects/boostgauge/data/speedrun/runs
+        --runs ../boostgauge/data/speedrun/runs
 
 Prints a table of percentiles and the Python literal to paste into
 stage_watchdog.py. Read-only: it never edits the table itself, because a

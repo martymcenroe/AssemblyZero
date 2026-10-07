@@ -43,7 +43,7 @@ Required classic PAT scopes: repo (full), workflow.
 
 Usage, in bash:
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/deploy_auto_reviewer_poll_fix.py
 
 Idempotent: skips whatever already exists. One-shot -- safe to delete after the

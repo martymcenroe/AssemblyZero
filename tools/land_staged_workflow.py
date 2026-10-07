@@ -54,7 +54,7 @@ RUN THIS YOURSELF in your own Git Bash -- never via an agent's Bash tool, per
 the _pat_session operational rule: a Python process spawned by an agent is the
 agent's child, and its heap is theoretically readable while the PAT is in scope.
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_staged_workflow.py \
         --repo <REPO> --issue <N> \
         --staged docs/ci/tests.yml \

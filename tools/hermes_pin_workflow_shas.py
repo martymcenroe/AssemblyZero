@@ -28,7 +28,7 @@ OPERATIONAL RULE (ADR-0216):
     cannot silently decrypt the PAT while a passphrase is cached.
 
 USAGE (run from the AssemblyZero repo so poetry resolves `requests`):
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/hermes_pin_workflow_shas.py            # dry-run
     poetry run python tools/hermes_pin_workflow_shas.py --apply    # land it
 
