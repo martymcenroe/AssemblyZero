@@ -28,7 +28,7 @@ flag on a *directory* is a shell hint, not a permission), so there is nothing
 here worth a destructive fix.
 
     poetry run python tools/readonly_attribute_audit.py
-    poetry run python tools/readonly_attribute_audit.py --root /c/Users/mcwiz/Projects
+    poetry run python tools/readonly_attribute_audit.py --root ..
 
 Exit codes:
     0  the tree looks the way #2277 recorded it, or is clean
@@ -47,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # #2367: before anything prints. Repo and directory names are arbitrary text.
+from assemblyzero.core.projects_root import PROJECTS
 from assemblyzero.core.utf8_console import install as _install_utf8_console  # noqa: E402
 
 _install_utf8_console()
@@ -120,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--root",
-        default=r"C:\Users\mcwiz\Projects",
+        default=str(PROJECTS),
         help="tree to audit (default: the Projects root)",
     )
     args = parser.parse_args(argv)

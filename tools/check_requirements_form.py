@@ -5,7 +5,7 @@ Issue #2219. Fully deterministic: no model calls, no network beyond reading
 the issue, and the same answer every time for the same input.
 
     poetry run python tools/check_requirements_form.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --issue 7
+        --repo ../boostgauge --issue 7
 
     poetry run python tools/check_requirements_form.py --file draft.md
 

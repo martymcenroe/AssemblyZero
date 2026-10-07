@@ -145,9 +145,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python tools/assemblyzero-generate.py --project /c/Users/mcwiz/Projects/Aletheia
+  python tools/assemblyzero-generate.py --project ../Aletheia
   python tools/assemblyzero-generate.py --project Aletheia
-  python tools/assemblyzero-generate.py --project . --templates /c/Users/mcwiz/Projects/.claude/templates
+  python tools/assemblyzero-generate.py --project . --templates ../.claude/templates
         """
     )
     parser.add_argument(

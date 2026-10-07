@@ -30,7 +30,7 @@ to hold.
 
 ::
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/update_clio_repo_metadata.py
 
 Pinentry will prompt for your gpg passphrase. Up to 5 retries on

@@ -22,7 +22,7 @@ be readable from the agent's child-process heap for the seconds it's in scope).
 Required classic-PAT scopes: repo (full) + workflow.
 
 Usage (operator, one run):
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_aletheia_ci_oidc.py --apply
 
 Default is dry-run (prints the plan, read-only). --apply performs the branch +
@@ -43,6 +43,9 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _pat_session import classic_pat_session  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import PROJECTS  # #3609
+
 GITHUB_USER = "martymcenroe"
 REPO = "Aletheia"
 GH_API = "https://api.github.com"
@@ -50,7 +53,7 @@ WORKFLOW_PATH = ".github/workflows/ci.yml"
 BRANCH = "773-ci-oidc-migration"
 LOCAL_BRANCH = "773-ci-oidc-migration"
 ISSUE_NUMBER = 773
-ALETHEIA_REPO = Path("C:/Users/mcwiz/Projects/Aletheia")
+ALETHEIA_REPO = PROJECTS / "Aletheia"
 SENTINEL = b"AletheiaCIAuditRole"  # must be present in the fixed ci.yml
 HTTP_TIMEOUT_S = 30
 POLL_INTERVAL_S = 10

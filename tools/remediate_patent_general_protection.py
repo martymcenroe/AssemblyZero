@@ -23,7 +23,7 @@ Idempotent:
       PUT is a no-op on GitHub's side.
 
 Usage:
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/remediate_patent_general_protection.py            # dry-run (default)
     poetry run python tools/remediate_patent_general_protection.py --apply    # execute
 

@@ -22,12 +22,12 @@ guarded — a missing PR / worktree / branch is not an error.
 Usage:
 
     poetry run python tools/speedrun_reset.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge \\
+        --repo ../boostgauge \\
         --issue 35
 
     # Reset all known speed-run issues at once:
     poetry run python tools/speedrun_reset.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge \\
+        --repo ../boostgauge \\
         --all-issues
 
 The `--all-issues` mode reads `data/speedrun/run-log.jsonl` and resets
@@ -780,7 +780,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--repo", required=True, type=Path,
-        help="Path to the target repo (e.g., /c/Users/mcwiz/Projects/boostgauge)",
+        help="Path to the target repo (e.g., ../boostgauge)",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--issue", type=int, help="Reset a single issue")

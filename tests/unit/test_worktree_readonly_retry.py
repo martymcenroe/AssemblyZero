@@ -3,7 +3,7 @@
 First real-state execution of the sweep against boostgauge, 2026-08-09: all 8
 registered clean worktrees failed plain `git worktree remove` with
 
-    error: failed to delete 'C:/Users/mcwiz/Projects/boostgauge-1': Permission denied
+    error: failed to delete 'C:/Users/dev/Projects/boostgauge-1': Permission denied
     error: failed to delete '.git/worktrees/boostgauge-1': Permission denied
 
 Every directory in each tree carried the Windows ReadOnly attribute -- the

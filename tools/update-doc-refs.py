@@ -8,7 +8,7 @@ with new AssemblyZero semantic paths.
 Usage:
     python tools/update-doc-refs.py --project /path/to/project [--verbose]
     python tools/update-doc-refs.py --project /path/to/project --apply
-    python tools/update-doc-refs.py --project /c/Users/mcwiz/Projects/Aletheia --apply
+    python tools/update-doc-refs.py --project ../Aletheia --apply
 
 Options:
     --apply      Actually modify files (default is scan-only)

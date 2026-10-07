@@ -14,11 +14,16 @@ _spec = importlib.util.spec_from_file_location(
 repo_drift_check = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(repo_drift_check)
 
+# #3609: the Projects root as the checker derives it, in its Git Bash and
+# Windows spellings; never written out.
+GB = repo_drift_check._ROOT["git_bash"]
+WIN = repo_drift_check._ROOT["windows"]
+
 
 # ---- extract_handoff_body ----
 
 def test_extract_handoff_body_returns_text_unchanged_when_no_markers():
-    text = "Just a plain handoff body. /c/Users/mcwiz/Projects/foo here."
+    text = f"Just a plain handoff body. {GB}/foo here."
     assert repo_drift_check.extract_handoff_body(text) == text
 
 
@@ -26,11 +31,11 @@ def test_extract_handoff_body_returns_only_last_handoff_block():
     text = (
         "preamble\n"
         "<!-- handoff-start -->\n"
-        "first handoff body /c/Users/mcwiz/Projects/older\n"
+        f"first handoff body {GB}/older\n"
         "<!-- handoff-end -->\n"
         "interlude\n"
         "<!-- handoff-start -->\n"
-        "newest body /c/Users/mcwiz/Projects/newer\n"
+        f"newest body {GB}/newer\n"
         "<!-- handoff-end -->\n"
         "trailing\n"
     )
@@ -45,9 +50,9 @@ def test_extract_handoff_body_returns_only_last_handoff_block():
 
 def test_parse_repo_names_dedupes_and_preserves_order():
     text = (
-        "Touched /c/Users/mcwiz/Projects/alpha and "
-        "C:\\Users\\mcwiz\\Projects\\beta and "
-        "Projects/gamma. Then back to /c/Users/mcwiz/Projects/alpha."
+        f"Touched {GB}/alpha and "
+        f"{WIN}\\beta and "
+        f"Projects/gamma. Then back to {GB}/alpha."
     )
     names = repo_drift_check.parse_repo_names(text)
     assert names == ["alpha", "beta", "gamma"]
@@ -55,9 +60,9 @@ def test_parse_repo_names_dedupes_and_preserves_order():
 
 def test_parse_repo_names_filters_denylist():
     text = (
-        "/c/Users/mcwiz/Projects/legit "
-        "/c/Users/mcwiz/Projects/node_modules "
-        "/c/Users/mcwiz/Projects/.git"
+        f"{GB}/legit "
+        f"{GB}/node_modules "
+        f"{GB}/.git"
     )
     names = repo_drift_check.parse_repo_names(text)
     assert names == ["legit"]
@@ -67,7 +72,7 @@ def test_parse_repo_names_skips_filenames_with_extensions():
     # "Projects/CLAUDE.md" names a file, not a repository. #3648: it is not
     # captured at all, since a missing repository is now reported rather than
     # dropped, and a file must not be mistaken for one.
-    text = "/c/Users/mcwiz/Projects/CLAUDE.md was edited"
+    text = f"{GB}/CLAUDE.md was edited"
     names = repo_drift_check.parse_repo_names(text)
     assert names == []
 
@@ -82,7 +87,7 @@ def test_extract_repo_names_drops_names_without_real_directories(tmp_path, monke
     fake_root = tmp_path / "Projects"
     (fake_root / "real").mkdir(parents=True)
     monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
-    text = "/c/Users/mcwiz/Projects/real and /c/Users/mcwiz/Projects/CLAUDE.md"
+    text = f"{GB}/real and {GB}/CLAUDE.md"
     names = repo_drift_check.extract_repo_names(text)
     assert names == ["real"]
 
@@ -92,7 +97,7 @@ def test_extract_repo_names_strips_worktree_suffix_when_parent_exists(tmp_path, 
     (fake_root / "alpha").mkdir(parents=True)
     monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
 
-    text = "Worked in /c/Users/mcwiz/Projects/alpha-1099 today."
+    text = f"Worked in {GB}/alpha-1099 today."
     names = repo_drift_check.extract_repo_names(text)
     assert names == ["alpha"]
 
@@ -103,7 +108,7 @@ def test_extract_repo_names_keeps_a_missing_repo_so_it_is_reported(tmp_path, mon
     fake_root.mkdir(parents=True)
     monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
 
-    text = "/c/Users/mcwiz/Projects/standalone-1077"
+    text = f"{GB}/standalone-1077"
     names = repo_drift_check.extract_repo_names(text)
     assert names == ["standalone-1077"]
     report = repo_drift_check.build_report(text)
@@ -134,7 +139,7 @@ def test_extract_repo_names_keeps_suffix_name_when_full_path_exists(tmp_path, mo
     (fake_root / "standalone-1077").mkdir(parents=True)
     monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
 
-    text = "/c/Users/mcwiz/Projects/standalone-1077"
+    text = f"{GB}/standalone-1077"
     names = repo_drift_check.extract_repo_names(text)
     assert names == ["standalone-1077"]
 
@@ -306,7 +311,7 @@ def test_main_emits_json_when_flag_passed(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
 
     handoff = tmp_path / "h.md"
-    handoff.write_text("Worked in /c/Users/mcwiz/Projects/real-repo today.", encoding="utf-8")
+    handoff.write_text(f"Worked in {GB}/real-repo today.", encoding="utf-8")
 
     rc = repo_drift_check.main(["--handoff", str(handoff), "--json"])
     captured = capsys.readouterr()
@@ -321,7 +326,7 @@ def test_main_emits_json_when_flag_passed(tmp_path, monkeypatch, capsys):
 
 def test_main_filters_filename_false_positives_via_dir_check(tmp_path, monkeypatch, capsys):
     # Regression test for the actual bug surfaced in smoke testing:
-    # "/c/Users/mcwiz/Projects/CLAUDE.md" used to extract as "CLAUDE.md".
+    # "<root>/CLAUDE.md" used to extract as "CLAUDE.md".
     # After the fix, the regex captures "CLAUDE" (period excluded from char class)
     # and the dir-check filter drops it because no "CLAUDE" directory exists.
     fake_root = tmp_path / "Projects"
@@ -330,8 +335,8 @@ def test_main_filters_filename_false_positives_via_dir_check(tmp_path, monkeypat
 
     handoff = tmp_path / "h.md"
     handoff.write_text(
-        "Edited C:\\Users\\mcwiz\\Projects\\CLAUDE.md and "
-        "/c/Users/mcwiz/Projects/dependabot-fleet.log today.",
+        f"Edited {WIN}\\CLAUDE.md and "
+        f"{GB}/dependabot-fleet.log today.",
         encoding="utf-8",
     )
 
@@ -390,7 +395,7 @@ def test_main_quiet_fetch_error_exits_2_with_stderr_detail(tmp_path, monkeypatch
     )
 
     handoff = tmp_path / "h.md"
-    handoff.write_text("Worked in /c/Users/mcwiz/Projects/real-repo today.", encoding="utf-8")
+    handoff.write_text(f"Worked in {GB}/real-repo today.", encoding="utf-8")
 
     rc = repo_drift_check.main(["--handoff", str(handoff), "--quiet"])
     captured = capsys.readouterr()

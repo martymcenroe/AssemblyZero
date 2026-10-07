@@ -28,7 +28,7 @@ OPERATOR RUNS THIS. NOT AN AGENT.
 
 Usage
 -----
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_aletheia_ci_pipestatus.py            # dry run
     poetry run python tools/land_aletheia_ci_pipestatus.py --apply    # land it
 
@@ -53,6 +53,9 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _pat_session import classic_pat_session  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import PROJECTS  # #3609
+
 GITHUB_USER = "martymcenroe"
 REPO = "Aletheia"
 GH_API = "https://api.github.com"
@@ -64,7 +67,7 @@ ISSUE = 831
 
 # The corrected workflow, produced and validated alongside the diagnosis.
 LOCAL_FILE = (
-    Path("C:/Users/mcwiz/Projects/Aletheia/data/scratch-20260809-backlog/ci.yml.fixed")
+    PROJECTS / "Aletheia" / "data" / "scratch-20260809-backlog" / "ci.yml.fixed"
 )
 
 PR_TITLE = (

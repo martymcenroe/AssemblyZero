@@ -34,9 +34,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Match repo references in handoff bodies. Two path families to cover:
-#   /c/Users/mcwiz/Projects/<repo>      (Bash / Git Bash)
-#   C:\Users\mcwiz\Projects\<repo>      (Windows native, with or without trailing slash)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import PROJECTS, spellings
+
+# Match repo references in handoff bodies, in each spelling of the Projects root
+# (#3609: derived from where this checkout sits, never written out):
+#   <root>/<repo> as Git Bash and as WSL write it, and <root>\<repo> as Windows
+#   writes it, with or without a trailing separator.
 # We also match bare "Projects/<repo>" since handoffs sometimes use shorthand.
 # The capture group is the repo name only. We deliberately exclude "." from the
 # character class because real repo directory names don't contain dots, and
@@ -44,9 +48,11 @@ from pathlib import Path
 # #3648: a name followed by ".<ext>" is a file directly under Projects
 # (CLAUDE.md, a .log), never a repository, so it is not captured at all.
 _NOT_A_FILE = r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9])"  # the first branch stops backtracking to "CLAUD"
+_ROOT = spellings(PROJECTS)
 _PATH_PATTERNS = [
-    re.compile(r"/c/Users/mcwiz/Projects/([A-Za-z0-9_-]+)" + _NOT_A_FILE, re.IGNORECASE),
-    re.compile(r"C:\\Users\\mcwiz\\Projects\\([A-Za-z0-9_-]+)" + _NOT_A_FILE, re.IGNORECASE),
+    re.compile(re.escape(_ROOT["wsl"]) + r"/([A-Za-z0-9_-]+)" + _NOT_A_FILE, re.IGNORECASE),
+    re.compile(re.escape(_ROOT["git_bash"]) + r"/([A-Za-z0-9_-]+)" + _NOT_A_FILE, re.IGNORECASE),
+    re.compile(re.escape(_ROOT["windows"]) + r"\\([A-Za-z0-9_-]+)" + _NOT_A_FILE, re.IGNORECASE),
     re.compile(r"(?<![A-Za-z0-9_-])Projects/([A-Za-z0-9_-]+)" + _NOT_A_FILE),
 ]
 
@@ -67,10 +73,11 @@ _REPO_DENYLIST = {
 _GIT_TIMEOUT = 30
 
 # #3648: derived, never spelled. The Projects root is the parent of this
-# repository's root, on Windows and on Ubuntu alike. The old literal
-# "C:/Users/mcwiz/Projects" is a relative path on Linux that never exists, so
-# every repository was skipped and the check printed a silent false clean.
-PROJECTS_ROOT = Path(__file__).resolve().parents[2]
+# repository's root, on Windows and on Ubuntu alike. The old spelled Windows
+# root is a relative path on Linux that never exists, so every repository was
+# skipped and the check printed a silent false clean. #3609 moved the
+# derivation into assemblyzero.core.projects_root.
+PROJECTS_ROOT = PROJECTS
 
 
 def extract_handoff_body(text: str) -> str:

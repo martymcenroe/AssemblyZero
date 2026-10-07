@@ -9,11 +9,11 @@ adds nothing to `~/Projects` (see #2077).
 
     # archive a run
     poetry run python tools/speedrun_archive.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --run hardening-run-15
+        --repo ../boostgauge --run hardening-run-15
 
     # what would be captured, without writing
     poetry run python tools/speedrun_archive.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --run hardening-run-15 --dry-run
+        --repo ../boostgauge --run hardening-run-15 --dry-run
 
     # restore
     poetry run python tools/speedrun_archive.py \\

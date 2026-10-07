@@ -18,7 +18,7 @@ What it does (idempotent):
 
 Usage (RUN THIS YOURSELF in your own Git Bash — never via an agent's Bash tool,
 per the _pat_session operational rule):
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_career_test_ci.py            # live
     poetry run python tools/land_career_test_ci.py --dry-run  # preview, no writes
 

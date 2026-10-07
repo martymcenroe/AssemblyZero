@@ -48,7 +48,7 @@ Required classic PAT scopes:
   - workflow           — for Contents API write to .github/workflows/*
 
 Usage:
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/upgrade_boostgauge_auto_reviewer.py
 """
 from __future__ import annotations

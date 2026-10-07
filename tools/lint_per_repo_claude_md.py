@@ -26,7 +26,7 @@ The 9 drift markers (severity in parens):
               per-repo workflow overrides ARE allowed and use the same
               phrases, so this marker hedges via the "override" check.
   8 [ERROR]   Stub (line count < 20)
-  9 [WARNING] Hardcoded C:\\Users\\mcwiz\\... path (should be parameterized
+  9 [WARNING] Hardcoded C:\\Users\\<user>\\... path (should be parameterized
               via config.projects_root())
 
 Heuristic notes:
@@ -124,7 +124,7 @@ RE_FIRST_READ_AZ = re.compile(
 )
 
 # Marker 9: hardcoded user-specific paths.
-RE_HARDCODED_MCWIZ = re.compile(r"C:[\\/]Users[\\/]mcwiz[\\/]")
+RE_HARDCODED_USER_PATH = re.compile(r"C:[\\/]Users[\\/][^\\/\s]+[\\/]")
 
 # Project Identifiers block boundaries — used by marker 9 to skip the
 # scaffolder-emitted literal path in the Identifiers section, which is
@@ -216,9 +216,9 @@ def _strip_identifiers_block(text: str) -> str:
 
     Used by marker 9 to ignore the scaffolder-emitted literal Windows path
     that appears in every per-repo CLAUDE.md's Identifiers block (e.g.
-    `C:\\Users\\mcwiz\\Projects\\boostgauge`). That literal IS the project
+    `C:\\Users\\<user>\\Projects\\boostgauge`). That literal IS the project
     root on this dev machine — load-bearing, not drift. Marker 9 should
-    only fire on `C:\\Users\\mcwiz\\...` occurrences OUTSIDE this block
+    only fire on `C:\\Users\\<user>\\...` occurrences OUTSIDE this block
     (in body prose, example commands, etc.).
 
     If the file has no `## Project Identifiers` heading, returns the
@@ -399,15 +399,15 @@ def detect_drift(
             ))
             break  # one finding per pattern is enough
 
-    # Marker 9: hardcoded mcwiz paths. Skip the Project Identifiers block —
+    # Marker 9: hardcoded user-directory paths. Skip the Project Identifiers block —
     # the literal Windows path there is scaffolder-emitted (load-bearing),
     # not drift. Only fires on occurrences OUTSIDE the Identifiers block.
     text_excl_identifiers = _strip_identifiers_block(text)
-    m = RE_HARDCODED_MCWIZ.search(text_excl_identifiers)
+    m = RE_HARDCODED_USER_PATH.search(text_excl_identifiers)
     if m:
         result.findings.append(Finding(
             9, "WARNING",
-            "Hardcoded C:\\Users\\mcwiz\\... path outside Project "
+            "Hardcoded C:\\Users\\<user>\\... path outside Project "
             "Identifiers block (should be parameterized via "
             "config.projects_root())",
             _match_excerpt(text_excl_identifiers, m),

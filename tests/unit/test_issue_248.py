@@ -154,8 +154,8 @@ def mock_state_base():
     """Base workflow state for testing."""
     return {
         "workflow_type": "lld",
-        "assemblyzero_root": "C:\\Users\\mcwiz\\Projects\\AssemblyZero",
-        "target_repo": "C:\\Users\\mcwiz\\Projects\\TestRepo",
+        "assemblyzero_root": "C:\\Users\\dev\\Projects\\AssemblyZero",
+        "target_repo": "C:\\Users\\dev\\Projects\\TestRepo",
         "config_gates_draft": False,
         "config_gates_verdict": False,
         "config_mock_mode": True,

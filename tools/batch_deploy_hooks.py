@@ -20,7 +20,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROJECTS_ROOT = Path("C:/Users/mcwiz/Projects")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import PROJECTS as PROJECTS_ROOT  # #3609
+
 ASSEMBLY_ZERO = PROJECTS_ROOT / "AssemblyZero"
 HOOKS_SOURCE = ASSEMBLY_ZERO / ".claude" / "hooks"
 
@@ -133,18 +135,18 @@ def get_default_branch(repo_path: Path) -> str:
     return current
 
 
-def generate_settings_json(repo_name: str, existing_settings: dict | None) -> dict:
+def generate_settings_json(existing_settings: dict | None) -> dict:
     """Generate or merge settings.json with hook configuration."""
     hook_entries = [
         {
             "type": "command",
-            "command": f"bash /c/Users/mcwiz/Projects/{repo_name}/.claude/hooks/secret-guard.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret-guard.sh\"",
             "timeout": 5,
             "description": "Secret File Guard (blocks access to .env, credentials)"
         },
         {
             "type": "command",
-            "command": f"bash /c/Users/mcwiz/Projects/{repo_name}/.claude/hooks/bash-gate.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/bash-gate.sh\"",
             "timeout": 5,
             "description": "Bash Command Gate (blocks &&, |, ;)"
         }
@@ -241,7 +243,7 @@ def deploy_to_repo(owner: str, repo_name: str, dry_run: bool) -> str:
         except json.JSONDecodeError:
             existing_settings = None
 
-    new_settings = generate_settings_json(repo_name, existing_settings)
+    new_settings = generate_settings_json(existing_settings)
     settings_path.write_text(
         json.dumps(new_settings, indent=2) + "\n",
         encoding="utf-8"

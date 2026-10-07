@@ -16,7 +16,7 @@ PAT + Contents API + PR + squash-merge. THE OPERATOR RUNS THIS in their own Git
 Bash; an agent must never invoke it.
 
 Usage (operator, one run):
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_aletheia_775.py --apply
 """
 from __future__ import annotations
@@ -33,6 +33,9 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _pat_session import classic_pat_session  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import PROJECTS  # #3609
+
 GITHUB_USER = "martymcenroe"
 REPO = "Aletheia"
 GH_API = "https://api.github.com"
@@ -40,7 +43,7 @@ WORKFLOW_PATH = ".github/workflows/ci.yml"
 BRANCH = "775-retire-deploy-infra-static-keys"
 LOCAL_BRANCH = "775-retire-deploy-infra-static-keys"
 ISSUE_NUMBER = 775
-ALETHEIA_REPO = Path("C:/Users/mcwiz/Projects/Aletheia")
+ALETHEIA_REPO = PROJECTS / "Aletheia"
 HTTP_TIMEOUT_S = 30
 POLL_INTERVAL_S = 10
 MERGEABLE_TIMEOUT_S = 900

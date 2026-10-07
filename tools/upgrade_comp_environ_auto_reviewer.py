@@ -62,7 +62,7 @@ Required classic PAT scopes:
   - workflow           -- Contents API write to .github/workflows/*
 
 Usage:
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/upgrade_comp_environ_auto_reviewer.py           # dry run
     poetry run python tools/upgrade_comp_environ_auto_reviewer.py --apply   # mutate
 """

@@ -302,7 +302,8 @@ def detect_convergent_evolution(all_candidates: list) -> list:
 def harvest_project(project: dict, verbose: bool = False) -> list:
     """Harvest promotion candidates from a single project."""
     project_name = project["name"]
-    project_path = Path(project["path"])
+    # #3609: a relative path is relative to the AssemblyZero checkout.
+    project_path = (ASSEMBLYZERO_ROOT / project["path"]).resolve()
 
     if not project_path.exists():
         if verbose:
