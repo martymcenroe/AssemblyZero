@@ -27,4 +27,9 @@
 - The driver stopped at `checks_failed` on head `f60885e9`, with nothing merged. The e2e tier halted a workflow, and the HALT node reached the real `alert_operator`. The recorder and the transport refusal lived in `tests/unit/conftest.py`, so only the unit tier had them. I had run only the unit tier before pushing.
 - Fix: `RealAlertTransportReached`, `_no_real_alert_transport` and `operator_alerts` moved to `tests/conftest.py`, so every tier gets them. `test_alert.py` imports the exception from there.
 - The fix branch merged `origin/main` (one commit, #3805) rather than rebasing, because the branch was already pushed.
-- All four tiers were then run on the merged tree: see below.
+- All four tiers were then run on the merged tree, with the machine quiet:
+  - integration: 64 passed, 7 skipped;
+  - e2e: 19 passed;
+  - adversarial: 1 skipped, the only test it selects;
+  - unit: 10997 passed, 66 skipped, 7 deselected, 6 xfailed in 9m 1s.
+- `tools/audit_fail_open.py --check --strict`: PASS. `tools/audit_loud_failure.py --check`: PASS at 329.
