@@ -264,70 +264,70 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/workflows/scout/templates.py` | 139 | not yet read | |
 | `assemblyzero/workflows/telemetry/__init__.py` | 16 | not yet read | |
 | `assemblyzero/workflows/telemetry/hallucination_log.py` | 124 | not yet read | |
-| `assemblyzero/workflows/testing/__init__.py` | 24 | not yet read | |
-| `assemblyzero/workflows/testing/adversarial_gemini.py` | 406 | not yet read | |
-| `assemblyzero/workflows/testing/adversarial_prompts.py` | 180 | not yet read | |
-| `assemblyzero/workflows/testing/adversarial_state.py` | 72 | not yet read | |
-| `assemblyzero/workflows/testing/atlas.py` | 299 | not yet read | |
-| `assemblyzero/workflows/testing/audit.py` | 331 | not yet read | |
-| `assemblyzero/workflows/testing/checkpoints.py` | 256 | not yet read | |
-| `assemblyzero/workflows/testing/circuit_breaker.py` | 139 | not yet read | |
-| `assemblyzero/workflows/testing/completeness/__init__.py` | 31 | not yet read | |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py` | 883 | not yet read | |
-| `assemblyzero/workflows/testing/completeness/report_generator.py` | 444 | not yet read | |
-| `assemblyzero/workflows/testing/coverage_report.py` | 193 | not yet read | |
-| `assemblyzero/workflows/testing/exit_code_router.py` | 106 | not yet read | |
-| `assemblyzero/workflows/testing/framework_detector.py` | 332 | not yet read | |
-| `assemblyzero/workflows/testing/graph.py` | 793 | not yet read | |
-| `assemblyzero/workflows/testing/knowledge/__init__.py` | 10 | not yet read | |
-| `assemblyzero/workflows/testing/knowledge/adversarial_patterns.py` | 53 | not yet read | |
-| `assemblyzero/workflows/testing/knowledge/patterns.py` | 192 | not yet read | |
-| `assemblyzero/workflows/testing/knowledge/types.yaml` | 241 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/__init__.py` | 68 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/adversarial_node.py` | 468 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/adversarial_validator.py` | 281 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/adversarial_writer.py` | 180 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/augment_tests.py` | 799 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/cleanup.py` | 157 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py` | 538 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py` | 439 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/document.py` | 377 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/e2e_validation.py` | 464 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/finalize.py` | 314 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implement_code.py` | 106 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/__init__.py` | 129 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/claude_client.py` | 271 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/context.py` | 188 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/deprecated.py` | 251 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py` | 527 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/import_validator.py` | 383 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py` | 269 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py` | 1269 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/parsers.py` | 449 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/prompts.py` | 392 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/implementation/routing.py` | 97 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/load_lld.py` | 1412 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/mechanical_hooks.py` | 110 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/review_test_plan.py` | 775 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/revise_test_plan.py` | 324 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/scaffold_tests.py` | 1265 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py` | 1047 | not yet read | |
-| `assemblyzero/workflows/testing/nodes/verify_phases.py` | 3918 | not yet read | |
-| `assemblyzero/workflows/testing/path_validator.py` | 180 | not yet read | |
-| `assemblyzero/workflows/testing/runner_registry.py` | 150 | not yet read | |
-| `assemblyzero/workflows/testing/runners/__init__.py` | 16 | not yet read | |
-| `assemblyzero/workflows/testing/runners/base_runner.py` | 137 | not yet read | |
-| `assemblyzero/workflows/testing/runners/jest_runner.py` | 206 | not yet read | |
-| `assemblyzero/workflows/testing/runners/playwright_runner.py` | 194 | not yet read | |
-| `assemblyzero/workflows/testing/runners/pytest_runner.py` | 124 | not yet read | |
-| `assemblyzero/workflows/testing/state.py` | 374 | not yet read | |
-| `assemblyzero/workflows/testing/step_budget.py` | 95 | not yet read | |
-| `assemblyzero/workflows/testing/symbol_validator.py` | 188 | not yet read | |
-| `assemblyzero/workflows/testing/templates/__init__.py` | 30 | not yet read | |
-| `assemblyzero/workflows/testing/templates/cp_docs.py` | 295 | not yet read | |
-| `assemblyzero/workflows/testing/templates/lessons.py` | 304 | not yet read | |
-| `assemblyzero/workflows/testing/templates/runbook.py` | 259 | not yet read | |
-| `assemblyzero/workflows/testing/templates/wiki_page.py` | 207 | not yet read | |
+| `assemblyzero/workflows/testing/__init__.py` | 24 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/adversarial_gemini.py` | 406 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 3 |
+| `assemblyzero/workflows/testing/adversarial_prompts.py` | 180 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/adversarial_state.py` | 72 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/atlas.py` | 299 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/audit.py` | 331 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 3 |
+| `assemblyzero/workflows/testing/checkpoints.py` | 256 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 14 |
+| `assemblyzero/workflows/testing/circuit_breaker.py` | 139 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/completeness/__init__.py` | 31 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py` | 883 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 9 |
+| `assemblyzero/workflows/testing/completeness/report_generator.py` | 444 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 6 |
+| `assemblyzero/workflows/testing/coverage_report.py` | 193 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/exit_code_router.py` | 106 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 4 |
+| `assemblyzero/workflows/testing/framework_detector.py` | 332 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 3 |
+| `assemblyzero/workflows/testing/graph.py` | 793 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 16 |
+| `assemblyzero/workflows/testing/knowledge/__init__.py` | 10 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/knowledge/adversarial_patterns.py` | 53 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/knowledge/patterns.py` | 192 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 2 |
+| `assemblyzero/workflows/testing/knowledge/types.yaml` | 241 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/nodes/__init__.py` | 68 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py` | 468 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 11 |
+| `assemblyzero/workflows/testing/nodes/adversarial_validator.py` | 281 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 2 |
+| `assemblyzero/workflows/testing/nodes/adversarial_writer.py` | 180 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 4 |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py` | 799 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 26 |
+| `assemblyzero/workflows/testing/nodes/cleanup.py` | 157 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 8 |
+| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py` | 538 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 4 |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py` | 439 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 7 |
+| `assemblyzero/workflows/testing/nodes/document.py` | 377 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 7 |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py` | 464 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 10 |
+| `assemblyzero/workflows/testing/nodes/finalize.py` | 314 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 4 |
+| `assemblyzero/workflows/testing/nodes/implement_code.py` | 106 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/nodes/implementation/__init__.py` | 129 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/nodes/implementation/claude_client.py` | 271 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 3 |
+| `assemblyzero/workflows/testing/nodes/implementation/context.py` | 188 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 1 |
+| `assemblyzero/workflows/testing/nodes/implementation/deprecated.py` | 251 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 4 |
+| `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py` | 527 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 5 |
+| `assemblyzero/workflows/testing/nodes/implementation/import_validator.py` | 383 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 3 |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py` | 269 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 7 |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py` | 1269 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 26 |
+| `assemblyzero/workflows/testing/nodes/implementation/parsers.py` | 449 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 6 |
+| `assemblyzero/workflows/testing/nodes/implementation/prompts.py` | 392 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 1 |
+| `assemblyzero/workflows/testing/nodes/implementation/routing.py` | 97 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/nodes/load_lld.py` | 1412 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 10 |
+| `assemblyzero/workflows/testing/nodes/mechanical_hooks.py` | 110 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 1 |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py` | 775 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 7 |
+| `assemblyzero/workflows/testing/nodes/revise_test_plan.py` | 324 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py` | 1265 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 11 |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py` | 1047 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 6 |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py` | 3918 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 33 |
+| `assemblyzero/workflows/testing/path_validator.py` | 180 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 2 |
+| `assemblyzero/workflows/testing/runner_registry.py` | 150 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 1 |
+| `assemblyzero/workflows/testing/runners/__init__.py` | 16 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/runners/base_runner.py` | 137 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 4 |
+| `assemblyzero/workflows/testing/runners/jest_runner.py` | 206 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 6 |
+| `assemblyzero/workflows/testing/runners/playwright_runner.py` | 194 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 2 |
+| `assemblyzero/workflows/testing/runners/pytest_runner.py` | 124 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 2 |
+| `assemblyzero/workflows/testing/state.py` | 374 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/step_budget.py` | 95 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/symbol_validator.py` | 188 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 3 |
+| `assemblyzero/workflows/testing/templates/__init__.py` | 30 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/templates/cp_docs.py` | 295 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 2 |
+| `assemblyzero/workflows/testing/templates/lessons.py` | 304 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 0 |
+| `assemblyzero/workflows/testing/templates/runbook.py` | 259 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 3 |
+| `assemblyzero/workflows/testing/templates/wiki_page.py` | 207 | 2026-10-07, one delegated reader per file, every finding's quoted line verified by script | 2 |
 | `tools/_gate.py` | 103 | not yet read | |
 | `tools/_gh_retry.py` | 132 | not yet read | |
 | `tools/_npm_manifest.py` | 108 | not yet read | |
@@ -698,3 +698,357 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/pr_poll.py:86` | error payload | wait | loud, logged, stops | raise |
 | `assemblyzero/core/text_sanitizer.py:72` | non-str | unstripped | loud, logged, stops | raise |
 | `assemblyzero/core/workspace_context.py:38` | missing path | raise | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:594` | the directory probe raises OSError | False, falls back to a directory target; coverage may measure the wrong scope | loud, logged, stops, alerts | ERROR and re-raise so N5 halts |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:767` | pytest-cov not installed | WARN, runs without --cov | loud, logged, stops, alerts | raise or route to HALT: the coverage gate cannot run |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:791` | pytest run times out | synthetic -1 result read as test errors, loops to N4 | loud, logged, stops, alerts | ERROR with command and timeout; halt |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:798` | poetry or pytest not on PATH | synthetic -1 result treated as failure | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:841` | restoring a best-iteration file fails | prints non-fatal, partly restored worktree | loud, logged, alerts | ERROR and alert naming the files |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1009` | red marker cannot be written | returns silently | loud, logged, stops, alerts | raise or ERROR and alert |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1022` | writing the red marker raises | WARNING, continues, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1036` | reading the red marker fails | None silently, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1241` | a test file cannot be read for the hollow check | skips it: could not check reads as not hollow | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1271` | N3 has no test files | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1276` | a listed test file is missing | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1293` | audit dir missing | skips red-phase.txt silently | loud, logged, stops, alerts | raise or route to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1423` | pytest interrupted in red phase | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1605` | tests pass before implementation | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1697` | unknown framework resolves to None | runs the pytest path silently | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1729` | no framework config ran in the red phase | success with no red phase run | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1798` | best-iteration snapshot fails | non-fatal print, no snapshot | loud, logged, alerts | ERROR and alert, or raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1821` | restoring a snapshot file fails | non-fatal print, revises from a mixed state | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1846` | git status cannot run | None silently, droppings cleanup skipped | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1849` | git status exits non-zero | None, stderr dropped | loud, logged, stops, alerts | ERROR with code and stderr, raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1885` | a dropping cannot be deleted | prints, continues; poisons later iterations | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1927` | git status cannot run preserving samples | ("", []), under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise or alert |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1932` | git status exits non-zero preserving samples | ("", []) silently, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise or alert |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:1956` | copying a sample fails | prints, partial output, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise after the loop |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2249` | spec suite cannot be read | [] silently, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2261` | a plan test file cannot be read | skipped, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2270` | an aligned file cannot be written | prints, measures the drifted file, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2387` | candidate path not under repo_root | builds a scope from an absolute path | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2393` | no coverage target derivable | hard-coded default module | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2431` | audit dir missing | skips green-phase.txt silently | loud, logged, stops, alerts | raise or route to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2526` | pytest interrupted in green phase | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2584` | coverage target absent | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2669` | zero tests collected twice | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2721` | iteration cap with failures | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2811` | deterministic failure | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2891` | circuit breaker trips | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2960` | cap below coverage target | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:2995` | circuit breaker trips | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3098` | full-suite run exits 2-5 or -1 with nothing parsed | exit code unchecked: reads as no regressions | loud, logged, stops, alerts | check the return code; error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3192` | skip-audit gate fails | WARNING, green passes anyway | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3310` | result carries no coverage figure | defaults to 100% | loud, logged, stops, alerts | missing coverage is a failure; HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3355` | no framework config ran in the green phase | success with no tests run | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3398` | non-pytest red phase has no tests | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3408` | runner cannot be built | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3416` | non-pytest runner crashes without running tests | reroutes to the scaffolder as no tests ran | loud, logged, stops, alerts | error_message to HALT on a crash code |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3584` | runner cannot be built in green | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3592` | non-pytest green run exits non-zero or collects nothing | unchecked; zero failures passes | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3599` | coverage_type invalid | defaults to LINE silently | loud, logged, stops, alerts | ERROR and HALT |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3647` | non-pytest cap with failures | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3672` | circuit breaker trips | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py:3707` | non-pytest cap below coverage | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/graph.py:128` | git checkpoint after a node fails | prints, continues (best-effort) | loud, logged, stops, alerts | ERROR, alert, re-raise |
+| `assemblyzero/workflows/testing/graph.py:217` | N1 error under auto_mode | ignored, continues to N2 | loud, logged, stops, alerts | route any error to HALT |
+| `assemblyzero/workflows/testing/graph.py:227` | test-plan gate BLOCKED under auto | continues past a failed gate | loud, logged, stops, alerts | route BLOCKED to HALT or revision |
+| `assemblyzero/workflows/testing/graph.py:232` | gate BLOCKED under strict policy | END, no alert | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:245` | still BLOCKED after the revision cap | END with a print | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:318` | regeneration exhausted at N2.5 | END, no HALT, no alert | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:355` | unrecognised next_node after N3 | END silently | loud, logged, stops, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:438` | iteration cap on the augment path | END silently | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:447` | augment attempts spent | END with a print | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:451` | cost budget exceeded on augment | END with a print | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:471` | iteration cap while N5 asks for a revision | END, error_message empty | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:478` | cost budget exceeded before N4 | END with a print | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:488` | unrecognised next_node after N5 | END silently | loud, logged, stops, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:513` | iteration cap after an E2E failure | END silently | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/graph.py:557` | adversarial node errors or skips | continues to N8 | loud, logged, stops, alerts | route an error or skip to HALT |
+| `assemblyzero/workflows/testing/graph.py:732` | N4c can return an error | unconditional edge to N5 | stops, alerts | conditional edge to HALT |
+| `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:273` | a planned file cannot be read | empty sets, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:303` | a test file cannot be read | empty set, under a tag | loud, logged, stops, alerts | remove the tag, ERROR, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:497` | model returns no edit blocks | None outcome, falls back to regeneration with a print | loud, logged, alerts | ERROR on the fallback |
+| `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:503` | edit blocks do not apply | None outcome, fallback with a print | loud, logged, alerts | ERROR naming the blocks |
+| `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:507` | edits empty the file | None outcome, fallback with a print | loud, logged, alerts | ERROR naming the file |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:89` | LLD cannot be read | WARNING, [] | loud, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:100` | Section 3 not found | WARNING, [] | loud, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:169` | no requirements extracted | empty requirements list | loud, logged, stops, alerts | raise |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:187` | an implementation file cannot be read | WARNING, partial materials | loud, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:407` | report cannot be written | ERROR, returns a nonexistent path | stops, alerts | alert and re-raise |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:444` | project root not found | falls back silently | loud, logged, stops, alerts | raise naming the LLD |
+| `assemblyzero/workflows/testing/nodes/implementation/import_validator.py:85` | metadata enumeration fails | silent fallback to a map | loud, logged, stops, alerts | ERROR and re-raise |
+| `assemblyzero/workflows/testing/nodes/implementation/import_validator.py:119` | pyproject.toml unreadable | empty set; every import flagged | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/implementation/import_validator.py:229` | code does not parse | (True, []): a gate that could not run passes | loud, logged, stops, alerts | return False with the error, or raise |
+| `assemblyzero/workflows/testing/nodes/revise_test_plan.py:226` | no requirements to revise against | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/revise_test_plan.py:246` | revisor spec invalid | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/revise_test_plan.py:266` | revisor call fails | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/revise_test_plan.py:307` | revision budget spent | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/templates/cp_docs.py:137` | no CLI commands extracted | invented placeholder row written | loud, logged, stops, alerts | raise or ERROR and skip |
+| `assemblyzero/workflows/testing/templates/cp_docs.py:159` | no commands for the usage block | invented placeholder command | loud, logged, stops, alerts | raise or ERROR and skip |
+| `assemblyzero/workflows/testing/templates/runbook.py:172` | no prerequisites extracted | placeholder prerequisites | loud, logged, stops, alerts | raise or ERROR and skip |
+| `assemblyzero/workflows/testing/templates/runbook.py:200` | no procedure steps | placeholder procedure | loud, logged, stops, alerts | raise or ERROR and skip |
+| `assemblyzero/workflows/testing/templates/runbook.py:210` | no verification steps | placeholder verification row | loud, logged, stops, alerts | raise or ERROR and skip |
+| `assemblyzero/workflows/testing/knowledge/patterns.py:24` | types.yaml missing | silent inline fallback | loud, logged, stops, alerts | raise FileNotFoundError |
+| `assemblyzero/workflows/testing/knowledge/patterns.py:30` | types.yaml unreadable | silent inline fallback | loud, logged, stops, alerts | ERROR and re-raise |
+| `assemblyzero/workflows/testing/nodes/adversarial_writer.py:45` | analysis holds no test cases | INFO, {} | loud, logged, stops, alerts | raise or ERROR |
+| `assemblyzero/workflows/testing/nodes/adversarial_writer.py:82` | writing a test file fails | ERROR and re-raise, but no alert (N7.5 has no HALT route) | alerts | alert before re-raising |
+| `assemblyzero/workflows/testing/nodes/adversarial_writer.py:90` | deleting the staging dir fails | ignored, leaves a staging dir | loud, logged, alerts | drop ignore_errors, ERROR on failure |
+| `assemblyzero/workflows/testing/nodes/adversarial_writer.py:134` | a test case has empty code | skipped silently, partial file | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/runner_registry.py:117` | framework string unrecognised | None; one caller treats None as pytest | loud, logged, stops, alerts | raise ValueError |
+| `assemblyzero/workflows/testing/runners/pytest_runner.py:45` | pytest exits interrupted, internal, usage or collection error | exit code never read; counts default to 0 | loud, logged, stops, alerts | raise or ERROR on codes other than 0 or 1 |
+| `assemblyzero/workflows/testing/runners/pytest_runner.py:57` | no TOTAL coverage line | defaults to 0.0 | loud, logged, stops, alerts | None or raise when unmeasured |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:101` | count_stub_tests cannot parse | (0, 0, []); the syntax error is recorded at line 418 in the same pass | compliant | none |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:418` | generated tests do not parse | appended to errors; exhaustion halts through HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:499` | imported_helper_sources cannot parse | {} as documented; the error is reported at line 418 | compliant | none |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:500` | withdrawn fail-open tag | comment present | loud, logged, stops, alerts | delete the tag |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:522` | a neighbouring helper cannot be read or parsed | continues, drops the helper; a valid test can be refused misleadingly | loud, logged, stops, alerts | ERROR with path and cause; record it as a validation error |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:523` | withdrawn fail-open tag | comment present | loud, logged, stops, alerts | delete the tag |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:557` | validate_scenario_coverage cannot parse | []; the error is already listed from line 418 | compliant | none |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:676` | every test fails unconditionally and the spec has no bodies | stdout print, proceeds | loud, alerts | ERROR on stderr with issue and stub names |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:811` | the non-pytest runner cannot be built | stdout print, is_valid True: a gate that cannot run passes | loud, logged, stops, alerts | return error_message routed to HALT |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:963` | scaffold budget spent on a valid suite | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:975` | scaffold invalid and regeneration exhausted | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py:1043` | legacy fallback with regeneration exhausted | escalate with no error_message, routed to end, not HALT | loud, logged, stops, alerts | set error_message so the run halts |
+| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py:101` | worktree absent | INFO, False as documented; the caller treats it as done | compliant | none |
+| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py:144` | git worktree list fails | WARNING, None, read as no branch | loud, logged, stops, alerts | raise CalledProcessError |
+| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py:193` | git branch -d fails | any "error: branch" read as not found | loud, logged, stops, alerts | match the exact not-found message, re-raise the rest |
+| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py:221` | no active lineage dir | INFO, None as documented; the caller checks first | compliant | none |
+| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py:277` | a lineage artifact cannot be read | continue, drops the iteration | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/cleanup_helpers.py:288` | coverage figure does not parse | records 0.0% | loud, logged, stops, alerts | raise with file and text |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:45` | passed count unparseable | 0 as documented; advisory only | compliant | none |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:182` | E2E run times out | -1; halts, but the message omits the timeout | logged | carry stderr, timeout and command into error_message |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:188` | poetry or pytest missing | -1; halts, cause lost | logged | put the cause into error_message |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:210` | cleanup_sandbox is a stub | always reports success | loud, logged, stops, alerts | raise NotImplementedError or implement |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:231` | verify_safety_limits is a stub | always reports safe | loud, logged, stops, alerts | implement or raise |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:291` | audit dir missing | skips saving results | loud, logged, stops, alerts | error_message naming the dir |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:300` | sandbox cleanup fails | WARN on stdout, continues | loud, logged, stops, alerts | error_message routed to HALT |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:313` | no E2E tests collected | routes to finalize as if passed | loud, logged, stops, alerts | halt unless E2E explicitly skipped |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:331` | pytest internal error | routed to HALT, without cause or identity | logged | include issue and output tail |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:334` | pytest exit 2 or unknown code | treated as test failures, loops to N4 | stops, alerts | only exit 1 is test failure; halt otherwise |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:337` | no E2E tests ran on non-zero exit | proceeds to finalize as if passed | loud, logged, stops, alerts | halt as at line 313 |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:394` | circuit breaker trips | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/e2e_validation.py:417` | retry loop runs out | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/adversarial_gemini.py:214` | response model neither Pro nor Flash | WARNING, verification passes | loud, logged, stops, alerts | raise GeminiModelDowngradeError |
+| `assemblyzero/workflows/testing/adversarial_gemini.py:291` | unexpected provider exception | re-raised as a timeout, which the node treats as a skip | loud, alerts | ERROR and re-raise the original |
+| `assemblyzero/workflows/testing/adversarial_gemini.py:361` | success with no text | empty string accepted | loud, logged, stops, alerts | raise on empty |
+| `assemblyzero/workflows/testing/nodes/implementation/claude_client.py:61` | timeout override not an integer | stdout, default used | loud, logged, stops, alerts | raise naming the variable |
+| `assemblyzero/workflows/testing/nodes/implementation/claude_client.py:64` | timeout override not positive | stdout, default used | loud, logged, stops, alerts | raise naming the variable |
+| `assemblyzero/workflows/testing/nodes/implementation/claude_client.py:250` | model is not a provider spec | [NON-RETRYABLE] string; the caller raises ImplementationError | compliant | none |
+| `assemblyzero/workflows/testing/nodes/implementation/claude_client.py:270` | seat, provider or invoke raises | string with no type or ERROR log | loud, logged | ERROR with type, seat and file |
+| `assemblyzero/workflows/testing/checkpoints.py:89` | worktree path missing | False silently | loud, logged, stops, alerts | raise naming the path |
+| `assemblyzero/workflows/testing/checkpoints.py:96` | git add fails | return code ignored | loud, logged, stops, alerts | check it, fail with stderr |
+| `assemblyzero/workflows/testing/checkpoints.py:103` | git diff --cached fails | any non-zero read as staged | logged | only exit 1 means staged |
+| `assemblyzero/workflows/testing/checkpoints.py:115` | checkpoint commit fails | stdout non-fatal, False | loud, alerts, stops | ERROR and raise |
+| `assemblyzero/workflows/testing/checkpoints.py:125` | git times out or cannot run | stdout non-fatal, False | loud, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/checkpoints.py:193` | measurement note not written | stdout non-fatal, False | loud, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/checkpoints.py:194` | withdrawn fail-open tag | comment present | loud, logged, stops, alerts | delete the tag |
+| `assemblyzero/workflows/testing/checkpoints.py:200` | git notes add fails | stdout non-fatal, False | loud, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/checkpoints.py:222` | git notes show cannot run | None, read as no measurement | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/checkpoints.py:223` | withdrawn fail-open tag | comment present | loud, logged, stops, alerts | delete the tag |
+| `assemblyzero/workflows/testing/checkpoints.py:229` | git notes show fails | None, same as no note | loud, logged, stops, alerts | raise unless git says no note |
+| `assemblyzero/workflows/testing/checkpoints.py:232` | a note is corrupt | None silently | loud, logged, stops, alerts | raise naming commit and text |
+| `assemblyzero/workflows/testing/checkpoints.py:238` | measurement numbers do not convert | None silently | loud, logged, stops, alerts | raise naming the commit |
+| `assemblyzero/workflows/testing/checkpoints.py:239` | withdrawn fail-open tag | comment present | loud, logged, stops, alerts | delete the tag |
+| `assemblyzero/workflows/testing/runners/playwright_runner.py:91` | no JSON report | WARNING, fabricated result | loud, logged, stops, alerts | raise with exit code and output head |
+| `assemblyzero/workflows/testing/runners/playwright_runner.py:104` | JSON report does not parse | WARNING, fabricated result | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/implementation/context.py:40` | a completed file cannot be parsed | first 50 lines, generation continues | loud, logged | ERROR naming the file and error |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:47` | issue_number missing after N8 | INFO, run ends without cleanup | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:72` | keys not declared in the state | always 0.0, 0.0, UNKNOWN; the summary always reports failure | loud, logged, stops, alerts | read the declared keys, fail when absent |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:81` | repo_root missing | uses the current directory | loud, logged, stops, alerts | error_message when absent |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:96` | worktree removal or branch delete fails | WARNING, continues; N9 goes straight to END | loud, stops, alerts | error_message, conditional edge to HALT |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:103` | PR merge check fails | WARNING, records skip reason | loud, stops, alerts | error_message routed to HALT |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:123` | learning summary fails | WARNING, continues | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:138` | archival produced no done dir | WARNING, continues | loud, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/cleanup.py:139` | lineage archival raises | WARNING, continues | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/exit_code_router.py:47` | red phase passes every test | END, no error; function unused | loud, logged, stops, alerts | route to HALT or delete the unused function |
+| `assemblyzero/workflows/testing/exit_code_router.py:60` | pytest interrupted or internal error | end, not HALT; unused | loud, logged, stops, alerts | route to HALT or delete |
+| `assemblyzero/workflows/testing/exit_code_router.py:68` | pytest timed out | end, not HALT; unused | loud, logged, stops, alerts | route to HALT or delete |
+| `assemblyzero/workflows/testing/exit_code_router.py:71` | unknown exit code | end, not HALT; unused | loud, logged, stops, alerts | route to HALT or delete |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:202` | Section 10 cannot be parsed | empty suite, same as no functions; quiet fallback | loud, logged, stops, alerts | re-raise or return a parse-failure marker |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:324` | LLD rebuild from refs raised | WARN, None, continues on spec content | loud, logged, stops, alerts | alert with issue and cause, raise |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:325` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:835` | no coverage target in the LLD | documented ADR 0207 default | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:896` | no files table | [], no red-phase import, no message | loud, logged, stops, alerts | raise WorkflowParsingError or error_message |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:969` | gh issue view timed out or missing | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:972` | gh issue view non-zero | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:977` | gh JSON does not parse | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:983` | issue has no body | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1001` | issue-only mode has no Section 10 | empty plan, success, no message | loud, logged, stops, alerts | error_message naming Section 10 |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1099` | spec missing | MISSING REQUIRED INPUT routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1136` | spec cannot be read | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1142` | spec too short | GUARD error routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1146` | spec not approved | GUARD WARNING, continues | loud, logged, stops, alerts | error_message so it halts |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1164` | original LLD unreadable | WARN, continues on the spec | loud, logged, stops, alerts | error_message naming path and cause |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1180` | original LLD fails Section 10 validation | swallowed, next source tried | loud, logged, stops, alerts | record each source's error |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1182` | no Section 10 anywhere | GUARD WARNING, zero scenarios | loud, logged, stops, alerts | error_message to halt at N0 |
+| `assemblyzero/workflows/testing/nodes/load_lld.py:1224` | zero requirements extracted | prints, continues until N4b | loud, logged, stops, alerts | error_message at N0 |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:105` | no Section 10 | empty ParsedLLDTests silently | loud, logged, stops, alerts | raise naming the patterns |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:325` | no assertion derivable | emits assert True | loud, logged, stops, alerts | raise or emit a failing assertion |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:342` | no assertion pattern matches | emits assert True | loud, logged, stops, alerts | raise or emit a failing assertion |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:435` | unsupported framework | raises | compliant | none |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:457` | Playwright scaffold has no logic | always-passing placeholder | loud, logged, stops, alerts | failing placeholder and ERROR |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:489` | Jest scaffold has no logic | always-passing assertion | loud, logged, stops, alerts | failing assertion and ERROR |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:787` | emitted test file does not parse | empty repair set, continues | loud, logged, stops, alerts | raise or error_message |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:788` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:833` | find_spec raised | False, classified as a symbol | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:834` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:1069` | audit dir missing (non-Python) | audit file skipped silently | loud, logged, stops, alerts | raise or error_message |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:1153` | no scenarios | GUARD error routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py:1199` | audit dir missing (pytest) | audit record skipped silently | loud, logged, stops, alerts | raise or error_message |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:101` | malformed range in Missing column | skipped silently | loud, logged, stops, alerts | raise a parse error |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:106` | malformed line number | skipped silently | loud, logged, stops, alerts | raise a parse error |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:134` | uncovered source unreadable | "", caller falls back to bare ranges | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:142` | uncovered source does not parse | documented fallback to _read_lines | compliant | none |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:209` | source unreadable in _read_lines | "" silently | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:218` | malformed range in _read_lines | skipped silently | loud, logged, stops, alerts | raise a parse error |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:223` | malformed line in _read_lines | skipped silently | loud, logged, stops, alerts | raise a parse error |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:317` | addition does not parse in vetting | keeps nothing, read as none pass | loud, logged, stops, alerts | raise: invariant breach |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:318` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:347` | vetting run executed nothing | drops all additions, returns to N5 with no error | loud, logged, stops, alerts | ERROR and error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:389` | repair source does not parse | passed through unchanged | loud, logged, stops, alerts | raise or reject loudly |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:390` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:537` | N4c has no test file | returns to N5 with no error | loud, logged, stops, alerts | error_message, conditional edge to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:551` | coverage not measured | error_message on an unconditional edge to N5 | stops, alerts | conditional edge to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:554` | under target with no uncovered lines named | returns to N5, attempts not counted; can loop | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:581` | target test file unreadable | returns to N5 with no error | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:593` | audit dir missing | audit writes skipped silently | loud, logged, stops, alerts | raise or error_message |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:613` | augment seat cannot resolve | prints, returns to N5 with no error | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:645` | LLM call failed or empty | prints, returns to N5, no attempt counted | loud, logged, stops, alerts | error_message with the provider error |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:650` | no code block | prints, returns to N5 | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:671` | retry loop ran out | returns to N5 with no error (a skip) | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:701` | added tests failed | prints, partial output | loud, logged, stops, alerts | ERROR, count drops as a failure |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:721` | repair call returned an error | error ignored | loud, logged, stops, alerts | check and log the error |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:734` | repaired candidate does not parse | printed, continues | loud, logged, stops, alerts | ERROR, surface in error_message |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:735` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:755` | repair fails import validation | printed, continues | loud, logged, stops, alerts | ERROR, surface in error_message |
+| `assemblyzero/workflows/testing/nodes/augment_tests.py:761` | none of the added tests pass | restores, returns to N5 with no error | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:132` | no implementation files | INFO, skipped; router always goes to N8 | loud, logged, stops, alerts | error_message, route to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:148` | client cannot be built | WARNING, skipped | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:164` | quota exhausted | WARNING, skipped | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:167` | model not permitted | WARNING, skipped | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:174` | downgraded to Flash | WARNING, skipped | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:177` | call failed or timed out | WARNING, skipped | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:184` | malformed response | ERROR, verdict error, proceeds to N8 | stops, alerts | error_message, route to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:235` | generated file has violations | WARNING, deleted, partial set | loud, logged, stops, alerts | ERROR and fail the node |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:239` | removing a rejected file failed | pass; the file stays | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:250` | zero valid tests | verdict fail at INFO, proceeds | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/adversarial_node.py:372` | a file cannot be read for context | WARNING, "", partial context | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:119` | zero requirements | BLOCK routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:142` | no files to analyse | WARN, verdict PASS | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:158` | AST analysis raised | WARNING, verdict WARN, proceeds | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:215` | Layer 2 materials raised | WARNING, Layer 2 skipped | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:243` | report generation raised | WARNING, continues | loud, logged, stops, alerts | ERROR, error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:249` | no LLD path | WARN, report skipped | loud, logged, stops, alerts | error_message to HALT |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:364` | still BLOCK at the cap | END, bypasses HALT | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:380` | issues stagnant | END, bypasses HALT | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/nodes/document.py:182` | README required but missing | False, reported as no update needed | loud, logged, stops, alerts | raise naming the README |
+| `assemblyzero/workflows/testing/nodes/document.py:215` | README has no Features section | False silently | loud, logged, stops, alerts | raise naming the section |
+| `assemblyzero/workflows/testing/nodes/document.py:289` | sidebar update failed | False return ignored | loud, logged, stops, alerts | check it and raise |
+| `assemblyzero/workflows/testing/nodes/document.py:292` | wiki page generation raised | SKIPPED, continues | loud, logged, stops, alerts | alert and raise, or HALT |
+| `assemblyzero/workflows/testing/nodes/document.py:308` | runbook generation raised | SKIPPED, continues | loud, logged, stops, alerts | alert and raise, or HALT |
+| `assemblyzero/workflows/testing/nodes/document.py:338` | c/p doc generation raised | SKIPPED, partial cp_paths | loud, logged, stops, alerts | alert and raise, or HALT |
+| `assemblyzero/workflows/testing/nodes/document.py:350` | README update raised | SKIPPED, continues | loud, logged, stops, alerts | alert and raise, or HALT |
+| `assemblyzero/workflows/testing/audit.py:121` | audit dir missing | 1, as if empty | loud, logged, stops, alerts | raise FileNotFoundError |
+| `assemblyzero/workflows/testing/audit.py:280` | audit log write failed | WARNING, continues | loud, logged, stops, alerts | alert and raise |
+| `assemblyzero/workflows/testing/audit.py:320` | no TOTAL coverage row | 0.0 default, same as 0% | loud, logged, stops, alerts | None when absent |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py:98` | before or after source does not parse | returns after untouched | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py:99` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py:134` | a passing test's class was deleted | dropped silently | loud, logged, stops, alerts | report the lost test or raise |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py:172` | spec suite does not parse | contract unchanged silently | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py:173` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py:214` | plan or spec does not parse | plan unaligned silently | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/nodes/implementation/keep_passing_tests.py:215` | withdrawn fail-open tag | justifies the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/templates/wiki_page.py:120` | no overview extracted | placeholder in the wiki page | loud, logged, stops, alerts | raise naming the section |
+| `assemblyzero/workflows/testing/templates/wiki_page.py:169` | _Sidebar.md missing | False; the caller ignores it | loud, logged, stops, alerts | raise or check the result |
+| `assemblyzero/workflows/testing/coverage_report.py:137` | no TOTAL row | documented ABSENT, treated as failure | compliant | none |
+| `assemblyzero/workflows/testing/coverage_report.py:143` | target absent from report | documented ABSENT with message | compliant | none |
+| `assemblyzero/workflows/testing/path_validator.py:65` | stat failed | documented (False, reason) | compliant | none |
+| `assemblyzero/workflows/testing/path_validator.py:164` | a context file fails validation | appended; run continues with partial context | loud, logged, stops, alerts | exit non-zero and alert on any rejection |
+| `assemblyzero/workflows/testing/path_validator.py:177` | reading a validated file raised | appended, partial context | loud, logged, stops, alerts | raise or exit non-zero |
+| `assemblyzero/workflows/testing/nodes/mechanical_hooks.py:70` | no .unleashed.json | documented no hook | compliant | none |
+| `assemblyzero/workflows/testing/nodes/mechanical_hooks.py:74` | config unreadable | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/mechanical_hooks.py:91` | hook could not start | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/mechanical_hooks.py:98` | hook exited non-zero | error_message routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/mechanical_hooks.py:108` | git add failed | return code ignored | loud, logged, stops, alerts | check it and halt |
+| `assemblyzero/workflows/testing/nodes/implementation/routing.py:62` | file_path not a str | raises TypeError | compliant | none |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:117` | edit-script call raises | failure outcome printed to stdout; falls back to regeneration | loud, alerts | ERROR with file, issue and cause; alert |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:125` | edit-script API error | stdout only, then regeneration | loud, alerts | ERROR with identity; alert |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:135` | whole file instead of edit blocks | stdout only, falls through | loud, alerts | ERROR with file and issue |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:239` | non-retryable API error | raises; the runner prints and exits 1, no alert | loud, alerts | ERROR and alert at the raise or the runner |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:270` | transport error refused or exhausted | stdout halt line, raises, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:301` | summary instead of code on every retry | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:316` | no code block after every retry | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:344` | mechanical validation fails every retry | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:357` | retry loop falls through | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:439` | git ls-files fails for another reason | any non-zero read as untracked | loud, logged, stops, alerts | only 1 is untracked; raise otherwise |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:559` | no files_to_modify | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:572` | paths fail pre-flight | routed to HALT | compliant | none |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:589` | reading a test file for the prompt fails | bare pass, prompt loses the tests | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:693` | batch API call fails | stdout, per-file fallback | loud, alerts | ERROR with identity; alert |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:704` | batch response unparseable for a file | stdout, fallback | loud, alerts | ERROR; alert |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:717` | batch code fails validation | stdout, fallback | loud, alerts | ERROR; alert |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:819` | reading an existing Modify target fails | bare pass; disables the shrink gate | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:912` | reading for the edit script fails | stdout, falls through to full-file | loud, alerts | ERROR, alert, stop |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:913` | withdrawn fail-open tag | documents the fall-through | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:933` | Modify target missing | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:946` | context over 180K tokens | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1016` | reading an unattributed file fails | "" silently; empty context later | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1017` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1065` | reading a test file after a failed patch | "" silently, recorded as completed | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1066` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1120` | reading the spec suite fails | "" silently, contract on incomplete input | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1121` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1146` | writing the generated file fails | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:233` | dead-flag check cannot parse | [], could not run reads as passed | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:390` | empty-branch check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:482` | docstring-only check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:549` | trivial-assertion check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:665` | unused-import check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:780` | stat on a file fails | WARNING, skipped; verdict can be PASS | loud, stops, alerts | ERROR, alert, raise or BLOCK |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:784` | file too large | WARNING, skipped; PASS on unchecked code | loud, stops, alerts | ERROR and fail the gate |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:796` | reading a file fails | WARNING, skipped | loud, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:807` | a file has a syntax error | WARNING, analysis skipped | loud, stops, alerts | ERROR and BLOCK or raise |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py:156` | review prompt template missing | silent default prompt | loud, logged, stops, alerts | ERROR, alert, HALT or raise |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py:428` | mechanical gates fail | HALT only without auto_mode | stops, alerts | route any error to HALT whatever auto_mode |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py:489` | reviewer cannot resolve | HALT only without auto_mode | stops, alerts | route any error to HALT |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py:553` | reviewer call fails | HALT only without auto_mode | stops, alerts | route any error to HALT |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py:579` | unexpected review error | HALT only without auto_mode | stops, alerts | route any error to HALT |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py:609` | no schema-valid verdict | with auto_mode falls through to N2 | stops, alerts | route any error to HALT |
+| `assemblyzero/workflows/testing/nodes/review_test_plan.py:710` | no Required Changes extracted | placeholder feedback | loud, logged, stops, alerts | ERROR and raise or error_message |
+| `assemblyzero/workflows/testing/nodes/implementation/parsers.py:142` | conftest does not parse | set(), check passes | loud, logged, stops, alerts | raise or explicit failure |
+| `assemblyzero/workflows/testing/nodes/implementation/parsers.py:143` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/parsers.py:197` | ancestor conftest unreadable | treated as no options, passes | loud, logged, stops, alerts | (False, error) or raise |
+| `assemblyzero/workflows/testing/nodes/implementation/parsers.py:198` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/parsers.py:212` | a directory cannot resolve | walk ends early, partial comparison | loud, logged, stops, alerts | (False, error) or raise |
+| `assemblyzero/workflows/testing/nodes/implementation/parsers.py:213` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/nodes/implementation/prompts.py:153` | reading a Modify file for the prompt fails | bare pass, prompt lacks contents | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/framework_detector.py:215` | package.json unreadable | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/framework_detector.py:252` | unknown framework in test_dirs | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/framework_detector.py:273` | project root missing | {} silently; defaults to pytest | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/finalize.py:46` | file to archive missing | WARNING, None, reports COMPLETE | loud, logged, stops, alerts | ERROR and HALT or raise |
+| `assemblyzero/workflows/testing/nodes/finalize.py:74` | move to done/ fails | ERROR without identity, continues to COMPLETE | logged, stops, alerts | identity, alert, HALT or raise |
+| `assemblyzero/workflows/testing/nodes/finalize.py:152` | green output empty or unparseable | counts default to 0, workflow complete | loud, logged, stops, alerts | HALT when no parseable counts |
+| `assemblyzero/workflows/testing/nodes/finalize.py:216` | some artifacts failed to archive | skipped list ignored | loud, logged, stops, alerts | non-empty skipped list is an error |
+| `assemblyzero/workflows/testing/nodes/adversarial_validator.py:63` | a test has no assertions | warning only, valid can be True | loud, stops, alerts | count it as an error |
+| `assemblyzero/workflows/testing/nodes/adversarial_validator.py:79` | parse fails after compile succeeded | bare pass, duplicate check skipped | loud, logged, stops, alerts | append to errors and ERROR |
+| `assemblyzero/workflows/testing/nodes/adversarial_validator.py:114` | mock scan cannot parse | [] for files whose errors are already recorded | compliant | none |
+| `assemblyzero/workflows/testing/nodes/adversarial_validator.py:227` | test does not compile | documented error entry; valid False | compliant | none |
+| `assemblyzero/workflows/testing/nodes/adversarial_validator.py:251` | assertion scan cannot parse | [] only for compiled files | compliant | none |
+| `assemblyzero/workflows/testing/nodes/implementation/deprecated.py:58` | reading a test file for the batch prompt fails | bare pass | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/deprecated.py:87` | reading a Modify file fails | bare pass | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/nodes/implementation/deprecated.py:190` | no path in a code block | invents a path | loud, logged, stops, alerts | raise |
+| `assemblyzero/workflows/testing/nodes/implementation/deprecated.py:218` | entry has no path or content | skipped silently, partial write | loud, logged, stops, alerts | ERROR and raise before writing |
+| `assemblyzero/workflows/testing/runners/jest_runner.py:33` | npx not on PATH | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
+| `assemblyzero/workflows/testing/runners/jest_runner.py:57` | package.json unreadable | bare pass, typecheck may be skipped | loud, logged, stops, alerts | ERROR, alert, raise |
+| `assemblyzero/workflows/testing/runners/jest_runner.py:58` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
+| `assemblyzero/workflows/testing/runners/jest_runner.py:72` | typecheck exits non-zero | red result, a legitimate failing run | compliant | none |
+| `assemblyzero/workflows/testing/runners/jest_runner.py:110` | no JSON report | WARNING, fallback reads as not failing | loud, stops, alerts | ERROR and raise or error result |
+| `assemblyzero/workflows/testing/runners/jest_runner.py:124` | JSON report unparseable | WARNING, fallback with zero failures | loud, stops, alerts | ERROR and raise or error result |
+| `assemblyzero/workflows/testing/runners/jest_runner.py:169` | fallback after a parse failure | failed and errors 0 at exit 0 | loud, logged, stops, alerts | always mark the fallback as an error |
+| `assemblyzero/workflows/testing/symbol_validator.py:71` | target module unreadable | None, treated as no finding | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/symbol_validator.py:137` | test source does not parse | [], same as all imports resolve | loud, logged, stops, alerts | ERROR and raise |
+| `assemblyzero/workflows/testing/symbol_validator.py:152` | exported names undeterminable | skipped: could not check counts as passed | loud, logged, stops, alerts | report it as unverifiable |
+| `assemblyzero/workflows/testing/runners/base_runner.py:96` | zero scenarios | WARNING, 0.0 as if measured | loud, stops, alerts | ERROR and raise ValueError |
+| `assemblyzero/workflows/testing/runners/base_runner.py:129` | test command times out | ERROR without identity, -1 sentinel read as a failed run | logged, stops, alerts | identity, alert, raise |
+| `assemblyzero/workflows/testing/runners/base_runner.py:132` | test binary not found | ERROR, -1 sentinel | logged, stops, alerts | identity, alert, raise |
+| `assemblyzero/workflows/testing/runners/base_runner.py:135` | OS error launching | ERROR, -1 sentinel | logged, stops, alerts | identity, alert, raise |
