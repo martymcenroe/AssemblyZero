@@ -1352,14 +1352,31 @@ class TestImportResolvesSourceLayouts:
         (tmp_path / "src" / "foo" / "bar" / "__init__.py").write_text("")
         assert _import_resolves("foo.bar", tmp_path, set()) is True
 
-    def test_resolves_parent_module_src_layout(self, tmp_path):
-        """from foo.bar import Baz where foo/bar.py exists (Baz lives inside)."""
+    def test_a_name_inside_a_module_is_not_a_module(self, tmp_path):
+        """#3754: `from foo.bar import Baz` checks the module `foo.bar`, which
+        resolves; `foo.bar.Baz` is a name inside it, not a module, and no
+        import the check reads can name it as one. The old parent clause
+        accepted it, and with it any `foo.<anything>`."""
         from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
             _import_resolves,
         )
         (tmp_path / "src" / "foo").mkdir(parents=True)
         (tmp_path / "src" / "foo" / "bar.py").write_text("")
-        assert _import_resolves("foo.bar.Baz", tmp_path, set()) is True
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+        assert _import_resolves("foo.bar.Baz", tmp_path, set()) is False
+
+    def test_a_missing_submodule_of_a_real_package_does_not_resolve(self, tmp_path):
+        """#3754, the boostgauge #2 shape: `boostgauge.renderer` passed on
+        `boostgauge/__init__.py` though no renderer module exists."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "src" / "boostgauge").mkdir(parents=True)
+        (tmp_path / "src" / "boostgauge" / "__init__.py").write_text("")
+        assert _import_resolves("boostgauge.renderer", tmp_path, set()) is False
+        assert _import_resolves(
+            "boostgauge.renderer", tmp_path, {"src/boostgauge/renderer.py"}
+        ) is True, "a module the plan adds still resolves"
 
     def test_unresolvable_returns_false(self, tmp_path):
         """Module that exists nowhere returns False."""

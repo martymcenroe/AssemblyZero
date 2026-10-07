@@ -82,13 +82,17 @@ class TestTheSweepIsExhaustive:
         stage earlier (#2706, #2707). The sixteenth checks that Section 10 is
         holding those functions at all, which is what run-issue4-192453 made
         necessary by leaving 10.1 as a pointer and sending both of the previous
-        two to not-applicable (#2741)."""
+        two to not-applicable (#2741). The seventeenth checks the keyword
+        arguments of calls into existing first-party code against the callee's
+        real signature, which boostgauge #2's `Telltale(duration=...)` showed
+        nothing else did (#3755)."""
         assert "python_fences_parse" in CLASSIFICATIONS
         assert "function_spec_sections_have_examples" in CLASSIFICATIONS
         assert "spec_test_functions_have_assertions" in CLASSIFICATIONS
         assert "spec_test_fixtures_resolvable" in CLASSIFICATIONS
         assert "section_ten_carries_test_functions" in CLASSIFICATIONS
-        assert len(CLASSIFICATIONS) == 16
+        assert "call_signatures_match" in CLASSIFICATIONS
+        assert len(CLASSIFICATIONS) == 17
 
     @pytest.mark.parametrize("name", sorted(CLASSIFICATIONS))
     def test_each_entry_states_what_it_reads_and_why(self, name: str) -> None:
