@@ -559,7 +559,33 @@ def ensure_base(
             log.write(f"BASE unsettled: {finding}")
             for reason in why:
                 log.write(f"  {reason}")
-        if settled and not unsettled:
+        # #3762: an unsettled LLD or spec on the base is a stale design, not
+        # merged implementation (#1959's case, which this scan of docs/lld
+        # never sees). The stage redraws it, since should_skip_stage refuses an
+        # artifact whose settlement does not verify, and the next landing
+        # overwrites the file in place. A new attempt branch would abandon the
+        # arc's seed for a design document: boostgauge #2 nearly cut
+        # hardening-run-21 over exactly this, twice.
+        stale_designs = [
+            finding for finding, _why in unsettled
+            if settlement_mod.stage_of_artifact_path(
+                finding.split(":", 1)[1].strip() if ":" in finding else finding, issue
+            )
+        ]
+        if unsettled and len(stale_designs) == len(unsettled):
+            log.write(
+                f"BASE keeping '{base}': unsettled design artifact(s) will be "
+                f"redrawn and re-landed: {', '.join(stale_designs)}"
+            )
+            record_heal(
+                repo_root, "base-kept-redraw", base, "healed",
+                detail=f"{len(stale_designs)} stale design artifact(s) to redraw",
+            )
+            debris = [d for d in debris if d not in committed]
+            if not debris:
+                return base
+            committed = []
+        elif settled and not unsettled:
             log.write(
                 f"BASE '{base}' carries #{issue}'s SETTLED work "
                 f"({len(settled)} artifact(s)) -- keeping the base; the roll "

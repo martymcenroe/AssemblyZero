@@ -286,7 +286,7 @@ class TestWorktreeIsCarvedFromTheAttempt:
 
         cmd = _run_impl(state, _GitStub())
 
-        assert cmd[-1] == "hardening-run-20", cmd
+        assert cmd[-1] == "origin/hardening-run-20", cmd
 
     def test_a_resume_into_a_different_stage_does_not_touch_the_worktree_base(
         self, state
@@ -295,14 +295,14 @@ class TestWorktreeIsCarvedFromTheAttempt:
 
         cmd = _run_impl(state, _GitStub())
 
-        assert cmd[-1] == "hardening-run-20", cmd
+        assert cmd[-1] == "origin/hardening-run-20", cmd
 
     def test_nothing_preserved_falls_through_to_the_base(self, state, capsys):
         state["resumed_from"] = "impl"
 
         cmd = _run_impl(state, _GitStub(attempt=""))
 
-        assert cmd[-1] == "hardening-run-20", cmd
+        assert cmd[-1] == "origin/hardening-run-20", cmd
         assert "No preserved attempt for #4" in capsys.readouterr().out
 
     def test_a_standing_leftover_branch_is_reported_not_silently_preferred(

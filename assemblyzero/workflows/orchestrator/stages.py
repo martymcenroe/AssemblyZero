@@ -1643,23 +1643,29 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # --base-branch now controls the roll's CONTENT as well as the PR
             # target, and the resolved base is printed rather than implied.
             base_branch = state.get("base_branch", "")
+            commit_ish = ""
             if base_branch and target_repo:
-                # #2011: the pipeline merges on ORIGIN but cuts the worktree from
-                # the LOCAL ref, so each phase was built from a base that had not
-                # received the previous phase's merge. `fetch origin b:b` is
-                # atomic and fast-forward-only, and REFUSES if the branch is
-                # checked out anywhere -- which is the correct failure, and why
-                # the main checkout must stay on the default branch (#2012).
+                # #2011: the pipeline merges on ORIGIN, so the worktree must
+                # start from what origin holds. #3763: it used to fetch into the
+                # LOCAL ref (`origin b:b`), which git refuses while the branch is
+                # checked out in any worktree -- and a campaign's seed worktree
+                # always holds it -- then only warned and cut from the stale
+                # local ref. boostgauge #2 run-issue2-052813 built against an
+                # August LLD that way. The remote-tracking ref is never refused,
+                # so the worktree is cut from origin/<base>; a failed fetch fails
+                # the stage rather than building from a ref that may be stale.
                 sync = run_command(
-                    ["git", "-C", target_repo, "fetch", "origin",
-                     f"{base_branch}:{base_branch}"],
+                    ["git", "-C", target_repo, "fetch", "origin", base_branch],
                     check=False, capture_output=True, text=True,
                 )
-                if sync.returncode == 0:
-                    print(f"    Base synced from origin/{base_branch}")
-                else:
+                if sync.returncode != 0:
                     detail = (sync.stderr or "").strip()[:200]
-                    print(f"    [WARN] could not sync {base_branch}: {detail}")
+                    raise RuntimeError(
+                        f"could not fetch origin/{base_branch} to cut the "
+                        f"implementation worktree from: {detail}"
+                    )
+                commit_ish = f"origin/{base_branch}"
+                print(f"    Base fetched: origin/{base_branch}")
             if not base_branch:
                 # current_branch raises GitBranchError on detached HEAD by
                 # design (it must not silently fall back to main), and OSError
@@ -1672,8 +1678,8 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 except (GitBranchError, OSError) as err:
                     print(f"    [WARN] base branch unresolved: {err}")
             if base_branch:
-                add_cmd.append(base_branch)
-                print(f"    Worktree base: {base_branch}")
+                add_cmd.append(commit_ish or base_branch)
+                print(f"    Worktree base: {commit_ish or base_branch}")
             else:
                 print(
                     "    [WARN] could not resolve a base branch; worktree "
