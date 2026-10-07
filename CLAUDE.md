@@ -56,27 +56,18 @@ After completing a task, ask "What would you like to work on next?" as an open-e
 
 ## Merging PRs
 
-Follow root CLAUDE.md "Merging PRs (Universal)" with `--repo martymcenroe/AssemblyZero`.
+Land every PR with the merge driver, as the root CLAUDE.md "Merging PRs (Universal)" says, and when it fails follow the route that section gives for the stage it printed. The driver pushes, opens the PR, merges, removes the worktree and deletes the branch; never do any of those by hand (#3803).
 
-**Important: Archival must happen BEFORE creating the PR, inside the worktree, after the last test run.** It copies the lineage and stages it. It leaves the worktree's poetry environment alone unless given `--evict-venv`, which removes the environment and refuses while anything runs from the worktree (#3614, #3626).
-
-**Agent Actions Budget (Use `[skip ci]`):** Since we cannot edit the CI workflow's concurrency settings without a highly-scoped token, EVERY intermediate commit pushed by an agent MUST include `[skip ci]` in the commit message (e.g., `git commit -m "fix typo [skip ci]"`). Only the final commit meant to be merged should omit `[skip ci]` so the required checks can run and pass Cerberus.
+**The one override: archive the lineage before the driver runs.** Inside the worktree, after the last test run:
 
 ```bash
-# Inside the worktree, after the last test run:
 poetry run python tools/archive_worktree_lineage.py --worktree . --issue {ID} --main-repo .
-git commit -m "chore: archive workflow lineage (Closes #{ID}) [skip ci]"
-# Then push and create the PR
+git commit -m "chore: archive workflow lineage (Closes #{ID})"
 ```
 
-After merging the PR, remove the worktree, prune, delete the branch, and update `main` without switching anyone's checkout (every `git checkout` is denied by the shell guard):
-```bash
-git worktree remove ../AssemblyZero-{ID}
-git fetch --prune origin
-git branch -d {ID}-fix
-git fetch origin main:main
-```
-After a squash merge `git branch -d` refuses; use the ADR-0217 graft, never `-D`. `git fetch origin main:main` refuses when `main` is checked out; there, if `git branch --show-current` prints `main`, run `git merge --ff-only origin/main` instead.
+It copies the lineage and stages it. It leaves the worktree's poetry environment alone unless given `--evict-venv`, which removes the environment and refuses while anything runs from the worktree (#3614, #3626).
+
+**Never put `[skip ci]` in a commit on a branch the driver lands.** GitHub skips the `test` check when the head commit carries it, and the PR merges anyway: PR #3683 merged with only the two pr-sentinel checks run. The driver pushes a branch once, which is what keeps the Actions bill down.
 
 ## Banned Practices (Agent Limitations)
 
