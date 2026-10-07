@@ -47,7 +47,7 @@ from assemblyzero.core.errors import (
     CapacityError as TypedCapacityError,
     RateLimitError as TypedRateLimitError,
     TimeoutError_ as TypedTimeoutError,
-    classify_gemini_error,
+    classify_agy_error,
 )
 
 from assemblyzero.telemetry.llm_call_record import LLMOutputMetadata
@@ -68,15 +68,6 @@ class GeminiErrorType(Enum):
     MODEL_MISMATCH = "model"  # Wrong model used - Fail closed
     UNKNOWN = "unknown"  # Other errors - Fail closed
 
-
-# Pattern matching (from gemini-rotate.py)
-QUOTA_EXHAUSTED_PATTERNS = [
-    "TerminalQuotaError",
-    "exhausted your capacity",
-    "QUOTA_EXHAUSTED",
-    "429",
-    "Resource has been exhausted",
-]
 
 # #1874: a per-attempt timeout is not a bound on a call. A timeout classifies
 # as capacity, which backs off and retries the SAME credential, so the real
@@ -321,23 +312,6 @@ SPAWN_FAILURE_EXIT_CODES = (
     3221225781,  # 0xC0000135 STATUS_DLL_NOT_FOUND
     3221225477,  # 0xC0000005 access violation during process init
 )
-
-CAPACITY_PATTERNS = [
-    "MODEL_CAPACITY_EXHAUSTED",
-    "RESOURCE_EXHAUSTED",
-    "503",
-    "529",
-    "The model is overloaded",
-]
-
-AUTH_ERROR_PATTERNS = [
-    "API_KEY_INVALID",
-    "API key not valid",
-    "PERMISSION_DENIED",
-    "UNAUTHENTICATED",
-    "401",
-    "403",
-]
 
 
 # =============================================================================
@@ -637,7 +611,7 @@ class GeminiClient:
                         model_verified="",
                     )
 
-                classified = classify_gemini_error(e)
+                classified = classify_agy_error(e)
                 status_code = classified.status_code
                 error_type = self._error_type_from_classified(classified)
 
@@ -704,31 +678,6 @@ class GeminiClient:
             duration_ms=int((time.time() - start_time) * 1000),
             model_verified="",
         )
-
-    def _classify_error(self, error_output: str) -> GeminiErrorType:
-        """Classify error type from API response string.
-
-        Deprecated: Use classify_gemini_error() + _error_type_from_classified()
-        for new code paths. Kept for backward compatibility.
-        """
-        error_lower = error_output.lower()
-
-        # Check quota patterns first
-        for pattern in QUOTA_EXHAUSTED_PATTERNS:
-            if pattern.lower() in error_lower:
-                return GeminiErrorType.QUOTA_EXHAUSTED
-
-        # Check capacity patterns
-        for pattern in CAPACITY_PATTERNS:
-            if pattern.lower() in error_lower:
-                return GeminiErrorType.CAPACITY_EXHAUSTED
-
-        # Check auth patterns
-        for pattern in AUTH_ERROR_PATTERNS:
-            if pattern.lower() in error_lower:
-                return GeminiErrorType.AUTH_ERROR
-
-        return GeminiErrorType.UNKNOWN
 
     @staticmethod
     def _error_type_from_classified(classified) -> GeminiErrorType:

@@ -1475,7 +1475,7 @@ def check_import_targets_exist(
     unresolvable: list[str] = []
     checked: set[str] = set()
     # #1901: dotted imports that are neither stdlib nor first-party are
-    # third-party (PIL.Image, psutil.*, google.genai). Walking the repo
+    # third-party (PIL.Image, psutil.*, requests.adapters). Walking the repo
     # tree for those flagged Pillow as "nonexistent" and cost a revision
     # cycle per affected spec. They validate against the TARGET repo's
     # own environment instead — grouped by top-level for one batched probe.

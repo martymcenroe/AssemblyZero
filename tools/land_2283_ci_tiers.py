@@ -92,7 +92,7 @@ That is how #2280 was able to rot: the e2e mock harness capped the graph at five
 
 **e2e is free.** Fully mock-driven, no credentials, about six seconds for the tier.
 
-**adversarial skips cleanly.** Its autouse fixture skips before constructing a client when neither `GOOGLE_API_KEY` nor `GEMINI_API_KEY` is set, so the step passes with `1 skipped`. Verified locally through the same `test-gate.py` wrapper CI uses: exit 0. It is deliberately **not** `continue-on-error` -- a skip is already the quiet outcome, and swallowing a genuine failure on top of that would recreate the blind spot this issue exists to close. When the credential question in #2285 is settled the step starts asserting with no workflow change.
+**adversarial needs no key.** The key-gated skip this note once described is gone: ADR 0237 removed every Gemini key path (#3583), and Gemini is reached only through agy. The step is deliberately **not** `continue-on-error`, because swallowing a genuine failure would recreate the blind spot this issue exists to close.
 
 ## Landing
 
