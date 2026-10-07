@@ -245,8 +245,8 @@ def route_after_human_gate(
     Routes based on human decision:
     - N5_review_spec: Human approved, proceed to Gemini review
     - N2_generate_spec: Human requested revisions
-    - HALT: Error (Issue #486)
-    - END: Human rejected (normal exit)
+    - HALT: Error (Issue #486), or a decision the gate never makes (#3887)
+    - END: Human chose manual handling (normal exit)
 
     Args:
         state: Current workflow state.
@@ -262,6 +262,24 @@ def route_after_human_gate(
         return "N5_review_spec"
     elif next_node == "N2_generate_spec":
         return "N2_generate_spec"
+    elif next_node == "END":
+        return "END"
+    # #3887: an empty or unknown decision used to end the run as if the human
+    # had chosen manual handling, with no reason and no alert.
+    return "HALT"
+
+
+def route_after_finalize(
+    state: ImplementationSpecState,
+) -> Literal["HALT", "END"]:
+    """Route after N6: finalize_spec.
+
+    #3887: N6 reached END by an unconditional edge, so every error it returned
+    (an empty or short draft, a non-APPROVED verdict, a bad issue number, a
+    failed write) ended the run without the HALT record or an alert.
+    """
+    if state.get("error_message"):
+        return "HALT"
     return "END"
 
 
@@ -509,7 +527,14 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
         },
     )
 
-    # N6 -> END (workflow complete)
-    graph.add_edge(N6_FINALIZE_SPEC, END)
+    # N6 -> END, or HALT on error (#3887)
+    graph.add_conditional_edges(
+        N6_FINALIZE_SPEC,
+        route_after_finalize,
+        {
+            "HALT": HALT,
+            "END": END,
+        },
+    )
 
     return graph.compile()

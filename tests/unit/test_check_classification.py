@@ -270,7 +270,9 @@ class TestReviewIsReallyEngaged:
         assert route_after_human_gate(
             {"next_node": "N2_generate_spec"}
         ) == "N2_generate_spec"
-        assert route_after_human_gate({}) == "END"
+        assert route_after_human_gate({"next_node": "END"}) == "END"
+        # #3887: no decision at all is not the human's manual exit; it halts.
+        assert route_after_human_gate({}) == "HALT"
 
     def test_the_default_is_engaged(self) -> None:
         assert vc.review_is_engaged({}) is True
