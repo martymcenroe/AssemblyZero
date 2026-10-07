@@ -154,6 +154,20 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def durable_lld_path(target_repo: Path | str, issue_number: int) -> Path:
+    """Where the approved LLD survives its own landing (#3750).
+
+    The merge driver lands the LLD and removes the LLD worktree, so the copy
+    inside that worktree is gone the moment the landing succeeds. This copy is
+    in the target's gitignored lineage, beside the spec's handoff copy
+    (`<N>-implspec/`, #2311), and is what `final_lld_path` names afterwards.
+    """
+    return (
+        Path(target_repo) / "docs" / "lineage" / "active"
+        / f"{issue_number}-lld-handoff" / f"LLD-{issue_number:03d}.md"
+    )
+
+
 def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
     """Commit and push created files to git.
 
@@ -227,6 +241,11 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
                 # #3704: the driver opened, merged and cleaned up; the LLD is
                 # on the base branch and the worktree and branch are gone.
                 print(f"    LLD PR landed by the merge driver: {pr_url}")
+                # #3750: final_lld_path named the worktree copy, which the
+                # driver just removed; the durable copy is what remains.
+                durable = durable_lld_path(target_repo, issue_number)
+                if durable.is_file():
+                    state["final_lld_path"] = str(durable)
         else:
             # Issue workflow remains on the legacy direct-push path.
             commit_sha = commit_and_push(
@@ -611,6 +630,22 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
 
     state["created_files"] = created_files
     state["final_lld_path"] = str(lld_path)
+
+    # #3750: the durable copy, written before the landing removes the worktree
+    # this LLD was saved into. A mock run lands nothing and keeps no copy.
+    if not state.get("config_mock_mode"):
+        durable = durable_lld_path(target_repo, issue_number)
+        try:
+            durable.parent.mkdir(parents=True, exist_ok=True)
+            durable.write_text(lld_content, encoding="utf-8")
+            print(f"    Handoff copy (survives the landing): {durable}")
+        except OSError as e:
+            # fail-open: the LLD itself is saved and about to land; only the
+            # post-landing copy is missing, and the line below says so.
+            print(
+                f"    WARNING: could not write the durable LLD copy ({e}); after "
+                f"the landing, the LLD exists only on the base branch (#3750)."
+            )
 
     # Save to audit trail. #3510: `Path("")` is the current directory, which
     # always exists, so a state with no audit_dir wrote NNN-final.md into
