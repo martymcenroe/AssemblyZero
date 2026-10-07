@@ -612,6 +612,14 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         created_by="#2552",
     ),
     Gate(
+        "impl.completeness_gate_cannot_check", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "Completeness gate could not check",
+        _s(f"{_TS}/nodes/completeness_gate.py::_cannot_check::return", 0),
+        created_by="#3811 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="no files, no LLD, a file it cannot stat, read or parse, or a report it "
+              "cannot write; each used to be skipped with a warning (ADR 0236)",
+    ),
+    Gate(
         "impl.coverage_unreadable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "COVERAGE MEASUREMENT FAILED",
         _s(f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage::return", 0)

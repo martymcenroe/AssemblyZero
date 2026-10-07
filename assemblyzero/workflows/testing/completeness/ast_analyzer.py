@@ -17,14 +17,10 @@ These checks form Layer 1 of the two-layer completeness gate. Layer 2
 from __future__ import annotations
 
 import ast
-import logging
 import time
 from enum import Enum
 from pathlib import Path
 from typing import Literal, TypedDict
-
-logger = logging.getLogger(__name__)
-
 
 # =============================================================================
 # Data Structures
@@ -60,9 +56,29 @@ class CompletenessResult(TypedDict):
     gemini_review_ms: int | None
 
 
+class CompletenessGateError(RuntimeError):
+    """The completeness gate could not check what it was given (#3811, ADR 0236).
+
+    A file it cannot stat, read or parse, or one too large to analyse, used to
+    be skipped with a warning, so the gate could return PASS on code it never
+    looked at. Every such failure raises this instead, with the file and the
+    cause, and the N4b node turns it into an error that routes to HALT.
+    """
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+def _parse(source_code: str, file_path: str) -> ast.AST:
+    """Parse one file for a check; a file that does not parse cannot be certified."""
+    try:
+        return ast.parse(source_code)
+    except SyntaxError as exc:
+        raise CompletenessGateError(
+            f"cannot parse {file_path} for the completeness checks: {exc}"
+        ) from exc
 
 
 def _is_trivial_body(body: list[ast.stmt]) -> bool:
@@ -228,10 +244,7 @@ def analyze_dead_cli_flags(
     """
     issues: list[CompletenessIssue] = []
 
-    try:
-        tree = ast.parse(source_code)
-    except SyntaxError:
-        return issues
+    tree = _parse(source_code, file_path)
 
     # Phase 1: Find all add_argument calls, their flag names, and each
     # call's own source segment. Occurrences of a flag name inside any
@@ -385,10 +398,7 @@ def analyze_empty_branches(
     """
     issues: list[CompletenessIssue] = []
 
-    try:
-        tree = ast.parse(source_code)
-    except SyntaxError:
-        return issues
+    tree = _parse(source_code, file_path)
 
     for block in _statement_blocks(tree):
         for index, node in enumerate(block):
@@ -477,10 +487,7 @@ def analyze_docstring_only_functions(
     """
     issues: list[CompletenessIssue] = []
 
-    try:
-        tree = ast.parse(source_code)
-    except SyntaxError:
-        return issues
+    tree = _parse(source_code, file_path)
 
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -544,10 +551,7 @@ def analyze_trivial_assertions(
     """
     issues: list[CompletenessIssue] = []
 
-    try:
-        tree = ast.parse(source_code)
-    except SyntaxError:
-        return issues
+    tree = _parse(source_code, file_path)
 
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -660,10 +664,7 @@ def analyze_unused_imports(
     """
     issues: list[CompletenessIssue] = []
 
-    try:
-        tree = ast.parse(source_code)
-    except SyntaxError:
-        return issues
+    tree = _parse(source_code, file_path)
 
     # Phase 1: Collect all imported names and their line numbers
     imported_names: list[tuple[str, int]] = []  # (name, line_number)
@@ -748,19 +749,25 @@ def run_ast_analysis(
     """Run all AST checks on provided files.
 
     Issue #147: Orchestrates all Layer 1 AST-based checks across a set
-    of implementation files. Skips files exceeding max_file_size_bytes
-    to prevent memory spikes on large generated files.
+    of implementation files.
 
     Files whose names start with 'test_' are analyzed for trivial
     assertions. All other files are analyzed for dead CLI flags, empty
-    branches, docstring-only functions, and unused imports.
+    branches, docstring-only functions, and unused imports. Non-Python
+    files and empty files carry nothing for these checks and are passed
+    over.
 
     Args:
         files: List of Python file paths to analyze.
-        max_file_size_bytes: Skip files larger than this (default 1MB).
+        max_file_size_bytes: A Python file larger than this (default 1MB)
+            is not analysed; it raises, because it cannot be certified.
 
     Returns:
         CompletenessResult with verdict, issues, and timing.
+
+    Raises:
+        CompletenessGateError: a Python file cannot be stat'ed, read or
+            parsed, or is over the size limit (#3811).
     """
     start_ms = time.monotonic_ns() // 1_000_000
     all_issues: list[CompletenessIssue] = []
@@ -774,40 +781,30 @@ def run_ast_analysis(
         if file_path.suffix != ".py":
             continue
 
-        # Skip files exceeding size limit
+        # #3811: a file the gate cannot stat, read or parse, or one too large
+        # to analyse, is a file it cannot certify. Skipping it let the verdict
+        # be PASS on code nobody checked.
         try:
             file_size = file_path.stat().st_size
-        except OSError as e:
-            logger.warning("Cannot stat file %s: %s", file_path, e)
-            continue
+        except OSError as exc:
+            raise CompletenessGateError(f"cannot stat {file_path}: {exc}") from exc
 
         if file_size > max_file_size_bytes:
-            logger.warning(
-                "Skipping file %s (%d bytes) — exceeds max_file_size_bytes (%d)",
-                file_path,
-                file_size,
-                max_file_size_bytes,
+            raise CompletenessGateError(
+                f"{file_path} is {file_size} bytes, over the {max_file_size_bytes}-byte "
+                f"limit for AST analysis, so its completeness cannot be checked"
             )
-            continue
 
-        # Read source code
         try:
             source_code = file_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Cannot read file %s: %s", file_path, e)
-            continue
+        except (OSError, UnicodeDecodeError) as exc:
+            raise CompletenessGateError(f"cannot read {file_path}: {exc}") from exc
 
-        # Skip empty files
+        # An empty file has nothing to certify.
         if not source_code.strip():
             continue
 
-        # Verify it parses before running checks
-        try:
-            tree = ast.parse(source_code)
-        except SyntaxError as e:
-            logger.warning("Syntax error in %s: %s — skipping AST analysis", file_path, e)
-            continue
-
+        tree = _parse(source_code, str(file_path))
         loaded.append((file_path, source_code, tree))
 
     # Issue #1857: cross-file flag-consumption corpus. Implementation files

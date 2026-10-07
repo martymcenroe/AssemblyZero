@@ -127,8 +127,12 @@ class TestN4bRefusesTheEmptySet:
 
     def test_a_populated_set_still_passes_layer_one(self, tmp_path, capsys):
         """The inverse: the gate's ordinary verdict is untouched when a
-        real requirement set is present."""
+        real requirement set is present. #3811: the gate also needs the LLD
+        it reviews against."""
         (tmp_path / "impl.py").write_text("x = 1\n", encoding="utf-8")
+        lld = tmp_path / "LLD-331.md"
+        lld.write_text("# LLD\n\n## 3. Requirements\n\n1. exists\n", encoding="utf-8")
+        state = {**self._state(tmp_path, ["REQ-1: exists"]), "original_lld_path": str(lld)}
         with patch(
             "assemblyzero.workflows.testing.nodes.completeness_gate."
             "run_ast_analysis",
@@ -139,7 +143,7 @@ class TestN4bRefusesTheEmptySet:
                 "gemini_review_ms": None,
             },
         ):
-            out = completeness_gate(self._state(tmp_path, ["REQ-1: exists"]))
+            out = completeness_gate(state)
         capsys.readouterr()
         assert out["completeness_verdict"] == "PASS"
         assert out["error_message"] == ""

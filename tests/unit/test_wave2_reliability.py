@@ -156,30 +156,26 @@ class TestCompletenessIssueIdentity:
 class TestCompletenessGateStagnation:
     """Tests for stagnation detection in route_after_completeness_gate."""
 
-    def test_identical_issues_routes_to_end(self):
-        """Same AST issues across 2 iterations → routes to end."""
+    def test_identical_issues_halt(self):
+        """Same AST issues across 2 iterations: the node records why, and it routes to HALT.
+
+        #3811: the stop used to route to END with no reason and no alert.
+        """
         from assemblyzero.workflows.testing.nodes.completeness_gate import (
+            _block_stop_reason,
             route_after_completeness_gate,
         )
 
         issue_ids = [["src/foo.py", 42, "empty_branch"]]
+        reason = _block_stop_reason("BLOCK", issue_ids, issue_ids, 1, "issue #1")
+        assert "stagnant" in reason and "the same 1 issue(s)" in reason
+
         state = {
-            "error_message": "",
+            "error_message": reason,
             "completeness_verdict": "BLOCK",
             "iteration_count": 1,
-            "completeness_issues": [
-                {
-                    "file_path": "src/foo.py",
-                    "line_number": 42,
-                    "category": "empty_branch",
-                    "description": "Empty if branch",
-                    "severity": "ERROR",
-                }
-            ],
-            "previous_completeness_issues": issue_ids,
         }
-
-        assert route_after_completeness_gate(state) == "end"
+        assert route_after_completeness_gate(state) == "HALT"
 
     def test_different_issues_allows_retry(self):
         """Different AST issues → routes back to N4."""
@@ -231,30 +227,19 @@ class TestCompletenessGateStagnation:
         assert route_after_completeness_gate(state) == "N4_implement_code"
 
     def test_max_iterations_still_enforced(self):
-        """Max iteration limit still ends even without stagnation."""
+        """The iteration cap stops the run even without stagnation, through HALT (#3811)."""
         from assemblyzero.workflows.testing.nodes.completeness_gate import (
-            route_after_completeness_gate,
+            _block_stop_reason,
         )
 
-        state = {
-            "error_message": "",
-            "completeness_verdict": "BLOCK",
-            "iteration_count": 3,
-            "completeness_issues": [
-                {
-                    "file_path": "src/new.py",
-                    "line_number": 1,
-                    "category": "trivial_assertion",
-                    "description": "Trivial",
-                    "severity": "ERROR",
-                }
-            ],
-            "previous_completeness_issues": [
-                ["src/old.py", 99, "unused_import"],
-            ],
-        }
-
-        assert route_after_completeness_gate(state) == "end"
+        reason = _block_stop_reason(
+            "BLOCK",
+            [["src/new.py", 1, "trivial_assertion"]],
+            [["src/old.py", 99, "unused_import"]],
+            3,
+            "issue #1",
+        )
+        assert "still BLOCK at iteration 3 (max 3)" in reason
 
     def test_pass_verdict_proceeds(self):
         """PASS verdict always routes to N5 regardless of history."""
@@ -296,54 +281,79 @@ class TestCompletenessGateStagnation:
 
 
 class TestCompletenessGateStoresIssueIds:
-    """Tests that completeness_gate node stores issue IDs for stagnation."""
+    """The node and the router together, as a run uses them (#3852).
 
-    def test_node_stores_previous_issues(self, tmp_path):
-        """completeness_gate stores previous_completeness_issues in result."""
+    The router-only tests above build state by hand, which is how a node that
+    compared its own update with itself went unnoticed: every first BLOCK read
+    as stagnant, and the N4 retry loop never ran.
+    """
+
+    def _run(self, tmp_path, **state_overrides):
         from unittest.mock import patch
 
+        from assemblyzero.workflows.testing.completeness.ast_analyzer import (
+            CompletenessCategory,
+        )
         from assemblyzero.workflows.testing.nodes.completeness_gate import (
             completeness_gate,
+            route_after_completeness_gate,
         )
 
         fake_issues = [
             {
-                "category": "empty_branch",
+                "category": CompletenessCategory.EMPTY_BRANCH,
                 "file_path": "src/foo.py",
                 "line_number": 42,
                 "description": "Empty branch",
                 "severity": "ERROR",
             }
         ]
+
+        lld = tmp_path / "LLD-099.md"
+        lld.write_text("# LLD\n\n## 3. Requirements\n\n1. foo exists\n")
+        (tmp_path / "foo.py").write_text("pass")
         fake_result = {
             "verdict": "BLOCK",
             "issues": fake_issues,
             "ast_analysis_ms": 5,
             "gemini_review_ms": None,
         }
-
+        state = {
+            "repo_root": str(tmp_path),
+            "issue_number": 99,
+            "original_lld_path": str(lld),
+            "implementation_files": [str(tmp_path / "foo.py")],
+            "test_files": [],
+            "audit_dir": "",
+            "iteration_count": 1,
+            # #2552: the gate refuses an empty requirement set before
+            # any analysis; this test exercises the ordinary path.
+            "requirements": ["REQ-1: foo exists"],
+            **state_overrides,
+        }
         with patch(
             "assemblyzero.workflows.testing.nodes.completeness_gate.run_ast_analysis",
             return_value=fake_result,
         ):
-            state = {
-                "repo_root": str(tmp_path),
-                "issue_number": 99,
-                "lld_path": "",
-                "implementation_files": [str(tmp_path / "foo.py")],
-                "test_files": [],
-                "audit_dir": "",
-                "iteration_count": 0,
-                # #2552: the gate refuses an empty requirement set before
-                # any analysis; this test exercises the ordinary path.
-                "requirements": ["REQ-1: foo exists"],
-            }
-            # Create a dummy file so analysis has something
-            (tmp_path / "foo.py").write_text("pass")
-
             result = completeness_gate(state)
+        return result, route_after_completeness_gate({**state, **result})
 
-        assert "previous_completeness_issues" in result
+    def test_node_stores_previous_issues(self, tmp_path):
+        result, _ = self._run(tmp_path)
         assert result["previous_completeness_issues"] == [
             ["src/foo.py", 42, "empty_branch"]
         ]
+
+    def test_a_first_block_goes_back_to_n4(self, tmp_path):
+        """#3852 T1: no previous issues, so the node records no stop and N4 runs again."""
+        result, route = self._run(tmp_path)
+        assert result["error_message"] == ""
+        assert route == "N4_implement_code"
+
+    def test_a_repeated_block_halts(self, tmp_path):
+        """#3852 T2: the previous iteration had the same issues, so it halts."""
+        result, route = self._run(
+            tmp_path, previous_completeness_issues=[["src/foo.py", 42, "empty_branch"]]
+        )
+        assert "stagnant" in result["error_message"]
+        assert route == "HALT"

@@ -21,6 +21,7 @@ import pytest
 
 from assemblyzero.workflows.testing.completeness.ast_analyzer import (
     CompletenessCategory,
+    CompletenessGateError,
     CompletenessIssue,
     CompletenessResult,
     analyze_dead_cli_flags,
@@ -37,6 +38,7 @@ from assemblyzero.workflows.testing.completeness.report_generator import (
 )
 from assemblyzero.workflows.testing.nodes.completeness_gate import (
     MAX_COMPLETENESS_ITERATIONS,
+    _block_stop_reason,
     route_after_completeness_gate,
 )
 
@@ -205,11 +207,11 @@ class TestDeadCLIFlags:
         issues = analyze_dead_cli_flags(source, "simple.py")
         assert issues == []
 
-    def test_syntax_error_returns_empty(self) -> None:
-        """Syntax errors in source return empty issues."""
+    def test_syntax_error_raises(self) -> None:
+        """#3811: a file that does not parse cannot be certified, so it raises."""
         source = "def broken(:\n    pass"
-        issues = analyze_dead_cli_flags(source, "broken.py")
-        assert issues == []
+        with pytest.raises(CompletenessGateError, match="cannot parse broken.py"):
+            analyze_dead_cli_flags(source, "broken.py")
 
     def test_hyphen_flag_consumed_via_getattr_same_file(self) -> None:
         """Issue #1864: --no-topmost + getattr(args, 'no_topmost') is alive.
@@ -761,23 +763,20 @@ class TestCompletenessGateRouting:
         result = route_after_completeness_gate(state)
         assert result == "N4_5_mechanical_hooks"
 
-    def test_max_iterations_ends(self, mock_state) -> None:
-        """T100: BLOCK at max iterations (3) routes to end."""
-        state = mock_state(
-            completeness_verdict="BLOCK",
-            iteration_count=MAX_COMPLETENESS_ITERATIONS,
-        )
-        result = route_after_completeness_gate(state)
-        assert result == "end"
+    @pytest.mark.parametrize("iteration", [MAX_COMPLETENESS_ITERATIONS, MAX_COMPLETENESS_ITERATIONS + 1])
+    def test_max_iterations_halts(self, mock_state, iteration) -> None:
+        """T100, #3811: a BLOCK at or above the cap records a reason, which routes to HALT.
 
-    def test_max_iterations_above_limit_ends(self, mock_state) -> None:
-        """BLOCK above max iterations also routes to end."""
-        state = mock_state(
-            completeness_verdict="BLOCK",
-            iteration_count=MAX_COMPLETENESS_ITERATIONS + 1,
-        )
-        result = route_after_completeness_gate(state)
-        assert result == "end"
+        It used to route to END with no reason and no alert.
+        """
+        reason = _block_stop_reason("BLOCK", [["a.py", 3, "empty_branch"]], [], iteration, "issue #1")
+        assert f"still BLOCK at iteration {iteration}" in reason
+        state = mock_state(completeness_verdict="BLOCK", iteration_count=iteration, error_message=reason)
+        assert route_after_completeness_gate(state) == "HALT"
+
+    def test_a_block_below_the_cap_records_no_reason(self) -> None:
+        """#3852: a first BLOCK with new issues goes back to N4; nothing stops it."""
+        assert _block_stop_reason("BLOCK", [["a.py", 3, "empty_branch"]], [], 1, "issue #1") == ""
 
     def test_error_message_routes_to_end(self, mock_state) -> None:
         """A recorded reason routes to HALT regardless of verdict (#2756)."""
@@ -805,11 +804,7 @@ class TestReportGeneration:
     def test_report_generation(
         self, tmp_path: Path, sample_lld: Path, sample_implementation_file: Path
     ) -> None:
-        """T110: Report file created with correct structure."""
-        # Set up a fake repo root with pyproject.toml so _find_reports_dir works
-        repo_root = tmp_path
-        (repo_root / "pyproject.toml").write_text("[tool.poetry]\nname = 'test'\n")
-
+        """T110: Report file created with correct structure, under the repo root given (#3811)."""
         completeness_result = CompletenessResult(
             verdict="PASS",
             issues=[],
@@ -821,10 +816,11 @@ class TestReportGeneration:
             lld_path=sample_lld,
             implementation_files=[sample_implementation_file],
             completeness_result=completeness_result,
+            repo_root=tmp_path,
         )
 
         assert report_path.exists()
-        assert report_path.name == "999-implementation-report.md"
+        assert report_path == tmp_path / "docs" / "reports" / "active" / "999-implementation-report.md"
         assert "reports" in str(report_path).replace("\\", "/")
 
         content = report_path.read_text(encoding="utf-8")
@@ -853,6 +849,7 @@ class TestReportGeneration:
             lld_path=sample_lld,
             implementation_files=[sample_implementation_file],
             completeness_result=completeness_result,
+            repo_root=tmp_path,
         )
         content = report_path.read_text(encoding="utf-8")
         # Should have requirement verification rows
@@ -885,6 +882,7 @@ class TestReportGeneration:
             lld_path=sample_lld,
             implementation_files=[sample_implementation_file],
             completeness_result=completeness_result,
+            repo_root=tmp_path,
         )
         content = report_path.read_text(encoding="utf-8")
         assert "WARN" in content
@@ -917,6 +915,7 @@ class TestReportGeneration:
             lld_path=sample_lld,
             implementation_files=[sample_implementation_file],
             completeness_result=completeness_result,
+            repo_root=tmp_path,
         )
         content = report_path.read_text(encoding="utf-8")
         assert "BLOCK" in content
@@ -957,29 +956,29 @@ class TestLLDRequirementExtraction:
             assert isinstance(req_text, str)
             assert len(req_text) > 0
 
-    def test_extraction_no_section_3_returns_empty(self, tmp_path: Path) -> None:
-        """LLD without Section 3 returns empty list."""
+    def test_extraction_no_section_3_raises(self, tmp_path: Path) -> None:
+        """#3812: an LLD without Section 3 gives nothing to review against, so it raises."""
         lld_path = tmp_path / "no-reqs.md"
         lld_path.write_text(
             "# Feature\n\n## 1. Context\n\nSome text.\n\n## 2. Changes\n\nStuff.\n"
         )
-        requirements = extract_lld_requirements(lld_path)
-        assert requirements == []
+        with pytest.raises(CompletenessGateError, match="Section 3 .* not found"):
+            extract_lld_requirements(lld_path)
 
-    def test_extraction_missing_file_returns_empty(self, tmp_path: Path) -> None:
-        """Non-existent LLD file returns empty list."""
+    def test_extraction_missing_file_raises(self, tmp_path: Path) -> None:
+        """#3812: an LLD that cannot be read raises, naming it."""
         lld_path = tmp_path / "nonexistent.md"
-        requirements = extract_lld_requirements(lld_path)
-        assert requirements == []
+        with pytest.raises(CompletenessGateError, match="cannot read the LLD .*nonexistent.md"):
+            extract_lld_requirements(lld_path)
 
-    def test_extraction_empty_section_3(self, tmp_path: Path) -> None:
-        """Section 3 with no numbered items returns empty list."""
+    def test_extraction_empty_section_3_raises(self, tmp_path: Path) -> None:
+        """#3812, #2552: Section 3 with no numbered item is zero requirements, which raises."""
         lld_path = tmp_path / "empty-reqs.md"
         lld_path.write_text(
             "# Feature\n\n## 3. Requirements\n\nNo requirements listed.\n\n## 4. Alternatives\n"
         )
-        requirements = extract_lld_requirements(lld_path)
-        assert requirements == []
+        with pytest.raises(CompletenessGateError, match="holds no numbered requirement"):
+            extract_lld_requirements(lld_path)
 
 
 # =============================================================================
@@ -1030,20 +1029,20 @@ class TestPrepareReviewMaterials:
         )
         assert len(materials["code_snippets"]) == 2
 
-    def test_review_materials_skips_missing_files(
+    def test_review_materials_raise_on_a_missing_file(
         self, tmp_path: Path, sample_lld: Path
     ) -> None:
-        """Non-existent files are skipped in review materials."""
+        """#3812: an implementation file that cannot be read stops the review; it is not skipped."""
         existing = tmp_path / "exists.py"
         existing.write_text('def hello():\n    return "hi"\n')
         missing = tmp_path / "missing.py"
 
-        materials = prepare_review_materials(
-            issue_number=999,
-            lld_path=sample_lld,
-            implementation_files=[existing, missing],
-        )
-        assert len(materials["code_snippets"]) == 1
+        with pytest.raises(CompletenessGateError, match="cannot read .*missing.py"):
+            prepare_review_materials(
+                issue_number=999,
+                lld_path=sample_lld,
+                implementation_files=[existing, missing],
+            )
 
     def test_review_materials_skips_non_python_files(
         self, tmp_path: Path, sample_lld: Path
@@ -1105,19 +1104,31 @@ class TestRunASTAnalysis:
         assert result["verdict"] == "PASS"
         assert result["issues"] == []
 
-    def test_run_ast_analysis_skips_large_files(self, tmp_py_file) -> None:
-        """Files exceeding max_file_size_bytes are skipped."""
-        # Create a file that would have issues if analyzed
+    def test_run_ast_analysis_raises_on_a_large_file(self, tmp_py_file) -> None:
+        """#3811: a file over max_file_size_bytes cannot be certified, so it raises.
+
+        It used to be skipped, and this exact stub came back PASS.
+        """
         source = """\
             def stub():
                 \"\"\"Stub.\"\"\"
                 pass
         """
         file_path = tmp_py_file(source, "big_module.py")
-        # Set max_file_size_bytes to 1 byte so the file is skipped
-        result = run_ast_analysis([file_path], max_file_size_bytes=1)
-        assert result["verdict"] == "PASS"
-        assert result["issues"] == []
+        with pytest.raises(CompletenessGateError, match="big_module.py is .* bytes, over the 1-byte limit"):
+            run_ast_analysis([file_path], max_file_size_bytes=1)
+
+    def test_run_ast_analysis_raises_on_a_file_that_does_not_parse(self, tmp_path: Path) -> None:
+        """#3811: a syntax error used to skip the file; the verdict could be PASS on it."""
+        broken = tmp_path / "broken.py"
+        broken.write_text("def broken(:\n    pass\n")
+        with pytest.raises(CompletenessGateError, match="cannot parse .*broken.py"):
+            run_ast_analysis([broken])
+
+    def test_run_ast_analysis_raises_on_a_file_it_cannot_stat(self, tmp_path: Path) -> None:
+        """#3811: a named file that is not there used to be skipped with a warning."""
+        with pytest.raises(CompletenessGateError, match="cannot stat .*gone.py"):
+            run_ast_analysis([tmp_path / "gone.py"])
 
     def test_run_ast_analysis_skips_non_python(self, tmp_path: Path) -> None:
         """Non-Python files are skipped."""

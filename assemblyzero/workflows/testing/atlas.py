@@ -159,9 +159,9 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N4_5_mechanical_hooks": "every requirement has code",
             "N4_implement_code": "something is missing; implement it",
-            "HALT": "the gate itself failed and left a reason",
-            "END": "still incomplete at the iteration cap; the orchestrator "
-                   "reads the BLOCK verdict (#1779)",
+            "HALT": "the gate could not check, or the implementation is still "
+                    "incomplete at the iteration cap or unchanged since the last "
+                    "iteration; the node left a reason (#3811)",
         },
     },
     "N4_5_mechanical_hooks": {

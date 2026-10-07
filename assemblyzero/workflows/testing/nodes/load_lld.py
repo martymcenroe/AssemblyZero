@@ -1386,7 +1386,7 @@ Requirement: REQ-2
     ]
 
     file_num = next_file_number(audit_dir)
-    save_audit_file(audit_dir, file_num, "lld.md", mock_lld)
+    mock_lld_path = save_audit_file(audit_dir, file_num, "lld.md", mock_lld)
 
     # Issue #381: Detect test framework (even in mock mode)
     frameworks = resolve_framework(mock_lld, str(repo_root))
@@ -1396,7 +1396,10 @@ Requirement: REQ-2
     print(f"    [MOCK] Loaded mock LLD for issue #{issue_number}")
 
     return {
-        "lld_path": f"docs/lld/active/LLD-{issue_number:03d}.md",
+        # #3811: the mock LLD is the file just written, so a reader of this path
+        # (the completeness gate) finds it. The repository path it used to name
+        # was never written in mock mode.
+        "lld_path": str(mock_lld_path),
         "lld_content": mock_lld,
         "test_plan_section": "### test_login_success\n...",
         "test_scenarios": mock_scenarios,
