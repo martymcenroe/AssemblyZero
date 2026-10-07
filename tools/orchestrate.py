@@ -257,6 +257,18 @@ Examples:
     print(f"[ORCHESTRATOR] Starting pipeline for issue #{args.issue}")
     print(f"[ORCHESTRATOR] Target repo: {target_repo}")
 
+    # #3717: the lld and pr stages land through the fleet merge driver, named
+    # by AZ_MERGE_DRIVER. Refuse before any stage spends: without it the LLD is
+    # approved and stranded on a local branch, and the implementation cannot
+    # land at all. A mock or dry run lands nothing and is not refused.
+    if not args.dry_run and not args.mock:
+        from assemblyzero.core import merge_driver
+
+        reason = merge_driver.check_configured()
+        if reason:
+            print(f"[ORCHESTRATOR] merge driver not configured: {reason}")
+            sys.exit(2)
+
     # #3566: the run's model profile: --models, then AZ_MODEL_PROFILE, then
     # the target's models.toml, then gemini.toml; --mock selects mock.toml.
     from assemblyzero.core.model_record import announce_profile

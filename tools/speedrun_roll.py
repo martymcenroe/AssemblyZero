@@ -793,6 +793,27 @@ def _orchestrator_state_path(az_root: Path, issue: int) -> Path:
     return az_root / ".assemblyzero" / "orchestrator" / "state" / f"{issue}.json"
 
 
+def _lld_landed_on_base(repo_root: Path, issue: int, base: str) -> bool:
+    """The issue's LLD is on ``origin/<base>`` (#3741).
+
+    Since #3704 the merge driver lands the LLD in one step -- push, PR, merge,
+    branch deleted -- so a landed design leaves no open LLD PR behind. Its file
+    on the attempt branch is the proof the draft survives, which is what the
+    open-PR check proved before.
+    """
+    fetch = _run(["git", "fetch", "origin", base], cwd=repo_root)
+    if fetch.returncode != 0:
+        return False
+    for name in (f"LLD-{issue:03d}.md", f"LLD-{issue}.md"):
+        found = _run(
+            ["git", "cat-file", "-e", f"origin/{base}:docs/lld/active/{name}"],
+            cwd=repo_root,
+        )
+        if found.returncode == 0:
+            return True
+    return False
+
+
 def _open_lld_pr_exists(repo_root: Path, issue: int) -> bool:
     """The lld PR still being open proves the reset has not destroyed the
     draft a resume would reuse -- reset_one_issue closes it first thing, so
@@ -1254,27 +1275,35 @@ def resume_plan(
       - the lld PR is still open and the passed artifacts exist on disk or
         are restorable from the lld branch.
     """
+    # #3741: every decline is said, naming the check, so a launch that falls
+    # through to a fresh draw shows why the resume was not planned.
+    def declined(reason: str) -> None:
+        log.write(f"RESUME declined for #{issue}: {reason}")
+
     state_path = _orchestrator_state_path(az_root, issue)
     if not state_path.is_file():
-        return None
+        return declined(f"no orchestrator state ({state_path.name})")
     try:
         data = json.loads(state_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    except (json.JSONDecodeError, OSError) as exc:
+        return declined(f"orchestrator state unreadable: {exc}")
 
     try:
         if Path(data.get("target_repo", "")).resolve() != repo_root.resolve():
-            return None
-    except OSError:
-        return None
+            return declined("the state belongs to another repository")
+    except OSError as exc:
+        return declined(f"the state's target repo cannot be resolved: {exc}")
 
     base = resolve_attempt_branch(repo_root)
     if not base or data.get("base_branch") != base:
-        return None
+        return declined(
+            f"the state's base branch ({data.get('base_branch') or '<none>'}) is not "
+            f"the attempt branch ({base or '<none>'})"
+        )
 
     results = data.get("stage_results", {}) or {}
     if results.get("lld", {}).get("status") not in ("passed", "skipped"):
-        return None
+        return declined("the lld stage did not pass")
 
     failed = next(
         (s for s in STAGE_ORDER
@@ -1289,20 +1318,27 @@ def resume_plan(
         failed = _halted_stage(data, results)
         halted = failed is not None
     if failed not in RESUMABLE_STAGES:
-        return None
+        return declined(f"no resumable stage failed or was in flight ({failed or 'none'})")
 
     if is_requirements_conflict(results.get(failed, {}).get("error_message", "")):
-        return None
+        return declined(f"the {failed} stage failed on a requirements conflict")
 
-    if not _open_lld_pr_exists(repo_root, issue):
-        return None
+    # #3741: the pre-#3704 shape left the LLD PR open; the merge driver lands
+    # it and leaves the LLD on the attempt branch instead. Either proves the
+    # approved draft survives.
+    if not (_open_lld_pr_exists(repo_root, issue)
+            or _lld_landed_on_base(repo_root, issue, base)):
+        return declined(
+            f"no open LLD PR and no LLD for #{issue} on origin/{base}: the "
+            f"approved design never left this machine"
+        )
 
     # #2206: the draft must still be derived from current law. #2615: by
     # CONTENT -- the settled fingerprint of the issue body and the binding
     # docs -- never by timestamps, which a comment moves without changing a
     # single input.
     if draft_is_stale(repo_root, issue, log):
-        return None
+        return declined("the draft is stale against the current issue and binding docs")
 
     # #2414: an artifact lookup, not a path-string lookup. The old form read
     # one field and abandoned on the empty string, so a resume was declined
