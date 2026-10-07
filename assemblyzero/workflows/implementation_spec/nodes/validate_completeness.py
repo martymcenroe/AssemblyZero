@@ -193,6 +193,14 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_imports)
     _log_check(check_imports)
 
+    # Check 6b (#3755): calls into existing first-party code the plan does not
+    # change must use keywords the callee accepts.
+    check_calls = check_call_signatures_match(
+        spec_draft, files_to_modify, repo_root_str, base_branch
+    )
+    checks.append(check_calls)
+    _log_check(check_calls)
+
     # Check 7: Spec must not call methods absent from target repo (Issue #1527)
     gathered_symbols: list[str] = state.get("gathered_symbols", [])  # type: ignore[assignment]
     check_symbols = check_api_symbols_exist(
@@ -1559,6 +1567,171 @@ def check_import_targets_exist(
         check_name="import_targets_exist",
         passed=True,
         details=f"All {len(checked)} import targets validated.{env_note}",
+    )
+
+
+def _module_source(
+    module_path: str, repo_root: Path, base_ref_name: str
+) -> tuple[str, str]:
+    """(repo-relative path, source) of first-party module `module_path`, read
+    from the checkout or, failing that, the run's base (#3755). ("", "") when
+    it is in neither."""
+    prefixes = _SOURCE_ROOT_PREFIXES + _discover_pyproject_source_roots(repo_root)
+    for candidate in _module_candidates(module_path):
+        for prefix in prefixes:
+            rel = (Path(prefix) / candidate) if prefix else candidate
+            on_disk = repo_root / rel
+            if on_disk.is_file():
+                return rel.as_posix(), on_disk.read_text(encoding="utf-8", errors="replace")
+            if base_ref_name:
+                text = read_from_base(repo_root, base_ref_name, rel.as_posix())
+                if text:
+                    return rel.as_posix(), text
+    return "", ""
+
+
+def _accepted_keywords(tree: ast.Module, name: str) -> tuple[set[str] | None, str]:
+    """The keywords top-level `name` accepts, and its signature as text.
+
+    A class is read through its own `__init__`; a class without one (a
+    dataclass, a NamedTuple, an inherited constructor) cannot be judged from
+    its source alone and returns None, as does any signature taking
+    ``**kwargs``. None means: do not check this callee.
+    """
+    for node in tree.body:
+        func = None
+        label = name
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            func = next(
+                (n for n in node.body
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                 and n.name == "__init__"),
+                None,
+            )
+            if func is None:
+                return None, ""
+            label = f"{name}.__init__"
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            func = node
+        if func is None:
+            continue
+        args = func.args
+        if args.kwarg is not None:
+            return None, ""
+        accepted = {a.arg for a in args.args} | {a.arg for a in args.kwonlyargs}
+        return accepted, f"{label}({ast.unparse(args)})"
+    return None, ""
+
+
+def check_call_signatures_match(
+    spec: str,
+    files: list[FileToModify],
+    repo_root_str: str = "",
+    base_branch: str = "",
+) -> CompletenessCheck:
+    """A spec's calls into existing first-party code use keywords it accepts (#3755).
+
+    `api_symbols_exist` checks that a called method exists and
+    `import_targets_exist` that a module does; neither checks the keyword
+    arguments of a call into code the plan does not change. boostgauge #2
+    run-issue2-024542 built `Telltale(duration=...)` against
+    `Telltale.__init__(self, window, decay_rate=None)` in a file the plan did
+    not own, and the implementer could only answer NO-EDIT until the green
+    phase ran out.
+
+    Reads by `ast` only: the spec's Python fences for imports and calls, the
+    callee's module for its signature. A callee the plan Adds or Modifies is
+    skipped, since the spec may be changing it; so is a class without its own
+    `__init__` and any signature with `**kwargs`. A fence that does not parse
+    is left to `python_fences_parse`.
+    """
+    if not repo_root_str:
+        return CompletenessCheck(
+            check_name="call_signatures_match",
+            passed=True,
+            details="No repo_root available — check not applicable.",
+        )
+    repo_root = Path(repo_root_str)
+    base_ref_name = base_ref(repo_root, base_branch) if base_branch else ""
+    first_party = _first_party_tops(repo_root)
+    planned = {
+        str(f.get("path", "")).replace("\\", "/")
+        for f in files
+        if f.get("change_type", "").lower() in ("add", "modify")
+    }
+
+    trees: list[ast.Module] = []
+    for match in _CODE_FENCE_RE.finditer(spec):
+        tag = (match.group(1) or "").lower()
+        if tag not in _PYTHON_FENCE_TAGS and tag not in _UNDECLARED_FENCE_TAGS:
+            continue
+        try:
+            trees.append(ast.parse(_normalize_fence(match.group(2))))
+        except (SyntaxError, ValueError, RecursionError):
+            # fail-open: an unparseable fence is not judged here because
+            # python_fences_parse fails the same draft on it, by name (#2526).
+            continue
+
+    # local name -> (accepted keywords, signature text)
+    signatures: dict[str, tuple[set[str], str]] = {}
+    module_trees: dict[str, ast.Module | None] = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or not node.module or node.level:
+                continue
+            if node.module.split(".")[0] not in first_party:
+                continue
+            if node.module not in module_trees:
+                rel, source = _module_source(node.module, repo_root, base_ref_name)
+                if not source or rel in planned:
+                    module_trees[node.module] = None
+                else:
+                    try:
+                        module_trees[node.module] = ast.parse(source)
+                    except SyntaxError:
+                        # fail-open: a callee module that does not parse cannot
+                        # be judged; its calls are not checked rather than
+                        # guessed at, and the repo's own tests own its syntax.
+                        module_trees[node.module] = None
+            module_tree = module_trees[node.module]
+            if module_tree is None:
+                continue
+            for alias in node.names:
+                accepted, text = _accepted_keywords(module_tree, alias.name)
+                if accepted is not None:
+                    signatures[alias.asname or alias.name] = (accepted, text)
+
+    findings: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for tree in trees:
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            entry = signatures.get(node.func.id)
+            if entry is None:
+                continue
+            accepted, text = entry
+            for kw in node.keywords:
+                if kw.arg is None or kw.arg in accepted or (node.func.id, kw.arg) in seen:
+                    continue
+                seen.add((node.func.id, kw.arg))
+                findings.append(f"`{node.func.id}({kw.arg}=...)`: `{text}` takes no `{kw.arg}`")
+
+    if findings:
+        return CompletenessCheck(
+            check_name="call_signatures_match",
+            passed=False,
+            details=(
+                "Spec calls existing first-party code with keywords it does not "
+                "accept: " + "; ".join(findings[:5])
+                + (f" (and {len(findings) - 5} more)" if len(findings) > 5 else "")
+                + ". Use the callee's real parameters; the plan does not change it."
+            ),
+        )
+    return CompletenessCheck(
+        check_name="call_signatures_match",
+        passed=True,
+        details=f"{len(signatures)} existing first-party callee(s) checked.",
     )
 
 
@@ -3975,6 +4148,24 @@ def _candidate_exists_under_source_roots(
     return False
 
 
+def _module_candidates(module_path: str) -> list[Path]:
+    """The files that ARE module `a.b`: `a/b.py` or `a/b/__init__.py` (#3754).
+
+    Both import shapes the check reads, `from X import ...` and `import X`,
+    name a module in X, so only X itself can satisfy them. #842 also accepted
+    X's parent (`a.py`, `a/__init__.py`) on the reading "from a.b import c --
+    c might be a name inside a.b.py", but the module path captured there is
+    `a.b`, which the two forms below already cover; the parent forms only let
+    any `pkg.<anything>` pass. boostgauge #2 run-issue2-024542 imported
+    `boostgauge.renderer`, which exists nowhere, and it passed on
+    `boostgauge/__init__.py`.
+    """
+    parts = [p for p in module_path.split(".") if p]
+    if not parts:
+        return []
+    return [Path(*parts).with_suffix(".py"), Path(*parts) / "__init__.py"]
+
+
 def _import_resolves(
     module_path: str, repo_root: Path, new_file_paths: set[str]
 ) -> bool:
@@ -3989,18 +4180,9 @@ def _import_resolves(
     pathlib treats as `Path(".")`, and `.with_suffix(".py")` raises
     ValueError on a path with no name. Closes #1513.
     """
-    parts = [p for p in module_path.split(".") if p]
-    if not parts:
+    candidates = _module_candidates(module_path)
+    if not candidates:
         return False
-    candidates: list[Path] = [
-        Path(*parts).with_suffix(".py"),
-        Path(*parts) / "__init__.py",
-    ]
-    if len(parts) > 1:
-        candidates.extend([
-            Path(*parts[:-1]).with_suffix(".py"),
-            Path(*parts[:-1]) / "__init__.py",
-        ])
 
     for candidate in candidates:
         if _candidate_exists_under_source_roots(candidate, repo_root):
@@ -4016,23 +4198,14 @@ def _resolves_on_base(
 ) -> bool:
     """Mirror of `_import_resolves` against the run's base ref (#2667).
 
-    Same candidate set (module and package forms, parent-forgiveness for the
-    attribute-import shape), same source-root prefixes — probed with
-    `git cat-file -e` instead of the filesystem, because the checkout is the
-    default branch and mid-arc the base carries files the checkout does not.
+    Same candidate set (the module and package forms, `_module_candidates`),
+    same source-root prefixes — probed with `git cat-file -e` instead of the
+    filesystem, because the checkout is the default branch and mid-arc the
+    base carries files the checkout does not.
     """
-    parts = [p for p in module_path.split(".") if p]
-    if not parts:
+    candidates = _module_candidates(module_path)
+    if not candidates:
         return False
-    candidates: list[Path] = [
-        Path(*parts).with_suffix(".py"),
-        Path(*parts) / "__init__.py",
-    ]
-    if len(parts) > 1:
-        candidates.extend([
-            Path(*parts[:-1]).with_suffix(".py"),
-            Path(*parts[:-1]) / "__init__.py",
-        ])
     prefixes = _SOURCE_ROOT_PREFIXES + _discover_pyproject_source_roots(repo_root)
     for candidate in candidates:
         for prefix in prefixes:

@@ -433,7 +433,8 @@ def settlement_inputs(repo_root: Path, issue: int, stage: str) -> list:
         if isinstance(record, dict):
             upstream = record.get("artifact_path") or None
     return settlement_mod.collect_inputs(
-        repo_root, issue_body=body, upstream_artifact=upstream
+        repo_root, issue_body=body, upstream_artifact=upstream,
+        stage=stage,  # #3756: the same inputs the stage hashed when it settled
     )
 
 

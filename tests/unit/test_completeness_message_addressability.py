@@ -433,6 +433,10 @@ class TestTheSweepIsExhaustive:
             "check_data_structures_have_examples",
             "check_pattern_references_valid",
             "check_import_targets_exist",
+            # #3755: needs a real repo tree, as check_import_targets_exist
+            # does; tests/unit/test_spec_calls_existing_code.py drives it
+            # against one.
+            "check_call_signatures_match",
             "check_visual_baselines_not_self_referential",
             "check_criteria_have_tests",
             "check_error_paths_have_tests",
@@ -451,6 +455,7 @@ class TestTheSweepIsExhaustive:
             "check_data_structures_have_examples",
             "check_pattern_references_valid",
             "check_import_targets_exist",
+            "check_call_signatures_match",
             "check_visual_baselines_not_self_referential",
             "check_criteria_have_tests",
             "check_error_paths_have_tests",

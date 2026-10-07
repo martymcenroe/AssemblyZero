@@ -102,6 +102,7 @@ def current_inputs(
         target_repo,
         issue_body=fetch_issue_body(target_repo, issue_number),
         upstream_artifact=upstream,
+        stage=stage,  # #3756: the spec's approving gate is an input
     )
 
 

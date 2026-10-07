@@ -203,6 +203,7 @@ def collect_inputs(
     issue_body: str | None,
     upstream_artifact: Path | str | None = None,
     doc_paths: tuple[str, ...] = BINDING_DOC_PATHS,
+    stage: str | None = None,
 ) -> list[SettledInput]:
     """The inputs a derivation at this stage depends on, hashed.
 
@@ -211,13 +212,36 @@ def collect_inputs(
     recorded as an unreadable input rather than omitted: an input that could
     not be read must reach `verify` as a mismatch, and omitting it would let a
     failed fetch read as "nothing to check" and settle everything.
+
+    #3756: for the spec stage, the gate that approved the artifact is an input
+    too. A spec settled by an older completeness gate is re-judged by the
+    current one instead of being preserved past a check it never faced.
     """
     inputs = [SettledInput(key="issue_body", sha256=None)] if issue_body is None \
         else [input_from_text("issue_body", issue_body)]
     if upstream_artifact is not None:
         inputs.append(input_from_file("upstream:artifact", upstream_artifact))
     inputs.extend(binding_inputs(Path(repo_root), doc_paths))
+    gate = gate_input(stage)
+    if gate is not None:
+        inputs.append(gate)
     return inputs
+
+
+def gate_input(stage: str | None) -> SettledInput | None:
+    """The approving gate's identity as a settlement input, or None (#3756).
+
+    For the spec stage: the completeness gate's check names, sorted, one per
+    line. Adding or removing a check changes it, so every spec the previous
+    gate approved stops verifying as settled.
+    """
+    if stage != "spec":
+        return None
+    from assemblyzero.workflows.implementation_spec.check_classification import (
+        CLASSIFICATIONS,
+    )
+
+    return input_from_text("gate:spec-completeness", "\n".join(sorted(CLASSIFICATIONS)))
 
 
 def build_settlement(

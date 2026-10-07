@@ -114,6 +114,19 @@ CLASSIFICATIONS: dict[str, Classification] = {
             "than a false alarm on a module the spec is about to create (#842)."
         ),
     ),
+    "call_signatures_match": Classification(
+        check="call_signatures_match",
+        kind=FACT,
+        reads=(
+            "ast of the spec's python fences for first-party imports and calls, "
+            "and ast of each callee's module, on disk or on the run's base"
+        ),
+        reason=(
+            "a keyword is in the callee's parameter list or it is not (#3755). "
+            "Callees the plan changes, classes without their own __init__, and "
+            "**kwargs signatures are not judged, so it never guesses."
+        ),
+    ),
     "pattern_references_valid": Classification(
         check="pattern_references_valid",
         kind=FACT,
