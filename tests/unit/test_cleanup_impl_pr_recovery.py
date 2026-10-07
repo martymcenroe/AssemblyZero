@@ -32,34 +32,37 @@ def _state(tmp_path, pr_passed=True, **overrides):
     return state
 
 
-def _run(state, merge_result):
-    with patch.object(stages, "_merge_pr", side_effect=merge_result), \
+def _run(state, landed):
+    """Run cleanup with the squash check (#3717) answering ``landed``."""
+    with patch.object(stages, "_squash_on_base", side_effect=landed), \
             patch.object(stages, "_delete_landed_working_copies"), \
             patch.object(stages, "_remove_orchestrator_worktrees"):
         return stages.run_cleanup_stage(state)
 
 
 class TestAMissingUrlIsRecoveredNotExcused:
-    def test_it_lands_the_pr_stage_artifact_when_the_url_is_missing(self, tmp_path):
+    def test_it_confirms_the_pr_stage_artifact_when_the_url_is_missing(self, tmp_path):
         """Exactly the live shape: pr stage passed with a PR, impl_pr_url gone."""
-        merged = []
+        checked = []
 
-        def fake(url, timeout, notes, label="LLD"):
-            merged.append((label, url))
+        def fake(target, sha, base, notes):
+            checked.append(sha)
             return True
 
-        new_state = _run(_state(tmp_path, lld_pr_url=LLD_PR), fake)
+        new_state = _run(_state(tmp_path, lld_pr_url=LLD_PR, impl_squash_sha="s159"), fake)
 
-        assert ("impl", IMPL_PR) in merged, merged
-        assert new_state["stage_results"]["cleanup"]["status"] == "passed"
+        assert checked == ["s159"], checked
+        result = new_state["stage_results"]["cleanup"]
+        assert result["status"] == "passed"
+        assert result["artifact_path"] == IMPL_PR
 
     def test_the_recovery_is_stated_not_silent(self, tmp_path, capsys):
         _run(_state(tmp_path), lambda *a, **k: True)
         assert "URL was missing from state" in capsys.readouterr().out
 
-    def test_an_unmergeable_recovered_pr_still_fails(self, tmp_path):
+    def test_an_unconfirmed_recovered_pr_still_fails(self, tmp_path):
         """Recovery must not become a second way to pass without landing."""
-        new_state = _run(_state(tmp_path), lambda u, t, n, label="LLD": label != "impl")
+        new_state = _run(_state(tmp_path), lambda *a, **k: False)
 
         result = new_state["stage_results"]["cleanup"]
         assert result["status"] == "failed", result
@@ -85,12 +88,5 @@ class TestTheExplicitUrlStillWins:
     def test_a_present_impl_pr_url_is_used_as_is(self, tmp_path):
         """The normal path once #2018 is fixed -- recovery must not shadow it."""
         explicit = "https://github.com/o/r/pull/999"
-        merged = []
-
-        def fake(url, timeout, notes, label="LLD"):
-            merged.append((label, url))
-            return True
-
-        _run(_state(tmp_path, impl_pr_url=explicit), fake)
-        assert ("impl", explicit) in merged, merged
-        assert ("impl", IMPL_PR) not in merged
+        new_state = _run(_state(tmp_path, impl_pr_url=explicit), lambda *a, **k: True)
+        assert new_state["stage_results"]["cleanup"]["artifact_path"] == explicit

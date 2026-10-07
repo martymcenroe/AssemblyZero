@@ -738,7 +738,22 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
             state["previous_lld_verdict_text"] = verdict_for_next
         state = OrchestrationState(**state)
 
-        if lld_path and Path(lld_path).is_file():
+        # #3740: an approved LLD that did not land exists only on this
+        # machine's local branch. finalize reports the reason in commit_error;
+        # before this, nothing read it and the stage passed on a design that
+        # never left the machine. Not transient: the same inputs fail the same
+        # way until the cause (usually AZ_MERGE_DRIVER) is fixed.
+        landing_error = sub_result.get("commit_error", "")
+        if landing_error and lld_path and Path(lld_path).is_file():
+            result = _make_stage_result(
+                status="failed",
+                artifact_path=lld_path,
+                error_message=f"LLD approved but not landed: {landing_error}",
+                duration_seconds=time.monotonic() - start_time,
+                attempts=1,
+                transient=False,
+            )
+        elif lld_path and Path(lld_path).is_file():
             # #1440 (extended): When the human verdict gate is bypassed
             # (config_gates_verdict=False), the reviewer's verdict becomes
             # ADVISORY — not authoritative. A finalized LLD on disk means the
@@ -2093,14 +2108,27 @@ def _reconcile_stale_remote_branch(worktree_path, branch: str) -> str:
     )
 
 
+def impl_pr_body_path(target_repo: str | Path, issue_number: int) -> Path:
+    """Where the implementation PR's body is written for the driver's
+    --body-file (#3717): under the target's gitignored data/, beside the LLD's,
+    never in the worktree the driver removes."""
+    return Path(target_repo) / "data" / "assemblyzero" / "pr-bodies" / f"impl-{issue_number}.md"
+
+
 def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
-    """Create and submit the PR via the gh CLI.
+    """Land the implementation through the fleet merge driver (#3717).
+
+    This machine's gh wrapper refuses `gh pr create` and `gh pr merge` from
+    any process that is not the driver, so the stage hands the worktree and
+    branch to `merge_driver.land`, which pushes, opens the PR, waits for the
+    checks, merges, verifies the squash, removes the worktree and deletes the
+    branch. The stage records the PR and the squash SHA it reports.
 
     The head branch is derived from the branch actually checked out in the
     worktree (not a hardcoded ``issue-{N}``); both the PR title and body carry
-    ``Closes #N`` so the fleet pr-sentinel accepts the PR and it can reach
-    ``mergeable_state: clean``.
+    ``Closes #N`` so the fleet pr-sentinel accepts the PR.
     """
+    from assemblyzero.core import merge_driver
     stage = "pr"
     issue_number = state["issue_number"]
     start_time = time.monotonic()
@@ -2140,16 +2168,8 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
         if reconcile_note:
             print(f"    {reconcile_note}")
 
-        # Push branch
-        run_command(
-            ["git", "push", "--set-upstream", "origin", branch],
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=worktree_path,
-        )
-
-        # Create PR. pr-sentinel validates the PR *body* for `Closes #N`
+        # #3717: nothing is pushed here; the driver pushes.
+        # pr-sentinel validates the PR *body* for `Closes #N`
         # (commit message / title alone are not sufficient); the universal rule
         # also requires `Closes #N` in the title. Without it the PR is marked
         # action_required/blocked and never reaches `mergeable_state: clean`.
@@ -2172,30 +2192,40 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
         base_branch = state.get("base_branch", "")
         if not base_branch:
             base_branch = current_branch(state.get("target_repo", "."))
-        pr_result = run_command(
-            [
-                "gh", "pr", "create",
-                "--title", pr_title,
-                "--body", pr_body,
-                "--base", base_branch,
-                "--head", branch,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=worktree_path,
-        )
 
-        pr_url = pr_result.stdout.strip()
-        # #2011: the impl PR was created and then abandoned -- nothing merged it,
-        # so the attempt branch received the design and never the code. Record it
-        # so the cleanup stage can land it alongside the LLD PR.
+        target_repo = state.get("target_repo", "") or worktree_path
+        body_file = impl_pr_body_path(target_repo, issue_number)
+        body_file.parent.mkdir(parents=True, exist_ok=True)
+        body_file.write_text(pr_body, encoding="utf-8")
+
+        landing = merge_driver.land(
+            worktree=worktree_path, branch=branch, title=pr_title,
+            body_file=body_file, issue=issue_number, base=base_branch,
+        )
+        pr_url = _pr_url_for(target_repo, landing)
+        # #2011: record the implementation PR so cleanup can say what landed.
+        # #3717: the driver merged it already; the squash is what cleanup checks.
         state["impl_pr_url"] = pr_url
+        state["impl_squash_sha"] = landing.squash_sha
+        print(f"    Implementation PR landed by the merge driver: {pr_url} (squash {landing.squash_sha})")
         result = _make_stage_result(
             status="passed",
             artifact_path=pr_url,
             duration_seconds=time.monotonic() - start_time,
             attempts=1,
+            notes=[f"squash {landing.squash_sha} on {base_branch}"],
+        )
+    except merge_driver.MergeDriverError as exc:
+        # fail-open: not a pass -- the refusal becomes this stage's failed
+        # result, carrying the driver's output, and halts the run below.
+        # The driver's refusals are decisions, not weather: another attempt
+        # with the same inputs gets the same answer.
+        result = _make_stage_result(
+            status="failed",
+            error_message=f"PR landing error: {exc}",
+            duration_seconds=time.monotonic() - start_time,
+            attempts=1,
+            transient=False,
         )
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr or ""
@@ -2223,48 +2253,44 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
     return update_stage_result(state, stage, result)
 
 
-def _merge_pr(pr_url: str, timeout_s: int, notes: list[str], label: str = "LLD") -> bool:
-    """Poll a PR until mergeable, then squash-merge it. Returns True iff merged.
+def _pr_url_for(target_repo: str | Path, landing) -> str:
+    """The PR's URL from what the merge driver reported (#3717)."""
+    from assemblyzero.workflows.requirements.git_operations import _resolve_repo_arg
 
-    Closes #1531 for the LLD PR (landing LLD + spec per ADR 0221). #2011 applies
-    the same discipline to the IMPLEMENTATION PR, which nothing merged: the arc
-    could not accumulate, and every previous "pipeline-built" arc had a human
-    merging six impl PRs by hand.
+    repo_arg = _resolve_repo_arg(Path(target_repo))
+    if landing.pr_number and repo_arg:
+        return f"https://github.com/{repo_arg}/pull/{landing.pr_number}"
+    return landing.pr_url
 
-    Bounded by ``timeout_s``; on timeout the PR is left open and reported. No
-    ``--admin``, no force -- a PR that will not merge cleanly is a finding.
+
+def _squash_on_base(target_repo: str, squash_sha: str, base: str, notes: list[str]) -> bool:
+    """Is the squash the merge driver reported on ``origin/<base>``? (#3717)
+
+    The driver merges and verifies; this is the orchestrator's own check that
+    the code it is about to call landed actually reached the branch the next
+    phase builds on. Nothing here merges, and nothing here calls gh.
     """
-    deadline = time.monotonic() + max(0, timeout_s)
-    last = ""
-    while True:
-        view = run_command(
-            ["gh", "pr", "view", pr_url, "--json", "state,mergeStateStatus",
-             "--jq", "[.state, .mergeStateStatus] | @tsv"],
-            capture_output=True, text=True,
+    if not (target_repo and squash_sha and base):
+        notes.append(
+            f"cannot verify the implementation landed: squash={squash_sha or '<none>'}, "
+            f"base={base or '<none>'}"
         )
-        if view.returncode == 0:
-            cols = (view.stdout or "").strip().split("\t")
-            pr_state = cols[0] if cols and cols[0] else ""
-            last = cols[1] if len(cols) > 1 else last
-            if pr_state == "MERGED":
-                return True
-            if last == "CLEAN":
-                merge = run_command(
-                    ["gh", "pr", "merge", pr_url, "--squash"],
-                    capture_output=True, text=True,
-                )
-                if merge.returncode == 0:
-                    return True
-                notes.append(f"{label} PR merge attempt failed: {(merge.stderr or '').strip()[:160]}")
-        else:
-            notes.append(f"{label} PR view failed: {(view.stderr or '').strip()[:160]}")
-        if time.monotonic() >= deadline:
-            notes.append(
-                f"{label} PR not merged within {timeout_s}s (last merge-state="
-                f"{last or '?'})"
-            )
-            return False
-        time.sleep(15)
+        return False
+    fetch = run_command(
+        ["git", "fetch", "origin", base], cwd=target_repo, capture_output=True, text=True,
+    )
+    if fetch.returncode != 0:
+        notes.append(f"fetch of origin/{base} failed: {(fetch.stderr or '').strip()[:160]}")
+        return False
+    check = run_command(
+        ["git", "merge-base", "--is-ancestor", squash_sha, f"origin/{base}"],
+        cwd=target_repo, capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        notes.append(f"squash {squash_sha} is not on origin/{base}")
+        return False
+    notes.append(f"squash {squash_sha} verified on origin/{base}")
+    return True
 
 
 def _delete_landed_working_copies(target_repo: str, issue_number: int, notes: list[str]) -> None:
@@ -2363,13 +2389,16 @@ def _remove_orchestrator_worktrees(
 
 
 def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
-    """Terminal stage (#1531 + #1624 + #1628): merge the LLD PR (landing LLD + spec
-    on target main), delete the now-redundant LLD/spec working-tree copies, and
-    remove the LLD + impl worktrees.
+    """Terminal stage (#1531 + #1624 + #1628 + #3717): confirm what landed,
+    delete the now-redundant LLD/spec working-tree copies, and remove any LLD or
+    impl worktree left behind.
 
-    Best-effort housekeeping: always returns ``passed`` so a cleanup hiccup never
-    fails an otherwise-successful run. Residue is logged and deferred to manual
-    ``/cleanup``.
+    #3717: this stage merges nothing. The merge driver landed the LLD in the
+    lld stage and the implementation in the pr stage, each in one step. An LLD
+    PR URL in state is the driver's report that it landed; the implementation
+    is confirmed by finding the reported squash on ``origin/<base>``.
+
+    Housekeeping is best-effort; the implementation's landing is not (#2011).
     """
     stage = "cleanup"
     issue_number = state["issue_number"]
@@ -2377,20 +2406,17 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
 
     target_repo = state.get("target_repo", "")
     lld_pr_url = state.get("lld_pr_url", "")
-    config = state.get("config", {})
-    merge_timeout = config.get("cleanup_merge_timeout_s", 600)
+    base_branch = state.get("base_branch", "")
     notes: list[str] = []
 
-    lld_merged = False
-    if lld_pr_url:
-        lld_merged = _merge_pr(lld_pr_url, merge_timeout, notes, label="LLD")
-    else:
-        notes.append("no LLD PR URL in state — skipping LLD merge")
+    # #3717: finalize records the URL only after the driver landed the LLD.
+    lld_merged = bool(lld_pr_url)
+    if not lld_merged:
+        notes.append("no landed LLD PR in state")
 
-    # #2011: land the IMPLEMENTATION PR. This is the step that was missing
-    # entirely; without it the attempt branch never receives the code and the
-    # next phase of an arc builds against a base that has never seen this one.
-    # LLD first, matching the order every previous arc landed in.
+    # #2011: the IMPLEMENTATION must land; without it the attempt branch never
+    # receives the code and the next phase of an arc builds against a base
+    # that has never seen this one.
     # #2019: decide against what the run actually produced, not against one
     # optional key. `pr_url` is the pr stage's own artifact and a declared
     # field, so when impl_pr_url is missing it still says whether there IS an
@@ -2408,7 +2434,9 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
 
     impl_merged = False
     if impl_pr_url:
-        impl_merged = _merge_pr(impl_pr_url, merge_timeout, notes, label="impl")
+        impl_merged = _squash_on_base(
+            target_repo, state.get("impl_squash_sha", ""), base_branch, notes,
+        )
     elif pr_stage_produced:
         # Unreachable via the recovery above, but a pr stage that passed and
         # left nothing landable is a fault, never a quiet pass.
@@ -2437,7 +2465,7 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
         status="passed" if landed else "failed",
         error_message=(
             "" if landed else
-            f"implementation PR was not merged into the attempt branch "
+            f"implementation PR is not confirmed on the attempt branch "
             f"({impl_pr_url or 'URL missing from state'}); the arc cannot "
             f"accumulate without it"
         ),

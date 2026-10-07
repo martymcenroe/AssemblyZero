@@ -240,9 +240,12 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
                 state["commit_sha"] = commit_sha
 
     except (GitOperationError, GitBranchError) as e:
-        # Log error but don't fail the workflow - files are already saved.
+        # The files are already saved, so the workflow returns; but the
+        # failure is said, and carried in commit_error for the orchestrator's
+        # lld stage, which fails on it (#3740). It was silent until then.
         # GitBranchError (#1754): base-branch detection failed (e.g.
         # detached HEAD) — refusing beats silently PRing against main.
+        print(f"    [LLD] NOT LANDED: {e}")
         state["commit_error"] = str(e)
 
     return state

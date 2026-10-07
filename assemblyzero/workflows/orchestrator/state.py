@@ -70,6 +70,10 @@ class OrchestrationState(TypedDict, total=False):
     # it here: the write succeeded, the value never crossed the node boundary,
     # and boostgauge #7 landed its design with the code left in an open PR.
     impl_pr_url: str
+    #: #3717: the squash SHA the merge driver reported for the implementation
+    #: PR, which the pr stage writes and cleanup verifies is on the base branch.
+    #: Declared for the #2018 reason.
+    impl_squash_sha: str
     #: #2926: one line saying what N7.5 did, written by the impl stage and
     #: read by the pr stage for the PR body. Declared for the #2018 reason.
     adversarial_summary: str
@@ -169,6 +173,7 @@ def create_initial_state(
         pr_url="",
         lld_pr_url="",
         impl_pr_url="",
+        impl_squash_sha="",
         adversarial_summary="",
         stage_results={},
         stage_attempts={stage: 0 for stage in STAGE_ORDER},

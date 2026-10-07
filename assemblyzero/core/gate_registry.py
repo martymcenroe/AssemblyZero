@@ -900,7 +900,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "orchestrator.subworkflow_halted", "orchestrator", JUDGES_RELAY, ACTION_HALT,
         "workflow halted before finalizing",
         _s(f"{_OR}/stages.py::_make_stage_result::stage_result", 0)
-        + _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 1)
+        + _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 2)
         + _s(f"{_OR}/stages.py::run_spec_stage::stage_result", 0)
         + _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 1)
         + _s(f"{_OR}/stages.py::run_cleanup_stage::stage_result", 0),
@@ -908,14 +908,21 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         notes="relays a halt a sub-workflow already decided; not a second death",
     ),
     Gate(
+        "orchestrator.lld_not_landed", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "LLD approved but not landed",
+        _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 0),
+        created_by="#3740",
+        notes="boostgauge #2 run-issue2-230238: AZ_MERGE_DRIVER unset, the LLD stranded on a local branch",
+    ),
+    Gate(
         "orchestrator.lld_review_verdict", "orchestrator", JUDGES_OPERATOR, ACTION_HALT,
         "LLD review verdict",
-        _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 0),
+        _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 1),
     ),
     Gate(
         "infra.lld_stage_exception", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "LLD stage error",
-        _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 2),
+        _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 3),
     ),
     Gate(
         "orchestrator.spec_stage_exception", "orchestrator", JUDGES_INFRASTRUCTURE,
@@ -930,7 +937,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "orchestrator.pr_stage_exception", "orchestrator", JUDGES_INFRASTRUCTURE,
         ACTION_HALT, "PR stage error",
-        _s(f"{_OR}/stages.py::run_pr_stage::stage_result", 2),
+        _s(f"{_OR}/stages.py::run_pr_stage::stage_result", 3),
     ),
     Gate(
         "orchestrator.triage_failed", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -971,9 +978,16 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_OR}/stages.py::run_pr_stage::stage_result", 0),
     ),
     Gate(
+        "orchestrator.pr_landing_refused", "orchestrator", JUDGES_INFRASTRUCTURE,
+        ACTION_HALT, "PR landing error",
+        _s(f"{_OR}/stages.py::run_pr_stage::stage_result", 1),
+        created_by="#3717",
+        notes="the merge driver's refusal, carrying its output; not transient",
+    ),
+    Gate(
         "infra.pr_creation", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "PR creation error",
-        _s(f"{_OR}/stages.py::run_pr_stage::stage_result", 1),
+        _s(f"{_OR}/stages.py::run_pr_stage::stage_result", 2),
     ),
     Gate(
         "budget.ceiling_timeout", "orchestrator", JUDGES_BUDGET, ACTION_HALT,

@@ -587,91 +587,81 @@ class TestLldStageBaseBranchThreading:
 
 
 class TestRunPrStage:
-    """run_pr_stage must emit a pr-sentinel-compliant PR (Closes #1366).
+    """run_pr_stage must emit a pr-sentinel-compliant PR (Closes #1366), landed
+    through the fleet merge driver (#3717).
 
     pr-sentinel validates the PR *body* for ``Closes #N``; the universal rule
     also requires it in the title. The head branch must be the branch actually
-    checked out in the worktree, not a hardcoded ``issue-{N}``.
+    checked out in the worktree, not a hardcoded ``issue-{N}``. Since #3717 the
+    stage hands those to ``merge_driver.land`` and calls no gh, and pushes
+    nothing itself.
     """
 
-    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
-    def test_pr_body_title_carry_closes_and_branch_matches_worktree(self, mock_run):
-        issue = 1366
-        worktree_branch = "1366-pr-stage-closes-ref"
+    @staticmethod
+    def _land(worktree_branch, tmp_path, state, *, branch_lookup=None):
+        """Run the stage with the driver stubbed; return (new_state, land kwargs, commands)."""
+        from assemblyzero.core import merge_driver
+        from assemblyzero.workflows.orchestrator import stages as stages_mod
+
+        commands: list[list[str]] = []
+        landed: dict = {}
 
         def fake_run(cmd, *args, **kwargs):
+            commands.append(list(cmd))
             out = MagicMock()
-            if cmd[:2] == ["git", "rev-parse"]:
-                out.stdout = f"{worktree_branch}\n"
-            elif cmd[:3] == ["gh", "pr", "create"]:
-                out.stdout = "https://github.com/martymcenroe/AssemblyZero/pull/9999\n"
-            else:
-                out.stdout = ""
+            out.returncode = 0
+            out.stderr = ""
+            out.stdout = f"{worktree_branch}\n" if cmd[:2] == ["git", "rev-parse"] else ""
             return out
 
-        mock_run.side_effect = fake_run
+        def fake_land(**kwargs):
+            landed.update(kwargs)
+            landed["body"] = Path(kwargs["body_file"]).read_text(encoding="utf-8")
+            return merge_driver.Landing(pr_number=9999, squash_sha="abc1234", output="")
 
-        config = get_default_config()
-        state = create_initial_state(issue, config)
-        state["worktree_path"] = "/tmp/AssemblyZero-1366"
+        state.setdefault("target_repo", str(tmp_path))
+        state["target_repo"] = state["target_repo"] or str(tmp_path)
+        with patch.object(stages_mod, "run_command", side_effect=fake_run), \
+             patch.object(stages_mod, "_reconcile_stale_remote_branch", return_value=""), \
+             patch.object(stages_mod, "_pr_url_for", return_value="https://github.com/o/r/pull/9999"), \
+             patch.object(merge_driver, "land", side_effect=fake_land):
+            new_state = run_pr_stage(state)
+        return new_state, landed, commands
+
+    def test_pr_body_title_carry_closes_and_branch_matches_worktree(self, tmp_path):
+        issue = 1366
+        worktree_branch = "1366-pr-stage-closes-ref"
+        state = create_initial_state(issue, get_default_config(), target_repo=str(tmp_path))
+        state["worktree_path"] = str(tmp_path / "AssemblyZero-1366")
         state["base_branch"] = "main"
 
-        new_state = run_pr_stage(state)
+        new_state, landed, commands = self._land(worktree_branch, tmp_path, state)
 
         assert new_state["stage_results"]["pr"]["status"] == "passed"
+        assert f"Closes #{issue}" in landed["body"], landed["body"]
+        assert f"Closes #{issue}" in landed["title"], landed["title"]
+        assert landed["branch"] == worktree_branch
+        assert landed["branch"] != f"issue-{issue}"
+        assert landed["base"] == "main"
+        assert landed["issue"] == issue
+        # #3717: the driver pushes and opens the PR; the stage does neither.
+        assert not [c for c in commands if c[:2] == ["git", "push"]], commands
+        assert not [c for c in commands if c[:1] == ["gh"]], commands
 
-        # The `gh pr create` invocation must carry Closes #N in body + title
-        # and point --head at the real worktree branch.
-        pr_calls = [c for c in mock_run.call_args_list if c.args[0][:3] == ["gh", "pr", "create"]]
-        assert len(pr_calls) == 1, "expected exactly one `gh pr create` call"
-        argv = pr_calls[0].args[0]
-        body = argv[argv.index("--body") + 1]
-        title = argv[argv.index("--title") + 1]
-        head = argv[argv.index("--head") + 1]
-        base = argv[argv.index("--base") + 1]
-
-        assert f"Closes #{issue}" in body, f"PR body missing Closes #{issue}: {body!r}"
-        assert f"Closes #{issue}" in title, f"PR title missing Closes #{issue}: {title!r}"
-        assert head == worktree_branch, f"--head {head!r} != worktree branch {worktree_branch!r}"
-        assert base == "main", f"--base {base!r} != state base_branch 'main'"
-
-        # The branch is pushed by its real name, never the hardcoded issue-{N}.
-        push_calls = [c for c in mock_run.call_args_list if c.args[0][:2] == ["git", "push"]]
-        assert len(push_calls) == 1, "expected exactly one `git push` call"
-        pushed_argv = push_calls[0].args[0]
-        assert worktree_branch in pushed_argv
-        assert f"issue-{issue}" not in pushed_argv
-
-    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
-    def test_pr_body_says_what_the_adversarial_review_did(self, mock_run):
+    def test_pr_body_says_what_the_adversarial_review_did(self, tmp_path):
         """#2926: the impl stage writes `adversarial_summary` and the pr stage
         puts it on the PR, so a review that did not run is visible where the
         work is judged. With no summary in state (a run that never reached
         N7.5), the body says the step was not reached rather than nothing."""
 
-        def fake_run(cmd, *args, **kwargs):
-            out = MagicMock()
-            if cmd[:2] == ["git", "rev-parse"]:
-                out.stdout = "2926-transport\n"
-            else:
-                out.stdout = "https://github.com/martymcenroe/AssemblyZero/pull/9999\n"
-            return out
-
-        mock_run.side_effect = fake_run
-
         def body_for(summary):
-            state = create_initial_state(2926, get_default_config())
-            state["worktree_path"] = "/tmp/AssemblyZero-2926"
+            state = create_initial_state(2926, get_default_config(), target_repo=str(tmp_path))
+            state["worktree_path"] = str(tmp_path / "AssemblyZero-2926")
             state["base_branch"] = "main"
             if summary is not None:
                 state["adversarial_summary"] = summary
-            run_pr_stage(state)
-            pr_calls = [
-                c for c in mock_run.call_args_list
-                if c.args[0][:3] == ["gh", "pr", "create"]
-            ]
-            argv = pr_calls[-1].args[0]
-            return argv[argv.index("--body") + 1]
+            _, landed, _ = self._land("2926-transport", tmp_path, state)
+            return landed["body"]
 
         skipped = (
             "Adversarial review (N7.5): did not run: "
@@ -680,71 +670,33 @@ class TestRunPrStage:
         assert skipped in body_for(skipped)
         assert "Adversarial review (N7.5): did not reach this step" in body_for(None)
 
-    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
-    def test_pr_base_is_attempt_branch_from_state(self, mock_run):
+    def test_pr_base_is_attempt_branch_from_state(self, tmp_path):
         """#1755 attempt-branch model: the impl PR targets the integration
         branch captured at pipeline start, never a hardcoded main."""
-        issue = 7
-
-        def fake_run(cmd, *args, **kwargs):
-            out = MagicMock()
-            if cmd[:2] == ["git", "rev-parse"]:
-                out.stdout = "issue-7\n"
-            elif cmd[:3] == ["gh", "pr", "create"]:
-                out.stdout = "https://github.com/owner/boostgauge/pull/99\n"
-            else:
-                out.stdout = ""
-            return out
-
-        mock_run.side_effect = fake_run
-
-        config = get_default_config()
-        state = create_initial_state(issue, config)
-        state["worktree_path"] = "/tmp/boostgauge-7"
+        state = create_initial_state(7, get_default_config(), target_repo=str(tmp_path))
+        state["worktree_path"] = str(tmp_path / "boostgauge-7")
         state["base_branch"] = "speedrun-attempt-1"
 
-        new_state = run_pr_stage(state)
+        new_state, landed, _ = self._land("issue-7", tmp_path, state)
 
         assert new_state["stage_results"]["pr"]["status"] == "passed"
-        pr_calls = [c for c in mock_run.call_args_list if c.args[0][:3] == ["gh", "pr", "create"]]
-        argv = pr_calls[0].args[0]
-        base = argv[argv.index("--base") + 1]
-        assert base == "speedrun-attempt-1", (
-            f"impl PR must target the attempt branch — got {base!r}"
+        assert landed["base"] == "speedrun-attempt-1", (
+            f"impl PR must target the attempt branch — got {landed['base']!r}"
         )
 
     @patch("assemblyzero.workflows.orchestrator.stages.current_branch")
-    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
-    def test_pr_base_detected_when_state_predates_key(self, mock_run, mock_branch):
+    def test_pr_base_detected_when_state_predates_key(self, mock_branch, tmp_path):
         """Persisted states from before #1755 lack base_branch — the pr
         stage detects it from the target repo instead of assuming main."""
-        issue = 7
-
-        def fake_run(cmd, *args, **kwargs):
-            out = MagicMock()
-            if cmd[:2] == ["git", "rev-parse"]:
-                out.stdout = "issue-7\n"
-            elif cmd[:3] == ["gh", "pr", "create"]:
-                out.stdout = "https://github.com/owner/boostgauge/pull/99\n"
-            else:
-                out.stdout = ""
-            return out
-
-        mock_run.side_effect = fake_run
         mock_branch.return_value = "speedrun-attempt-3"
-
-        config = get_default_config()
-        state = create_initial_state(issue, config)
-        state["worktree_path"] = "/tmp/boostgauge-7"
-        state["target_repo"] = "/tmp/boostgauge"
+        state = create_initial_state(7, get_default_config(), target_repo=str(tmp_path))
+        state["worktree_path"] = str(tmp_path / "boostgauge-7")
         state.pop("base_branch", None)
 
-        run_pr_stage(state)
+        _, landed, _ = self._land("issue-7", tmp_path, state)
 
-        mock_branch.assert_called_once_with("/tmp/boostgauge")
-        pr_calls = [c for c in mock_run.call_args_list if c.args[0][:3] == ["gh", "pr", "create"]]
-        argv = pr_calls[0].args[0]
-        assert argv[argv.index("--base") + 1] == "speedrun-attempt-3"
+        mock_branch.assert_called_once_with(str(tmp_path))
+        assert landed["base"] == "speedrun-attempt-3"
 
 
 class TestMakeStageResultTransient:
