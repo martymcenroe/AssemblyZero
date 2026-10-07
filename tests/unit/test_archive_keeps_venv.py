@@ -103,11 +103,13 @@ def test_a_sibling_directory_with_the_same_prefix_does_not_count(tmp_path, monke
     assert awl.processes_using(wt) == []
 
 
-def test_claude_md_runs_the_archive_after_the_tests_and_before_the_push():
-    """#3614 T3: the order of the three lines in the merge sequence."""
+def test_claude_md_runs_the_archive_after_the_tests_and_before_the_driver():
+    """#3614 T3: the archive runs after the last test run. #3803: and before the merge
+    driver, which does the push, so CLAUDE.md no longer tells the agent to push."""
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    after_tests = text.index("# Inside the worktree, after the last test run:")
+    before_driver = text.index("archive the lineage before the driver runs")
+    after_tests = text.index("Inside the worktree, after the last test run:")
     archive = text.index("tools/archive_worktree_lineage.py --worktree . --issue {ID} --main-repo .")
-    push = text.index("# Then push and create the PR")
-    assert after_tests < archive < push
+    assert before_driver < after_tests < archive
+    assert "push and create the PR" not in text
     assert "--evict-venv" in text
