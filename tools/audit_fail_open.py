@@ -32,10 +32,9 @@ PRs collide on the same three lines. Staleness of the part that is enforced --
 a baselined site that no longer exists -- is still caught on every PR by the
 unit gate.
 
-Clearing a finding means one of two things, and the audit does not care which:
-make the site fail closed, or write ``# fail-open: <reason>`` on it and let it
-be a decision on record. What it refuses to allow is a third state where nobody
-has decided.
+Clearing a finding means making the site fail closed. ADR 0236 withdrew the
+``# fail-open:`` tag that used to declare a site instead; a tag is now itself a
+finding of the loud-failure check (standard 0034, ``tools/audit_loud_failure.py``).
 """
 
 from __future__ import annotations
@@ -328,8 +327,8 @@ def main() -> int:
             print(f"      instead of halting: {f.what_happens}")
             print(f"      output tells you it happened: {f.distinguishable}")
         print()
-        print("Either make the site fail closed, or rule on it in the code with")
-        print(f"  {DECLARATION_MARKER} <why continuing is correct here>")
+        print("Make the site fail closed (ADR 0236, standard 0034). A")
+        print(f"  {DECLARATION_MARKER} tag no longer clears it; the tag is withdrawn.")
         return 1
 
     shown = findings

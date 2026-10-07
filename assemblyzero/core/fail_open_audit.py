@@ -54,10 +54,15 @@ results untrustworthy. ``silent`` means the site emits nothing at all -- no
 print, no log, no warning -- so the run's output cannot be told from one where
 the step succeeded. Those rank first, always.
 
-Declaring a decision
---------------------
-Some fall-throughs are correct: an advisory benchmark should not halt a run. The
-goal is not to remove them but to make each one a decision on record rather than
+Declaring a decision (withdrawn)
+--------------------------------
+ADR 0236 (2026-10-06) withdrew this convention: there are no fall-throughs, and
+a ``# fail-open:`` tag is itself a finding of the loud-failure check (standard
+0034). This audit still reads tags so its counts stay comparable while #3581
+removes them; what follows describes the convention as it was.
+
+Some fall-throughs were judged correct: an advisory benchmark should not halt a run. The
+goal was not to remove them but to make each one a decision on record rather than
 an accident. Writing ``# fail-open: <reason>`` inside the handler (or on the line
 above it) marks it as declared. Declared sites stay in the inventory -- they are
 still fail-open and still counted -- but they are no longer *undeclared*, which
