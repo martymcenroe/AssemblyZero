@@ -85,6 +85,14 @@ After completing implementation of a feature:
 - [ ] Tests fail on revert (verified)
 - [ ] Proof captured in Test Report
 
+## 7a. Loud-failure compliance (standard 0034)
+
+{Every failure path this change adds or touches: an `except`, a returned error, a checked return code, a retry loop. For each, how it is loud, logged with details, stops dependent processing, and alerts the operator. "None added or touched" is a valid answer only when true.}
+
+| Site (file:line) | Loud | Logged | Stops | Alerts |
+|------------------|------|--------|-------|--------|
+| {path:line} | {ERROR to stderr} | {fields} | {HALT / exit 1 / raise} | {alert_operator / HALT} |
+
 ## 8. Lessons Learned
 
 {What would you do differently? What surprised you? What should future implementers know?}

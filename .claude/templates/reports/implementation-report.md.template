@@ -32,6 +32,10 @@ Description of implementation approach.
 - Limitation 1: Description and workaround if any
 - Limitation 2: Description and future improvement path
 
+## Loud-failure compliance
+
+Every failure path this change adds or touches, and how each one is loud, logged with details, stops dependent processing, and alerts the operator. This is the fleet standard: AssemblyZero standard 0034, from ADR 0236.
+
 ## Testing Summary
 
 - Unit tests: Pass/Fail/Skipped
