@@ -8,12 +8,11 @@ model check) while delegating the call to the sanctioned transport:
 ``gemini:3.1-pro`` by default, which is ``agy`` over stdin per ADR 0220.
 
 #2926: until 2026-09-24 the client "discovered" its provider through four
-module names that did not exist, fell through to ``google.genai.Client()``,
-and that SDK read a retired ``GEMINI_API_KEY`` from the environment. Google
-answered ``API_KEY_INVALID`` on every run since 2026-07-31 and the node
-skipped itself each time. There is no discovery and no SDK fallback now: the
-provider is the one every other Gemini caller in this repository uses, or one
-the caller injects.
+module names that did not exist and fell through to Google's REST SDK, which
+read a stale API key from the environment; every run from 2026-07-31 was
+refused and the node skipped itself. ADR 0237 removed that path for good:
+there is no discovery, no SDK and no key, and the provider is the one every
+other Gemini caller in this repository uses, or one the caller injects.
 """
 
 import logging
@@ -24,7 +23,7 @@ from pydantic import ValidationError as PydanticValidationError
 from assemblyzero.core.errors import (
     RateLimitError,
     TimeoutError_ as TypedTimeoutError,
-    classify_gemini_error,
+    classify_agy_error,
 )
 from assemblyzero.core.text_sanitizer import strip_emoji
 
@@ -291,7 +290,7 @@ class AdversarialGeminiClient:
             raise
         except Exception as e:
             # Issue #546: Classify through the typed error hierarchy
-            classified = classify_gemini_error(e)
+            classified = classify_agy_error(e)
             if isinstance(classified, RateLimitError):
                 raise GeminiQuotaExhaustedError(
                     f"Gemini quota exhausted: {e}", provider="gemini",
@@ -323,10 +322,9 @@ class AdversarialGeminiClient:
     ) -> tuple[str, dict]:
         """Invoke the underlying provider and return (response_text, metadata).
 
-        Two shapes, and only two (#2926). The ``google.genai`` and LangChain
-        strategies that used to sit here were the failed path: a raw SDK
-        constructed around the sanctioned client, reading a key from the
-        environment that nothing sanctioned reads.
+        Two shapes, and only two (#2926, ADR 0237): an injected provider, or
+        the ``get_provider`` seat. The SDK strategies that used to sit here
+        were the failed path and no longer exist.
 
         Returns:
             Tuple of (raw_response_text, response_metadata_dict).
