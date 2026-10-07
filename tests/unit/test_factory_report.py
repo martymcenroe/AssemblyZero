@@ -432,7 +432,7 @@ class TestCli:
 
     def test_default_save_path_names_target_and_date(self, tmp_path):
         path = cli.default_save_path(
-            Path("/c/Users/mcwiz/Projects/boostgauge"),
+            Path("/c/Users/dev/Projects/boostgauge"),
             when=datetime(2026, 8, 28),
         )
         assert path.name == "0904-factory-report-boostgauge-2026-08-28.md"
@@ -463,10 +463,10 @@ _TABLE_HEADER = [
 PASSED_TAIL = "\n".join(
     _TABLE_HEADER
     + [
-        "triage    skipped      0.0s  C:\\Users\\mcwiz\\Projects\\boostgauge\\docs\\lineage\\1\\issue-brie",
-        "lld       passed      87.7s  C:\\Users\\mcwiz\\Projects\\boostgauge\\docs\\lld\\active\\LLD-001.m",
-        "spec      passed      84.7s  C:\\Users\\mcwiz\\Projects\\boostgauge\\docs\\lld\\drafts\\spec-0001",
-        "impl      passed     179.4s  C:\\Users\\mcwiz\\Projects\\boostgauge-1",
+        "triage    skipped      0.0s  C:\\Users\\dev\\Projects\\boostgauge\\docs\\lineage\\1\\issue-brie",
+        "lld       passed      87.7s  C:\\Users\\dev\\Projects\\boostgauge\\docs\\lld\\active\\LLD-001.m",
+        "spec      passed      84.7s  C:\\Users\\dev\\Projects\\boostgauge\\docs\\lld\\drafts\\spec-0001",
+        "impl      passed     179.4s  C:\\Users\\dev\\Projects\\boostgauge-1",
         "pr        passed       2.2s  https://github.com/martymcenroe/boostgauge/pull/200",
         "cleanup   passed      66.6s  https://github.com/martymcenroe/boostgauge/pull/200",
         "",

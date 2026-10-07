@@ -9,15 +9,15 @@ Usage:
 
     # Latest attempt for an issue:
     poetry run python tools/speedrun_overlay.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --issue 35
+        --repo ../boostgauge --issue 35
 
     # Specific attempt:
     poetry run python tools/speedrun_overlay.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --issue 35 --attempt 7
+        --repo ../boostgauge --issue 35 --attempt 7
 
     # Watch mode — re-render every second:
     poetry run python tools/speedrun_overlay.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --issue 35 --watch
+        --repo ../boostgauge --issue 35 --watch
 """
 from __future__ import annotations
 

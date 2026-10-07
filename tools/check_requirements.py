@@ -7,7 +7,7 @@ same gate directly -- imported from the workflow, never reimplemented -- so a
 defect in an edit is found while the editor still holds the context.
 
     poetry run python tools/check_requirements.py \\
-        --repo /c/Users/mcwiz/Projects/boostgauge --issue 7
+        --repo ../boostgauge --issue 7
 
 The call costs one drafter-class model request. Measured on boostgauge #7 --
 two decision tables, 21 acceptance criteria -- it took 294 seconds; the budget

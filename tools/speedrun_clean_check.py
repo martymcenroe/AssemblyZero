@@ -10,7 +10,7 @@ phase-4 roll actually produced, exit nonzero listing findings.
 
 Usage:
     poetry run python tools/speedrun_clean_check.py \
-        --repo /c/Users/mcwiz/Projects/boostgauge --issue 4
+        --repo ../boostgauge --issue 4
 
     # several issues at once
     ... --issue 4 --issue 2 --issue 5

@@ -1,6 +1,6 @@
 """Reference-integrity test for the universal CLAUDE.md (#1308).
 
-The universal CLAUDE.md at `C:\\Users\\mcwiz\\Projects\\CLAUDE.md` is
+The universal CLAUDE.md at `<Projects>/CLAUDE.md` is
 authored by agents (not the operator). I'm responsible for not breaking
 its outbound references — stale file paths, dead issue numbers, missing
 runbooks, duplicate section headings.
@@ -27,8 +27,11 @@ from pathlib import Path
 
 import pytest
 
-UNIVERSAL_PATH = Path("C:/Users/mcwiz/Projects/CLAUDE.md")
-PROJECTS_ROOT = Path("C:/Users/mcwiz/Projects")
+from assemblyzero.core.projects_root import PROJECTS, spellings
+
+# #3609: derived from where this checkout sits, never spelled.
+PROJECTS_ROOT = PROJECTS
+UNIVERSAL_PATH = PROJECTS_ROOT / "CLAUDE.md"
 AZ_RUNBOOKS = PROJECTS_ROOT / "AssemblyZero" / "docs" / "runbooks"
 AZ_ADRS = PROJECTS_ROOT / "AssemblyZero" / "docs" / "adrs"
 AZ_STANDARDS = PROJECTS_ROOT / "AssemblyZero" / "docs" / "standards"
@@ -67,9 +70,13 @@ RE_RELATIVE_PATH = re.compile(
 # Home-relative `~/.claude/...` paths
 RE_HOME_CLAUDE = re.compile(r"`(~/\.claude/[A-Za-z0-9_/.\-]+\.[a-z]{2,5})`")
 
-# Absolute Windows paths `C:\Users\mcwiz\Projects\...`
+# Absolute Windows paths under the Projects root, `<root>\...` with either
+# separator; the root is the Windows spelling of PROJECTS_ROOT (#3609).
+_WINDOWS_ROOT = r"[\\/]".join(
+    re.escape(part) for part in spellings(PROJECTS_ROOT)["windows"].split("\\")
+)
 RE_ABS_PATH = re.compile(
-    r"`(C:[\\/]Users[\\/]mcwiz[\\/]Projects[\\/][A-Za-z0-9_/\\.\-]+\.[a-z]{2,5})`"
+    r"`" + _WINDOWS_ROOT + r"[\\/]([A-Za-z0-9_/\\.\-]+\.[a-z]{2,5})`"
 )
 
 
@@ -82,7 +89,8 @@ def _resolve_home(path_str: str) -> Path:
 
 
 def _resolve_abs(path_str: str) -> Path:
-    return Path(path_str.replace("\\", "/"))
+    """The part after the root, opened under PROJECTS_ROOT on whichever side runs."""
+    return PROJECTS_ROOT / path_str.replace("\\", "/")
 
 
 def test_file_path_references_resolve(universal_text: str) -> None:

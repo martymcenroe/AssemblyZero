@@ -100,7 +100,7 @@ class SessionState:
 **Concrete Example:**
 ```json
 {
-    "config_file_path": "C:\\Users\\mcwiz\\AppData\\Roaming\\boostgauge\\config.json",
+    "config_file_path": "C:\\Users\\dev\\AppData\\Roaming\\boostgauge\\config.json",
     "in_memory_config": {
         "theme": "dark",
         "size": 400,
@@ -136,7 +136,7 @@ def get_default_config_path() -> Path:
 
 **Output Example:**
 ```python
-Path("C:/Users/mcwiz/AppData/Roaming/boostgauge/config.json")
+Path("C:/Users/dev/AppData/Roaming/boostgauge/config.json")
 ```
 
 **Edge Cases:**

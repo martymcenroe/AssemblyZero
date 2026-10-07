@@ -2,14 +2,14 @@
   "// INSTRUCTIONS": "Copy this file to your project's .claude/project.json and customize the values below.",
 
   "variables": {
-    "PROJECT_ROOT": "/c/Users/mcwiz/Projects/YOUR_PROJECT",
+    "PROJECT_ROOT": "<absolute path to YOUR_PROJECT>",
     "PROJECT_NAME": "YourProject",
     "GITHUB_REPO": "your-username/your-repo",
-    "TOOLS_DIR": "/c/Users/mcwiz/Projects/YOUR_PROJECT/tools",
+    "TOOLS_DIR": "<absolute path to YOUR_PROJECT>/tools",
     "WORKTREE_PATTERN": "YourProject-{ID}"
   },
 
-  "inherit_from": "C:\\Users\\mcwiz\\Projects",
+  "inherit_from": "<absolute path to the Projects directory>",
 
   "// VARIABLE REFERENCE": {
     "PROJECT_ROOT": "Unix-style absolute path to the project (for Bash commands)",
@@ -42,7 +42,7 @@
   "// USAGE": [
     "1. Copy this file to your project: cp .claude/project.json.example YourProject/.claude/project.json",
     "2. Edit the values in 'variables' section",
-    "3. Run the generator: poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project YourProject",
+    "3. From YOUR_PROJECT, run the generator: poetry run --directory ../AssemblyZero python ../AssemblyZero/tools/assemblyzero-generate.py --project YourProject",
     "4. The generator will create concrete configs from templates"
   ]
 }

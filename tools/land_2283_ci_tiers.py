@@ -34,7 +34,7 @@ investigate it rather than merging past it.
 
 Usage (RUN THIS YOURSELF in your own Git Bash -- never via an agent's Bash tool,
 per the _pat_session operational rule):
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_2283_ci_tiers.py --dry-run   # preview, no writes
     poetry run python tools/land_2283_ci_tiers.py             # live
 

@@ -23,7 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROJECTS_ROOT = Path("C:/Users/mcwiz/Projects")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import PROJECTS as PROJECTS_ROOT  # #3609
 
 # Only these repos have quality hooks deployed
 TARGET_REPOS = {"Aletheia", "Talos", "Clio", "maintenance", "maintenance-pytest"}

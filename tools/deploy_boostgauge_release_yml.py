@@ -36,7 +36,7 @@ REQUIRED operational rule (`feedback_az_tools_user_runs_script.md`):
   for the seconds the PAT is in scope.
 
 Usage:
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/deploy_boostgauge_release_yml.py
 
 This is a one-shot for boostgauge #50. Safe to delete after the PR

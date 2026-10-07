@@ -7,9 +7,17 @@ Single source of truth for TUI garbage detection. Used by:
 95 compiled regex patterns covering spinners, timing fragments, permission UI,
 status bars, agent trees, checklist repaints, CLI help, and garbled TUI artifacts.
 
-Origin: unleashed/src/transcript_filters.py (propagated via Issue #361)
+Origin: propagated from a private fleet tool via Issue #361.
 """
 import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import spellings
+
+# #3609: the Projects root as a transcript spells it, derived, never written out.
+_ROOT = spellings()
 
 
 # --- Compiled patterns (order matters — most frequent first) ---
@@ -76,9 +84,12 @@ GARBAGE_PATTERNS = [
     re.compile(r'^Wait$'),
 
     # 12. Path-only status lines
-    re.compile(r'^(?:s/|/c/Users/mcwiz/Projects/)\S+\s*(?:\(main\)\s*)?.{0,5}$'),
+    re.compile(
+        r'^(?:s/|' + re.escape(_ROOT["git_bash"]) + '/|' + re.escape(_ROOT["wsl"]) + r'/)'
+        r'\S+\s*(?:\(main\)\s*)?.{0,5}$'
+    ),
     re.compile(r'^\s*~\\Projects\\\S+\s*.{0,5}$'),
-    re.compile(r'^C:\\Users\\mcwiz\\Projects\\\S+\s*.{0,5}$'),
+    re.compile('^' + re.escape(_ROOT["windows"]) + r'\\\S+\s*.{0,5}$'),
 
     # 13. Running N agents lines
     re.compile(r'^Running\s+\d+\s+Bash\s+ag[ne]+ts'),

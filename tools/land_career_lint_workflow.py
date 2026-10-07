@@ -9,7 +9,7 @@ then squash-merge after pr-sentinel + Cerberus pass.
 
 Run from AssemblyZero (for the poetry env + `_pat_session`):
 
-    cd /c/Users/mcwiz/Projects/AssemblyZero
+    # from the AssemblyZero checkout
     poetry run python tools/land_career_lint_workflow.py            # live
     poetry run python tools/land_career_lint_workflow.py --dry-run  # print the plan
 

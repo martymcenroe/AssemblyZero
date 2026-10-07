@@ -355,7 +355,7 @@ class TestSanitizePath:
             importlib.reload(assemblyzero_config)
 
             config_instance = assemblyzero_config.AssemblyZeroConfig()
-            clean_path = "/c/Users/mcwiz/Projects"
+            clean_path = "/c/Users/dev/Projects"
             result = config_instance._sanitize_path(clean_path)
             assert result == clean_path
 

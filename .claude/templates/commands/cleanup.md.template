@@ -104,7 +104,7 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 **Full mode adds (10 parallel calls total):**
 - git -C {{PROJECT_ROOT}} branch -vv
 - git -C {{PROJECT_ROOT}} branch -r
-- poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-permissions.py --quick-check --project {{PROJECT_NAME}}
+- poetry run --directory {{PROJECT_ROOT}}/../AssemblyZero python {{PROJECT_ROOT}}/../AssemblyZero/tools/assemblyzero-permissions.py --quick-check --project {{PROJECT_NAME}}
 
 ## Phase 2: Conditional Fixes
 
@@ -208,10 +208,12 @@ git -C {{PROJECT_ROOT}} status --porcelain
 
 ### 4.2 — Create the tracking issue
 
+Write the body with the Write tool to a file in the repository's gitignored `data/scratch-<date>-<topic>/`: `Auto-created by /cleanup to track the session-artifact commit. Session: [SESSION_NAME]`. Then:
+
 ```bash
 ISSUE_N=$(gh issue create --repo {{GITHUB_REPO}} \
   --title "chore: session cleanup [DATE] — [SESSION_NAME]" \
-  --body "Auto-created by /cleanup to track the session-artifact commit. Session: [SESSION_NAME]" \
+  --body-file <that file> \
   | grep -oE '[0-9]+$')
 ```
 
@@ -227,24 +229,16 @@ git -C {{PROJECT_ROOT}} commit -m "chore: session cleanup [DATE] (Closes #${ISSU
 
 ### 4.4 — Land via the shared PR-lander (do NOT hand-roll push / poll / merge / graft)
 
-Call the shared, tested driver instead of hand-rolling the cycle. It owns push→PR→bounded-poll→merge→verify→ADR-0217-graft with five invariants: a bounded mergeable poll (the old `until [ … = "clean" ]` had no timeout and hung on `blocked`/`unstable`), a verify-gate before any branch delete, the graft hardcoded (`branch -d` only; `-D`/`--force` unrepresentable), the squash SHA looked up **by PR number** (the old `rev-parse origin/main` grabbed whatever merged last — a *stranger's* commit under parallel sessions, deleting the wrong branch), and a fail-SAFE protection probe (404 is never "unprotected → direct push"). It does a PR on a protected base and a direct push on a definitively-unprotected one, internally:
+Land through the fleet merge driver, exactly as the root `CLAUDE.md`'s "Merging PRs (Universal)" section gives it: the command, its absolute paths for your side, and its rules (#3727). That section is the one source; this template does not copy the command, so it cannot drift from the law.
 
-```bash
-(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/tracked_pr_land.py \
-  --repo {{PROJECT_ROOT}} \
-  --branch $BRANCH \
-  --title "chore: session cleanup [DATE] (Closes #${ISSUE_N})" \
-  --issue ${ISSUE_N} \
-  --body "Session cleanup artifacts ([SESSION_NAME]).
+- Title: `chore: session cleanup [DATE] (Closes #${ISSUE_N})`, with `--issue ${ISSUE_N}`.
+- Body: write it with the Write tool to a file in the repository's gitignored `data/scratch-<date>-<topic>/` (`Session cleanup artifacts ([SESSION_NAME]).`, then `Closes #${ISSUE_N}` on its own line), and pass the file with `--body-file`. Never pass a body inline.
 
-Closes #${ISSUE_N}")
-```
-
-Exit `0` = landed (merged, verified on `origin/main`, branch grafted + deleted). Non-zero = STOPPED before cleanup → 4.5.
+The driver owns push, PR, bounded poll, merge, verification on `origin/main`, and the ADR-0217 graft. Exit `0` = landed. Non-zero = STOPPED before cleanup → 4.5.
 
 ### 4.5 — Failure handling
 
-If `tracked_pr_land.py` exits non-zero: STOP and REPORT. Do NOT use `--admin`, `--no-verify`, force-push, or `branch -D` — the driver refuses all of these; a non-zero exit means the safe path is genuinely blocked. Report the tracking issue, the branch, files still uncommitted, and the driver's final `stage=…` line.
+If the merge driver exits non-zero: STOP and REPORT. Do NOT use `--admin`, `--no-verify`, force-push, or `branch -D` — the driver refuses all of these; a non-zero exit means the safe path is genuinely blocked. Report the tracking issue, the branch, files still uncommitted, and the driver's final `stage=…` line.
 
 ## Phase 5: Verification (PARALLEL)
 
