@@ -9,7 +9,7 @@ import pytest
 from assemblyzero.core import alert, operator_notify
 from assemblyzero.core.alert import AlertDeliveryError, alert_operator, check_alert_channel, resolve_sender
 
-from tests.unit.conftest import RealAlertTransportReached
+from tests.conftest import RealAlertTransportReached
 
 SENDER = "alerts@example.test"
 
