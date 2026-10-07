@@ -660,6 +660,15 @@ def ensure_base(
 
     findings = gate.check_repo(repo_root, [issue], base)
     debris = [f for f in findings if not f.startswith("ERROR:")]
+    # #3758: the reset preserved settled artifacts on purpose; the recheck
+    # applies the same settledness partition the first check did, or it counts
+    # the LLD it just kept as a finding it could not clear.
+    committed_now = [d for d in debris if d.startswith("committed artifact:")]
+    if committed_now:
+        settled_now, _ = partition_by_settledness(repo_root, issue, committed_now)
+        for finding in settled_now:
+            log.write(f"BASE settled, preserved after reset: {finding}")
+        debris = [d for d in debris if d not in settled_now]
     if debris:
         log.write(f"GATE still dirty after reset ({len(debris)}) -- {len(debris)} left")
         for d in debris:
