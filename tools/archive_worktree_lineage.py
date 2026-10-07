@@ -10,7 +10,7 @@ This script:
 1. Copies docs/lineage/active/{issue}-*/ to main repo's docs/lineage/archived/
 2. Stages the archived files in main
 3. Only with --evict-venv: evicts the worktree's poetry environment
-4. Does NOT remove the worktree (user does that after)
+4. Does NOT remove the worktree (the merge driver does that after the merge, #3803)
 
 Step 3 is opt-in (#3614, #3626). It ran on every call and deleted the
 environment out from under whatever was using it: twice on 2026-09-25 a test
@@ -257,8 +257,9 @@ def main():
     if args.evict_venv:
         evict_poetry_venv(worktree)
 
-    print("\nDone. You can now remove the worktree:")
-    print(f"  git worktree remove {worktree}")
+    # #3803: the merge driver removes the worktree after the merge; never by hand.
+    print("\nDone. Commit what was staged, then land the branch with the merge driver, "
+          "which removes the worktree after the merge.")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 # 0935 - PR Stuck on `mergeable_state=blocked` or `behind`: Recovery Procedures
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.1
-**Last Updated:** 2026-05-27
+**Version:** 1.2
+**Last Updated:** 2026-10-07
 
 ---
 
@@ -105,9 +105,9 @@ If `state=closed` OR `is_pr=true` → worker rejects → posts `action_required`
 
 ## Step 4: Why Auto Review Says "pending" When Worker Already Failed
 
-Auto Review (`AssemblyZero/.github/workflows/auto-reviewer.yml`) poll-loop branch logic:
+Auto Review (`AssemblyZero/.github/workflows/auto-reviewer.yml`) poll-loop branch logic, quoted from the workflow for reading, not for running:
 
-```bash
+```text
 if [ "$STATUS" = "success" ]; then
   echo "  ✅ ${check_name}: passed"
 elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
@@ -138,13 +138,13 @@ Edit the PR body to remove the parasitic match. Replacement phrasings:
 | `Closes none of the related issues (#A, #B)` | `Related (kept open): #A, #B` |
 | Example: `` `Closes #N` `` (in instructional text) | `<directive> #N` (use placeholder) |
 
-Apply via:
+Write the rephrased body to a file in the repo's `data/scratch-<date>-<topic>/` and apply it. The shell guard refuses an inline `--body` (#3803):
 
 ```bash
-gh pr edit {N} --repo {owner}/{repo} --body "...rephrased body..."
+gh pr edit {N} --repo {owner}/{repo} --body-file {body_file}
 ```
 
-The `edited` webhook re-fires sentinel. Worker re-evaluates against the new body and posts a fresh check-run. If body now passes regex + all extracted refs are open issues, conclusion is `success`.
+Pass the same file to the merge driver when you rerun it, so the body it checks is the body on the PR. The `edited` webhook re-fires sentinel. Worker re-evaluates against the new body and posts a fresh check-run. If body now passes regex + all extracted refs are open issues, conclusion is `success`.
 
 ---
 
@@ -165,15 +165,11 @@ gh pr reopen {N} --repo {owner}/{repo}
 
 ---
 
-## Step 7: Wait for `clean`, Merge, Cleanup
+## Step 7: Rerun the Merge Driver
 
-```bash
-until [ "$(gh api repos/{owner}/{repo}/pulls/{N} --jq '.mergeable_state')" = "clean" ]; do sleep 20; done
-gh pr merge {N} --squash --repo {owner}/{repo}
-git checkout main && git fetch origin && git merge origin/main --ff-only && git branch -d {branch}
-```
+Rerun the merge driver with the same arguments as the run that stopped (root `CLAUDE.md`, "Merging PRs (Universal)"). It finds the open PR and reuses it, stamps it so pr-sentinel re-evaluates, waits for `clean`, merges, verifies the squash on `origin/main`, and removes the worktree and the branch. Never merge, fast-forward, remove the worktree or delete the branch by hand (#3803).
 
-Squash merge collapses any noise commits on the branch into ONE commit on main with the PR title — so even if you accidentally pushed extra commits during diagnosis, main history stays clean.
+If the driver fails again at the same stage, stop and report its output (Two-Strike Rule).
 
 ---
 
@@ -189,40 +185,24 @@ Squash merge collapses any noise commits on the branch into ONE commit on main w
 | `behind` | Branch behind main, branch-protection gate requires up-to-date | This section |
 | `unstable` | Required checks still running | Just wait — not this runbook |
 | `unknown` | GitHub hasn't computed yet | Wait a few seconds, usually resolves transiently |
-| `dirty` | Merge conflicts in working tree | Manual conflict resolution; not this runbook |
+| `dirty` | The branch conflicts with main | Merge `origin/main` in the worktree, as for `behind` below |
 
 **Cause:** Branch protection has "Require branches to be up to date before merging" enabled (the operator's fleet-wide default). The PR's branch is N commits behind main on origin; the gate refuses merge until the branch is updated.
 
 **The wrong fix:** manually rebasing the branch + force-pushing (banned — see "Banned Recovery Actions" below). Manual rebase + force-push violates the no-force-push rule even if technically it would work.
 
-**The right fix:** GitHub's `update-branch` API merges `main` into the PR's branch non-destructively (creates a real merge commit on the branch, no history rewrite, no force-push).
+**The right fix:** merge `origin/main` into the branch in its worktree, run the full test suite, and rerun the merge driver (#3803). A merge adds a commit on top of what was pushed, so the driver's push is an ordinary fast-forward:
 
 ```bash
-head=$(gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha')
-gh api -X PUT repos/{owner}/{repo}/pulls/{N}/update-branch -f expected_head_sha=$head
+git -C {worktree} fetch origin
+git -C {worktree} merge origin/main
 ```
 
-**The `expected_head_sha` parameter is required.** It's GitHub's concurrency-control token — if anything else pushes to the PR's branch between your `.head.sha` read and your `update-branch` call, the request fails with `422 Unprocessable Entity` and the PR is left untouched. Re-read the head SHA and retry.
+Resolve any conflict by keeping both sides, never with `--theirs`. A `dirty` PR is recovered the same way: the conflicts surface in this merge, in the worktree, where the tests can run.
 
-**State progression after success:** `behind → unstable → clean` in approximately 20 seconds. The new merge commit appended to the branch re-fires the required checks; once those pass, Cerberus-AZ re-approves and the merge gate opens.
+**Never rebase a branch the driver has already pushed.** A rebased branch can only be published by a force push, which is banned. Rebasing is fine only before the first push.
 
-**Resumed polling pattern (handles `behind` mid-loop):**
-
-```bash
-attempt=0
-while true; do
-  state=$(gh api repos/{owner}/{repo}/pulls/{N} --jq '.mergeable_state')
-  if [ "$state" = "clean" ]; then break; fi
-  if [ "$state" = "behind" ]; then
-    head=$(gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha')
-    gh api -X PUT repos/{owner}/{repo}/pulls/{N}/update-branch -f expected_head_sha=$head
-  fi
-  attempt=$((attempt+1))
-  if [ $attempt -ge 30 ]; then echo "TIMEOUT (last state=$state)"; exit 1; fi
-  sleep 10
-done
-gh pr merge {N} --squash --repo {owner}/{repo}
-```
+**Do not use GitHub's `update-branch` API while landing with the driver.** It adds a merge commit to the remote branch that the local branch lacks, so the driver's next push is refused as non-fast-forward and the run stops at `push_failed`. The API was the right fix for the hand-merge sequence this runbook used to teach (Hermes PR #475, below).
 
 **Documented incident:** Hermes PR #475 (2026-05-27). The PR sat `mergeable_state=behind` after a close+reopen cycle; main had moved by one commit while the PR was being unblocked from a different pr-sentinel issue. The standard poll-until-`clean` loop would have spun forever. The Hermes-side agent worked out the `update-branch` recovery during execution and persisted the lesson to `docs/lessons-learned.md` (PR #488). Closes AssemblyZero #1347.
 
@@ -242,6 +222,11 @@ These have all been attempted; all violate user-set rules. Memory: `feedback_nev
 | Asking user to manually approve | Cerberus-AZ exists for this — its job to approve, not user's |
 | Pushing empty / noise commits to re-trigger workflows | Git history pollution; `gh pr close && gh pr reopen` works without a commit |
 | `gh pr merge --auto` | `allow_auto_merge=false` on all repos (Standard 0016) |
+| `gh pr merge`, worktree removal or branch deletion by hand | The merge driver does all three; a hand-finished landing is how worktrees and branches get left behind. Rerun the driver (Step 7) |
+| `git checkout` in any form | The shell guard refuses every form of it |
+| Rebasing a branch the driver already pushed | It can only be published by a force push. Merge `origin/main` instead (Behind-State Recovery) |
+| `git checkout --theirs` / `git rebase --theirs` | Discards one side of a conflict; it destroyed two days of code once |
+| Rerunning the driver after its PR merged | It finds no open PR and opens a duplicate. Follow the root `CLAUDE.md` route for the stage it printed |
 
 ---
 
@@ -268,8 +253,8 @@ mergeable_state == "blocked"
 mergeable_state == "behind"
 │
 └─→ "Behind-State Recovery" section above
-    └─→ gh api -X PUT .../update-branch -f expected_head_sha=$head
-    └─→ resume polling → merge
+    └─→ merge origin/main into the branch in the worktree
+    └─→ full test suite, commit, rerun the merge driver
 
 mergeable_state == "unstable" / "unknown"
 │
@@ -279,8 +264,9 @@ mergeable_state == "unstable" / "unknown"
 
 mergeable_state == "dirty"
 │
-└─→ Merge conflicts — manual resolution required.
-    NOT this runbook. Pull main, resolve conflicts, push.
+└─→ Merge conflicts: the same as "behind". Merge origin/main into
+    the branch in the worktree, keep both sides of each conflict,
+    run the full test suite, commit, rerun the merge driver.
 ```
 
 ---
@@ -290,7 +276,7 @@ mergeable_state == "dirty"
 - [0016 - PR Governance System Architecture](../standards/0016-pr-sentinel-system-architecture.md) — How the system works (sentinel Worker, Cerberus-AZ App, branch protection, auto-reviewer)
 - [0021 - Workflow Error Recovery](../standards/0021-workflow-error-recovery.md) — Recovery for LLM/LangGraph workflows (different system)
 - [0217 - Squash-merge Orphan Graft Cleanup](../adrs/0217-squash-merge-orphan-graft-cleanup.md) — When `git branch -d` refuses on squash-merged branches
-- Project-root `CLAUDE.md` "If `mergeable_state` stays `blocked`" section — Quick-reference summary
+- Project-root `CLAUDE.md` "Merging PRs (Universal)" — the merge driver, and the route to follow for each stage at which it fails
 
 ---
 
@@ -300,3 +286,4 @@ mergeable_state == "dirty"
 |---------|------|---------|
 | 1.0 | 2026-05-10 | Initial. Captures the PR #527 incident (negation-parsed-as-Closes) and codifies the broader recovery procedures. |
 | 1.1 | 2026-05-27 | Added "Behind-State Recovery" section for `mergeable_state=behind`. Documents the `update-branch` API technique discovered during Hermes PR #475 unblock and persisted to Hermes `docs/lessons-learned.md` (PR #488). Decision tree extended to handle `behind`, `unstable`, `unknown`, `dirty`. Closes #1347. |
+| 1.2 | 2026-10-07 | #3803: every recovery ends in a rerun of the merge driver. Removed the hand merge, checkout, fast-forward and branch deletion from Step 7, the inline `--body` from Step 5, and the `update-branch` loop, which makes the driver's push fail. `behind` and `dirty` merge `origin/main` in the worktree. Five rows added to the banned table. |
