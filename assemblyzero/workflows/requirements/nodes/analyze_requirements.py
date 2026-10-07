@@ -481,6 +481,41 @@ _HISTORY_HEADING = re.compile(
 )
 
 
+def _quote_key(text: Any) -> str:
+    """A quoted criterion, compared without case or spacing (#3747)."""
+    return " ".join(str(text or "").lower().split())
+
+
+def _same_quote(a: str, b: str) -> bool:
+    """Two quotes of the same criterion: one contains the other, since a model
+    asked twice may quote a shorter or longer span of the same sentence."""
+    return bool(a and b) and (a in b or b in a)
+
+
+def _articulated_conflicts(parsed: dict) -> list[dict]:
+    """The conflicts a verdict reports that the gate would file (#2462 rules
+    out the rest); none when the verdict says the text is consistent."""
+    from assemblyzero.speedrun.must_resolve import unanswerable_reason
+
+    if parsed.get("is_consistent", True):
+        return []
+    return [c for c in parsed.get("conflicts") or [] if not unanswerable_reason(c)]
+
+
+def _reported_again(conflict: dict, again: list[dict]) -> bool:
+    """Does the second answer report the same pair of criteria, in either order?"""
+    a = _quote_key(conflict.get("criterion_a"))
+    b = _quote_key(conflict.get("criterion_b"))
+    for other in again:
+        oa = _quote_key(other.get("criterion_a"))
+        ob = _quote_key(other.get("criterion_b"))
+        if (_same_quote(a, oa) and _same_quote(b, ob)) or (
+            _same_quote(a, ob) and _same_quote(b, oa)
+        ):
+            return True
+    return False
+
+
 def requirements_text(issue_body: str) -> tuple[str, int]:
     """The body above its revision history, and how many lines were set aside.
 
@@ -715,6 +750,42 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
             "divergence condition, so nothing was verifiable",
         )
         return {}
+
+    # #3747: a conflict halts the roll and asks the operator for a ruling only
+    # when it reproduces. N0c is model-judged: on boostgauge #2's body,
+    # unedited since 2026-08-16, the same model ruled it consistent at 23:07
+    # and found two conflicts at 01:10. One draw is not a finding.
+    print(
+        f"  [N0c] {len(conflicts)} conflict(s) reported; asking again to "
+        "confirm before halting (#3747)."
+    )
+    second = _verdict_of(_invoke(provider))
+    if second is None:
+        # Halting on the first answer is the conservative side: the second ask
+        # failed to answer, it did not disagree.
+        print(
+            "  [N0c] the confirming ask gave no verdict; halting on the first "
+            "answer's conflicts."
+        )
+    else:
+        again = _articulated_conflicts(second)
+        confirmed = [c for c in conflicts if _reported_again(c, again)]
+        for c in conflicts:
+            if c not in confirmed:
+                print("  [N0c] not reproduced, not filed:")
+                print(f"          A: {c.get('criterion_a') or '(not stated)'}")
+                print(f"          B: {c.get('criterion_b') or '(not stated)'}")
+        if not confirmed:
+            # fail-open: proceeding is the verdict of the second ask, which
+            # judged the same text and repeated none of the first ask's
+            # conflicts; each dropped conflict is printed above, never silent.
+            print(
+                "  [N0c] Requirements internally consistent: no reported "
+                "conflict reproduced on a second ask."
+            )
+            print(f"  [N0c] Verdict from {answered_by}.")
+            return {}
+        conflicts = confirmed
 
     message = _format_conflict_message(conflicts, unarticulated)
     print(f"  [N0c] {message}")
