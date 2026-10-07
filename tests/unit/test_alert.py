@@ -133,3 +133,24 @@ def test_the_unit_tier_cannot_reach_real_ses(home, monkeypatch):
     monkeypatch.setenv(alert.SENDER_ENV, SENDER)
     with pytest.raises(RealAlertTransportReached):
         _alert()
+
+
+def test_a_failed_email_still_toasts_on_windows(home, monkeypatch, capsys):
+    """#3581 core batch 1: every channel is attempted, and every failure is printed."""
+    monkeypatch.setenv(alert.SENDER_ENV, SENDER)
+    monkeypatch.setattr(alert.sys, "platform", "win32")
+    toasts: list[tuple] = []
+
+    def fake_toast(title, body, url="", *, runner=None, platform=None):
+        toasts.append((title, body))
+        return "toast failed (exit 1): no notifier"
+
+    ses = _FakeSes(error=RuntimeError("MessageRejected"))
+    with patch("assemblyzero.core.alert._ses_client", return_value=ses), \
+            patch("assemblyzero.core.alert._toast_runner", return_value=None), \
+            patch.object(operator_notify, "show_toast", fake_toast), \
+            pytest.raises(AlertDeliveryError, match="toast"):
+        _alert()
+    assert len(toasts) == 1
+    err = capsys.readouterr().err
+    assert "toast failed" in err and "MessageRejected" in err

@@ -1,5 +1,5 @@
 {
-  "count": 333,
+  "count": 329,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -102,30 +102,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 44
-    },
-    "assemblyzero/core/halt_node.py::create_halt_node.halt_with_plan::fail_open_tag::1": {
-      "detail": "# fail-open: the contract is the resume's protection, not the",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 298
-    },
-    "assemblyzero/core/halt_node.py::create_halt_node.halt_with_plan::fail_open_tag::2": {
-      "detail": "# fail-open: the bundle describes the halt; failing to write",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 345
-    },
-    "assemblyzero/core/halt_node.py::create_halt_node.halt_with_plan::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 297
-    },
-    "assemblyzero/core/halt_node.py::create_halt_node.halt_with_plan::swallowed_handler::2": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 344
     },
     "assemblyzero/core/interface_surface.py::build_interface_map::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

@@ -178,7 +178,7 @@ class TestTheHaltWritesTheContract:
         assert lineage_copy.exists(), "the lineage carries the manifest"
 
     def test_a_contract_write_failure_never_masks_the_halt(
-        self, store, tmp_path, monkeypatch, capsys
+        self, store, tmp_path, monkeypatch, operator_alerts
     ):
         state = _world(tmp_path)
         state["error_message"] = "some halt"
@@ -188,6 +188,7 @@ class TestTheHaltWritesTheContract:
         )
         halt = create_halt_node("testing")
         result = halt(state)
-        out = capsys.readouterr().out
         assert result["workflow_status"] == "halted"
-        assert "resume contract not written" in out
+        # #3724: the halt is alerted first, then the contract failure on its own.
+        assert operator_alerts[1]["what"] == "the halt's resume contract was not written"
+        assert "disk full" in operator_alerts[1]["cause"]

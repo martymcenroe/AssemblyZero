@@ -74,6 +74,29 @@ def _no_real_alert_transport():
 
 
 @pytest.fixture(autouse=True)
+def operator_alerts(request):
+    """Every ``alert_operator`` call a test makes, recorded instead of sent (#3724).
+
+    Failure paths now alert (the HALT node does on every halt), so the unit tier
+    replaces ``assemblyzero.core.alert.alert_operator`` with a recorder: no
+    stderr record, no alerts log under the real home, no SES client. A test
+    asserts on the list by naming this fixture. ``test_alert.py`` is exempt: it
+    tests the real function, with fake transports.
+    """
+    if request.module.__name__.endswith("test_alert"):
+        yield None
+        return
+    calls: list[dict] = []
+
+    def record(**kwargs):
+        calls.append(kwargs)
+        return kwargs
+
+    with patch("assemblyzero.core.alert.alert_operator", record):
+        yield calls
+
+
+@pytest.fixture(autouse=True)
 def _bypass_box_health_preflight():
     """Unit tests never depend on the health of the machine running them (#2248).
 

@@ -194,3 +194,52 @@ class TestErrorClassification:
             plan = json.load(f)
         assert plan["error_type"] == "budget"
         assert plan["is_transient"] is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# #3724: every halt alerts the operator (ADR 0236)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestHaltAlerts:
+    def test_every_halt_alerts_once_with_workflow_stage_and_cause(
+        self, halt_fn, error_state: dict, tmp_path: Path, operator_alerts
+    ) -> None:
+        error_state["target_repo"] = "/repos/example"
+        with patch("assemblyzero.core.halt_node.STATE_DIR", tmp_path / "state"):
+            result = halt_fn(error_state)
+        halt_alerts = [a for a in operator_alerts if "halted" in a["what"]]
+        assert len(halt_alerts) == 1
+        alert = halt_alerts[0]
+        assert "implementation_spec" in alert["what"] and "implementation_spec HALT" in alert["where"]
+        assert alert["cause"] == error_state["error_message"]
+        assert alert["issue"] == 102 and alert["repo"] == "/repos/example"
+        assert result["recovery_plan_path"] in alert["consequence"]
+
+    def test_an_undeliverable_alert_raises_after_the_halt_is_on_disk(
+        self, halt_fn, error_state: dict, tmp_path: Path
+    ) -> None:
+        from assemblyzero.core.alert import AlertDeliveryError
+
+        def refuse(**_kwargs):
+            raise AlertDeliveryError("no alert sender configured")
+
+        with patch("assemblyzero.core.alert.alert_operator", refuse), \
+                pytest.raises(AlertDeliveryError):
+            halt_fn(error_state)
+        # The state snapshot and the plan were written before the alert raised.
+        # The snapshot lands in the per-test state dir tests/conftest.py
+        # redirects every STATE_DIR binding to (#3531).
+        from assemblyzero.core import state_persistence
+
+        written = sorted(p.name for p in Path(state_persistence.STATE_DIR).rglob("*") if p.is_file())
+        assert any("102" in name for name in written), written
+
+    def test_a_named_but_missing_audit_dir_is_reported_not_skipped(
+        self, halt_fn, error_state: dict, tmp_path: Path, operator_alerts
+    ) -> None:
+        error_state["audit_dir"] = str(tmp_path / "no-such-dir")
+        with patch("assemblyzero.core.halt_node.STATE_DIR", tmp_path / "state"):
+            halt_fn(error_state)
+        reported = [a for a in operator_alerts if "not written" in a["what"]]
+        assert reported and all("no-such-dir" in a["cause"] for a in reported)

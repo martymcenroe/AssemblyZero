@@ -161,16 +161,21 @@ def alert_operator(
 
     try:
         try:
-            _send_email(record)
-            if sys.platform == "win32":
-                _show_toast(record)
+            try:
+                _send_email(record)
+            finally:
+                # Every channel is attempted: a failed email still toasts.
+                if sys.platform == "win32":
+                    _show_toast(record)
         finally:
-            # The record reaches the log even when the email did not.
+            # The record reaches the log even when no message was delivered.
             _append_log(record)
     except AlertDeliveryError as exc:
         sys.stderr.write(f"ERROR [ALERT] NOT DELIVERED to the operator: {exc}\n")
-        if exc.__context__ is not None:
-            sys.stderr.write(f"  and before it: {exc.__context__}\n")
+        earlier = exc.__context__
+        while earlier is not None:
+            sys.stderr.write(f"  and before it: {earlier}\n")
+            earlier = earlier.__context__
         sys.stderr.flush()
         raise
     return record

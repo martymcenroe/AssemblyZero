@@ -164,7 +164,7 @@ class TestTheHaltEmitsIt:
         ]
 
     def test_a_bundle_failure_never_masks_the_halt(
-        self, store, tmp_path, monkeypatch, capsys
+        self, store, tmp_path, monkeypatch, operator_alerts
     ):
         state = _state(tmp_path)
         state["error_message"] = "some halt"
@@ -174,6 +174,7 @@ class TestTheHaltEmitsIt:
         )
         halt = create_halt_node("implementation_spec")
         result = halt(state)
-        out = capsys.readouterr().out
         assert result["workflow_status"] == "halted"
-        assert "halt evidence not written" in out
+        # #3724: the halt is alerted first, then the bundle failure on its own.
+        assert [a["what"] for a in operator_alerts][1:] == ["the halt's evidence bundle was not written"]
+        assert "disk full" in operator_alerts[1]["cause"]

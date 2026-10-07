@@ -340,6 +340,16 @@ def _exits_hard(node: ast.AST) -> bool:
     return False
 
 
+def _alerts_operator(node: ast.AST) -> bool:
+    """Does this subtree call the alert path (``alert_operator``)?
+
+    Standard 0034: a handler that alerts the operator meets the rule as surely
+    as one that raises; the alert path itself raises if it cannot deliver. The
+    loud-failure check (``loud_failure_check``) counts it the same way.
+    """
+    return any(_call_name(child) == "alert_operator" for child in ast.walk(node))
+
+
 def _returns_in(node: ast.AST) -> list[ast.Return]:
     return [c for c in ast.walk(node) if isinstance(c, ast.Return)]
 
@@ -492,7 +502,11 @@ class _Scanner(ast.NodeVisitor):
         self.coverage.handlers_examined += 1
 
         returns = _returns_in(node)
-        if _exits_hard(node) or any(_is_error_return(r.value) for r in returns):
+        if (
+            _exits_hard(node)
+            or _alerts_operator(node)
+            or any(_is_error_return(r.value) for r in returns)
+        ):
             outcome = OUTCOME_PROPAGATES
         elif returns:
             outcome = OUTCOME_SUBSTITUTES

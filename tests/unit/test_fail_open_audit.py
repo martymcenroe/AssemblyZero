@@ -78,6 +78,26 @@ def f():
         raise RuntimeError("no") from e
 """) == []
 
+    def test_alerting_the_operator_is_not_a_finding(self, tmp_path):
+        """Standard 0034: a handler that calls the alert path meets the rule."""
+        assert _findings(tmp_path, """
+from assemblyzero.core import alert
+def f():
+    try:
+        go()
+    except OSError as e:
+        alert.alert_operator(what="go", where="f", cause=str(e), consequence="x")
+""") == []
+
+    def test_a_handler_that_only_logs_is_still_a_finding(self, tmp_path):
+        assert _findings(tmp_path, """
+def f():
+    try:
+        go()
+    except OSError as e:
+        log.warning("go failed: %s", e)
+""") != []
+
     def test_sys_exit_is_not_a_finding(self, tmp_path):
         assert _findings(tmp_path, """
 def f():
