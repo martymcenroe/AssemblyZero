@@ -38,7 +38,7 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
     FrameworkConfig,
 )
-from assemblyzero.workflows.testing.runner_registry import get_runner
+from assemblyzero.workflows.testing.runner_registry import get_runner, resolve_framework
 
 
 # =============================================================================
@@ -1119,11 +1119,15 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     # Issue #381: Framework-aware scaffolding
     framework_config = state.get("framework_config")
 
-    # If framework_config exists and is not pytest, use TS scaffolding
-    if framework_config and framework_config.get("framework") not in (
-        None, TestFramework.PYTEST
-    ):
-        return _scaffold_non_python_tests(state, framework_config)
+    # If framework_config names a framework other than pytest, use TS
+    # scaffolding. #3732: the state carries the framework as its string value
+    # (#3708), so it is resolved to the enum before any comparison, and the
+    # non-Python path gets the enum back for its `.value` and `get_runner`.
+    framework = resolve_framework(framework_config)
+    if framework is not None and framework != TestFramework.PYTEST:
+        return _scaffold_non_python_tests(
+            state, {**framework_config, "framework": framework}
+        )
 
     # Default: existing pytest scaffolding (unchanged)
 

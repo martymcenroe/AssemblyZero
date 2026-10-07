@@ -56,7 +56,7 @@ from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     DETERMINISTIC_FAILURE,
     count_stub_tests,
 )
-from assemblyzero.workflows.testing.runner_registry import get_runner
+from assemblyzero.workflows.testing.runner_registry import get_runner, resolve_framework
 from assemblyzero.workflows.testing.state import (
     DEFAULT_MAX_ITERATIONS,
     TestingWorkflowState,
@@ -3373,17 +3373,10 @@ def _resolve_framework_enum(framework_config: dict) -> TestFramework | None:
     """Extract TestFramework enum from framework_config dict.
 
     The framework field may be a TestFramework enum or its string value
-    (after serialization through LangGraph state).
+    (after serialization through LangGraph state). Delegates to the one
+    shared resolver, `runner_registry.resolve_framework` (#3732).
     """
-    fw = framework_config.get("framework")
-    if isinstance(fw, TestFramework):
-        return fw
-    if isinstance(fw, str):
-        try:
-            return TestFramework(fw)
-        except ValueError:
-            return None
-    return None
+    return resolve_framework(framework_config)
 
 
 def _verify_red_non_pytest(
