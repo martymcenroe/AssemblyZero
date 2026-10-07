@@ -1551,13 +1551,28 @@ def check_import_targets_exist(
             if base_ref_name
             else ""
         )
+        # #3760: name the module that does exist, when one shares the missing
+        # module's final name in the same package. "Missing" alone left the
+        # drafter guessing `boostgauge.stingray` for `boostgauge.skins.stingray`
+        # until the revision cap.
+        hints = []
+        for module in unresolvable[:5]:
+            if module.split(".")[0] not in first_party_tops:
+                continue
+            found = _same_named_modules(module, repo_root, base_ref_name)
+            if found:
+                hints.append(
+                    f"`{module}` -> did you mean "
+                    + " or ".join(f"`{m}`" for m in found) + "?"
+                )
+        hint_clause = (" " + " ".join(hints)) if hints else ""
         return CompletenessCheck(
             check_name="import_targets_exist",
             passed=False,
             details=(
                 f"Imports in spec reference modules that neither exist, nor "
                 f"are created by this spec{base_clause}, nor import in the "
-                f"target repo's environment: {mod_list}{suffix}. For "
+                f"target repo's environment: {mod_list}{suffix}.{hint_clause} For "
                 f"first-party modules, verify the path; for third-party, add "
                 f"the dependency to the target repo or fix the import."
             ),
@@ -1568,6 +1583,45 @@ def check_import_targets_exist(
         passed=True,
         details=f"All {len(checked)} import targets validated.{env_note}",
     )
+
+
+def _same_named_modules(
+    module_path: str, repo_root: Path, base_ref_name: str, limit: int = 3
+) -> list[str]:
+    """Existing modules in the same top-level package whose final name matches
+    the missing module's, as dotted paths, on disk or on the run's base (#3760).
+    """
+    parts = [p for p in module_path.split(".") if p]
+    if len(parts) < 2:
+        return []
+    top, last = parts[0], parts[-1]
+    prefixes = _SOURCE_ROOT_PREFIXES + _discover_pyproject_source_roots(repo_root)
+    found: set[str] = set()
+
+    def dotted(rel: str, prefix: str) -> str:
+        rel = rel[len(prefix) + 1:] if prefix and rel.startswith(prefix + "/") else rel
+        rel = rel.removesuffix("/__init__.py").removesuffix(".py")
+        return rel.replace("/", ".")
+
+    for prefix in prefixes:
+        package = (repo_root / prefix / top) if prefix else (repo_root / top)
+        if package.is_dir():
+            for path in package.rglob("*.py"):
+                rel = path.relative_to(repo_root).as_posix()
+                if path.stem == last or (path.name == "__init__.py" and path.parent.name == last):
+                    found.add(dotted(rel, prefix))
+        if base_ref_name:
+            listing = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", base_ref_name, "--",
+                 f"{prefix}/{top}" if prefix else top],
+                cwd=str(repo_root), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", check=False,
+            )
+            for rel in listing.stdout.splitlines():
+                if rel.endswith((f"/{last}.py", f"/{last}/__init__.py")):
+                    found.add(dotted(rel, prefix))
+    found.discard(module_path)
+    return sorted(found)[:limit]
 
 
 def _module_source(
