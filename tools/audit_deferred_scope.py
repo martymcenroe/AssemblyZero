@@ -6,10 +6,16 @@ Three phases:
    persist as JSON so subsequent runs are cheap.
 2. Regex first pass: scan body+comments for deferral keywords; build
    candidate list.
-3. LLM refinement: per candidate, ask `claude --print` (no API key — uses
-   Max subscription via the user's CLI) to classify true-deferral,
-   summarize, cross-reference follow-ups, and judge obsolescence.
+3. LLM refinement: per candidate, ask the classifier seat to classify
+   true-deferral, summarize, cross-reference follow-ups, and judge
+   obsolescence. The seat must resolve to Gemini through agy (ADR 0237); the
+   tool refuses at start under any profile where it does not (#3584).
 4. Write reports: full audit and new-repo subset.
+
+Every failure stops the audit (ADR 0236, #3584): a failed fetch, a corrupt
+cache, a failed or unparseable classification. The operator is alerted, the
+process exits 1, and no report is written, so a report on disk is always a
+complete one.
 
 Issue #930. ADR-0217 (force-free git ops) and root CLAUDE.md (no-API-key
 rule) constraints respected.
@@ -32,13 +38,17 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 REPO = "martymcenroe/AssemblyZero"
 TODAY = datetime.now().strftime("%Y-%m-%d")
+
+
+class AuditFailed(RuntimeError):
+    """A failure that stops the audit; main() alerts and exits 1 (#3584)."""
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DOCS_DIR = Path(__file__).resolve().parent.parent / "docs" / "audits"
 
@@ -141,8 +151,6 @@ class Classification:
     new_repo_related: bool
     still_relevant: Optional[bool]
     rationale: str
-    raw_response: str = ""
-    error: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -201,8 +209,7 @@ def fetch_corpus(refresh: bool = False) -> list[IssueRecord]:
         "--json", "number,title,state,closedAt,body,labels",
     ], timeout=120)
     if r.returncode != 0:
-        print(f"ERROR: gh issue list failed: {r.stderr.strip()}")
-        sys.exit(1)
+        raise AuditFailed(f"gh issue list failed (exit {r.returncode}): {r.stderr.strip()}")
     issues_raw = json.loads(r.stdout)
     print(f"  {len(issues_raw)} closed issues found")
 
@@ -226,18 +233,24 @@ def fetch_corpus(refresh: bool = False) -> list[IssueRecord]:
             "gh", "api", "--paginate",
             f"repos/{REPO}/issues/{rec.number}/comments",
         ], timeout=60)
-        if cr.returncode == 0:
-            try:
-                comments = json.loads(cr.stdout) if cr.stdout.strip() else []
-                if isinstance(comments, list):
-                    rec.comments = [
-                        {"author": (c.get("user") or {}).get("login", "?"),
-                         "createdAt": c.get("created_at"),
-                         "body": c.get("body") or ""}
-                        for c in comments
-                    ]
-            except json.JSONDecodeError:
-                pass
+        # #3584: a missing comment thread would hide its deferrals from the
+        # scan, so a failed or unreadable fetch stops the audit.
+        if cr.returncode != 0:
+            raise AuditFailed(
+                f"gh api comments for #{rec.number} failed (exit {cr.returncode}): {cr.stderr.strip()}"
+            )
+        try:
+            comments = json.loads(cr.stdout) if cr.stdout.strip() else []
+        except json.JSONDecodeError as exc:
+            raise AuditFailed(f"comments for #{rec.number} are not JSON: {exc}") from exc
+        if not isinstance(comments, list):
+            raise AuditFailed(f"comments for #{rec.number} are not a list: {type(comments).__name__}")
+        rec.comments = [
+            {"author": (c.get("user") or {}).get("login", "?"),
+             "createdAt": c.get("created_at"),
+             "body": c.get("body") or ""}
+            for c in comments
+        ]
         records.append(rec)
         time.sleep(GH_INTER_CALL_DELAY)
 
@@ -261,9 +274,11 @@ def fetch_state_index(refresh: bool = False) -> dict[int, dict]:
     if STATE_INDEX_CACHE.exists() and not refresh:
         try:
             raw = json.loads(STATE_INDEX_CACHE.read_text(encoding="utf-8"))
-            return {int(k): v for k, v in raw.items()}
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as exc:
+            raise AuditFailed(
+                f"cannot read {STATE_INDEX_CACHE}: {exc}; rerun with --refresh to rebuild it"
+            ) from exc
+        return {int(k): v for k, v in raw.items()}
 
     print(f"Fetching issue state index for {REPO}...")
     r = gh_with_backoff([
@@ -273,13 +288,14 @@ def fetch_state_index(refresh: bool = False) -> dict[int, dict]:
         "--limit", "5000",
         "--json", "number,state,title",
     ], timeout=120)
+    # #3584: without the index the prompts lose the open/closed annotations
+    # the classifier depends on (#1049), so a failed fetch stops the audit.
     if r.returncode != 0:
-        print(f"  WARN: gh issue list failed: {r.stderr.strip()}")
-        return {}
+        raise AuditFailed(f"gh issue list (state index) failed (exit {r.returncode}): {r.stderr.strip()}")
     try:
         items = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        return {}
+    except json.JSONDecodeError as exc:
+        raise AuditFailed(f"the state index from gh is not JSON: {exc}") from exc
     idx: dict[int, dict] = {}
     for it in items:
         num = it.get("number")
@@ -453,16 +469,19 @@ def find_title_similar_open_issues(
 
 
 # ---------------------------------------------------------------------------
-# Phase C: LLM classification via `claude --print`
+# Phase C: LLM classification through the classifier seat (Gemini, agy)
 # ---------------------------------------------------------------------------
 
 def load_llm_cache() -> dict[str, dict]:
+    """Cached classifications. Only successful ones are ever stored, so an
+    entry carrying an error (written before #3584) is dropped and reclassified."""
     if not LLM_CACHE.exists():
         return {}
     try:
-        return json.loads(LLM_CACHE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        cache = json.loads(LLM_CACHE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AuditFailed(f"cannot read {LLM_CACHE}: {exc}; move it aside to reclassify") from exc
+    return {key: entry for key, entry in cache.items() if not entry.get("error")}
 
 
 def save_llm_cache(cache: dict[str, dict]) -> None:
@@ -567,38 +586,46 @@ def parse_json_response(text: str) -> Optional[dict]:
 
 
 #: #3563: the classifier's model is this seat of the active profile
-#: (``AZ_MODEL_PROFILE``, else the built-in default). It used to be a bare
-#: ``claude --print`` subprocess, outside the provider layer and so outside
-#: its hook isolation (ADR 0232) and its recording.
+#: (``AZ_MODEL_PROFILE``, else the built-in default). #3584: it must resolve to
+#: Gemini through agy (ADR 0237) under whatever profile is active.
 CLASSIFIER_SEAT = "tools.audit_deferred_scope"
 
 
-def _invoke_classifier(prompt: str) -> tuple[bool, str]:
-    """``(succeeded, response text or error message)`` from the seat's model."""
+def require_gemini_seat():
+    """The classifier seat, refused unless it is a ``gemini:`` spec (#3584)."""
     from assemblyzero.core.seats import resolve_active
 
-    try:
-        seat = resolve_active(CLASSIFIER_SEAT)
-        result = seat.build().invoke(
-            system_prompt="", content=prompt, timeout_seconds=LLM_TIMEOUT_S,
+    seat = resolve_active(CLASSIFIER_SEAT)
+    if not seat.spec.startswith("gemini:"):
+        raise AuditFailed(
+            f"seat {CLASSIFIER_SEAT} resolves to {seat.spec!r} under the active profile; "
+            "this audit classifies on Gemini through agy only (ADR 0237). Use a profile "
+            "whose seat resolves to a gemini: spec."
         )
-    except Exception as exc:  # noqa: BLE001 - a failed call is recorded per candidate
-        # fail-open: one candidate's classification fails and is recorded as
-        # an error on that candidate; the sweep continues to the next one,
-        # as it did when the subprocess exited non-zero.
-        return False, f"{type(exc).__name__}: {exc}"
+    return seat
+
+
+def _invoke_classifier(seat, prompt: str) -> str:
+    """The seat's response text. A failed call raises (#3584)."""
+    result = seat.build().invoke(
+        system_prompt="", content=prompt, timeout_seconds=LLM_TIMEOUT_S,
+    )
     if not result.success:
-        return False, result.error_message or "no response"
-    return True, result.response or ""
+        raise AuditFailed(f"classifier {seat.spec} failed: {result.error_message or 'no response'}")
+    return result.response or ""
 
 
 def classify_candidate(
     c: Candidate,
     xref: list[int],
     cache: dict[str, dict],
+    seat,
     state_index: dict[int, dict] | None = None,
 ) -> Classification:
     """Classify a candidate via the classifier seat (#3563), with cache.
+
+    A failed call or an unparseable answer raises ``AuditFailed`` naming the
+    candidate (#3584); nothing is cached for it.
 
     When `state_index` is provided, also supplements the literal-#N xref
     with title-token-similar OPEN issues (#1049 bug 2) and annotates each
@@ -607,7 +634,8 @@ def classify_candidate(
     key = c.cache_key()
     if key in cache:
         cached = cache[key]
-        return Classification(**cached)
+        known = {f.name for f in fields(Classification)}
+        return Classification(**{k: v for k, v in cached.items() if k in known})
 
     if state_index:
         supplemental = find_title_similar_open_issues(
@@ -618,35 +646,21 @@ def classify_candidate(
         merged_xref = xref
 
     prompt = build_prompt(c, merged_xref, state_index)
-    ok, text = _invoke_classifier(prompt)
-    if not ok:
-        cls = Classification(
-            is_deferral=False, summary="", addressed_in=None,
-            addressed_status=None, new_repo_related=False,
-            still_relevant=None, rationale="", raw_response=text[:500],
-            error=f"classifier call failed: {text[:200]}",
+    text = _invoke_classifier(seat, prompt)
+    parsed = parse_json_response(text)
+    if not parsed:
+        raise AuditFailed(
+            f"#{c.issue_number}: classifier {seat.spec} answered without parseable JSON: {text[:200]!r}"
         )
-    else:
-        parsed = parse_json_response(text)
-        if not parsed:
-            cls = Classification(
-                is_deferral=False, summary="", addressed_in=None,
-                addressed_status=None, new_repo_related=False,
-                still_relevant=None, rationale="", raw_response=text[:500],
-                error="json parse failed",
-            )
-        else:
-            cls = Classification(
-                is_deferral=bool(parsed.get("is_deferral", False)),
-                summary=str(parsed.get("summary", ""))[:300],
-                addressed_in=(parsed.get("addressed_in") or None),
-                addressed_status=(parsed.get("addressed_status") or None),
-                new_repo_related=bool(parsed.get("new_repo_related", False)),
-                still_relevant=parsed.get("still_relevant"),
-                rationale=str(parsed.get("rationale", ""))[:400],
-                raw_response="",
-                error=None,
-            )
+    cls = Classification(
+        is_deferral=bool(parsed.get("is_deferral", False)),
+        summary=str(parsed.get("summary", ""))[:300],
+        addressed_in=(parsed.get("addressed_in") or None),
+        addressed_status=(parsed.get("addressed_status") or None),
+        new_repo_related=bool(parsed.get("new_repo_related", False)),
+        still_relevant=parsed.get("still_relevant"),
+        rationale=str(parsed.get("rationale", ""))[:400],
+    )
     cache[key] = asdict(cls)
     save_llm_cache(cache)
     time.sleep(LLM_INTER_CALL_SLEEP_S)
@@ -660,8 +674,6 @@ def classify_candidate(
 def category_for(cls: Classification) -> str:
     if not cls.is_deferral:
         return "FALSE_POSITIVE"
-    if cls.error:
-        return "ERROR"
     if cls.addressed_in:
         return "CAUGHT" if cls.addressed_status == "closed" else "ADDRESSED_OPEN"
     if cls.still_relevant is False:
@@ -686,7 +698,11 @@ def render_report(
     title: str,
     audit_id: str,
     only_new_repo: bool,
+    model: str,
+    scope: str = "every candidate",
 ) -> str:
+    """The report. ``model`` names the resolved classifier (spec and model id);
+    ``scope`` says whether every candidate was classified or a --limit subset."""
     rows = [
         (c, cls) for c, cls in candidates_with_class
         if cls.is_deferral and (not only_new_repo or cls.new_repo_related)
@@ -697,27 +713,26 @@ def render_report(
 
     lines: list[str] = []
     lines.append(f"# {audit_id} - {title}\n")
-    lines.append("**Auditor:** Claude Opus 4.7 (1M context) via `tools/audit_deferred_scope.py`")
+    lines.append(f"**Auditor:** {model} via `tools/audit_deferred_scope.py`")
     lines.append(f"**Date:** {TODAY}")
     lines.append(f"**Corpus:** all closed AssemblyZero issues (snapshot {CORPUS_CACHE.name})")
-    lines.append("**Method:** regex first-pass + LLM (`claude --print`) classification per candidate")
+    lines.append(f"**Method:** regex first-pass, then classification of {scope} by {model}")
     lines.append("**Issue:** [#930](https://github.com/martymcenroe/AssemblyZero/issues/930)\n")
     lines.append("## Summary\n")
     lines.append("| Category | Meaning | Count |")
     lines.append("|---|---|---|")
-    for cat in ("CAUGHT", "ADDRESSED_OPEN", "ORPHANED", "OBSOLETE", "UNCLASSIFIED", "ERROR"):
+    for cat in ("CAUGHT", "ADDRESSED_OPEN", "ORPHANED", "OBSOLETE", "UNCLASSIFIED"):
         meaning = {
             "CAUGHT": "follow-up issue was filed and is closed",
             "ADDRESSED_OPEN": "follow-up filed, still open",
             "ORPHANED": "still relevant; no follow-up filed",
             "OBSOLETE": "no longer applies (tech/process changed)",
             "UNCLASSIFIED": "still-relevant judgment unclear",
-            "ERROR": "LLM call failed; needs human review",
         }[cat]
         lines.append(f"| **{cat}** | {meaning} | {len(by_category.get(cat, []))} |")
     lines.append("")
 
-    for cat in ("ORPHANED", "ADDRESSED_OPEN", "CAUGHT", "OBSOLETE", "UNCLASSIFIED", "ERROR"):
+    for cat in ("ORPHANED", "ADDRESSED_OPEN", "CAUGHT", "OBSOLETE", "UNCLASSIFIED"):
         items = by_category.get(cat, [])
         if not items:
             continue
@@ -732,7 +747,7 @@ def render_report(
     lines.append("| Date | Auditor | Findings | Issues Created |")
     lines.append("|------|---------|----------|----------------|")
     counts = " ".join(f"{k}:{len(v)}" for k, v in sorted(by_category.items()))
-    lines.append(f"| {TODAY} | Claude Opus 4.7 | {counts} | (filed manually after review) |")
+    lines.append(f"| {TODAY} | {model} | {counts} | (filed manually after review) |")
     lines.append("")
 
     lines.append("## Notes\n")
@@ -764,17 +779,45 @@ def main() -> int:
                         help="If >0, only classify the first N candidates (for testing)")
     args = parser.parse_args()
 
+    try:
+        return _run_audit(args)
+    except Exception as exc:  # noqa: BLE001 - every failure alerts and exits 1 (ADR 0236)
+        # #3584 (ADR 0236): any failure stops the audit. The operator is told,
+        # the process exits 1, and no report is written, because reports are
+        # written only after every candidate is classified.
+        from assemblyzero.core.alert import alert_operator
+
+        alert_operator(
+            what="deferred-scope audit",
+            where=f"tools/audit_deferred_scope.py, {_PROGRESS['phase']}",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="the audit stopped; no report was written",
+            repo=REPO,
+            issue=_PROGRESS.get("issue"),
+            spec=_PROGRESS.get("spec", ""),
+        )
+        return 1
+
+
+#: Where the audit is, for the alert when it stops (#3584).
+_PROGRESS: dict = {"phase": "start"}
+
+
+def _run_audit(args: argparse.Namespace) -> int:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
+    _PROGRESS["phase"] = "phase A (corpus)"
     print("Phase A: fetch corpus")
     corpus = fetch_corpus(refresh=args.refresh)
     print(f"  {len(corpus)} issues in corpus")
 
+    _PROGRESS["phase"] = "phase A2 (state index)"
     print("\nPhase A2: fetch issue state index (#1049 bugs 2 + 3)")
     state_index = fetch_state_index(refresh=args.refresh)
     print(f"  {len(state_index)} issues in state index")
 
+    _PROGRESS["phase"] = "phase B (regex pass)"
     print("\nPhase B: regex first pass")
     candidates = find_candidates(corpus)
     print(f"  {len(candidates)} candidate matches")
@@ -790,26 +833,40 @@ def main() -> int:
             print(f"    {c.context[:160]}...")
         return 0
 
+    _PROGRESS["phase"] = "phase C (classification)"
     print("\nPhase C: LLM classification")
+    seat = require_gemini_seat()
+    _PROGRESS["spec"] = seat.spec
+    model = f"`{seat.spec}` ({seat.resolved_model_id}, through agy)"
+    print(f"  classifier: {model}")
     cache = load_llm_cache()
     print(f"  {len(cache)} cached responses")
     classified: list[tuple[Candidate, Classification]] = []
     work = candidates if args.limit == 0 else candidates[:args.limit]
     for i, c in enumerate(work, 1):
+        _PROGRESS["issue"] = c.issue_number
         if i % 10 == 0 or i == 1:
             print(f"  classifying {i}/{len(work)} (#{c.issue_number}/{c.keyword})")
         xrefs = xref.get(c.issue_number, [])
-        cls = classify_candidate(c, xrefs, cache, state_index=state_index)
+        cls = classify_candidate(c, xrefs, cache, seat, state_index=state_index)
         classified.append((c, cls))
+    _PROGRESS.pop("issue", None)
 
-    print(f"\n  classified {len(classified)} (errors: {sum(1 for _, cls in classified if cls.error)})")
+    print(f"\n  classified {len(classified)} of {len(candidates)} candidates")
+    scope = (
+        "every candidate" if len(work) == len(candidates)
+        else f"the first {len(work)} of {len(candidates)} candidates (--limit)"
+    )
 
+    _PROGRESS["phase"] = "phase D (reports)"
     print("\nPhase D: writing reports")
-    full = render_report(classified, "Deferred-Scope Audit (Full)", "0851", only_new_repo=False)
+    full = render_report(classified, "Deferred-Scope Audit (Full)", "0851",
+                         only_new_repo=False, model=model, scope=scope)
     REPORT_FULL.write_text(full, encoding="utf-8")
     print(f"  wrote {REPORT_FULL.relative_to(DATA_DIR.parent)}")
 
-    new_repo = render_report(classified, "Deferred-Scope Audit — New Repo Creation Subset", "0852", only_new_repo=True)
+    new_repo = render_report(classified, "Deferred-Scope Audit — New Repo Creation Subset", "0852",
+                             only_new_repo=True, model=model, scope=scope)
     REPORT_NEW_REPO.write_text(new_repo, encoding="utf-8")
     print(f"  wrote {REPORT_NEW_REPO.relative_to(DATA_DIR.parent)}")
 

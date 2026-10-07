@@ -1,5 +1,5 @@
 {
-  "count": 335,
+  "count": 333,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -1590,18 +1590,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 58
-    },
-    "tools/audit_deferred_scope.py::_invoke_classifier::fail_open_tag::1": {
-      "detail": "# fail-open: one candidate's classification fails and is recorded as",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 586
-    },
-    "tools/audit_deferred_scope.py::_invoke_classifier::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 585
     },
     "tools/audit_fully_landed.py::<module>::swallowed_handler::1": {
       "detail": "bare except neither raises nor calls alert_operator",

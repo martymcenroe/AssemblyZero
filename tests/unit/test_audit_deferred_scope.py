@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 
 # Make tools/ importable without poetry's package install
@@ -207,9 +210,10 @@ class TestCategoryFor:
         c = self._cls(still_relevant=None)
         assert ads.category_for(c) == "UNCLASSIFIED"
 
-    def test_error(self):
-        c = self._cls(error="json parse failed")
-        assert ads.category_for(c) == "ERROR"
+    def test_there_is_no_error_category(self):
+        """#3584: a failed classification stops the audit, so no report row
+        can carry one."""
+        assert "error" not in {f.name for f in ads.fields(ads.Classification)}
 
 
 # ---------------------------------------------------------------------------
@@ -438,3 +442,160 @@ class TestBuildPromptStateAware:
         state_index = {1017: {"state": "open", "title": "x"}}
         prompt = ads.build_prompt(c, [999], state_index=state_index)
         assert "#999 (unknown)" in prompt
+
+
+# ---------------------------------------------------------------------------
+# #3584: Gemini through agy under every profile, and a loud stop on failure
+# ---------------------------------------------------------------------------
+
+
+class _Result:
+    def __init__(self, success: bool, response: str = "", error_message: str = ""):
+        self.success = success
+        self.response = response
+        self.error_message = error_message
+
+
+class _Provider:
+    """Answers with valid JSON, except on the calls listed in ``fail_on``."""
+
+    def __init__(self, fail_on: set[int], raise_on: set[int]):
+        self.calls = 0
+        self.fail_on, self.raise_on = fail_on, raise_on
+
+    def invoke(self, system_prompt, content, timeout_seconds):
+        self.calls += 1
+        if self.calls in self.raise_on:
+            raise RuntimeError("agy exited 1: transport down")
+        if self.calls in self.fail_on:
+            return _Result(False, error_message="quota exhausted")
+        return _Result(True, response='{"is_deferral": true, "summary": "s", "still_relevant": true}')
+
+
+class _Seat:
+    spec = "gemini:3.1-pro"
+    resolved_model_id = "gemini-3.1-pro-high"
+
+    def __init__(self, provider):
+        self._provider = provider
+
+    def build(self):
+        return self._provider
+
+
+def _candidates(n: int) -> list:
+    return [
+        ads.Candidate(issue_number=100 + i, issue_title=f"t{i}", closed_at="2026-01-01",
+                      labels=[], keyword="deferred", location="body", context=f"ctx {i}")
+        for i in range(n)
+    ]
+
+
+
+
+@pytest.fixture
+def audit_env(tmp_path, monkeypatch):
+    """main() with gh, the corpus and the seat replaced; reports into tmp_path."""
+    monkeypatch.setattr(ads, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(ads, "DOCS_DIR", tmp_path / "docs")
+    monkeypatch.setattr(ads, "LLM_CACHE", tmp_path / "data" / "cache.json")
+    monkeypatch.setattr(ads, "REPORT_FULL", tmp_path / "docs" / "full.md")
+    monkeypatch.setattr(ads, "REPORT_NEW_REPO", tmp_path / "docs" / "new.md")
+    monkeypatch.setattr(ads, "LLM_INTER_CALL_SLEEP_S", 0)
+    monkeypatch.setattr(ads, "fetch_corpus", lambda refresh=False: [])
+    monkeypatch.setattr(ads, "fetch_state_index", lambda refresh=False: {})
+    monkeypatch.setattr(ads, "find_candidates", lambda corpus: _candidates(3))
+    monkeypatch.setattr(ads, "build_xref_index", lambda corpus: {})
+    monkeypatch.setattr(sys, "argv", ["audit_deferred_scope.py"])
+    return tmp_path
+
+
+class TestGeminiOnly:
+    def test_T1_a_claude_profile_is_refused_before_any_call(self, monkeypatch):
+        from assemblyzero.core import seats
+
+        monkeypatch.setattr(seats, "_RUN_PROFILE", None)
+        monkeypatch.setenv("AZ_MODEL_PROFILE", "claude")
+        with patch("assemblyzero.core.seats.Seat.build") as build, \
+                pytest.raises(ads.AuditFailed, match="claude:"):
+            ads.require_gemini_seat()
+        build.assert_not_called()
+
+    def test_the_default_profile_resolves_to_gemini(self, monkeypatch):
+        from assemblyzero.core import seats
+
+        monkeypatch.setattr(seats, "_RUN_PROFILE", None)
+        monkeypatch.delenv("AZ_MODEL_PROFILE", raising=False)
+        assert ads.require_gemini_seat().spec.startswith("gemini:")
+
+
+class TestLoudStop:
+    @pytest.mark.parametrize("how", ["raise", "fail"])
+    def test_T2_a_failure_on_the_second_candidate_stops_with_no_report(self, audit_env, how):
+        provider = _Provider(fail_on={2} if how == "fail" else set(), raise_on={2} if how == "raise" else set())
+        with patch.object(ads, "require_gemini_seat", return_value=_Seat(provider)), \
+                patch("assemblyzero.core.alert.alert_operator") as alert:
+            assert ads.main() == 1
+        assert not (audit_env / "docs" / "full.md").exists()
+        assert not (audit_env / "docs" / "new.md").exists()
+        alert.assert_called_once()
+        kwargs = alert.call_args.kwargs
+        assert kwargs["issue"] == 101 and kwargs["spec"] == "gemini:3.1-pro"
+        assert "phase C" in kwargs["where"]
+
+    def test_unparseable_answer_stops(self, audit_env):
+        provider = _Provider(set(), set())
+        provider.invoke = lambda **kw: _Result(True, response="not json at all")
+        with patch.object(ads, "require_gemini_seat", return_value=_Seat(provider)), \
+                patch("assemblyzero.core.alert.alert_operator") as alert:
+            assert ads.main() == 1
+        assert "parseable JSON" in alert.call_args.kwargs["cause"]
+
+    def test_a_refused_profile_alerts_and_writes_nothing(self, audit_env):
+        refusal = ads.AuditFailed("seat resolves to 'claude:opus'")
+        with patch.object(ads, "require_gemini_seat", side_effect=refusal), \
+                patch("assemblyzero.core.alert.alert_operator") as alert:
+            assert ads.main() == 1
+        assert not (audit_env / "docs" / "full.md").exists()
+        assert "claude:opus" in alert.call_args.kwargs["cause"]
+
+    def test_T3_a_complete_run_names_the_resolved_model(self, audit_env):
+        provider = _Provider(set(), set())
+        with patch.object(ads, "require_gemini_seat", return_value=_Seat(provider)):
+            assert ads.main() == 0
+        report = (audit_env / "docs" / "full.md").read_text(encoding="utf-8")
+        assert "`gemini:3.1-pro` (gemini-3.1-pro-high, through agy)" in report
+        assert "claude --print" not in report and "Claude Opus" not in report
+        assert "the first" not in report
+
+    def test_a_limited_run_says_so(self, audit_env, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["audit_deferred_scope.py", "--limit", "2"])
+        with patch.object(ads, "require_gemini_seat", return_value=_Seat(_Provider(set(), set()))):
+            assert ads.main() == 0
+        report = (audit_env / "docs" / "full.md").read_text(encoding="utf-8")
+        assert "the first 2 of 3 candidates (--limit)" in report
+
+
+class TestCache:
+    def test_a_cached_error_is_dropped_and_reclassified(self, tmp_path, monkeypatch):
+        cache_file = tmp_path / "cache.json"
+        cache_file.write_text(
+            '{"a": {"is_deferral": true, "error": "json parse failed"}, "b": {"is_deferral": false}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(ads, "LLM_CACHE", cache_file)
+        assert set(ads.load_llm_cache()) == {"b"}
+
+    def test_a_corrupt_cache_stops_the_audit(self, tmp_path, monkeypatch):
+        cache_file = tmp_path / "cache.json"
+        cache_file.write_text("{not json", encoding="utf-8")
+        monkeypatch.setattr(ads, "LLM_CACHE", cache_file)
+        with pytest.raises(ads.AuditFailed, match="cannot read"):
+            ads.load_llm_cache()
+
+    def test_a_failed_state_index_fetch_stops_the_audit(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ads, "STATE_INDEX_CACHE", tmp_path / "absent.json")
+        failed = ads.subprocess.CompletedProcess([], 1, stdout="", stderr="HTTP 502")
+        monkeypatch.setattr(ads, "gh_with_backoff", lambda cmd, timeout=60: failed)
+        with pytest.raises(ads.AuditFailed, match="HTTP 502"):
+            ads.fetch_state_index(refresh=True)
