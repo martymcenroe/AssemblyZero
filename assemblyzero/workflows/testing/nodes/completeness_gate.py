@@ -7,8 +7,10 @@ Two-layer validation between N4 (implement_code) and N5 (verify_green):
 - Layer 1: AST-based deterministic analysis (fast, free)
 - Layer 2: Gemini semantic review materials preparation (user-controlled)
 
-Fail Mode: Fail Open — if AST analysis fails unexpectedly, proceed to N5
-with a warning rather than blocking indefinitely.
+Failure (ADR 0236, #3811): a gate that cannot check stops the run. A file it
+cannot read or parse, an LLD with no requirements, a report it cannot write,
+and a BLOCK that survives the iteration cap or stagnates all set
+error_message, which routes to HALT, and HALT alerts the operator.
 
 Architectural Constraints:
 - Cannot modify N4 or N5 node logic (only add N4b between them)
@@ -30,6 +32,7 @@ from assemblyzero.workflows.testing.audit import (
     save_audit_file,
 )
 from assemblyzero.workflows.testing.completeness.ast_analyzer import (
+    CompletenessGateError,
     CompletenessResult,
     run_ast_analysis,
 )
@@ -46,7 +49,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
-# Issue #147, Section 2.5: Hard limit of 3 iterations before routing to end
+# Issue #147, Section 2.5: hard limit of 3 iterations; a BLOCK at it halts (#3811)
 MAX_COMPLETENESS_ITERATIONS = 3
 
 
@@ -67,8 +70,9 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
     If Layer 1 passes, Layer 2 materials are prepared for the user
     to submit to Gemini.
 
-    Fail Mode: If AST analysis raises an unexpected exception, the node
-    proceeds with verdict="WARN" to avoid blocking the pipeline.
+    Failure (#3811): when the gate cannot check, or a BLOCK reaches the
+    iteration cap or repeats unchanged, the node returns verdict BLOCK with
+    an error_message, which routes to HALT.
 
     Args:
         state: Current workflow state from N4_implement_code.
@@ -99,6 +103,11 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
     implementation_files = [Path(f) for f in implementation_files_strs]
     test_files = [Path(f) for f in test_files_strs]
     lld_path = Path(lld_path_str) if lld_path_str else None
+    # #3811: mock mode records the LLD relative to the target repository. Read
+    # against the process's working directory it never existed, and Layer 2
+    # and the report were skipped without a word.
+    if lld_path is not None and not lld_path.is_absolute():
+        lld_path = repo_root / lld_path
 
     # Combine implementation and test files for analysis
     all_files = implementation_files + test_files
@@ -139,13 +148,13 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
             "error_message": message,
         }
 
+    where = f"issue #{issue_number} in {repo_root}"
     if not all_files:
-        print("    [WARN] No implementation files to analyze — passing through")
-        return {
-            "completeness_verdict": "PASS",
-            "completeness_issues": [],
-            "error_message": "",
-        }
+        # #3811: a gate with nothing to analyse has certified nothing.
+        return _cannot_check(f"no implementation or test files to analyse for {where}")
+    if lld_path is None or not lld_path.exists():
+        # #3811: the review materials and the report both need the LLD.
+        return _cannot_check(f"the LLD {lld_path_str or '(none in state)'} for {where} does not exist")
 
     print(f"    Analyzing {len(implementation_files)} implementation + {len(test_files)} test files...")
 
@@ -155,18 +164,8 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
 
     try:
         ast_result: CompletenessResult = run_ast_analysis(all_files)
-    except Exception as e:
-        # Fail Open: proceed with warning rather than blocking
-        logger.warning(
-            "AST analysis failed unexpectedly: %s — proceeding with WARN verdict", e
-        )
-        print(f"    [WARN] AST analysis failed: {e} — fail open, proceeding")
-        ast_result = CompletenessResult(
-            verdict="WARN",
-            issues=[],
-            ast_analysis_ms=0,
-            gemini_review_ms=None,
-        )
+    except CompletenessGateError as exc:
+        return _cannot_check(f"Layer 1 AST analysis for {where}: {exc}")
 
     verdict = ast_result["verdict"]
     issues = ast_result["issues"]
@@ -200,7 +199,7 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
 
     review_materials = None
 
-    if verdict != "BLOCK" and lld_path and lld_path.exists():
+    if verdict != "BLOCK":
         # Layer 1 passed — prepare materials for user to submit to Gemini
         print("    Layer 2: Preparing review materials for Gemini...")
         try:
@@ -209,48 +208,34 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
                 lld_path=lld_path,
                 implementation_files=implementation_files,
             )
-            req_count = len(review_materials.get("lld_requirements", []))
-            snippet_count = len(review_materials.get("code_snippets", {}))
-            print(f"    Layer 2: Prepared {req_count} requirements, {snippet_count} code snippets")
-        except Exception as e:
-            # Fail Open: if material preparation fails, log and continue
-            logger.warning(
-                "Review materials preparation failed: %s — skipping Layer 2", e
-            )
-            print(f"    [WARN] Layer 2 preparation failed: {e} — skipping")
-    elif verdict == "BLOCK":
+        except CompletenessGateError as exc:
+            return _cannot_check(f"Layer 2 review materials for {where}: {exc}")
+        req_count = len(review_materials.get("lld_requirements", []))
+        snippet_count = len(review_materials.get("code_snippets", {}))
+        print(f"    Layer 2: Prepared {req_count} requirements, {snippet_count} code snippets")
+    else:
         print("    Layer 2: Skipped (Layer 1 BLOCK)")
-    else:
-        print("    Layer 2: Skipped (no LLD path available)")
 
     # =========================================================================
-    # Report Generation (side effect — does not block)
+    # Report Generation
     # =========================================================================
 
-    implementation_report_path = ""
-
-    if lld_path and lld_path.exists():
-        print("    Generating implementation report...")
-        try:
-            report_path = generate_implementation_report(
-                issue_number=issue_number,
-                lld_path=lld_path,
-                implementation_files=implementation_files,
-                completeness_result=ast_result,
-            )
-            implementation_report_path = str(report_path)
-            print(f"    Report: {report_path}")
-        except Exception as e:
-            # Report generation is a side effect — log and continue
-            logger.warning(
-                "Report generation failed: %s — continuing without report", e
-            )
-            print(f"    [WARN] Report generation failed: {e}")
-    else:
-        print("    [WARN] No LLD path — skipping report generation")
+    print("    Generating implementation report...")
+    try:
+        report_path = generate_implementation_report(
+            issue_number=issue_number,
+            lld_path=lld_path,
+            implementation_files=implementation_files,
+            completeness_result=ast_result,
+            repo_root=repo_root,
+        )
+    except CompletenessGateError as exc:
+        return _cannot_check(f"the implementation report for {where}: {exc}")
+    implementation_report_path = str(report_path)
+    print(f"    Report: {report_path}")
 
     # Save report path to audit
-    if audit_dir and audit_dir.exists() and implementation_report_path:
+    if audit_dir and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         save_audit_file(
             audit_dir,
@@ -291,7 +276,10 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
         "completeness_issues": issues,
         "previous_completeness_issues": issue_ids,
         "implementation_report_path": implementation_report_path,
-        "error_message": "",
+        "error_message": _block_stop_reason(
+            verdict, issue_ids, state.get("previous_completeness_issues", []),
+            iteration_count, where,
+        ),
     }
 
     # Include review materials if prepared (for user to submit to Gemini)
@@ -300,6 +288,51 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"    Completeness gate verdict: {verdict}")
     return result
+
+
+def _cannot_check(reason: str) -> dict[str, Any]:
+    """The gate could not check: BLOCK, with an error that routes to HALT (#3811)."""
+    message = f"Completeness gate could not check: {reason} (#3811)"
+    logger.error(message)
+    return {
+        "completeness_verdict": "BLOCK",
+        "completeness_issues": [],
+        "error_message": message,
+    }
+
+
+def _block_stop_reason(
+    verdict: str,
+    issue_ids: list[list],
+    previous_issue_ids: list[list],
+    iteration_count: int,
+    where: str,
+) -> str:
+    """Why a BLOCK stops the run instead of going back to N4, or "" when it does not.
+
+    Issue #147: a BLOCK at the iteration cap stops. Issue #505: so does one
+    whose issues are those of the previous iteration. #3852: the previous
+    iteration's identities are read from state before this update replaces
+    them; the router used to compare this update with itself, so every first
+    BLOCK looked stagnant. #3811: the stop is an error_message, so it reaches
+    HALT and the operator is alerted, where it used to end the graph silently.
+    """
+    if verdict != "BLOCK":
+        return ""
+    if iteration_count >= MAX_COMPLETENESS_ITERATIONS:
+        message = (
+            f"Completeness gate still BLOCK at iteration {iteration_count} "
+            f"(max {MAX_COMPLETENESS_ITERATIONS}) for {where}; see the implementation report"
+        )
+    elif issue_ids and sorted(map(tuple, issue_ids)) == sorted(map(tuple, previous_issue_ids)):
+        message = (
+            f"Completeness gate stagnant for {where}: the same {len(issue_ids)} issue(s) "
+            f"two iterations running"
+        )
+    else:
+        return ""
+    logger.error(message)
+    return message
 
 
 # =============================================================================
@@ -325,63 +358,32 @@ def _completeness_issue_identity(issue: dict) -> tuple:
 
 def route_after_completeness_gate(
     state: TestingWorkflowState,
-) -> Literal["N4_5_mechanical_hooks", "N4_implement_code", "end", "HALT"]:
-    """Route based on completeness verdict and iteration count.
+) -> Literal["N4_5_mechanical_hooks", "N4_implement_code", "HALT"]:
+    """Route based on the node's error and verdict.
 
     Issue #147, Requirements 7, 8, 12:
-    - BLOCK verdict: route back to N4 for re-implementation (up to 3 iterations)
+    - BLOCK verdict: route back to N4 for re-implementation
     - PASS/WARN verdict: route forward to N5
-    - BLOCK at max iterations (3): route to end (hard stop)
 
-    Issue #505: AST stagnation detection — identical issues across
-    2 consecutive iterations routes to end immediately.
-
-    #2756: a node that recorded a reason routes to HALT, so the stop is
-    written down by the node that owns halting. The verdict-driven stops
-    below keep going to END: they carry no `error_message`, and the
-    orchestrator reads the BLOCK verdict itself (#1779).
+    #2756, #3811: every stop is an error_message the node set, and routes to
+    HALT. That includes a BLOCK at the iteration cap and a stagnant BLOCK
+    (#505), which the node decides; they used to route to END with no reason
+    recorded and no alert.
 
     Args:
         state: Current workflow state with completeness_verdict set.
 
     Returns:
-        Next node name: "N4_5_mechanical_hooks", "N4_implement_code", "end", or
-        "HALT".
+        Next node name: "N4_5_mechanical_hooks", "N4_implement_code" or "HALT".
     """
-    error = state.get("error_message", "")
-    if error:
+    if state.get("error_message", ""):
         return "HALT"
 
     verdict = state.get("completeness_verdict", "")
-    iteration_count = state.get("iteration_count", 0)
-
     if verdict == "BLOCK":
-        if iteration_count >= MAX_COMPLETENESS_ITERATIONS:
-            print(
-                f"    [N4b] BLOCK at iteration {iteration_count} "
-                f"(max {MAX_COMPLETENESS_ITERATIONS}) — routing to end"
-            )
-            return "end"
-
-        # Issue #505: AST stagnation detection
-        current_issues = state.get("completeness_issues", [])
-        previous_issue_ids = state.get("previous_completeness_issues", [])
-
-        if current_issues and previous_issue_ids:
-            current_ids = sorted(
-                _completeness_issue_identity(i) for i in current_issues
-            )
-            prev_ids = sorted(tuple(x) for x in previous_issue_ids)
-            if current_ids == prev_ids:
-                print(
-                    f"    [N4b] [STAGNANT] Same {len(current_ids)} completeness issues "
-                    f"across 2 iterations. Halting."
-                )
-                return "end"
-
         print(
             f"    [N4b] BLOCK — routing back to N4 "
-            f"(iteration {iteration_count}/{MAX_COMPLETENESS_ITERATIONS})"
+            f"(iteration {state.get('iteration_count', 0)}/{MAX_COMPLETENESS_ITERATIONS})"
         )
         return "N4_implement_code"
 

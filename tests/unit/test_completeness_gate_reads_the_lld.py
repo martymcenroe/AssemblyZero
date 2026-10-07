@@ -23,6 +23,9 @@ from pathlib import Path
 
 import pytest
 
+from assemblyzero.workflows.testing.completeness.ast_analyzer import (
+    CompletenessGateError,
+)
 from assemblyzero.workflows.testing.completeness.report_generator import (
     extract_lld_requirements,
 )
@@ -66,11 +69,13 @@ class TestTheTwoDocumentsDiffer:
         lld, _ = docs
         assert len(extract_lld_requirements(lld)) == 2
 
-    def test_the_spec_yields_none(self, docs):
+    def test_the_spec_is_refused(self, docs):
         """Not a bug in the extractor -- the spec genuinely has no requirements
-        section. Handing it one is the bug."""
+        section. Handing it one is the bug, and since #3812 the extractor says
+        so by raising, where it used to return an empty list."""
         _, spec = docs
-        assert extract_lld_requirements(spec) == []
+        with pytest.raises(CompletenessGateError, match="check which document was passed"):
+            extract_lld_requirements(spec)
 
 
 class TestTheGatePrefersTheLld:
@@ -103,27 +108,26 @@ class TestTheGatePrefersTheLld:
 
 
 class TestAnEmptyExtractionIsVisible:
-    def test_it_says_the_review_compared_against_nothing(self, docs, capsys):
+    def test_the_review_refuses_to_compare_against_nothing(self, docs):
+        """#2024 made an empty extraction visible with a print; #3812 makes it
+        stop the review, because a printed warning let the gate go on."""
         from assemblyzero.workflows.testing.completeness.report_generator import (
             prepare_review_materials,
         )
 
         _, spec = docs
-        prepare_review_materials(issue_number=2, lld_path=spec, implementation_files=[])
-        out = capsys.readouterr().out
+        with pytest.raises(CompletenessGateError, match="Section 3 .* not found"):
+            prepare_review_materials(issue_number=2, lld_path=spec, implementation_files=[])
 
-        assert "NO REQUIREMENTS" in out
-        assert "against nothing" in out
-
-    def test_a_good_lld_says_nothing_alarming(self, docs, capsys):
+    def test_a_good_lld_prepares_its_requirements(self, docs):
         from assemblyzero.workflows.testing.completeness.report_generator import (
             prepare_review_materials,
         )
 
         lld, _ = docs
-        prepare_review_materials(issue_number=2, lld_path=lld, implementation_files=[])
+        materials = prepare_review_materials(issue_number=2, lld_path=lld, implementation_files=[])
 
-        assert "NO REQUIREMENTS" not in capsys.readouterr().out
+        assert len(materials["lld_requirements"]) == 2
 
 
 class TestTheKeyIsDeclared:

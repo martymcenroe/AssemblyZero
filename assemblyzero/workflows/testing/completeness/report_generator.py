@@ -21,6 +21,7 @@ from typing import Literal, TypedDict
 
 from assemblyzero.workflows.testing.completeness.ast_analyzer import (
     CompletenessCategory,
+    CompletenessGateError,
     CompletenessIssue,
     CompletenessResult,
 )
@@ -80,14 +81,18 @@ def extract_lld_requirements(lld_path: Path) -> list[tuple[int, str]]:
         lld_path: Path to the LLD markdown file.
 
     Returns:
-        List of (requirement_id, requirement_text) tuples.
-        Returns empty list if file cannot be read or Section 3 not found.
+        List of (requirement_id, requirement_text) tuples, never empty.
+
+    Raises:
+        CompletenessGateError: the LLD cannot be read, has no Section 3, or
+            Section 3 holds no numbered requirement (#3812). Each used to
+            return an empty list, and the review then compared the
+            implementation against nothing.
     """
     try:
         content = lld_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        logger.warning("Cannot read LLD file %s: %s", lld_path, e)
-        return []
+        raise CompletenessGateError(f"cannot read the LLD {lld_path}: {e}") from e
 
     # Find Section 3 (Requirements) — flexible: H1-H3, optional period, case-insensitive
     # Matches: "## 3. Requirements", "## 3 Requirements", "### 3. Requirements\n"
@@ -97,12 +102,11 @@ def extract_lld_requirements(lld_path: Path) -> list[tuple[int, str]]:
     )
     match = section_3_pattern.search(content)
     if not match:
-        logger.warning(
-            "Section 3 (Requirements) not found in %s (%d chars). "
-            "Expected heading like '## 3. Requirements'",
-            lld_path, len(content),
+        raise CompletenessGateError(
+            f"Section 3 (Requirements) not found in {lld_path} ({len(content)} chars); "
+            f"expected a heading like '## 3. Requirements'. An implementation spec "
+            f"has 'Current State' there, so check which document was passed (#2024)."
         )
-        return []
 
     # Extract content from Section 3 until the next section (## N.)
     section_start = match.end()
@@ -129,6 +133,11 @@ def extract_lld_requirements(lld_path: Path) -> list[tuple[int, str]]:
         if req_text:
             requirements.append((req_id, req_text))
 
+    if not requirements:
+        raise CompletenessGateError(
+            f"Section 3 of {lld_path} holds no numbered requirement, so there is "
+            f"nothing to review the implementation against (#2552)"
+        )
     return requirements
 
 
@@ -158,20 +167,12 @@ def prepare_review_materials(
 
     Returns:
         ReviewMaterials with requirements and code snippets.
+
+    Raises:
+        CompletenessGateError: no requirement can be extracted (#2024, #2552),
+            or an implementation file cannot be read (#3812).
     """
-    # Extract requirements from LLD
     lld_requirements = extract_lld_requirements(lld_path)
-    if not lld_requirements:
-        # #2024: with nothing to check against, a verdict from this gate is not
-        # meaningful -- "reviewed and found minor issues" and "reviewed nothing"
-        # came out identical, and the only trace was a logger warning nobody
-        # reads. Say it where the run can see it.
-        print(
-            f"    [N4b] NO REQUIREMENTS extracted from {lld_path} — this review "
-            f"compares the implementation against nothing. A Section 3 "
-            f"'Requirements' heading was expected; the implementation spec has "
-            f"'Current State' there, so check which document was passed."
-        )
 
     # Read code snippets from implementation files
     code_snippets: dict[str, str] = {}
@@ -184,10 +185,9 @@ def prepare_review_materials(
         try:
             source = file_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
-            logger.warning(
-                "Cannot read file %s for review materials: %s", file_path, e
-            )
-            continue
+            raise CompletenessGateError(
+                f"cannot read {file_path} for the review materials: {e}"
+            ) from e
 
         # Skip empty files
         if not source.strip():
@@ -310,6 +310,7 @@ def generate_implementation_report(
     lld_path: Path,
     implementation_files: list[Path],
     completeness_result: CompletenessResult,
+    repo_root: Path,
 ) -> Path:
     """Generate implementation report to docs/reports/active/{issue}-implementation-report.md.
 
@@ -319,17 +320,24 @@ def generate_implementation_report(
     - Completeness analysis summary (Requirement 11)
     - Issue details and timing information
 
-    The report is written to the standard reports directory. If the
-    directory does not exist, it is created.
+    The report is written to the target repository's docs/reports/active,
+    which is created if it does not exist.
 
     Args:
         issue_number: The issue number being verified.
         lld_path: Path to the LLD markdown file.
         implementation_files: List of implementation file paths.
         completeness_result: Results from AST completeness analysis.
+        repo_root: The target repository. #3811: the caller knows it; it used
+            to be guessed by walking up from the LLD, which found no root for
+            an LLD outside a marked project and wrote the report beside it.
 
     Returns:
         Path to the generated report file.
+
+    Raises:
+        CompletenessGateError: the requirements cannot be extracted, or the
+            report cannot be written (#3812).
     """
     # Extract requirements for the report
     requirements = extract_lld_requirements(lld_path)
@@ -393,52 +401,16 @@ def generate_implementation_report(
         f"*Generated by Implementation Completeness Gate (N4b) — Issue #147*\n"
     )
 
-    # Determine output path
-    # Navigate up from the completeness module to find project root
-    # Standard path: docs/reports/active/{issue}-implementation-report.md
-    report_dir = _find_reports_dir(lld_path)
-    report_dir.mkdir(parents=True, exist_ok=True)
-
-    report_path = report_dir / f"{issue_number}-implementation-report.md"
+    report_path = repo_root / "docs" / "reports" / "active" / f"{issue_number}-implementation-report.md"
     try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(report, encoding="utf-8")
-        logger.info("Implementation report written to %s", report_path)
     except OSError as e:
-        logger.error(
-            "Failed to write implementation report to %s: %s", report_path, e
-        )
+        # #3812: a failed write used to be logged, and the path of a file that
+        # was never written returned as if it had been.
+        raise CompletenessGateError(
+            f"cannot write the implementation report to {report_path}: {e}"
+        ) from e
+    logger.info("Implementation report written to %s", report_path)
 
     return report_path
-
-
-def _find_reports_dir(lld_path: Path) -> Path:
-    """Find the docs/reports/active directory relative to the project root.
-
-    Walks up from the LLD path to find a directory containing
-    'docs/reports/active'. Falls back to creating relative to the
-    project root if not found.
-
-    Args:
-        lld_path: Path to the LLD file, used to locate the project root.
-
-    Returns:
-        Path to the docs/reports/active directory.
-    """
-    # Walk up from the LLD path looking for project markers
-    current = lld_path.resolve().parent
-    for _ in range(10):  # Max 10 levels up
-        candidate = current / "docs" / "reports" / "active"
-        if candidate.exists():
-            return candidate
-        # Check for project root markers
-        if (current / "pyproject.toml").exists() or (
-            current / ".git"
-        ).exists():
-            return current / "docs" / "reports" / "active"
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-
-    # Fallback: relative to LLD path's parent
-    return lld_path.resolve().parent / "docs" / "reports" / "active"

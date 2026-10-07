@@ -1,5 +1,5 @@
 {
-  "count": 329,
+  "count": 326,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -47,19 +47,19 @@
       "detail": "# fail-open: this only names the exception type for the report. An",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 596
+      "line": 610
     },
     "assemblyzero/core/fail_open_audit.py::_Scanner._exception_text::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 595
+      "line": 609
     },
     "assemblyzero/core/fail_open_audit.py::scan_file::fail_open_tag::1": {
       "detail": "# fail-open: one unreadable file must not cost the whole sweep. This is",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 700
+      "line": 714
     },
     "assemblyzero/core/gate_registry.py::renumberings::fail_open_tag::1": {
       "detail": "# fail-open: a row naming something that is not a site key at all",
@@ -1259,7 +1259,7 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 128
+      "line": 129
     },
     "assemblyzero/workflows/testing/knowledge/patterns.py::load_test_types::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1296,24 +1296,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 139
-    },
-    "assemblyzero/workflows/testing/nodes/completeness_gate.py::completeness_gate::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 158
-    },
-    "assemblyzero/workflows/testing/nodes/completeness_gate.py::completeness_gate::swallowed_handler::2": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 215
-    },
-    "assemblyzero/workflows/testing/nodes/completeness_gate.py::completeness_gate::swallowed_handler::3": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 243
     },
     "assemblyzero/workflows/testing/nodes/document.py::document::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

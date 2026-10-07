@@ -2,8 +2,8 @@
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
     "files_scanned": 312,
-    "sites_examined": 9633,
-    "findings_total": 558
+    "sites_examined": 9622,
+    "findings_total": 547
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
@@ -343,17 +343,6 @@
     "assemblyzero/workflows/testing/adversarial_gemini.py::verify_model_is_pro::warned_return::0",
     "assemblyzero/workflows/testing/audit.py::log_workflow_execution::except_handler::0",
     "assemblyzero/workflows/testing/checkpoints.py::commit_checkpoint::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::analyze_dead_cli_flags::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::analyze_docstring_only_functions::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::analyze_empty_branches::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::analyze_trivial_assertions::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::analyze_unused_imports::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::run_ast_analysis::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::run_ast_analysis::except_handler::1",
-    "assemblyzero/workflows/testing/completeness/ast_analyzer.py::run_ast_analysis::except_handler::2",
-    "assemblyzero/workflows/testing/completeness/report_generator.py::extract_lld_requirements::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/report_generator.py::generate_implementation_report::except_handler::0",
-    "assemblyzero/workflows/testing/completeness/report_generator.py::prepare_review_materials::except_handler::0",
     "assemblyzero/workflows/testing/graph.py::_wrap_with_checkpoint.wrapped::except_handler::0",
     "assemblyzero/workflows/testing/knowledge/patterns.py::load_test_types::except_handler::0",
     "assemblyzero/workflows/testing/nodes/adversarial_node.py::_read_file_safe::except_handler::0",

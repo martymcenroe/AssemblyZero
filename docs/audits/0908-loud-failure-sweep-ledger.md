@@ -770,12 +770,12 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:497` | model returns no edit blocks | None outcome, falls back to regeneration with a print | loud, logged, alerts | ERROR on the fallback |
 | `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:503` | edit blocks do not apply | None outcome, fallback with a print | loud, logged, alerts | ERROR naming the blocks |
 | `assemblyzero/workflows/testing/nodes/implementation/edit_script_fix.py:507` | edits empty the file | None outcome, fallback with a print | loud, logged, alerts | ERROR naming the file |
-| `assemblyzero/workflows/testing/completeness/report_generator.py:89` | LLD cannot be read | WARNING, [] | loud, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/report_generator.py:100` | Section 3 not found | WARNING, [] | loud, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/report_generator.py:169` | no requirements extracted | empty requirements list | loud, logged, stops, alerts | raise |
-| `assemblyzero/workflows/testing/completeness/report_generator.py:187` | an implementation file cannot be read | WARNING, partial materials | loud, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/report_generator.py:407` | report cannot be written | ERROR, returns a nonexistent path | stops, alerts | alert and re-raise |
-| `assemblyzero/workflows/testing/completeness/report_generator.py:444` | project root not found | falls back silently | loud, logged, stops, alerts | raise naming the LLD |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:89` | LLD cannot be read | WARNING, [] | loud, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:100` | Section 3 not found | WARNING, [] | loud, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:169` | no requirements extracted | empty requirements list | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:187` | an implementation file cannot be read | WARNING, partial materials | loud, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:407` | report cannot be written | ERROR, returns a nonexistent path | stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/report_generator.py:444` | project root not found | falls back silently | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
 | `assemblyzero/workflows/testing/nodes/implementation/import_validator.py:85` | metadata enumeration fails | silent fallback to a map | loud, logged, stops, alerts | ERROR and re-raise |
 | `assemblyzero/workflows/testing/nodes/implementation/import_validator.py:119` | pyproject.toml unreadable | empty set; every import flagged | loud, logged, stops, alerts | ERROR and raise |
 | `assemblyzero/workflows/testing/nodes/implementation/import_validator.py:229` | code does not parse | (True, []): a gate that could not run passes | loud, logged, stops, alerts | return False with the error, or raise |
@@ -934,13 +934,13 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/workflows/testing/nodes/adversarial_node.py:250` | zero valid tests | verdict fail at INFO, proceeds | loud, logged, stops, alerts | error_message to HALT |
 | `assemblyzero/workflows/testing/nodes/adversarial_node.py:372` | a file cannot be read for context | WARNING, "", partial context | loud, logged, stops, alerts | ERROR and raise |
 | `assemblyzero/workflows/testing/nodes/completeness_gate.py:119` | zero requirements | BLOCK routed to HALT | compliant | none |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py:142` | no files to analyse | WARN, verdict PASS | loud, logged, stops, alerts | error_message to HALT |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py:158` | AST analysis raised | WARNING, verdict WARN, proceeds | loud, logged, stops, alerts | ERROR, error_message to HALT |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py:215` | Layer 2 materials raised | WARNING, Layer 2 skipped | loud, logged, stops, alerts | ERROR, error_message to HALT |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py:243` | report generation raised | WARNING, continues | loud, logged, stops, alerts | ERROR, error_message to HALT |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py:249` | no LLD path | WARN, report skipped | loud, logged, stops, alerts | error_message to HALT |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py:364` | still BLOCK at the cap | END, bypasses HALT | loud, logged, alerts | route to HALT |
-| `assemblyzero/workflows/testing/nodes/completeness_gate.py:380` | issues stagnant | END, bypasses HALT | loud, logged, alerts | route to HALT |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:142` | no files to analyse | WARN, verdict PASS | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:158` | AST analysis raised | WARNING, verdict WARN, proceeds | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:215` | Layer 2 materials raised | WARNING, Layer 2 skipped | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:243` | report generation raised | WARNING, continues | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:249` | no LLD path | WARN, report skipped | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:364` | still BLOCK at the cap | END, bypasses HALT | loud, logged, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py:380` | issues stagnant | END, bypasses HALT | loud, logged, alerts | FIXED in #3581 testing batch 1 (#3811) |
 | `assemblyzero/workflows/testing/nodes/document.py:182` | README required but missing | False, reported as no update needed | loud, logged, stops, alerts | raise naming the README |
 | `assemblyzero/workflows/testing/nodes/document.py:215` | README has no Features section | False silently | loud, logged, stops, alerts | raise naming the section |
 | `assemblyzero/workflows/testing/nodes/document.py:289` | sidebar update failed | False return ignored | loud, logged, stops, alerts | check it and raise |
@@ -999,15 +999,15 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1120` | reading the spec suite fails | "" silently, contract on incomplete input | loud, logged, stops, alerts | ERROR, alert, raise |
 | `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1121` | withdrawn fail-open tag | documents the swallow | loud, logged, stops, alerts | remove the tag |
 | `assemblyzero/workflows/testing/nodes/implementation/orchestrator.py:1146` | writing the generated file fails | raises, no ERROR, no alert | loud, alerts | ERROR and alert before raising |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:233` | dead-flag check cannot parse | [], could not run reads as passed | loud, logged, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:390` | empty-branch check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:482` | docstring-only check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:549` | trivial-assertion check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:665` | unused-import check cannot parse | [], reads as passed | loud, logged, stops, alerts | ERROR and raise |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:780` | stat on a file fails | WARNING, skipped; verdict can be PASS | loud, stops, alerts | ERROR, alert, raise or BLOCK |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:784` | file too large | WARNING, skipped; PASS on unchecked code | loud, stops, alerts | ERROR and fail the gate |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:796` | reading a file fails | WARNING, skipped | loud, stops, alerts | ERROR, alert, raise |
-| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:807` | a file has a syntax error | WARNING, analysis skipped | loud, stops, alerts | ERROR and BLOCK or raise |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:233` | dead-flag check cannot parse | [], could not run reads as passed | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:390` | empty-branch check cannot parse | [], reads as passed | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:482` | docstring-only check cannot parse | [], reads as passed | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:549` | trivial-assertion check cannot parse | [], reads as passed | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:665` | unused-import check cannot parse | [], reads as passed | loud, logged, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:780` | stat on a file fails | WARNING, skipped; verdict can be PASS | loud, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:784` | file too large | WARNING, skipped; PASS on unchecked code | loud, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:796` | reading a file fails | WARNING, skipped | loud, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py:807` | a file has a syntax error | WARNING, analysis skipped | loud, stops, alerts | FIXED in #3581 testing batch 1 (#3811) |
 | `assemblyzero/workflows/testing/nodes/review_test_plan.py:156` | review prompt template missing | silent default prompt | loud, logged, stops, alerts | ERROR, alert, HALT or raise |
 | `assemblyzero/workflows/testing/nodes/review_test_plan.py:428` | mechanical gates fail | HALT only without auto_mode | stops, alerts | route any error to HALT whatever auto_mode |
 | `assemblyzero/workflows/testing/nodes/review_test_plan.py:489` | reviewer cannot resolve | HALT only without auto_mode | stops, alerts | route any error to HALT |

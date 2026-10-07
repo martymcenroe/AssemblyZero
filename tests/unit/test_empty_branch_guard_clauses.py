@@ -194,11 +194,12 @@ class TestElseBranches:
         assert kinds(source) == [2, 4]
 
 
-class TestFailOpenIsUntouched:
-    def test_a_syntax_error_still_returns_no_issues(self):
-        """WARN-and-route is designed behaviour and this issue does not change it.
+class TestASyntaxErrorStopsTheCheck:
+    def test_a_syntax_error_raises(self):
+        """#3811 withdrew the fail-open this class once pinned (ADR 0236).
 
-        The node proceeds with verdict WARN when AST analysis cannot run. The
-        defect was the warning being false, not the routing.
+        A file that does not parse used to give no issues, and the node went on
+        with verdict WARN. It now raises, and the node routes to HALT.
         """
-        assert analyze_empty_branches("def f(:\n", "t.py") == []
+        with pytest.raises(A.CompletenessGateError, match="cannot parse t.py"):
+            analyze_empty_branches("def f(:\n", "t.py")

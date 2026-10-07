@@ -37,7 +37,8 @@ Graph structure:
                                             |      |
                                             v      v
                                            N5   N4 (iter<3)
-                                                 or END (iter>=3)
+                                                 or HALT (iter>=3, stagnant,
+                                                 or the gate could not check)
 
     N5_verify_green -> N6_e2e_validation -> N7_finalize -> N7_5_adversarial
            |                  |                  |               |
@@ -699,14 +700,14 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N4b -> N5 or N4 (re-implement) or END (max iterations) - Issue #147
+    # N4b -> N5, N4 (re-implement) or HALT - Issue #147. A BLOCK at the
+    # iteration cap, or a stagnant one, halts with a reason (#3811).
     workflow.add_conditional_edges(
         "N4b_completeness_gate",
         route_after_completeness_gate,
         {
             "N4_5_mechanical_hooks": "N4_5_mechanical_hooks",
             "N4_implement_code": "N4_implement_code",
-            "end": END,
             "HALT": "HALT",  # #2756
         },
     )
