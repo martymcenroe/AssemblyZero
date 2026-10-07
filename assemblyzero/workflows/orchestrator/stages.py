@@ -781,7 +781,14 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
                     attempts=1,
                 )
         else:
-            error_msg = sub_result.get("error_message", "LLD workflow completed but no artifact produced")
+            # #3750: never an empty reason. The sub-workflow carries
+            # error_message as "" when it did not fail, so .get()'s default
+            # never applied, and a reported LLD that is not on disk is named.
+            error_msg = sub_result.get("error_message") or (
+                f"LLD workflow reported {lld_path} but no file is there"
+                if lld_path else
+                "LLD workflow completed but no artifact produced"
+            )
             result = _make_stage_result(
                 status="failed",
                 error_message=error_msg,
