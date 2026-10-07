@@ -119,7 +119,30 @@ def add_context(pat: str, cfg: argparse.Namespace) -> list[str]:
     return list(r.json())
 
 
+PASTE = "paste this output to the agent"
+
+
 def run(pat: str, cfg: argparse.Namespace) -> int:
+    """Do the work, then end with ONE verdict line on every path (#3734).
+
+    The operator runs this. Its last line says whether it worked: `OK`, or
+    `FAILED at: <step> -- paste this output to the agent`. The lines above it
+    stay informative; the verdict is what he reads.
+    """
+    try:
+        failed_at = _run(pat, cfg)
+    except requests.RequestException as exc:
+        print(f"  GitHub API error: {exc}")
+        failed_at = "the GitHub API call"
+    if failed_at:
+        print(f"FAILED at: {failed_at} -- {PASTE}")
+        return 1
+    print("OK")
+    return 0
+
+
+def _run(pat: str, cfg: argparse.Namespace) -> str | None:
+    """The work. Returns the step that stopped it, or None when it finished."""
     target = f"{cfg.owner}/{cfg.repo}@{cfg.branch}"
     protection = read_protection(pat, cfg)
 
@@ -130,7 +153,7 @@ def run(pat: str, cfg: argparse.Namespace) -> int:
             "must satisfy, which is a decision about the repo rather than a "
             "step in this task. Stopping."
         )
-        return 1
+        return "branch protection (none on this branch)"
 
     checks = protection.get("required_status_checks")
     if not isinstance(checks, dict):
@@ -139,7 +162,7 @@ def run(pat: str, cfg: argparse.Namespace) -> int:
             "off.\nTurning them on changes what every pull request must "
             "satisfy. Stopping."
         )
-        return 1
+        return "required status checks (switched off on this branch)"
 
     contexts = list(checks.get("contexts") or [])
     print(f"  required status checks now : {contexts or '(none)'}")
@@ -147,16 +170,20 @@ def run(pat: str, cfg: argparse.Namespace) -> int:
 
     if cfg.context in contexts:
         print(f"  `{cfg.context}` is already required -- nothing to do.")
-        return 0
+        return None
 
     if not cfg.apply:
         print("  DRY-RUN -- nothing written. Re-run with --apply.")
-        return 0
+        return None
 
-    now = add_context(pat, cfg)
+    try:
+        now = add_context(pat, cfg)
+    except requests.RequestException as exc:
+        print(f"  GitHub API error: {exc}")
+        return "adding the required check"
     print(f"  required status checks are now: {now}")
     print(f"  `mergeable_state: clean` on {cfg.branch} now includes {cfg.context}.")
-    return 0
+    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
