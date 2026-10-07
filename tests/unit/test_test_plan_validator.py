@@ -3,6 +3,7 @@
 Issue #166: Test IDs match LLD Section 10.0.
 """
 
+import pytest
 
 from assemblyzero.core.validation.test_plan_validator import (
     check_human_delegation,
@@ -322,6 +323,41 @@ class TestHumanDelegationDetection:
         tests = extract_test_scenarios(LLD_HUMAN_DELEGATION_JUSTIFIED)
         violations = check_human_delegation(tests)
         assert len(violations) == 0
+
+    # #3752: the message is revision feedback for the drafter. boostgauge #2's
+    # T100 kept "visual check" in an automatic test's title through three
+    # revisions while the feedback quoted a regex.
+    @staticmethod
+    def _t100(**overrides):
+        return {
+            "id": "T100",
+            "description": "Absent needle (post-reset) visual check (REQ-3)",
+            "test_type": "Auto",
+            **overrides,
+        }
+
+    def test_the_message_names_the_words_and_both_remedies(self):
+        violations = check_human_delegation([self._t100()])
+        assert len(violations) == 1
+        message = violations[0]["message"]
+        assert '"visual check"' in message
+        assert "reword" in message
+        assert "Manual" in message
+        assert "\\" not in message, "the drafter is told words, not a regex"
+
+    def test_the_same_scenario_typed_manual_is_not_flagged(self):
+        assert check_human_delegation([self._t100(test_type="Manual")]) == []
+
+    @pytest.mark.parametrize("phrase", [
+        "manual verification", "manual check", "visual check", "visual verification",
+        "human review", "manual inspection", "visually inspect", "manually verify",
+    ])
+    def test_every_phrase_is_still_flagged(self, phrase):
+        """The decision is unchanged: only the message moved (#3752)."""
+        scenario = {"id": "T1", "description": f"Gauge {phrase} of the face", "test_type": "Unit"}
+        violations = check_human_delegation([scenario])
+        assert len(violations) == 1
+        assert f'"{phrase}"' in violations[0]["message"]
 
 
 # =============================================================================

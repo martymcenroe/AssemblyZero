@@ -476,16 +476,27 @@ def check_human_delegation(tests: list[LLDTestScenario]) -> list[ValidationViola
         test_type = test.get("test_type", "").lower()
 
         for pattern in HUMAN_DELEGATION_PATTERNS:
-            if re.search(pattern, desc, re.IGNORECASE):
+            match = re.search(pattern, desc, re.IGNORECASE)
+            if match:
                 # Justified if test type is explicitly "manual"
                 if test_type == "manual":
                     break
+                # #3752: this message goes back to the drafter as revision
+                # feedback. It names the words and both ways out; the regex it
+                # used to quote told the model nothing it could act on, and
+                # gemini-3.1-pro-high kept the title through three revisions.
+                words = match.group(0)
                 violations.append({
                     "check_type": "delegation",
                     "severity": "error",
                     "requirement_id": None,
                     "test_id": test["id"],
-                    "message": f"Test {test['id']} delegates to human: matches '{pattern}' but type is '{test_type}'",
+                    "message": (
+                        f'Test {test["id"]} reads as a human check ("{words}") but is '
+                        f"typed '{test_type}': reword it to state what the test asserts "
+                        f'automatically, without the words "{words}", or type it Manual '
+                        f"if a person must look."
+                    ),
                     "line_number": None,
                 })
                 break
