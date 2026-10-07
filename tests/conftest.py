@@ -221,6 +221,61 @@ def no_spend_lock_from_the_machine(tmp_path, monkeypatch):
     monkeypatch.setattr(seats, "other_side_claude_home", lambda: None)
 
 
+class RealAlertTransportReached(BaseException):
+    """A test reached SES or the toast runner for real (#3728).
+
+    BaseException, not Exception: ``alert_operator`` catches ``Exception``
+    around the send to report it, and that must not swallow this.
+    """
+
+
+def _refuse_real_alert_transport(*_args, **_kwargs):
+    raise RealAlertTransportReached(
+        "a test reached the real alert transport; inject a fake SES client "
+        "by patching assemblyzero.core.alert._ses_client"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_alert_transport(monkeypatch):
+    """No test tier emails the operator or raises a real toast (#3728).
+
+    ``alert_operator`` builds its SES client and toast runner through two
+    module functions; both are replaced here with one that fails the test, so
+    a failure path reached in any tier cannot send real mail. A test of the
+    alert path patches ``_ses_client`` with its own fake inside this.
+    """
+    from assemblyzero.core import alert
+
+    monkeypatch.setattr(alert, "_ses_client", _refuse_real_alert_transport)
+    monkeypatch.setattr(alert, "_toast_runner", _refuse_real_alert_transport)
+
+
+@pytest.fixture(autouse=True)
+def operator_alerts(request, monkeypatch):
+    """Every ``alert_operator`` call a test makes, recorded instead of sent (#3724).
+
+    Failure paths alert (the HALT node does on every halt), so every tier --
+    unit, integration and e2e alike -- replaces
+    ``assemblyzero.core.alert.alert_operator`` with a recorder: no stderr
+    record, no alerts log under the real home, no SES client. A test asserts on
+    the list by naming this fixture. ``test_alert.py`` is exempt: it tests the
+    real function, with fake transports.
+    """
+    if request.module.__name__.endswith("test_alert"):
+        return None
+    from assemblyzero.core import alert
+
+    calls: list[dict] = []
+
+    def record(**kwargs):
+        calls.append(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(alert, "alert_operator", record)
+    return calls
+
+
 @pytest.fixture
 def mock_file_size(monkeypatch):
     """Factory fixture that patches os.path.getsize to return specified sizes for given paths.

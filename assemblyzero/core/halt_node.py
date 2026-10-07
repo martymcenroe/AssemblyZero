@@ -6,8 +6,9 @@ Creates a LangGraph-compatible node that:
 1. Saves full workflow state to disk
 2. Classifies the error from state["error_message"]
 3. Generates a structured recovery plan
-4. Prints a human-readable summary
-5. Returns paths for downstream consumption
+4. Alerts the operator (#3724, ADR 0236), after the state and plan are saved
+5. Prints a human-readable summary
+6. Returns paths for downstream consumption
 
 #2197: a halt that reports "Error: unknown" is the one thing this node must
 never do -- it exists to make a stop legible. A router's state writes are
@@ -24,6 +25,7 @@ routes to the drafter, never here, so that emptiness is untouched.
 
 from pathlib import Path
 
+from assemblyzero.core import alert as _alert
 from assemblyzero.core.errors import (
     AuthenticationError,
     CapacityError,
@@ -270,13 +272,30 @@ def create_halt_node(workflow_name: str):
         # 5. Save plan to same directory as state
         plan_path = plan.save(state_path.parent)
 
+        # 5a. #3724 (ADR 0236): every halt alerts the operator. It runs after
+        # the state and the plan are on disk, so a failed delivery (which
+        # raises) can never cost the record of the halt it reports.
+        repo = str(state.get("target_repo") or state.get("repo_root") or "")
+        where = f"{workflow_name} HALT, stage {stage}"
+        _alert.alert_operator(
+            what=f"the {workflow_name} workflow halted ({error_type})",
+            where=where,
+            cause=error_message,
+            consequence=(
+                f"the run stopped; state {state_path}, recovery plan {plan_path}"
+            ),
+            repo=repo,
+            issue=issue_number or None,
+        )
+        audit_dir_str = str(state.get("audit_dir", "") or "")
+
         # 5b. #2570: the halt writes the resume contract — every input the
         # resume will need, hashed, plus the counters and the snapshot it
         # seeds from. The resume verifies this FIRST and refuses by name
         # on any mismatch. Written beside the plan, and copied into the
         # run's audit dir when there is one, so the lineage carries the
-        # manifest. Best-effort: a contract that cannot be written must
-        # never mask the halt it describes.
+        # manifest. #3724: a contract that cannot be written is its own
+        # failure and gets its own alert; the halt above is already reported.
         try:
             from assemblyzero.core.resume_contract import (
                 build_resume_contract,
@@ -287,18 +306,22 @@ def create_halt_node(workflow_name: str):
                 state, workflow_name, state_snapshot=state_path
             )
             save_resume_contract(contract)
-            audit_dir_str = str(state.get("audit_dir", "") or "")
-            if audit_dir_str and Path(audit_dir_str).is_dir():
+            if audit_dir_str:
+                _require_audit_dir(audit_dir_str)
                 save_resume_contract(contract, Path(audit_dir_str))
             print(
                 f"  resume contract written: "
                 f"{len(contract['inputs'])} input(s) (#2570)"
             )
-        except Exception as exc:  # noqa: BLE001
-            # fail-open: the contract is the resume's protection, not the
-            # halt's -- a halt that cannot write it still halts, loudly,
-            # and the resume simply has no contract to verify.
-            print(f"  [WARN] resume contract not written: {exc}")
+        except Exception as exc:  # noqa: BLE001 - reported to the operator below
+            _alert.alert_operator(
+                what="the halt's resume contract was not written",
+                where=where,
+                cause=f"{type(exc).__name__}: {exc}",
+                consequence="a resume of this run has no contract to verify",
+                repo=repo,
+                issue=issue_number or None,
+            )
 
         # 5c. #2574: the halt emits its own evidence bundle — the events
         # the run recorded, the lineage artifacts hashed with their
@@ -331,8 +354,8 @@ def create_halt_node(workflow_name: str):
                     workflow_name, state
                 )
             )
-            audit_dir_str = str(state.get("audit_dir", "") or "")
-            if audit_dir_str and Path(audit_dir_str).is_dir():
+            if audit_dir_str:
+                _require_audit_dir(audit_dir_str)
                 write_halt_evidence(evidence, Path(audit_dir_str))
             groups = len(evidence["artifacts"]["identical_groups"])
             print(
@@ -341,10 +364,15 @@ def create_halt_node(workflow_name: str):
                 f"{groups} byte-identical group(s), draft issue body "
                 f"included (#2574)"
             )
-        except Exception as exc:  # noqa: BLE001
-            # fail-open: the bundle describes the halt; failing to write
-            # it must never mask the halt it describes.
-            print(f"  [WARN] halt evidence not written: {exc}")
+        except Exception as exc:  # noqa: BLE001 - reported to the operator below
+            _alert.alert_operator(
+                what="the halt's evidence bundle was not written",
+                where=where,
+                cause=f"{type(exc).__name__}: {exc}",
+                consequence="the halt has no evidence bundle; the state and plan are saved",
+                repo=repo,
+                issue=issue_number or None,
+            )
 
         # 6. Print human-readable summary
         plan.print_summary()
@@ -364,6 +392,12 @@ def create_halt_node(workflow_name: str):
         }
 
     return halt_with_plan
+
+
+def _require_audit_dir(audit_dir: str) -> None:
+    """An audit_dir the state names must exist; a copy is never skipped (#3724)."""
+    if not Path(audit_dir).is_dir():
+        raise FileNotFoundError(f"state names audit_dir {audit_dir}, which is not a directory")
 
 
 def _infer_stage(state: dict, workflow_name: str) -> str:

@@ -34,7 +34,7 @@ BASELINE = REPO_ROOT / "tests" / "fixtures" / "loud_failure_baseline.json"
 
 #: The baseline's size the day it was written (#3580). Each #3581 batch lowers
 #: this by the entries it removes; it is never raised.
-BASELINE_CEILING = 333  # #3584 removed two (tools/audit_deferred_scope.py)
+BASELINE_CEILING = 329  # #3584 removed two; #3581 core batch 1 (#3724) four
 
 
 # ---------------------------------------------------------------------------
