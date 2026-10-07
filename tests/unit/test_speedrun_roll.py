@@ -138,18 +138,20 @@ class TestEnsureBaseDecides:
         assert base == "hardening-run-11", "must use the attempt that is on origin"
         assert sr.base_is_structurally_sound(repo, base) == []
 
-    def test_base_holding_this_issues_work_triggers_a_fresh_attempt(
+    def test_base_holding_this_issues_unsettled_lld_is_kept_for_a_redraw(
         self, repo, log
     ):
-        """No amount of debris cleanup fixes a base that already merged the
-        issue -- it needs a base that predates it."""
+        """#3762: this scan reads docs/lld only, so what it finds is a design,
+        never merged implementation (#1959's case). An unsettled LLD on the
+        base is redrawn and re-landed over itself; it used to cost a whole new
+        attempt branch, abandoning the arc's seed."""
         _commit_lld(repo, 4)
 
         with _no_network():
             base = sr.ensure_base(repo, 4, log)
 
-        assert base == "hardening-run-12"
-        assert sr.gate.find_committed_artifact_debris(repo, 4, base) == []
+        assert base == "hardening-run-11"
+        assert "will be redrawn and re-landed" in Path(log.path).read_text(encoding="utf-8")
 
     def test_another_issues_work_does_not_trigger_a_fresh_attempt(
         self, repo, log

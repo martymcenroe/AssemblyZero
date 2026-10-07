@@ -80,7 +80,7 @@ class TestBaseIsNamedExplicitly:
         cmd = _run_impl(state, _Recorder())
 
         assert cmd is not None, "no worktree add was issued"
-        assert cmd[-1] == "hardening-run-12", cmd
+        assert cmd[-1] == "origin/hardening-run-12", cmd
         # And it must come AFTER -b <branch>, i.e. be the base, not the name.
         assert cmd[cmd.index("-b") + 1] == "issue-4", cmd
 
@@ -94,7 +94,42 @@ class TestBaseIsNamedExplicitly:
         state["base_branch"] = "speedrun-attempt-3"
         _run_impl(state, _Recorder())
 
-        assert "Worktree base: speedrun-attempt-3" in capsys.readouterr().out
+        assert "Worktree base: origin/speedrun-attempt-3" in capsys.readouterr().out
+
+    def test_the_base_is_fetched_into_the_remote_tracking_ref(self, state):
+        """#3763: `fetch origin b:b` is refused while b is checked out in any
+        worktree (a campaign's seed always holds it); the remote-tracking ref
+        is not, and the worktree is cut from it."""
+        state["base_branch"] = "hardening-run-20"
+        recorder = _Recorder()
+        _run_impl(state, recorder)
+
+        fetches = [c for c in recorder.calls if "fetch" in c]
+        assert fetches, recorder.calls
+        assert fetches[0][-2:] == ["origin", "hardening-run-20"], fetches[0]
+        assert not any(":" in arg for arg in fetches[0][-2:]), "no local-ref refspec"
+
+    def test_a_failed_fetch_fails_the_stage_rather_than_build_stale(self, state):
+        """#3763: boostgauge #2 run-issue2-052813 warned and built from a stale
+        local ref, against an August LLD. A fetch that fails now stops."""
+        state["base_branch"] = "hardening-run-20"
+
+        class _FetchRefused(_Recorder):
+            def __call__(self, cmd, *args, **kwargs):
+                self.calls.append(list(cmd))
+                if "fetch" in cmd:
+                    return _completed(returncode=1, stderr="fatal: could not read from remote")
+                return _completed()
+
+        recorder = _FetchRefused()
+        with patch.object(stages, "run_command", recorder), \
+             patch.object(Path, "is_dir", return_value=False):
+            new_state = stages.run_impl_stage(state)
+
+        assert recorder.worktree_add() is None, "no worktree may be cut from a stale ref"
+        result = new_state["stage_results"]["impl"]
+        assert result["status"] == "failed"
+        assert "could not fetch origin/hardening-run-20" in result["error_message"]
 
     def test_worktree_belongs_to_the_target_repo(self, state):
         """#1374: `git -C <target>` must still precede the subcommand."""

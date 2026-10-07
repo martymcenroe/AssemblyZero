@@ -319,4 +319,4 @@ class TestTheWorktreeStartsFromTheBest:
 
         cmd = _run_impl(state, repo)
 
-        assert cmd[-1] == "hardening-run-20", cmd
+        assert cmd[-1] == "origin/hardening-run-20", cmd
