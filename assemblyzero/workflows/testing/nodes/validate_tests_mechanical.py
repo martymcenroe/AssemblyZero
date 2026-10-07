@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from assemblyzero.workflows.testing.audit import gate_log
 from assemblyzero.workflows.testing.framework_detector import TestFramework
-from assemblyzero.workflows.testing.runner_registry import get_runner
+from assemblyzero.workflows.testing.runner_registry import get_runner, resolve_framework
 
 logger = logging.getLogger(__name__)
 
@@ -610,13 +610,9 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # Issue #381: Framework-aware validation branch
     framework_config = state.get("framework_config")
     if framework_config:
-        fw_enum = framework_config.get("framework")
-        # Normalize: could be a TestFramework enum or its string value
-        if isinstance(fw_enum, str):
-            try:
-                fw_enum = TestFramework(fw_enum)
-            except ValueError:
-                fw_enum = None
+        # The framework may be the enum or its string value (#3708); the one
+        # shared resolver reads both (#3732).
+        fw_enum = resolve_framework(framework_config)
         if fw_enum and fw_enum != TestFramework.PYTEST:
             return _validate_non_pytest(
                 state, generated_tests, fw_enum, scaffold_attempts

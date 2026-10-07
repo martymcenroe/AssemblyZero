@@ -86,15 +86,36 @@ def checkpoint_safe(config: FrameworkConfig | dict) -> dict:
 
     LangGraph's serializer stores an Enum as a Python object and has announced
     it will refuse unregistered types; `TestFramework` and `CoverageType` in
-    `framework_config` drew that warning on every implementation run. Every
-    reader already accepts the string (`_resolve_framework_enum`, and the
-    `CoverageType(...)` conversion in verify_phases), so the state carries
-    strings and the checkpoint carries nothing LangGraph has to be told about.
+    `framework_config` drew that warning on every implementation run. So the
+    state carries strings and the checkpoint carries nothing LangGraph has to
+    be told about. A reader must turn the framework back into its enum with
+    `resolve_framework` before comparing it: `TestFramework` is a plain Enum,
+    so `"pytest" != TestFramework.PYTEST`, and a raw comparison sent every
+    pytest repository down the TypeScript scaffold path (#3732).
     """
     return {
         key: value.value if isinstance(value, Enum) else value
         for key, value in dict(config).items()
     }
+
+
+_FRAMEWORKS_BY_VALUE: dict[str, TestFramework] = {fw.value: fw for fw in TestFramework}
+
+
+def resolve_framework(framework_config: FrameworkConfig | dict | None) -> TestFramework | None:
+    """The `TestFramework` a framework configuration names, or None (#3732).
+
+    The one place the state's framework is read back. The checkpoint carries
+    the string value (#3708); a checkpoint written before that still carries
+    the enum. Both resolve. An unknown string, a missing key or no config at
+    all is None, which every caller treats as "not a recognised framework".
+    """
+    fw = (framework_config or {}).get("framework")
+    if isinstance(fw, TestFramework):
+        return fw
+    if isinstance(fw, str):
+        return _FRAMEWORKS_BY_VALUE.get(fw)
+    return None
 
 
 def get_runner(
