@@ -776,9 +776,10 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
                 print(f"          A: {c.get('criterion_a') or '(not stated)'}")
                 print(f"          B: {c.get('criterion_b') or '(not stated)'}")
         if not confirmed:
-            # fail-open: proceeding is the verdict of the second ask, which
-            # judged the same text and repeated none of the first ask's
-            # conflicts; each dropped conflict is printed above, never silent.
+            # Not a failure path (#3767). The check ran twice and both asks
+            # answered; #3747's rule is that a conflict halts only when it
+            # reproduces, and none did. Proceeding is the check's verdict,
+            # and each dropped conflict is printed above, never silent.
             print(
                 "  [N0c] Requirements internally consistent: no reported "
                 "conflict reproduced on a second ask."

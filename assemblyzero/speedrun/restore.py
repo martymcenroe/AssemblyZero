@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from assemblyzero.core.settlement import sha256_text
 from assemblyzero.speedrun.leavings import _run
 
 
@@ -108,8 +109,61 @@ def input_refs(repo_root: Path, issue: int) -> list[str]:
     return refs
 
 
+def _main_checkout(repo_root: Path) -> Path:
+    """The primary checkout of the repo `repo_root` belongs to (#3764).
+
+    A stage runs in a worktree, but the durable LLD copy and the settlement
+    record live in the primary checkout's gitignored lineage and data.
+    """
+    result = _run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=repo_root,
+    )
+    common = (result.stdout or "").strip()
+    if result.returncode != 0 or not common:
+        return repo_root
+    return Path(common).parent
+
+
+def _settled_lld_sha(main: Path, issue: int) -> str | None:
+    """The content hash of the issue's settled LLD, or None with no record."""
+    from assemblyzero.workflows.requirements.audit import load_settlement
+
+    record = load_settlement(issue, "lld", main)
+    if not isinstance(record, dict):
+        return None
+    return record.get("artifact_sha256") or None
+
+
+def _sources(
+    repo_root: Path, issue: int, rel: Path, base: str
+) -> list[tuple[str, str]]:
+    """Where a missing input is rebuilt from, in order (#3764).
+
+    Each entry is (kind, where): kind "file" is a path on disk, "ref" a git
+    ref. The newest authoritative copy comes first:
+
+    * the durable handoff copy (#3750), for the LLD only;
+    * the base the run builds on: ``origin/<base>`` when the caller knows it,
+      then this checkout's ``HEAD``, which a worktree cut from the base holds;
+    * the live ``<N>-lld`` branch, which is the LLD before it lands;
+    * the graveyard refs, last, because their newest match may be months old.
+    """
+    from assemblyzero.workflows.requirements.nodes.finalize import durable_lld_path
+
+    sources: list[tuple[str, str]] = []
+    if rel.name == f"LLD-{issue:03d}.md":
+        durable = durable_lld_path(_main_checkout(repo_root), issue)
+        sources.append(("file", str(durable)))
+    if base:
+        sources.append(("ref", f"origin/{base}"))
+    sources.append(("ref", "HEAD"))
+    sources += [("ref", ref) for ref in input_refs(repo_root, issue)]
+    return sources
+
+
 def restore_artifact(
-    repo_root: Path, issue: int, artifact: str, *, log=None
+    repo_root: Path, issue: int, artifact: str, *, log=None, base: str = ""
 ) -> bool:
     """Materialize a file from the refs so a stage can read it.
 
@@ -130,6 +184,12 @@ def restore_artifact(
     #2571 moves this here so the LOADER can rebuild too: a working copy is
     a cache, and `find_lld_path` now rebuilds it from these refs before
     concluding absence instead of depending on an untracked file surviving.
+
+    #3764: since the merge driver deletes `<N>-lld` after landing, the search
+    used to fall through to the graveyard, and boostgauge #2
+    (run-issue2-052813) was implemented against an August draft. The durable
+    copy and the base now come first (`_sources`). A graveyard copy that is
+    not the settled LLD, by content hash, is refused and named, never used.
     """
     path = Path(artifact)
     if path.is_file():
@@ -143,14 +203,37 @@ def restore_artifact(
         # audited package is what made the site newly visible).
         return False
 
-    for ref in input_refs(repo_root, issue):
-        show = _run(
-            ["git", "show", f"{ref}:{rel.as_posix()}"], cwd=repo_root
-        )
-        if show.returncode == 0 and show.stdout:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(show.stdout, encoding="utf-8")
-            if log is not None:
-                log(f"[REBUILT] {rel.as_posix()} restored from '{ref}' (#2571)")
-            return True
+    is_lld = rel.name == f"LLD-{issue:03d}.md"
+    settled_sha = _settled_lld_sha(_main_checkout(repo_root), issue) if is_lld else None
+
+    for kind, where in _sources(repo_root, issue, rel, base):
+        if kind == "file":
+            source = Path(where)
+            if not source.is_file():
+                continue
+            content = source.read_text(encoding="utf-8")
+        else:
+            show = _run(
+                ["git", "show", f"{where}:{rel.as_posix()}"], cwd=repo_root
+            )
+            if show.returncode != 0 or not show.stdout:
+                continue
+            content = show.stdout
+            if (
+                "graveyard/" in where
+                and settled_sha
+                and sha256_text(content) != settled_sha
+            ):
+                if log is not None:
+                    log(
+                        f"[REFUSED] {rel.as_posix()} on '{where}' is not the "
+                        f"settled LLD (settled {settled_sha[:12]}, this copy "
+                        f"{sha256_text(content)[:12]}); not used (#3764)"
+                    )
+                continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        if log is not None:
+            log(f"[REBUILT] {rel.as_posix()} restored from '{where}' (#2571, #3764)")
+        return True
     return False

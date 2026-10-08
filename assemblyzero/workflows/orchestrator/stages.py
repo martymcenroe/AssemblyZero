@@ -2230,10 +2230,11 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
             notes=[f"squash {landing.squash_sha} on {base_branch}"],
         )
     except merge_driver.MergeDriverError as exc:
-        # fail-open: not a pass -- the refusal becomes this stage's failed
-        # result, carrying the driver's output, and halts the run below.
-        # The driver's refusals are decisions, not weather: another attempt
-        # with the same inputs gets the same answer.
+        # Fails loud (#3767): the refusal becomes this stage's failed result,
+        # carrying the driver's output. transient=False skips the retry, and
+        # _route_after_stage sends a failed stage to "terminal", the HALT
+        # node, which alerts. The driver's refusals are decisions, not
+        # weather: another attempt with the same inputs gets the same answer.
         result = _make_stage_result(
             status="failed",
             error_message=f"PR landing error: {exc}",

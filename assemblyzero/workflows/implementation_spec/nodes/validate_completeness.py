@@ -83,6 +83,14 @@ SPECIFICITY_INDICATORS = [
 ]
 
 
+class CompletenessCannotCheck(RuntimeError):
+    """A completeness check could not run at all (#3767).
+
+    Distinct from a check that ran and failed: the draft did not cause it and
+    no revision can fix it, so N3 halts the run (ADR 0236).
+    """
+
+
 # =============================================================================
 # Main Node
 # =============================================================================
@@ -195,9 +203,20 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
 
     # Check 6b (#3755): calls into existing first-party code the plan does not
     # change must use keywords the callee accepts.
-    check_calls = check_call_signatures_match(
-        spec_draft, files_to_modify, repo_root_str, base_branch
-    )
+    try:
+        check_calls = check_call_signatures_match(
+            spec_draft, files_to_modify, repo_root_str, base_branch
+        )
+    except CompletenessCannotCheck as exc:
+        # #3767: route_after_validation sends this to HALT, which alerts.
+        message = f"N3 completeness gate cannot run: {exc}"
+        print(f"ERROR [N3] {message}", file=sys.stderr)
+        return {
+            "completeness_issues": [message],
+            "validation_passed": False,
+            "completeness_cannot_check": message,
+            "error_message": message,
+        }
     checks.append(check_calls)
     _log_check(check_calls)
 
@@ -1722,8 +1741,10 @@ def check_call_signatures_match(
         try:
             trees.append(ast.parse(_normalize_fence(match.group(2))))
         except (SyntaxError, ValueError, RecursionError):
-            # fail-open: an unparseable fence is not judged here because
-            # python_fences_parse fails the same draft on it, by name (#2526).
+            # Not a failure path (#3767). A fence tagged Python that does not
+            # parse fails this same draft under python_fences_parse, by name
+            # (#2526); an untagged fence that does not parse claimed no
+            # Python, so it holds no calls to check.
             continue
 
     # local name -> (accepted keywords, signature text)
@@ -1742,11 +1763,17 @@ def check_call_signatures_match(
                 else:
                     try:
                         module_trees[node.module] = ast.parse(source)
-                    except SyntaxError:
-                        # fail-open: a callee module that does not parse cannot
-                        # be judged; its calls are not checked rather than
-                        # guessed at, and the repo's own tests own its syntax.
-                        module_trees[node.module] = None
+                    except SyntaxError as exc:
+                        # #3767: a callee that does not parse means this check
+                        # cannot run, and "could not check" is not "passed"
+                        # (ADR 0236). No revision of the draft can fix the
+                        # repo's own module, so the run halts.
+                        raise CompletenessCannotCheck(
+                            f"call_signatures_match cannot check calls into "
+                            f"`{node.module}`: {rel} on "
+                            f"{base_ref_name or 'the checkout'} does not parse "
+                            f"(line {exc.lineno}: {exc.msg})"
+                        ) from exc
             module_tree = module_trees[node.module]
             if module_tree is None:
                 continue

@@ -1,11 +1,11 @@
 {
-  "count": 323,
+  "count": 318,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
       "issue": 3581,
       "kind": "unrouted_error",
-      "line": 91
+      "line": 99
     },
     "assemblyzero.workflows.testing.graph::N4c_augment_tests::unrouted_error::1": {
       "detail": "node N4c_augment_tests returns error_message; no conditional edge",
@@ -467,7 +467,7 @@
       "detail": "# fail-open: a path outside the repo cannot be on any of the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 140
+      "line": 200
     },
     "assemblyzero/spelunking/engine.py::run_all_probes::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -725,67 +725,55 @@
       "detail": "# fail-open: an unparseable pyproject declares no plugins, which makes",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1988
+      "line": 2015
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_pyproject_for_run::fail_open_tag::1": {
       "detail": "# fail-open: a base that cannot be read falls to the checkout's",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2037
+      "line": 2064
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_pyproject_for_run::fail_open_tag::2": {
       "detail": "# fail-open: no pyproject anywhere means no declared plugins, which",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2051
+      "line": 2078
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_resolve_stdlib_class::fail_open_tag::1": {
       "detail": "# fail-open: a name the standard library does not have resolves to",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 3439
-    },
-    "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_call_signatures_match::fail_open_tag::1": {
-      "detail": "# fail-open: an unparseable fence is not judged here because",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 1725
-    },
-    "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_call_signatures_match::fail_open_tag::2": {
-      "detail": "# fail-open: a callee module that does not parse cannot",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 1746
+      "line": 3466
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_manifest_traceability::fail_open_tag::1": {
       "detail": "# fail-open: #2533's ruled abstention (#2526: unknown is not",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2641
+      "line": 2668
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_section_ten_carries_test_functions::fail_open_tag::1": {
       "detail": "# fail-open: the heading was found above, so the section exists; only",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2223
+      "line": 2250
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_section_ten_carries_test_functions::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2222
+      "line": 2249
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_spec_test_fixtures_resolvable::fail_open_tag::1": {
       "detail": "# fail-open: abstains audibly -- the details say not applicable, the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2420
+      "line": 2447
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::validate_completeness::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 280
+      "line": 299
     },
     "assemblyzero/workflows/janitor/fixers.py::create_fix_pr::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -887,31 +875,31 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2370
+      "line": 2371
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2383
+      "line": 2384
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2391
+      "line": 2392
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::3": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2393
+      "line": 2394
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::4": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2401
+      "line": 2402
     },
     "assemblyzero/workflows/orchestrator/stages.py::_synthesize_brief_summary::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -943,17 +931,11 @@
       "kind": "swallowed_handler",
       "line": 800
     },
-    "assemblyzero/workflows/orchestrator/stages.py::run_pr_stage::fail_open_tag::1": {
-      "detail": "# fail-open: not a pass -- the refusal becomes this stage's failed",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 2233
-    },
     "assemblyzero/workflows/orchestrator/stages.py::run_pr_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2259
+      "line": 2260
     },
     "assemblyzero/workflows/orchestrator/stages.py::run_spec_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1093,35 +1075,23 @@
       "kind": "fail_open_tag",
       "line": 727
     },
-    "assemblyzero/workflows/requirements/nodes/analyze_requirements.py::analyze_requirements::fail_open_tag::3": {
-      "detail": "# fail-open: proceeding is the verdict of the second ask, which",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 779
-    },
     "assemblyzero/workflows/requirements/nodes/analyze_requirements.py::analyze_requirements::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 814
+      "line": 815
     },
     "assemblyzero/workflows/requirements/nodes/analyze_requirements.py::analyze_requirements::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 825
+      "line": 826
     },
     "assemblyzero/workflows/requirements/nodes/finalize.py::_save_lld_file::fail_open_tag::1": {
       "detail": "# fail-open: not a fall-through -- error_message is the halt; the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 573
-    },
-    "assemblyzero/workflows/requirements/nodes/finalize.py::_save_lld_file::fail_open_tag::2": {
-      "detail": "# fail-open: the LLD itself is saved and about to land; only the",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 643
+      "line": 574
     },
     "assemblyzero/workflows/requirements/nodes/generate_draft.py::build_revision_context::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
