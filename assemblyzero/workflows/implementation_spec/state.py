@@ -161,6 +161,10 @@ class ImplementationSpecState(TypedDict, total=False):
     # Validation (N3)
     completeness_issues: list[str]
     validation_passed: bool
+    #: #3767: why a completeness check could not run at all, e.g. a callee
+    #: module on the base does not parse. No revision of the draft can fix
+    #: that, so the router sends it straight to HALT instead of to N2.
+    completeness_cannot_check: str
 
     # Review (N5)
     review_verdict: Literal["APPROVED", "REVISE", "BLOCKED"]

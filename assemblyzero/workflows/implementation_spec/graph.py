@@ -169,7 +169,8 @@ def route_after_validation(
     - N4_human_gate: Validation passed AND human_gate_enabled
     - N5_review_spec: Validation passed AND human gate disabled
     - N2_generate_spec: Validation failed, retry (if iterations remain)
-    - HALT: Validation failed and max iterations exceeded (Issue #486)
+    - HALT: Validation failed and max iterations exceeded (Issue #486), or
+      a check could not run at all (#3767)
 
     Args:
         state: Current workflow state.
@@ -177,6 +178,13 @@ def route_after_validation(
     Returns:
         Next node name.
     """
+    # #3767: a check that could not run is not a draft defect, so it never
+    # goes back to N2. Keyed on its own field: error_message also carries the
+    # cap message on a grace revision, which must still reach N2 (#2304).
+    if state.get("completeness_cannot_check"):
+        print(f"    [ROUTING] {state['completeness_cannot_check']} - halting")
+        return "HALT"
+
     validation_passed = state.get("validation_passed", False)
     review_iteration = state.get("review_iteration", 0)
     max_iterations = state.get("max_iterations", 3)

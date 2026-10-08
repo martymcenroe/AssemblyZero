@@ -10,6 +10,7 @@ from assemblyzero.utils.shell import run_command
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -640,12 +641,18 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
             durable.write_text(lld_content, encoding="utf-8")
             print(f"    Handoff copy (survives the landing): {durable}")
         except OSError as e:
-            # fail-open: the LLD itself is saved and about to land; only the
-            # post-landing copy is missing, and the line below says so.
-            print(
-                f"    WARNING: could not write the durable LLD copy ({e}); after "
-                f"the landing, the LLD exists only on the base branch (#3750)."
+            # #3767: fails loud. The durable copy is the first source a
+            # rebuild restores from (#3764), so a run without it would let a
+            # later stage fall back to an older copy. error_message routes
+            # finalize to HALT (#3864), which alerts.
+            message = (
+                f"could not write the durable LLD copy {durable} for issue "
+                f"#{issue_number} ({type(e).__name__}: {e}); the run stops "
+                f"before landing so no later stage restores an older LLD (#3750)."
             )
+            print(f"ERROR [finalize] {message}", file=sys.stderr)
+            state["error_message"] = message
+            return state
 
     # Save to audit trail. #3510: `Path("")` is the current directory, which
     # always exists, so a state with no audit_dir wrote NNN-final.md into

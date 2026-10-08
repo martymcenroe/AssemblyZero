@@ -2,8 +2,8 @@
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
     "files_scanned": 312,
-    "sites_examined": 9642,
-    "findings_total": 546
+    "sites_examined": 9660,
+    "findings_total": 545
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
@@ -221,6 +221,7 @@
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_pyproject_declared_package::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_scan_fences::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_target_env_python::except_handler::0",
+    "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_call_signatures_match::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_pattern_references_valid::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::validate_completeness::except_handler::0",
     "assemblyzero/workflows/implementation_spec/review_progress.py::hard_ceiling::except_handler::0",
@@ -268,6 +269,7 @@
     "assemblyzero/workflows/orchestrator/stages.py::run_impl_stage::except_handler::1",
     "assemblyzero/workflows/orchestrator/stages.py::run_impl_stage::except_handler::2",
     "assemblyzero/workflows/orchestrator/stages.py::run_lld_stage::except_handler::0",
+    "assemblyzero/workflows/orchestrator/stages.py::run_pr_stage::except_handler::0",
     "assemblyzero/workflows/orchestrator/stages.py::run_pr_stage::except_handler::1",
     "assemblyzero/workflows/orchestrator/stages.py::run_pr_stage::except_handler::2",
     "assemblyzero/workflows/orchestrator/stages.py::run_spec_stage::except_handler::0",
@@ -301,10 +303,12 @@
     "assemblyzero/workflows/requirements/nodes/analyze_requirements.py::analyze_requirements::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/analyze_requirements.py::analyze_requirements::except_handler::1",
     "assemblyzero/workflows/requirements/nodes/analyze_requirements.py::analyze_requirements::except_handler::2",
+    "assemblyzero/workflows/requirements/nodes/analyze_requirements.py::analyze_requirements::vacuous_pass::2",
     "assemblyzero/workflows/requirements/nodes/finalize.py::_commit_and_push_files::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/finalize.py::_finalize_issue::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/finalize.py::_finalize_repair_budget::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/finalize.py::_mirror_to_worktree::except_handler::0",
+    "assemblyzero/workflows/requirements/nodes/finalize.py::_save_lld_file::except_handler::1",
     "assemblyzero/workflows/requirements/nodes/generate_draft.py::build_revision_context::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/generate_draft.py::generate_draft::except_handler::1",
     "assemblyzero/workflows/requirements/nodes/load_input.py::_get_repo_name::except_handler::0",

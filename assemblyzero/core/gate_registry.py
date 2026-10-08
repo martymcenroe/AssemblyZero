@@ -429,9 +429,18 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         notes="the reviewer's escalation marker inside a BLOCKED verdict (spec.review_blocked)",
     ),
     Gate(
+        "spec.completeness_cannot_check", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "N3 completeness gate cannot run:",
+        _s(f"{_IS}/nodes/validate_completeness.py::validate_completeness::return", 0),
+        created_by="#3767 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a first-party callee module on the base does not parse, so "
+              "call_signatures_match cannot run; it used to pass with the "
+              "calls unchecked (ADR 0236)",
+    ),
+    Gate(
         "spec.completeness_cap", "spec", JUDGES_BUDGET, ACTION_HALT,
         "Iteration cap:",
-        _s(f"{_IS}/nodes/validate_completeness.py::validate_completeness::return", 0),
+        _s(f"{_IS}/nodes/validate_completeness.py::validate_completeness::return", 1),
         notes="12 of 135 banner kills on boostgauge",
     ),
     Gate(
