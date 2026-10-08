@@ -75,6 +75,7 @@ except ImportError:
 import requests  # noqa: E402
 try:
     from _pat_session import (
+        PinentryUnavailable,
         classic_pat_session,
         cerberus_pem_session,
         pr_sentinel_app_session,
@@ -82,6 +83,7 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from _pat_session import (
+        PinentryUnavailable,
         classic_pat_session,
         cerberus_pem_session,
         pr_sentinel_app_session,
@@ -1941,66 +1943,64 @@ def warn_npm_dirs_without_test_script(project_path: Path) -> list[str]:
     return missing
 
 
-# #2113: the PreToolUse matcher this scaffolder owns. Merging keys on this
-# exact string so a repo's own entries under other matchers survive untouched.
-_GUARD_MATCHER = "Read|Write|Edit|Grep|NotebookEdit"
+# The tail of the repo-local guard's command, which this scaffolder used to
+# register in every new repo (#4137). The guard is now registered centrally by
+# the machine-wide managed settings; the repo-local copies were removed from
+# the fleet on 2026-09-30 and from AssemblyZero in #3684.
+_STALE_GUARD_SUFFIX = "/.claude/hooks/secret-file-guard.sh"
 
 
-def _merge_settings(existing: dict, canonical_hook: dict) -> dict:
-    """Return `existing` with the canonical guard hook ensured, nothing lost.
+def _strip_stale_guard(existing: dict) -> dict:
+    """Return `existing` without the repo-local guard registration (#4137).
 
-    #2113: the previous implementation built a fixed dict and wrote it
-    unconditionally, so re-running the scaffolder over an existing repo -- a
-    normal catch-up when a template change needs to reach repos created before
-    it -- silently destroyed whatever that repo had added since: permission
-    rules, extra hooks, tool-specific config. `settings.json` is not a file
-    anyone opens routinely, so the loss surfaced much later as a repo
-    prompting for something it never prompted for.
+    A registration whose script is missing makes Claude Code read the hook's
+    error as a refusal, so Read, Write, Edit and Grep fail in that repo
+    (#3684). This removes only that registration.
 
-    Merge rules, deliberately the narrowest that still guarantees the guard:
-      * every top-level key is preserved; only `hooks` is touched
-      * every hook EVENT other than PreToolUse is preserved -- note the old
-        code wrote `"PostToolUse": []`, erasing post-hooks outright
-      * within PreToolUse, only the entry whose matcher we own is touched
-      * within that entry the guard command is appended only when absent, so a
-        repo may carry its own additional hooks on the same matcher
+    #2113 still holds: re-running the scaffolder over an existing repo must
+    not destroy what the repo added since. So every top-level key, every hook
+    event, every other matcher and every sibling hook on the same matcher is
+    kept. A PreToolUse entry is dropped only when the stale hook was its last
+    hook, and PreToolUse itself only when that leaves it empty.
 
-    Pure: mutates neither argument, so the merge decision is testable without
-    a filesystem.
+    Pure: mutates nothing, so the caller compares the result with `existing`.
     """
-    merged = copy.deepcopy(existing)
-    hooks = merged.setdefault("hooks", {})
-    pre = hooks.setdefault("PreToolUse", [])
+    cleaned = copy.deepcopy(existing)
+    hooks = cleaned.get("hooks")
+    if not isinstance(hooks, dict) or not isinstance(hooks.get("PreToolUse"), list):
+        return cleaned
 
-    entry = next(
-        (e for e in pre
-         if isinstance(e, dict) and e.get("matcher") == _GUARD_MATCHER),
-        None,
-    )
-    if entry is None:
-        pre.append({"matcher": _GUARD_MATCHER, "hooks": [canonical_hook]})
-        return merged
-
-    entry_hooks = entry.setdefault("hooks", [])
-    if not any(
-        isinstance(h, dict) and h.get("command") == canonical_hook["command"]
-        for h in entry_hooks
-    ):
-        entry_hooks.append(canonical_hook)
-    return merged
+    kept = []
+    for entry in hooks["PreToolUse"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+            kept.append(entry)
+            continue
+        entry_hooks = [
+            h for h in entry["hooks"]
+            if not (isinstance(h, dict)
+                    and str(h.get("command", "")).endswith(_STALE_GUARD_SUFFIX))
+        ]
+        if entry_hooks or not entry["hooks"]:
+            kept.append({**entry, "hooks": entry_hooks})
+    if kept:
+        hooks["PreToolUse"] = kept
+    else:
+        del hooks["PreToolUse"]
+    return cleaned
 
 
 def create_settings_json(project_path: Path) -> str:
     """
-    Ensure .claude/settings.json carries the per-repo secret-file guard.
+    Ensure .claude/settings.json exists and registers no repo-local guard.
 
-    Only deploys secret-file-guard.sh per-repo. Security hooks (secret-guard.sh,
-    bash-gate.sh) are registered globally in ~/.claude/settings.json and do not
-    need per-repo copies. See AssemblyZero #872.
+    Every security hook, the secret-file guard included, is registered
+    centrally by the machine-wide managed settings, so a new repo's settings
+    are `{}`, as AssemblyZero's are (#4137, #3684).
 
-    #2113: reads and merges rather than overwriting. Returns what it did, so
-    callers and tests assert on the outcome instead of inferring it from the
-    file's contents.
+    #2113: reads and merges rather than overwriting. Re-run over an existing
+    repo, it removes only a stale registration of the repo-local guard.
+    Returns what it did, so callers and tests assert on the outcome instead
+    of inferring it from the file's contents.
 
     A file that does not parse as JSON is the one destructive path left. The
     original is copied to `<name>.bak` beside itself before canonical settings
@@ -2010,25 +2010,9 @@ def create_settings_json(project_path: Path) -> str:
         project_path: Path to the project root
 
     Returns:
-        "created" | "unchanged" | "merged" | "replaced-unparseable"
+        "created" | "unchanged" | "removed-stale-guard" | "replaced-unparseable"
     """
-    projects_root_unix = config.projects_root_unix()
-    project_name = project_path.name
-
-    canonical_hook = {
-        "type": "command",
-        "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/secret-file-guard.sh",
-        "timeout": 5,
-        "description": "Secret File Guard (blocks file tools on .env, credentials)"
-    }
-    canonical = {
-        "hooks": {
-            "PreToolUse": [
-                {"matcher": _GUARD_MATCHER, "hooks": [canonical_hook]}
-            ],
-            "PostToolUse": []
-        }
-    }
+    canonical: dict = {}
 
     settings_path = project_path / ".claude" / "settings.json"
 
@@ -2051,48 +2035,15 @@ def create_settings_json(project_path: Path) -> str:
               f"preserved at {backup.name} and canonical settings written")
         return "replaced-unparseable"
 
-    merged = _merge_settings(existing, canonical_hook)
-    if merged == existing:
+    cleaned = _strip_stale_guard(existing)
+    if cleaned == existing:
         # #2113: a no-op run leaves the file untouched, so a catch-up sweep
         # over already-compliant repos produces no diff and no mtime churn.
         return "unchanged"
 
     settings_path.write_text(
-        json.dumps(merged, indent=2) + "\n", encoding='utf-8')
-    return "merged"
-
-
-def deploy_canonical_hooks(project_path: Path) -> None:
-    """
-    Copy per-repo hooks from AssemblyZero to the new project.
-
-    Only deploys secret-file-guard.sh per-repo. Security hooks (secret-guard.sh,
-    bash-gate.sh) are registered globally in ~/.claude/settings.json and do not
-    need per-repo copies. See AssemblyZero #872.
-
-    Args:
-        project_path: Path to the project root
-
-    Raises:
-        FileNotFoundError: If AssemblyZero hook source files don't exist.
-    """
-    import shutil
-
-    assemblyzero_root = Path(config.assemblyzero_root())
-    source_hooks_dir = assemblyzero_root / ".claude" / "hooks"
-    target_hooks_dir = project_path / ".claude" / "hooks"
-    target_hooks_dir.mkdir(parents=True, exist_ok=True)
-
-    per_repo_hooks = ["secret-file-guard.sh"]
-    for hook_name in per_repo_hooks:
-        source = source_hooks_dir / hook_name
-        if not source.exists():
-            raise FileNotFoundError(
-                f"Canonical hook not found: {source}\n"
-                f"AssemblyZero hooks must exist before creating new repos."
-            )
-        target = target_hooks_dir / hook_name
-        shutil.copy2(str(source), str(target))
+        json.dumps(cleaned, indent=2) + "\n", encoding='utf-8')
+    return "removed-stale-guard"
 
 
 _GH_API = "https://api.github.com"
@@ -2337,8 +2288,8 @@ def audit_structure(project_path: Path, name: str) -> int:
     schema = load_structure_schema()
 
     # Load audit decisions (allowed exceptions) from 0011
-    assemblyzero_root = Path(config.assemblyzero_root())
-    decisions_file = assemblyzero_root / "docs" / "standards" / "0011-audit-decisions.md"
+    assemblyzero_root = Path(config.assemblyzero_root(fmt='auto'))
+    decisions_file =assemblyzero_root / "docs" / "standards" / "0011-audit-decisions.md"
     allowed_missing = set()
 
     if decisions_file.exists():
@@ -2977,8 +2928,11 @@ Examples:
         sys.exit(1)
 
     # Resolve project path
-    projects_root = Path(config.projects_root())
-    project_path = projects_root / args.name
+    try:
+        project_path = resolve_project_path(args.name)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Handle audit mode
     if args.audit:
@@ -3019,7 +2973,42 @@ Examples:
         print(f"{'=' * 60}")
         print(f"\nPartial state may exist at: {project_path}")
         print("Review and clean up manually if needed.")
+        from assemblyzero.core.alert import alert_operator
+
+        alert_operator(
+            what=f"new repository {args.name}",
+            where="tools/new_repo.py, main",
+            cause=f"{type(e).__name__}: {e}",
+            consequence=f"creation stopped; partial state may exist at {project_path}",
+            repo=args.name,
+        )
         sys.exit(1)
+
+
+def resolve_project_path(name: str) -> Path:
+    """Where the new repository goes: <Projects root>/<name> (#4132).
+
+    The root is taken in the spelling of the OS this runs on. Its 'windows'
+    default, `C:\\...`, is a relative path on Ubuntu; the config's sanitizer
+    then resolved it against the current directory, and on 2026-10-07 a new
+    repository was built inside the AssemblyZero checkout.
+
+    Raises:
+        ValueError: the root is not an existing directory named by an
+            absolute path on this OS. The existence check matters: the
+            sanitizer makes a misread root absolute by joining it to the
+            current directory, and that joined path does not exist. Nothing
+            has been created when this is raised.
+    """
+    projects_root = Path(config.projects_root(fmt='auto'))
+    if not projects_root.is_absolute() or not projects_root.is_dir():
+        raise ValueError(
+            f"the Projects root '{projects_root}' is not an existing directory "
+            "named by an absolute path on this OS; refusing to create a "
+            f"repository there (current directory: {Path.cwd()}). "
+            "Nothing was created."
+        )
+    return projects_root / name
 
 
 def _diagnose_existing_path(project_path: Path) -> tuple[str, list[str]]:
@@ -3244,19 +3233,12 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     create_project_json(project_path, args.name, github_user)
     print("  Created project.json")
 
-    # Step 5: Create .claude/settings.json (with canonical hooks)
-    print("\n5. Creating .claude/settings.json (with security hooks)...")
+    # Step 5: Create .claude/settings.json. Every security hook is registered
+    # centrally by the machine-wide managed settings, so the repo gets no hook
+    # of its own (#4137); the old step 5b, which copied one, is gone.
+    print("\n5. Creating .claude/settings.json...")
     create_settings_json(project_path)
-    print("  Created settings.json with secret-file-guard.sh hook (security hooks are global)")
-
-    # Step 5b: Deploy canonical hook scripts
-    print("\n5b. Deploying canonical security hooks...")
-    try:
-        deploy_canonical_hooks(project_path)
-        print("  Deployed: secret-file-guard.sh (security hooks are global)")
-    except FileNotFoundError as e:
-        print(f"  WARNING: {e}")
-        print("  Hooks not deployed — repo will start unprotected!")
+    print("  Created settings.json (security hooks are registered centrally)")
 
     # Step 6: Create CLAUDE.md
     print("\n6. Creating CLAUDE.md...")
@@ -3384,6 +3366,9 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     repo_settings_ok = False
     protection_ok = False
     cerberus_status: str | None = None
+    # Why the classic-PAT session never opened, when it did not (#4136). Set,
+    # it replaces the push-failure advice, whose causes were not the cause.
+    pat_failure: str | None = None
     hook_results: list[tuple[Path, str]] = []
     gh_checks_passed = 0
     gh_checks_total = 0
@@ -3397,15 +3382,6 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
     checks_passed = 0
     checks_total = 0
-
-    # Verify per-repo hook exists (security hooks are global since #872)
-    checks_total += 1
-    sfg = project_path / ".claude" / "hooks" / "secret-file-guard.sh"
-    if sfg.exists():
-        print("  [PASS] Per-repo hook deployed (secret-file-guard)")
-        checks_passed += 1
-    else:
-        print("  [FAIL] Per-repo hook missing: secret-file-guard.sh")
 
     # Verify .gitignore has security patterns
     checks_total += 1
@@ -3483,16 +3459,17 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     else:
         print("  [FAIL] data-dl/ ignore rule wrong (contents must be ignored, README must not)")
 
-    # Verify settings.json has hooks configured
+    # Verify settings.json registers no repo-local guard (#4137): a registered
+    # hook whose script is missing refuses every file tool in the repo (#3684).
     checks_total += 1
     settings_file = project_path / ".claude" / "settings.json"
-    if settings_file.exists():
-        s_content = settings_file.read_text(encoding="utf-8")
-        if "secret-file-guard" in s_content:
-            print("  [PASS] Hook configuration in settings.json (secret-file-guard)")
-            checks_passed += 1
-        else:
-            print("  [FAIL] settings.json missing hook configuration!")
+    if not settings_file.exists():
+        print("  [FAIL] .claude/settings.json missing")
+    elif _STALE_GUARD_SUFFIX in settings_file.read_text(encoding="utf-8"):
+        print("  [FAIL] settings.json registers the repo-local secret-file guard")
+    else:
+        print("  [PASS] settings.json registers no repo-local hook")
+        checks_passed += 1
 
     print(f"\nLocal verification: {checks_passed}/{checks_total} checks passed")
 
@@ -3845,13 +3822,19 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                               "sentinel verification)")
 
         except FileNotFoundError as e:
-            print(f"\n  ERROR: classic PAT not configured: {e}")
+            pat_failure = f"classic PAT not configured: {e}"
+            print(f"\n  ERROR: {pat_failure}", file=sys.stderr)
             print("  Local scaffold preserved. Set up classic PAT per ADR-0216 /")
             print("  runbook 0927, then re-run this script (it will resume against")
             print("  the existing scaffold and against the existing GitHub repo if")
             print("  one was created before the failure).")
+        except PinentryUnavailable as e:
+            # No passphrase was ever asked for, so "re-enter it" is wrong (#4135).
+            pat_failure = f"gpg could not prompt for the passphrase: {e}"
+            print(f"\n  ERROR: {e}", file=sys.stderr)
         except RuntimeError as e:
-            print(f"\n  ERROR: gpg decrypt failed: {e}")
+            pat_failure = f"gpg decrypt failed: {e}"
+            print(f"\n  ERROR: {pat_failure}", file=sys.stderr)
             print("  Re-enter passphrase carefully and re-run.")
 
         if github_created:
@@ -3881,8 +3864,23 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("\nWARNING: a post-create hook failed. Its secret or setting is "
                   "NOT in place; fix the cause and run the hook's own tool.")
 
+    failed = failed_steps(
+        no_github=args.no_github,
+        local_checks=(checks_passed, checks_total),
+        github_created=github_created,
+        push_succeeded=push_succeeded,
+        repo_settings_ok=repo_settings_ok,
+        protection_ok=protection_ok,
+        cerberus_status=cerberus_status,
+        hook_results=hook_results,
+        gh_checks=(gh_checks_passed, gh_checks_total),
+    )
     print("\n" + "=" * 60)
-    print(f"[SUCCESS] Repository '{args.name}' created!")
+    if failed:
+        print(f"[FAILED] Repository '{args.name}' is incomplete. Failed: "
+              f"{', '.join(failed)}", file=sys.stderr)
+    else:
+        print(f"[SUCCESS] Repository '{args.name}' created!")
     print("\nNext steps:")
     print(f"  cd {project_path}")
     if not args.no_github:
@@ -3890,7 +3888,16 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         # a mutated lowercased form. The local dir on the `cd` line above
         # and this URL must agree, both matching the actual GitHub repo.
         print(f"  # Repository: https://github.com/{github_user}/{args.name}")
-        if not push_succeeded:
+        if pat_failure is not None:
+            # The classic-PAT session never opened, so the GitHub repo was
+            # never created and nothing was pushed. The push advice below
+            # names causes that were not this one (#4136).
+            print("  # IMPORTANT: the classic-PAT session never opened, so the")
+            print("  # GitHub repo was not created and nothing was pushed.")
+            print(f"  # Cause: {pat_failure}")
+            print("  # Fix that cause, then re-run the script; it resumes")
+            print("  # against this scaffold.")
+        elif not push_succeeded:
             print("  # IMPORTANT: Initial push failed.")
             print("  # Diagnose first -- the push uses git's credential helper")
             print("  # (typically `gh` with the fine-grained PAT), and the initial")
@@ -3957,6 +3964,61 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         # in the reminder should match the actual GitHub repo name.
         repo_name=args.name,
     )
+
+    if failed:
+        # Standard 0034: an incomplete run exits non-zero and alerts (#4136).
+        from assemblyzero.core.alert import alert_operator
+
+        alert_operator(
+            what=f"new repository {args.name}",
+            where="tools/new_repo.py, _create_repo",
+            cause=pat_failure or f"failed steps: {', '.join(failed)}",
+            consequence=f"the repository is incomplete; failed: {', '.join(failed)}",
+            repo=args.name,
+        )
+        sys.exit(1)
+
+
+def failed_steps(
+    *,
+    no_github: bool,
+    local_checks: tuple[int, int],
+    github_created: bool,
+    push_succeeded: bool,
+    repo_settings_ok: bool,
+    protection_ok: bool,
+    cerberus_status: str | None,
+    hook_results: list[tuple[Path, str]],
+    gh_checks: tuple[int, int],
+) -> list[str]:
+    """Every step of a run that did not succeed, in run order (#4136).
+
+    Empty means the run may print [SUCCESS] and exit 0. Anything else is an
+    incomplete repository: the run names these steps and exits 1.
+    """
+    failed = []
+    passed, total = local_checks
+    if passed < total:
+        failed.append(f"local verification ({passed}/{total})")
+    if no_github:
+        return failed
+    if not github_created:
+        failed.append("GitHub repo")
+    if not push_succeeded:
+        failed.append("push")
+    if not repo_settings_ok:
+        failed.append("repo settings")
+    if not protection_ok:
+        failed.append("branch protection")
+    if cerberus_status is not None and cerberus_status != "OK":
+        failed.append(f"Cerberus secrets ({cerberus_status})")
+    for hook_path, hook_status in hook_results:
+        if hook_status.startswith("FAILED"):
+            failed.append(f"hook {hook_path.stem}")
+    gh_passed, gh_total = gh_checks
+    if github_created and gh_passed < gh_total:
+        failed.append(f"GitHub-side verification ({gh_passed}/{gh_total})")
+    return failed
 
 
 def _maybe_print_pypi_reminder(

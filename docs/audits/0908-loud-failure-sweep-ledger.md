@@ -2343,20 +2343,20 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/new_repo.py:2690` | secret deploy fails | stdout, status string, exit 0 | loud, stops, alerts | Raise and exit 1 with an alert. |
 | `tools/new_repo.py:2699` | secrets not verified | stdout warning, exit 0 | loud, stops, alerts | Raise and exit 1 with an alert. |
 | `tools/new_repo.py:2709` | plaintext PEM cannot be deleted | warning, returns "OK", exit 0 | loud, logged, stops, alerts | Raise, alert, exit non-zero. |
-| `tools/new_repo.py:2781` | post-create hook raises | FAILED status, creation continues, exit 0 | loud, stops, alerts | Alert and exit non-zero at the end. |
+| `tools/new_repo.py:2781` | post-create hook raises | FAILED status, creation continues, exit 0 | loud, stops, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
 | `tools/new_repo.py:2790` | stdin detach fails | return value ignored | loud, logged, stops, alerts | Check the result and stop. |
 | `tools/new_repo.py:2918` | bad arguments | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
 | `tools/new_repo.py:2960` | PEM missing | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
 | `tools/new_repo.py:2976` | invalid name | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
 | `tools/new_repo.py:2993` | directory exists | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
 | `tools/new_repo.py:3003` | gh api user fails | stdout without stderr, exit 1 | loud, logged, alerts | Include gh stderr, ERROR to stderr, alert. |
-| `tools/new_repo.py:3016` | any scaffold step raises | stdout, exit 1, partial state left | loud, alerts | ERROR to stderr with type and alert_operator. |
+| `tools/new_repo.py:3016` | any scaffold step raises | stdout, exit 1, partial state left | loud, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
 | `tools/new_repo.py:3054` | .git file unreadable while diagnosing | shows "(unreadable)" inside a refusal that already exits 1 | compliant | none |
 | `tools/new_repo.py:3076` | directory unreadable while diagnosing | entry count -1 inside a refusal that already exits 1 | compliant | none |
 | `tools/new_repo.py:3125` | packaging unavailable | validation becomes advisory, gate passes | loud, logged, stops, alerts | Fail the gate. |
 | `tools/new_repo.py:3147` | PyYAML unavailable | dependabot.yml not validated, gate passes | loud, logged, stops, alerts | Fail the gate. |
 | `tools/new_repo.py:3192` | remote existence unknown | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/new_repo.py:3257` | canonical hook source missing | warning, repo continues unprotected | loud, stops, alerts | Raise and stop. |
+| `tools/new_repo.py:3257` | canonical hook source missing | warning, repo continues unprotected | loud, stops, alerts | FIXED in #4137: the per-repo hook step is removed; the guard is registered centrally |
 | `tools/new_repo.py:3328` | Python bootstrap failed | warning, creation continues | loud, stops, alerts | Stop and alert. |
 | `tools/new_repo.py:3466` | git check-ignore errors (rc 128) | read as "not ignored" without a message | loud, logged, stops, alerts | Treat return codes other than 0 and 1 as failures. |
 | `tools/new_repo.py:3500` | local verification fails | warning, proceeds to create the GitHub repo | loud, stops, alerts | Exit 1 with an alert before any GitHub step. |
@@ -2376,13 +2376,13 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/new_repo.py:3731` | plaintext PEM missing | warning, status string, exit 0 | loud, stops, alerts | Raise. |
 | `tools/new_repo.py:3742` | encrypted PEM missing | warning, exit 0 | loud, stops, alerts | Raise. |
 | `tools/new_repo.py:3745` | PEM decrypt fails | warning, exit 0 | loud, stops, alerts | Raise. |
-| `tools/new_repo.py:3780` | GitHub-side verification fails | FAIL line, then only a warning at 3861, exit 0 | loud, stops, alerts | Exit 1 with an alert when any check fails. |
+| `tools/new_repo.py:3780` | GitHub-side verification fails | FAIL line, then only a warning at 3861, exit 0 | loud, stops, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
 | `tools/new_repo.py:3843` | sentinel check could not run | excluded from the denominator | loud, stops, alerts | Count it as a failure. |
-| `tools/new_repo.py:3847` | classic PAT not configured | stdout ERROR, falls through to [SUCCESS] exit 0 | loud, stops, alerts | Exit 1 with an alert. |
-| `tools/new_repo.py:3853` | gpg decrypt fails | stdout ERROR, [SUCCESS] exit 0 | loud, stops, alerts | Exit 1 with an alert. |
-| `tools/new_repo.py:3861` | GitHub-side checks failed | warning, exit 0 | loud, stops, alerts | Exit 1 with an alert. |
-| `tools/new_repo.py:3881` | a hook failed | warning, exit 0 | loud, stops, alerts | Exit 1 with an alert. |
-| `tools/new_repo.py:3885` | printed unconditionally after any of the failures above | main returns None, process exits 0 | loud, stops, alerts | Track failures and exit non-zero with an alert. |
+| `tools/new_repo.py:3847` | classic PAT not configured | stdout ERROR, falls through to [SUCCESS] exit 0 | loud, stops, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
+| `tools/new_repo.py:3853` | gpg decrypt fails | stdout ERROR, [SUCCESS] exit 0 | loud, stops, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
+| `tools/new_repo.py:3861` | GitHub-side checks failed | warning, exit 0 | loud, stops, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
+| `tools/new_repo.py:3881` | a hook failed | warning, exit 0 | loud, stops, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
+| `tools/new_repo.py:3885` | printed unconditionally after any of the failures above | main returns None, process exits 0 | loud, stops, alerts | FIXED in #4136: failed_steps names it, the run exits 1 and alerts |
 | `tools/orchestrate.py:78` | started_at unparseable | elapsed shown as "?" in a progress display only | compliant | none |
 | `tools/orchestrate.py:269` | merge driver missing | stdout, exit 2 | loud, alerts | ERROR to stderr and alert. |
 | `tools/orchestrate.py:280` | profile invalid | stdout, exit 2 | loud, alerts | ERROR to stderr and alert. |

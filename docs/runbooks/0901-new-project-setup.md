@@ -1,8 +1,8 @@
 # 0901 - New Project Setup
 
 **Category:** Runbook / Operational Procedure
-**Version:** 2.7
-**Last Updated:** 2026-05-26
+**Version:** 2.8
+**Last Updated:** 2026-10-07
 
 ---
 
@@ -26,6 +26,8 @@ Initialize a new project with the canonical AssemblyZero structure, enabling:
 | GitHub CLI | `gh auth status` |
 
 > **Classic PAT required (in-process, no `gh auth` swap).** The setup script's privileged steps (workflow upload via Contents API, repo settings PATCH, branch protection PUT) use the in-process classic-PAT pattern from [ADR-0216](../adrs/0216-in-process-classic-pat-decryption.md). Prerequisites: `~/.secrets/classic-pat.gpg` must exist (one-time setup procedure in `tools/_pat_session.py`'s docstring) and `~/.gnupg/gpg-agent.conf` must have `default-cache-ttl 0` + `max-cache-ttl 0` (post-2026-04-30 hardening — see [standard 0017](../standards/0017-classic-pat-fleet-tooling-reference-architecture.md)). Pinentry will prompt for the gpg passphrase once when the script reaches the privileged section. The user must run the script personally; agents must NOT invoke it via their tool surfaces.
+
+> **Run it from Git Bash on Windows.** That is where the script has always run, and where pinentry is a dialog with its own window. On Ubuntu the only pinentry is `pinentry-curses`, which draws on the terminal, and the script detaches its standard input so that no passphrase can arrive through the terminal (#1806). gpg therefore fails with "Inappropriate ioctl for device" before any prompt appears, and the script stops on that first failure and says so (#4135).
 
 ---
 
@@ -67,7 +69,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwi
 MyNewProject/
 ├── .claude/
 │   ├── commands/
-│   ├── hooks/                  # secret-file-guard.sh (per-repo)
+│   ├── hooks/                  # empty: security hooks are registered centrally (#4137)
 │   └── gemini-prompts/
 ├── .github/
 │   ├── dependabot.yml          # version-update config (ecosystems by detection + github-actions)
@@ -111,8 +113,7 @@ MyNewProject/
 | File | Purpose |
 |------|---------|
 | `.claude/project.json` | Project variables for AssemblyZero |
-| `.claude/settings.json` | Hook configuration — wires the `secret-file-guard.sh` PreToolUse hook |
-| `.claude/hooks/secret-file-guard.sh` | Blocks file tools (Read/Write/Edit/Grep/NotebookEdit) on `.env`, `.dev.vars`, credentials. Copied from AZ's canonical hook |
+| `.claude/settings.json` | `{}`. Every security hook, the secret-file guard included, is registered centrally by the machine-wide managed settings (#3684, #4137) |
 | `CLAUDE.md` | Claude agent instructions |
 | `README.md` | Project overview |
 | `LICENSE` | PolyForm Noncommercial 1.0.0 (default; pass `--license mit` for MIT) |
@@ -299,3 +300,4 @@ The script automates all of this in one command.
 | 2.5 | 2026-05-23 | Multi-section sweep (#1210): `.claude/settings.json` row corrected (not empty — wires the hook); added rows for `.github/workflows/release.yml`, `.claude/hooks/secret-file-guard.sh`, `src/<module>/__init__.py`, `src/<module>/__main__.py`; Directory Structure tree includes `.github/workflows/` and `src/<module>/`; Command Reference adds `--no-pypi` flag and notes `--cerberus-pem` is required; Post-Setup Steps Section 1 rewritten — Cerberus is now automated, not a manual remaining step; added Section 1a for PyPI pending-publisher registration. |
 | 2.6 | 2026-05-26 | #1331 — Dependabot now enabled automatically at repo settings level (step 20 in the script). Without this step, the scaffolded `.github/dependabot.yml` was inert on private repos (defect confirmed on a private decorative-deps fixture repo). Companion tool `tools/enable_dependabot.py` backfills existing repos. See runbook 0927 v6.7 history entry for the under-the-hood table change. |
 | 2.7 | 2026-06-10 | #1334 + #1563 — script now generates `.github/dependabot.yml` at creation time (step 11c2; ecosystems detected by marker-file presence plus `github-actions` always; rides the initial commit) so #1331's enablement actually emits version-update PRs, and creates `data-g/` (git-tracked source-of-truth data) alongside the fleet-ignored `data/`. Added file-table rows and directory-tree entries for both. |
+| 2.8 | 2026-10-07 | #4137: a new repo gets no hook of its own; `.claude/settings.json` is `{}` and the `secret-file-guard.sh` row is gone, because the guard is registered centrally (#3684). #4135: Git Bash is the place to run the script; on Ubuntu the decrypt cannot prompt, by #1806's design, and the script now stops at once. |
