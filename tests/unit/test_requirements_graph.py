@@ -342,12 +342,15 @@ class TestGraphRoutingExtended:
         result = route_after_review(state)
         assert result == "HALT"
 
-    def test_route_from_review_to_finalize_on_max_iterations(self):
-        """Test routing from review to finalize when verdict_count >= max."""
+    def test_route_from_review_halts_on_max_iterations(self):
+        """#3864: a draft still BLOCKED when verdict_count reaches the cap halts.
+
+        It used to go to N5 and finalize the BLOCKED draft with no alert.
+        Closes #1509: the gate is on verdict_count (one per N3 review), not
+        iteration_count (bumped by N1, Ponder, N1B too).
+        """
         from assemblyzero.workflows.requirements.graph import route_after_review
 
-        # Closes #1509: gate is on verdict_count (one per N3 review),
-        # not iteration_count (bumped by N1, Ponder, N1B too).
         state = {
             "error_message": "",
             "config_gates_verdict": False,
@@ -356,7 +359,7 @@ class TestGraphRoutingExtended:
             "max_iterations": 20,
         }
         result = route_after_review(state)
-        assert result == "N5_finalize"
+        assert result == "HALT"
 
     def test_route_from_review_to_draft_when_under_max_iterations(self):
         """Test routing from review to draft when verdict_count < max."""
@@ -398,49 +401,59 @@ class TestGraphRoutingExtended:
             "See #1509 for the empirical surface."
         )
 
-    def test_route_from_human_gate_verdict_to_end(self):
-        """Test routing from human gate verdict to END for unknown next_node."""
+    def test_route_from_human_gate_verdict_unknown_halts(self):
+        """#3864: a decision the gate never makes halts; it used to end the run."""
         from assemblyzero.workflows.requirements.graph import route_from_human_gate_verdict
 
         state = {"next_node": "unknown_node"}
         result = route_from_human_gate_verdict(state)
-        assert result == "END"
+        assert result == "HALT"
 
-    def test_route_from_human_gate_verdict_empty_next_node(self):
-        """Test routing from human gate verdict to END when next_node is empty."""
+    def test_route_from_human_gate_verdict_empty_next_node_halts(self):
+        """#3864: an empty decision halts too."""
         from assemblyzero.workflows.requirements.graph import route_from_human_gate_verdict
 
         state = {"next_node": ""}
         result = route_from_human_gate_verdict(state)
-        assert result == "END"
+        assert result == "HALT"
+
+    def test_route_from_human_gate_verdict_manual_exit_ends(self):
+        from assemblyzero.workflows.requirements.graph import route_from_human_gate_verdict
+
+        assert route_from_human_gate_verdict({"next_node": "END"}) == "END"
 
     def test_route_after_finalize(self):
-        """Test routing after finalize always returns END."""
+        """A clean finalize ends; #3864: a finalize error routes to HALT, not END."""
         from assemblyzero.workflows.requirements.graph import route_after_finalize
 
-        # Should always return END regardless of state
         state = {"error_message": "", "lld_status": "APPROVED"}
         result = route_after_finalize(state)
         assert result == "END"
 
         state = {"error_message": "Some error"}
         result = route_after_finalize(state)
-        assert result == "END"
+        assert result == "HALT"
 
-    def test_route_from_human_gate_draft_unknown_next_node(self):
-        """Test routing from human gate draft to END for unknown next_node."""
+    def test_route_from_human_gate_draft_unknown_next_node_halts(self):
+        """#3864: a decision the gate never makes halts; it used to end the run."""
         from assemblyzero.workflows.requirements.graph import route_from_human_gate_draft
 
         state = {"next_node": "unknown"}
         result = route_from_human_gate_draft(state)
-        assert result == "END"
+        assert result == "HALT"
+
+    def test_route_from_human_gate_draft_manual_exit_ends(self):
+        from assemblyzero.workflows.requirements.graph import route_from_human_gate_draft
+
+        assert route_from_human_gate_draft({"next_node": "END"}) == "END"
 
     def test_route_from_review_uses_default_max_iterations(self):
         """Test routing from review uses default max_iterations of 3."""
         from assemblyzero.workflows.requirements.graph import route_after_review
 
         # No max_iterations set in state — function defaults to 3.
-        # verdict_count of 19 is well past the default, so finalize.
+        # verdict_count of 19 is well past the default, so the cap applies:
+        # a still-BLOCKED draft halts (#3864).
         state = {
             "error_message": "",
             "config_gates_verdict": False,
@@ -449,4 +462,4 @@ class TestGraphRoutingExtended:
             # max_iterations not set - should default to 3
         }
         result = route_after_review(state)
-        assert result == "N5_finalize"  # Over default max of 3
+        assert result == "HALT"  # Over default max of 3

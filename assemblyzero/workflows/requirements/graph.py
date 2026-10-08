@@ -231,6 +231,11 @@ def route_after_validate_mechanical(
         print("    [ROUTING] Mechanical validation failed - returning to drafter")
         return "N1_generate_draft"
 
+    # #3864: an error that is not a BLOCKED validation (which carries its own
+    # error_message into the retry above) used to go on to N1b as a pass.
+    if state.get("error_message"):
+        return "HALT"
+
     # Issue #166: Validation passed - proceed to test plan validation
     return "N1b_validate_test_plan"
 
@@ -291,13 +296,28 @@ def route_after_validate_test_plan(
         return "N3_review"
 
 
+def route_after_analyze_codebase(
+    state: RequirementsWorkflowState,
+) -> Literal["N0c_analyze_requirements", "HALT"]:
+    """Route after N0b analyze_codebase.
+
+    #3864: the N0b -> N0c edge was unconditional, so an N0b error (the LLD arc
+    worktree could not be cut) ran N0c's model calls before anything halted.
+    """
+    if state.get("error_message"):
+        return "HALT"
+    return "N0c_analyze_requirements"
+
+
 def route_after_ponder(
     state: RequirementsWorkflowState,
-) -> Literal["N1_5_validate_mechanical"]:
+) -> Literal["N1_5_validate_mechanical", "HALT"]:
     """Route after Ponder Stibbons auto-fix node.
 
-    Issue #565: Ponder now runs BEFORE validation. Always proceeds to
-    mechanical validation (N1.5) so fixes are validated immediately.
+    Issue #565: Ponder now runs BEFORE validation, so fixes are validated
+    immediately at N1.5. #3864: a Ponder error routes to HALT; the edge used
+    to be unconditional. N1 clears error_message on success, so a BLOCKED
+    validation's message from the previous round never reaches this check.
 
     Args:
         state: Current workflow state.
@@ -305,18 +325,22 @@ def route_after_ponder(
     Returns:
         Next node name.
     """
+    if state.get("error_message"):
+        return "HALT"
     return "N1_5_validate_mechanical"
 
 
 def route_from_human_gate_draft(
     state: RequirementsWorkflowState,
-) -> Literal["N3_review", "N1_generate_draft", "END"]:
+) -> Literal["N3_review", "N1_generate_draft", "END", "HALT"]:
     """Route from human_gate_draft node.
 
     Routes based on next_node set by the gate:
     - N3_review: Send to review
     - N1_generate_draft: Revise draft
     - END: Manual handling (normal exit, not error — no HALT needed)
+    - HALT: a decision the gate never makes (#3864); it used to end the run
+      as if the human had chosen manual handling
 
     Args:
         state: Current workflow state.
@@ -330,8 +354,9 @@ def route_from_human_gate_draft(
         return "N3_review"
     elif next_node == "N1_generate_draft":
         return "N1_generate_draft"
-    else:
+    elif next_node == "END":
         return "END"
+    return "HALT"
 
 
 def route_after_review(
@@ -376,8 +401,11 @@ def route_after_review(
         verdict_count = state.get("verdict_count", 0)
         max_iterations = state.get("max_iterations", 3)
         if verdict_count >= max_iterations:
-            print(f"    [ROUTING] Max iterations ({max_iterations}) reached with unanswered questions - going to human gate")
-            return "N4_human_gate_verdict"
+            # #3864: this used to hand the unanswered questions to the verdict
+            # gate, which in auto mode finalizes; the cap is a failure.
+            print(f"    [ROUTING] Max iterations ({max_iterations}) reached with unanswered questions - halting")
+            emit("workflow.halt_and_plan", repo=state.get("repo_root", ""), metadata={"reason": "max_iterations_open_questions", "issue": state.get("issue_number")})
+            return "HALT"
         print("    [ROUTING] Open questions unanswered - looping back to drafter for revision")
         return "N1_generate_draft"
 
@@ -410,8 +438,11 @@ def route_after_review(
             verdict_count = state.get("verdict_count", 0)
             max_iterations = state.get("max_iterations", 3)
             if verdict_count >= max_iterations:
-                # Max iterations reached - finalize with current status
-                return "N5_finalize"
+                # #3864: the cap reached with a draft that is still not
+                # APPROVED used to go to N5 and finalize it; it halts.
+                print(f"    [ROUTING] Max iterations ({max_iterations}) reached with verdict {lld_status} - halting")
+                emit("workflow.halt_and_plan", repo=state.get("repo_root", ""), metadata={"reason": "max_iterations_review", "issue": state.get("issue_number")})
+                return "HALT"
             return "N1_generate_draft"
 
 
@@ -446,13 +477,14 @@ def _same_blocking_issues(current_feedback: str, previous_feedback: str) -> bool
 
 def route_from_human_gate_verdict(
     state: RequirementsWorkflowState,
-) -> Literal["N5_finalize", "N1_generate_draft", "END"]:
+) -> Literal["N5_finalize", "N1_generate_draft", "END", "HALT"]:
     """Route from human_gate_verdict node.
 
     Routes based on next_node set by the gate:
     - N5_finalize: Approve and finalize
     - N1_generate_draft: Revise draft
     - END: Manual handling
+    - HALT: a decision the gate never makes (#3864)
 
     Args:
         state: Current workflow state.
@@ -466,13 +498,14 @@ def route_from_human_gate_verdict(
         return "N5_finalize"
     elif next_node == "N1_generate_draft":
         return "N1_generate_draft"
-    else:
+    elif next_node == "END":
         return "END"
+    return "HALT"
 
 
 def route_after_finalize(
     state: RequirementsWorkflowState,
-) -> Literal["N1_generate_draft", "END"]:
+) -> Literal["N1_generate_draft", "END", "HALT"]:
     """Route after finalize node.
 
     #2233: a finalize validation failure goes back to the revision node with
@@ -482,13 +515,14 @@ def route_after_finalize(
     paid for again: the run that motivated this discarded an APPROVED draft,
     re-ran every validated stage, and reached the identical block.
 
-    Everything else ends the workflow exactly as before, including a finalize
-    that stopped with an error, which the orchestrator reads off
-    ``error_message``.
+    #3864: a finalize that stopped with an error routes to HALT. It used to end
+    the workflow at END, leaving the orchestrator to read ``error_message``
+    with no HALT record and no alert.
 
     Routes to:
     - N1_generate_draft: finalize blocked and repair budget remains (#2233)
-    - END: workflow complete, or finalize stopped with an error
+    - HALT: finalize stopped with an error
+    - END: workflow complete
 
     Args:
         state: Current workflow state.
@@ -502,6 +536,8 @@ def route_after_finalize(
             "revision node with the errors as feedback (#2233)"
         )
         return "N1_generate_draft"
+    if state.get("error_message"):
+        return "HALT"
     return "END"
 
 
@@ -574,8 +610,16 @@ def create_requirements_graph() -> StateGraph:
     )
 
     # N0b -> N0c (Issue #1899: requirements-ambiguity gate before any
-    # generation spends tokens) -> N1 or HALT
-    graph.add_edge(N0B_ANALYZE_CODEBASE, N0C_ANALYZE_REQUIREMENTS)
+    # generation spends tokens) -> N1 or HALT. #3864: N0b's error (the arc
+    # worktree could not be cut) used to run N0c's model calls first.
+    graph.add_conditional_edges(
+        N0B_ANALYZE_CODEBASE,
+        route_after_analyze_codebase,
+        {
+            "N0c_analyze_requirements": N0C_ANALYZE_REQUIREMENTS,
+            "HALT": HALT,
+        },
+    )
     graph.add_conditional_edges(
         N0C_ANALYZE_REQUIREMENTS,
         route_after_analyze_requirements,
@@ -630,10 +674,11 @@ def create_requirements_graph() -> StateGraph:
         route_after_ponder,
         {
             "N1_5_validate_mechanical": N1_5_VALIDATE_MECHANICAL,
+            "HALT": HALT,  # #3864
         },
     )
 
-    # N2 -> N3 or N1 or END (based on human decision)
+    # N2 -> N3 or N1 or END (based on human decision), or HALT (#3864)
     graph.add_conditional_edges(
         N2_HUMAN_GATE_DRAFT,
         route_from_human_gate_draft,
@@ -641,6 +686,7 @@ def create_requirements_graph() -> StateGraph:
             "N3_review": N3_REVIEW,
             "N1_generate_draft": N1_GENERATE_DRAFT,
             "END": END,
+            "HALT": HALT,
         },
     )
 
@@ -659,7 +705,7 @@ def create_requirements_graph() -> StateGraph:
         },
     )
 
-    # N4 -> N5 or N1 or END (based on human decision)
+    # N4 -> N5 or N1 or END (based on human decision), or HALT (#3864)
     graph.add_conditional_edges(
         N4_HUMAN_GATE_VERDICT,
         route_from_human_gate_verdict,
@@ -667,6 +713,7 @@ def create_requirements_graph() -> StateGraph:
             "N5_finalize": N5_FINALIZE,
             "N1_generate_draft": N1_GENERATE_DRAFT,
             "END": END,
+            "HALT": HALT,
         },
     )
 
@@ -681,6 +728,7 @@ def create_requirements_graph() -> StateGraph:
         {
             "N1_generate_draft": N1_GENERATE_DRAFT,
             "END": END,
+            "HALT": HALT,  # #3864
         },
     )
 
