@@ -64,6 +64,44 @@ SECRET_CLASSIC_PAT: str = "GitHub classic PAT (admin scope)"
 SECRET_CERBERUS_PEM: str = "Cerberus App private key (PEM)"
 SECRET_PR_SENTINEL_APP: str = "pr-sentinel App credential (App ID + PEM)"
 
+# The gpg stderr phrases that mean pinentry never reached the operator, so no
+# passphrase was asked for and a retry cannot help (#4135). Closed set, taken
+# from gpg's own messages: the agent could not start pinentry, or pinentry
+# found no terminal. On Ubuntu, pinentry-curses fails this way under a script
+# that detached its stdin.
+GPG_NO_PROMPT_PHRASES: tuple[str, ...] = (
+    "problem with the agent",
+    "Inappropriate ioctl for device",
+    "No pinentry",
+)
+
+
+class PinentryUnavailable(RuntimeError):
+    """gpg could not show its passphrase prompt; nothing was asked (#4135).
+
+    A RuntimeError, so every caller that handles a failed decrypt still
+    handles this one; callers that tell the operator to retype a passphrase
+    check for it first.
+    """
+
+
+def _stop_if_no_prompt(stderr: str, secret_name: str) -> None:
+    """Raise PinentryUnavailable when gpg failed before any prompt (#4135).
+
+    Retrying such a failure only repeats it: on 2026-10-07 five "attempts"
+    failed on Ubuntu without the operator ever seeing a prompt, and the
+    final message told him to retype a passphrase he was never asked for.
+    """
+    if any(phrase in stderr for phrase in GPG_NO_PROMPT_PHRASES):
+        raise PinentryUnavailable(
+            f"gpg could not show the passphrase prompt for the {secret_name}; "
+            f"nothing was asked of you. gpg said: {stderr}\n"
+            "Run this from Git Bash on Windows, where pinentry is a dialog. "
+            "On Ubuntu the only pinentry is terminal-based, and a script "
+            "that detaches its stdin (new_repo.py, #1806) refuses it by "
+            "design."
+        )
+
 
 def _announce_decrypt(
     secret_name: str,
@@ -165,6 +203,7 @@ def classic_pat_session(
                 del pat
             return
         last_stderr = result.stderr.strip()
+        _stop_if_no_prompt(last_stderr, SECRET_CLASSIC_PAT)
         if attempt < MAX_GPG_ATTEMPTS:
             print(
                 f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
@@ -266,6 +305,7 @@ def cerberus_pem_session(
                 del pem
             return
         last_stderr = result.stderr.strip()
+        _stop_if_no_prompt(last_stderr, SECRET_CERBERUS_PEM)
         if attempt < MAX_GPG_ATTEMPTS:
             print(
                 f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
@@ -357,6 +397,7 @@ def pr_sentinel_app_session(
                 del bundle
             return
         last_stderr = result.stderr.strip()
+        _stop_if_no_prompt(last_stderr, SECRET_PR_SENTINEL_APP)
         if "cancel" in last_stderr.lower():
             # Pinentry cancel = operator declined the boost. No retry.
             raise RuntimeError(
@@ -429,6 +470,7 @@ def gpg_secret_session(
                 del value
             return
         last_stderr = result.stderr.strip()
+        _stop_if_no_prompt(last_stderr, secret_name)
         if attempt < MAX_GPG_ATTEMPTS:
             print(
                 f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",

@@ -49,7 +49,7 @@ For the target repo at `{target}`:
 | Repo bootstrap | `git log --oneline | grep "initialize project with AssemblyZero"` | Indicates `new_repo.py` ran |
 | `CLAUDE.md` | Present, ≥50 lines; no `GEMINI.md` beside it (#3633) | Files |
 | `.unleashed.json` | Present; `assemblyZero: true`; no deprecated `pickupThresholdMinutes` | File |
-| Security hooks | `.claude/hooks/secret-file-guard.sh` present | File |
+| Security hooks | `.claude/settings.json` registers no repo-local `secret-file-guard.sh`: the guard is registered centrally, and a registration whose script is missing refuses every file tool (#3684, #4137) | File |
 | Canonical structure | `docs/lld/active/`, `docs/lld/done/`, `docs/reports/active/` exist | Directories |
 | Test scaffolding | `tests/` exists with subcategories | Directory listing |
 | Open issues | ≥1 open issue queued for the workflow | `gh issue list` |
@@ -353,7 +353,7 @@ present / missing / misconfigured with a one-line evidence excerpt:
 - CLAUDE.md present and ≥50 lines
 - no GEMINI.md (#3633)
 - .unleashed.json present, assemblyZero=true
-- .claude/hooks/secret-file-guard.sh present
+- .claude/settings.json registers no repo-local secret-file-guard.sh (#4137)
 - docs/lld/active, docs/lld/done, docs/reports/active directories
 - tests/ subcategories
 - pyproject.toml + poetry.lock + pytest in dev deps

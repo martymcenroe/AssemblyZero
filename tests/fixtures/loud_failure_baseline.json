@@ -1,5 +1,5 @@
 {
-  "count": 324,
+  "count": 323,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -1685,25 +1685,19 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3604
+      "line": 3581
     },
     "tools/new_repo.py::_create_repo::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3613
-    },
-    "tools/new_repo.py::main::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 3016
+      "line": 3590
     },
     "tools/new_repo.py::run_post_create_hooks::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2781
+      "line": 2732
     },
     "tools/orchestrate.py::main::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

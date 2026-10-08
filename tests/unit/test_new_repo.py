@@ -68,6 +68,18 @@ def completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subpro
     )
 
 
+def run_with_real_git_init(cmd, cwd=None, check=True):
+    """A run_command stand-in that really runs `git init`, and nothing else.
+
+    A full local run now exits 1 when any local check fails (#4136). The
+    data-dl check asks real git whether the ignore rule works, so the scaffold
+    must be a real repository; every other command is answered as a success.
+    """
+    if cmd[:2] == ["git", "init"]:
+        subprocess.run(["git", "init", "-q"], cwd=cwd, check=True)
+    return completed(returncode=0)
+
+
 class FakeResponse:
     """Typed stand-in for `requests.Response`, with proof-of-life.
 
@@ -584,7 +596,7 @@ class TestPythonBootstrap:
     def test_T285_lang_none_skips_poetry(self, mock_run, mock_config, tmp_path):
         """--lang none short-circuits the Python bootstrap (no poetry calls)."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv",
                    ["new_repo.py", "NoLang", "--no-github", "--lang", "none"]):
             main()
@@ -599,7 +611,7 @@ class TestPythonBootstrap:
     ):
         """--lang python (the default) calls poetry init + poetry add."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv", ["new_repo.py", "PyDefault", "--no-github"]):
             main()
         commands = [call[0][0] for call in mock_run.call_args_list]
@@ -748,7 +760,7 @@ class TestMainLocalWorkflow:
     def test_T250_no_github_skips_remote(self, mock_run, mock_config, tmp_path):
         """--no-github skips GitHub repo creation and starring."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv", ["new_repo.py", "LocalProject", "--no-github"]):
             main()
         # Should have called git init and git commit, but NOT gh repo create
@@ -761,7 +773,7 @@ class TestMainLocalWorkflow:
     def test_T260_local_creates_all_files(self, mock_run, mock_config, tmp_path):
         """--no-github creates directory structure, config, and content files."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv", ["new_repo.py", "FullLocal", "--no-github"]):
             main()
         project = tmp_path / "FullLocal"
@@ -786,7 +798,7 @@ class TestMainLocalWorkflow:
         against the rules. No generated file names it either, so the inventory
         and README do not promise a file that is not there."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv", ["new_repo.py", "GemCheck", "--no-github"]):
             main()
         project = tmp_path / "GemCheck"
@@ -804,7 +816,7 @@ class TestMainLocalWorkflow:
         """`.unleashed.json` defaults to assemblyZero=true (#1059) and
         does NOT include the deprecated pickupThresholdMinutes (#1060)."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv", ["new_repo.py", "DefaultsProject", "--no-github"]):
             main()
         unleashed_json = (tmp_path / "DefaultsProject" / ".unleashed.json").read_text()
@@ -825,7 +837,7 @@ class TestMainLocalWorkflow:
     def test_T270_force_flag_passed(self, mock_run, mock_config, tmp_path):
         """--force flag is accepted without error."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv", ["new_repo.py", "ForceProject", "--no-github", "--force"]):
             main()
         assert (tmp_path / "ForceProject").exists()
@@ -876,7 +888,7 @@ class TestCerberusPemRequired:
     def test_T291_no_github_bypasses_requirement(self, mock_run, mock_config, tmp_path):
         """--no-github skips the requirement — local scaffold proceeds without --cerberus-pem."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = completed(returncode=0)
+        mock_run.side_effect = run_with_real_git_init
         with patch("sys.argv", ["new_repo.py", "NoGitTest", "--no-github"]):
             main()  # should NOT raise
         assert (tmp_path / "NoGitTest").exists()
@@ -1880,75 +1892,93 @@ def _read(project):
     )
 
 
-def _guard_entry(settings):
-    return next(
-        e for e in settings["hooks"]["PreToolUse"]
-        if e.get("matcher") == _nr._GUARD_MATCHER
-    )
+# The registration every repo got before #4137: the repo-local guard, whose
+# script the fleet removed (#3684). The machine-wide managed settings now
+# register the guard centrally.
+_GUARD_MATCHER = "Read|Write|Edit|Grep|NotebookEdit"
+_STALE_GUARD = {
+    "type": "command",
+    "command": "bash /mnt/c/Users/someone/Projects/myrepo/.claude/hooks/secret-file-guard.sh",
+    "timeout": 5,
+}
 
 
-def test_creates_settings_when_absent(tmp_path):
+def _stale_entry(*extra_hooks):
+    return {"matcher": _GUARD_MATCHER, "hooks": [_STALE_GUARD, *extra_hooks]}
+
+
+def test_creates_empty_settings_when_absent(tmp_path):
+    """#4137: a new repo registers no hook of its own, as AssemblyZero does not."""
     project = _settings_dir(tmp_path)
     assert _nr.create_settings_json(project) == "created"
-    assert _guard_entry(_read(project))["hooks"][0]["type"] == "command"
+    assert _read(project) == {}
 
 
-def test_preserves_unrelated_top_level_keys(tmp_path):
-    """A repo's own permissions must survive a scaffolder re-run.
+def test_removes_the_stale_guard_and_keeps_top_level_keys(tmp_path):
+    """A repo's own permissions must survive a scaffolder re-run (#2113).
 
-    This is the actual reported harm: permission rules vanishing, discovered
-    later as a repo prompting for something it never prompted for.
+    That was the original reported harm: permission rules vanishing,
+    discovered later as a repo prompting for something it never prompted for.
     """
     project = _settings_dir(tmp_path)
     (project / ".claude" / "settings.json").write_text(json.dumps({
         "permissions": {"allow": ["Bash(gh:*)"], "deny": ["Read(.env)"]},
         "model": "opus",
+        "hooks": {"PreToolUse": [_stale_entry()], "PostToolUse": []},
     }), encoding="utf-8")
 
-    assert _nr.create_settings_json(project) == "merged"
-    after = _read(project)
-    assert after["permissions"] == {"allow": ["Bash(gh:*)"], "deny": ["Read(.env)"]}
-    assert after["model"] == "opus"
-    assert _guard_entry(after)["hooks"][0]["command"].endswith("secret-file-guard.sh")
+    assert _nr.create_settings_json(project) == "removed-stale-guard"
+    assert _read(project) == {
+        "permissions": {"allow": ["Bash(gh:*)"], "deny": ["Read(.env)"]},
+        "model": "opus",
+        "hooks": {"PostToolUse": []},
+    }
 
 
 def test_preserves_other_hook_events(tmp_path):
-    """The old code wrote PostToolUse: [] — erasing post-hooks outright."""
+    """The pre-#2113 code wrote PostToolUse: [], erasing post-hooks outright."""
     project = _settings_dir(tmp_path)
     post = [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hi"}]}]
     (project / ".claude" / "settings.json").write_text(
-        json.dumps({"hooks": {"PostToolUse": post}}), encoding="utf-8")
+        json.dumps({"hooks": {"PreToolUse": [_stale_entry()], "PostToolUse": post}}),
+        encoding="utf-8")
 
-    assert _nr.create_settings_json(project) == "merged"
-    assert _read(project)["hooks"]["PostToolUse"] == post
+    assert _nr.create_settings_json(project) == "removed-stale-guard"
+    assert _read(project)["hooks"] == {"PostToolUse": post}
 
 
 def test_preserves_other_matchers_in_pretooluse(tmp_path):
     project = _settings_dir(tmp_path)
     other = {"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh"}]}
     (project / ".claude" / "settings.json").write_text(
-        json.dumps({"hooks": {"PreToolUse": [other]}}), encoding="utf-8")
+        json.dumps({"hooks": {"PreToolUse": [other, _stale_entry()]}}), encoding="utf-8")
 
-    assert _nr.create_settings_json(project) == "merged"
-    pre = _read(project)["hooks"]["PreToolUse"]
-    assert other in pre
-    assert any(e.get("matcher") == _nr._GUARD_MATCHER for e in pre)
+    assert _nr.create_settings_json(project) == "removed-stale-guard"
+    assert _read(project)["hooks"]["PreToolUse"] == [other]
 
 
-def test_preserves_sibling_hooks_on_our_own_matcher(tmp_path):
+def test_preserves_sibling_hooks_on_the_guards_matcher(tmp_path):
     """A repo may add its own hook to the same matcher; it must survive."""
     project = _settings_dir(tmp_path)
     sibling = {"type": "command", "command": "bash /repo/.claude/hooks/mine.sh"}
     (project / ".claude" / "settings.json").write_text(json.dumps({
-        "hooks": {"PreToolUse": [
-            {"matcher": _nr._GUARD_MATCHER, "hooks": [sibling]}
-        ]}
+        "hooks": {"PreToolUse": [_stale_entry(sibling)]}
     }), encoding="utf-8")
 
-    assert _nr.create_settings_json(project) == "merged"
-    entry_hooks = _guard_entry(_read(project))["hooks"]
-    assert sibling in entry_hooks
-    assert any(h["command"].endswith("secret-file-guard.sh") for h in entry_hooks)
+    assert _nr.create_settings_json(project) == "removed-stale-guard"
+    assert _read(project)["hooks"]["PreToolUse"] == [
+        {"matcher": _GUARD_MATCHER, "hooks": [sibling]}
+    ]
+
+
+def test_settings_without_the_stale_guard_are_left_alone(tmp_path):
+    project = _settings_dir(tmp_path)
+    path = project / ".claude" / "settings.json"
+    path.write_text(json.dumps({"permissions": {"allow": ["Bash(gh:*)"]}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    assert _nr.create_settings_json(project) == "unchanged"
+    assert path.read_bytes() == before
 
 
 def test_rerun_is_a_no_op_and_does_not_touch_the_file(tmp_path):
@@ -1976,7 +2006,7 @@ def test_unparseable_file_is_backed_up_never_discarded(tmp_path):
     backup = project / ".claude" / "settings.json.bak"
     assert backup.exists()
     assert backup.read_text(encoding="utf-8") == garbage
-    assert _guard_entry(_read(project))["hooks"][0]["type"] == "command"
+    assert _read(project) == {}
 
 
 def test_json_array_at_top_level_is_treated_as_unparseable(tmp_path):
@@ -1990,12 +2020,17 @@ def test_json_array_at_top_level_is_treated_as_unparseable(tmp_path):
         encoding="utf-8") == "[1, 2, 3]"
 
 
-def test_merge_helper_does_not_mutate_its_input():
-    """Purity matters: the caller compares merged against existing."""
-    existing = {"hooks": {"PreToolUse": []}}
+def test_strip_helper_does_not_mutate_its_input():
+    """Purity matters: the caller compares the result against existing."""
+    existing = {"hooks": {"PreToolUse": [_stale_entry()]}}
     snapshot = json.dumps(existing, sort_keys=True)
-    _nr._merge_settings(existing, {"type": "command", "command": "x"})
+    _nr._strip_stale_guard(existing)
     assert json.dumps(existing, sort_keys=True) == snapshot
+
+
+def test_new_repo_no_longer_copies_a_hook():
+    """#4137: step 5b, which copied the removed guard, is gone."""
+    assert not hasattr(_nr, "deploy_canonical_hooks")
 
 
 # ---- #2182: the scaffolder names npm dirs whose PRs could never merge ----

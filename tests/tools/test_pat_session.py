@@ -286,3 +286,69 @@ class TestDecryptAnnouncement:
         pat_file.write_bytes(b"fake gpg blob")
         with _pat_session.classic_pat_session(pat_file) as pat:
             assert pat == FAKE_PAT
+
+
+# The stderr of the 2026-10-07 Ubuntu run (#4135): pinentry-curses had no
+# terminal, because new_repo.py detaches its stdin (#1806), so no prompt
+# ever appeared.
+NO_PROMPT_STDERR = (
+    "gpg: problem with the agent: Inappropriate ioctl for device\n"
+    "gpg: decryption failed: Bad session key\n"
+)
+
+
+class TestNoPromptStopsAtOnce:
+    """A gpg failure that never reached the operator is not retried (#4135)."""
+
+    @pytest.mark.parametrize("session, secret", [
+        (_pat_session.classic_pat_session, _pat_session.SECRET_CLASSIC_PAT),
+        (_pat_session.cerberus_pem_session, _pat_session.SECRET_CERBERUS_PEM),
+        (_pat_session.pr_sentinel_app_session, _pat_session.SECRET_PR_SENTINEL_APP),
+    ])
+    def test_named_sessions_raise_after_one_call(self, tmp_path, monkeypatch, session, secret):
+        secret_file = tmp_path / "secret.gpg"
+        secret_file.write_bytes(b"fake gpg blob")
+        run_mock = mock.Mock(return_value=_make_completed_process(
+            stderr=NO_PROMPT_STDERR, returncode=2,
+        ))
+        monkeypatch.setattr(_pat_session.subprocess, "run", run_mock)
+
+        with pytest.raises(_pat_session.PinentryUnavailable) as excinfo, session(secret_file):
+            pass
+
+        assert run_mock.call_count == 1
+        msg = str(excinfo.value)
+        assert secret in msg
+        assert "nothing was asked of you" in msg
+        assert "Git Bash" in msg
+        assert "Inappropriate ioctl" in msg, "gpg's own words must reach the operator"
+
+    def test_generic_session_raises_after_one_call(self, tmp_path, monkeypatch):
+        secret_file = tmp_path / "token.gpg"
+        secret_file.write_bytes(b"fake gpg blob")
+        run_mock = mock.Mock(return_value=_make_completed_process(
+            stderr=NO_PROMPT_STDERR, returncode=2,
+        ))
+        monkeypatch.setattr(_pat_session.subprocess, "run", run_mock)
+
+        with pytest.raises(_pat_session.PinentryUnavailable, match="read-only CI token"), \
+                _pat_session.gpg_secret_session(secret_file, "read-only CI token"):
+            pass
+        assert run_mock.call_count == 1
+
+    def test_is_a_runtime_error_for_existing_callers(self):
+        assert issubclass(_pat_session.PinentryUnavailable, RuntimeError)
+
+    def test_wrong_passphrase_still_retries_every_attempt(self, tmp_path, monkeypatch):
+        pat_file = tmp_path / "classic-pat.gpg"
+        pat_file.write_bytes(b"fake gpg blob")
+        run_mock = mock.Mock(return_value=_make_completed_process(
+            stderr="gpg: decryption failed: Bad session key\n", returncode=2,
+        ))
+        monkeypatch.setattr(_pat_session.subprocess, "run", run_mock)
+
+        with pytest.raises(RuntimeError) as excinfo, _pat_session.classic_pat_session(pat_file):
+            pass
+
+        assert not isinstance(excinfo.value, _pat_session.PinentryUnavailable)
+        assert run_mock.call_count == _pat_session.MAX_GPG_ATTEMPTS
