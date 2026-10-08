@@ -475,7 +475,8 @@ class TestRepairBudget:
         assert state["error_message"].startswith("[FINALIZE]")
         assert "Unresolved open questions remain" in state["error_message"]
         assert "rather than regenerating" in state["error_message"]
-        assert route_after_finalize(state) == "END"
+        # #3864: the exhausted budget halts with this reason; it used to end at END.
+        assert route_after_finalize(state) == "HALT"
 
     def test_the_budget_is_clamped_to_what_the_graph_can_carry(
         self, approved_state, quiet_finalize
@@ -681,10 +682,13 @@ class TestScope:
         assert Path(done["final_lld_path"]).is_file()
         assert route_after_finalize(done) == "END"
 
-    def test_a_non_validation_finalize_error_still_ends_the_workflow(
+    def test_a_non_validation_finalize_error_halts(
         self, approved_state, quiet_finalize
     ):
-        """Only the validation gate repairs. Everything else fails as before."""
+        """Only the validation gate repairs. Any other finalize error halts.
+
+        #3864: it used to end the workflow at END, with no HALT record or alert.
+        """
         state = dict(approved_state)
         state["issue_number"] = 0
 
@@ -692,7 +696,7 @@ class TestScope:
 
         assert out["error_message"] == "No issue number for LLD finalization"
         assert not out.get("finalize_repair_pending")
-        assert route_after_finalize(out) == "END"
+        assert route_after_finalize(out) == "HALT"
 
     def test_the_issue_workflow_never_asks_for_a_repair(
         self, monkeypatch, approved_state

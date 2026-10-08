@@ -1,17 +1,11 @@
 {
-  "count": 325,
+  "count": 324,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
       "issue": 3581,
       "kind": "unrouted_error",
       "line": 91
-    },
-    "assemblyzero.workflows.requirements.graph::N0b_analyze_codebase::unrouted_error::1": {
-      "detail": "node N0b_analyze_codebase returns error_message; no conditional edge",
-      "issue": 3581,
-      "kind": "unrouted_error",
-      "line": 86
     },
     "assemblyzero.workflows.testing.graph::N4c_augment_tests::unrouted_error::1": {
       "detail": "node N4c_augment_tests returns error_message; no conditional edge",

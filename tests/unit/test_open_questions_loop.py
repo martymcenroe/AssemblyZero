@@ -211,8 +211,12 @@ class TestRouteAfterReviewOpenQuestions:
 
         assert route_after_review(state) == "N1_generate_draft"
 
-    def test_unanswered_at_max_iterations_goes_to_gate(self):
-        """UNANSWERED at verdict_count >= max should go to human gate."""
+    def test_unanswered_at_max_iterations_halts(self):
+        """#3864: UNANSWERED at verdict_count >= max halts.
+
+        It used to go to the verdict gate, which in auto mode finalizes an LLD
+        whose open questions were never answered.
+        """
         from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
@@ -224,7 +228,7 @@ class TestRouteAfterReviewOpenQuestions:
             "max_iterations": 20,
         }
 
-        assert route_after_review(state) == "N4_human_gate_verdict"
+        assert route_after_review(state) == "HALT"
 
     def test_resolved_proceeds_to_finalize(self):
         """RESOLVED with APPROVED should go to N5."""

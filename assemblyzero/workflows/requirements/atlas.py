@@ -48,7 +48,8 @@ ATLAS: dict[str, dict] = {
             "exist and follows conventions already in the tree."
         ),
         "successors": {
-            "N0c_analyze_requirements": "always",
+            "N0c_analyze_requirements": "the codebase was analysed",
+            "HALT": "the analysis failed, such as an arc worktree that could not be cut (#3864)",
         },
     },
     "N0c_analyze_requirements": {
@@ -102,7 +103,8 @@ ATLAS: dict[str, dict] = {
             "version of the draft and loop-backs are spent on real defects."
         ),
         "successors": {
-            "N1_5_validate_mechanical": "always",
+            "N1_5_validate_mechanical": "the auto-fix pass ran",
+            "HALT": "the auto-fix pass failed and left a reason (#3864)",
         },
     },
     "N1_5_validate_mechanical": {
@@ -121,7 +123,7 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N1b_validate_test_plan": "the structure passed",
             "N1_generate_draft": "the structure failed; redraft",
-            "HALT": "still failing at the iteration cap",
+            "HALT": "still failing at the iteration cap, or an error that is not a failed validation (#3864)",
         },
     },
     "N1b_validate_test_plan": {
@@ -157,6 +159,7 @@ ATLAS: dict[str, dict] = {
             "N3_review": "the human sent it to review",
             "N1_generate_draft": "the human asked for a revision",
             "END": "the human took over manually",
+            "HALT": "a decision the gate never makes (#3864)",
         },
     },
     "N3_review": {
@@ -178,7 +181,10 @@ ATLAS: dict[str, dict] = {
             "N5_finalize": "approved with the verdict gate off",
             "N1_generate_draft": "blocked or unanswered questions; revise",
             "N3_review": "follow-up review round",
-            "HALT": "error, stagnation, or the iteration cap",
+            "HALT": (
+                "error, stagnation, or the iteration cap reached with the draft "
+                "still blocked or its questions still unanswered (#3864)"
+            ),
         },
     },
     "N4_human_gate_verdict": {
@@ -194,6 +200,7 @@ ATLAS: dict[str, dict] = {
             "N5_finalize": "the human approved",
             "N1_generate_draft": "the human asked for a revision",
             "END": "the human took over manually",
+            "HALT": "a decision the gate never makes (#3864)",
         },
     },
     "N5_finalize": {
@@ -210,7 +217,8 @@ ATLAS: dict[str, dict] = {
         ),
         "successors": {
             "N1_generate_draft": "finalize's own validation blocked the document",
-            "END": "the artifact is saved, or the repair budget is spent",
+            "END": "the artifact is saved",
+            "HALT": "finalize stopped with an error, or the repair budget is spent (#3864)",
         },
     },
     "HALT": {

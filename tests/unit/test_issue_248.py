@@ -303,8 +303,9 @@ def test_t050(mock_state_base):
     result = route_after_review(state)
 
     # TDD: Assert
-    # Max iterations reached - should go to human gate instead of looping
-    assert result == "N4_human_gate_verdict"
+    # Max iterations reached: the loop stops. #3864: it halts, where it used to
+    # hand the unanswered questions to the verdict gate, which finalizes in auto mode.
+    assert result == "HALT"
 
 
 def test_t060(mock_state_base):
@@ -477,8 +478,9 @@ def test_050(mock_state_base):
     route = route_after_review(state)
 
     # TDD: Assert
-    # At max iterations, should stop looping and go to human gate
-    assert route == "N4_human_gate_verdict"
+    # At max iterations the loop stops. #3864: it halts rather than going to the
+    # verdict gate.
+    assert route == "HALT"
 
 
 def test_060(mock_state_base):
