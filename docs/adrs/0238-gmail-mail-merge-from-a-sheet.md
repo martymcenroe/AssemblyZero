@@ -1,6 +1,6 @@
 # ADR 0238: Personal bulk email goes out through a Gmail mail merge run from a Google Sheet
 
-**Status:** Proposed (the operator asked for it on 2026-10-08: "should you write yourself an ADR so that hwen i do this again you can do it right from the beginning? not just in this repo but anywhere")
+**Status:** Accepted (the operator, 2026-10-08, in session `dd156424-8f0d-46ee-967a-92bfa5b299d3`: "mark it as accepted ... really the ADR is for other agents." He asked for it the same day: "should you write yourself an ADR so that hwen i do this again you can do it right from the beginning? not just in this repo but anywhere")
 **Date:** 2026-10-08
 **Deciders:** Operator
 **Related:** #4143; `tools/gmail_mail_merge.gs`
