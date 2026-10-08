@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 6.8
-**Last Updated:** 2026-05-26
+**Version:** 6.9
+**Last Updated:** 2026-10-08
 
 ---
 
@@ -12,7 +12,7 @@ The human steps when creating a new repo. Most of the work is automated by `new_
 
 Post-#1000 + #1007 (both landed 2026-04-22), the script needs **no environment-variable prefix**, even when `--cerberus-pem` is used. The classic PAT stays encrypted at rest (`~/.secrets/classic-pat.gpg`), the script decrypts it inline only when a specific API call needs admin/workflow/secrets scope, and the PAT lives only in the Python process heap — never in the env block.
 
-The human handles only what the script genuinely can't: the one-time gpg encryption of the classic PAT, the gpg passphrase prompt (per gpg-agent cache window), downloading the Cerberus `.pem` from the browser, and revoking the Cerberus key when done.
+The human handles only what the script genuinely can't: the one-time gpg encryption of the classic PAT, the gpg passphrase prompt (one per secret decrypted), and downloading the Cerberus `.pem` from the browser. The Cerberus key stays active after deploying; rotation is runbook 0939.
 
 ---
 
@@ -129,6 +129,8 @@ You CAN safely `rm ~/.secrets/cerberus-pem.gpg` at any time (deletes only your o
 
 ### 1. Run the setup script (bare — no env prefix needed)
 
+**Run it in Git Bash on Windows 11.** There, pinentry is a dialog with its own window. Ubuntu has only a terminal pinentry (`pinentry-curses`), and the script detaches its standard input so that no passphrase can arrive through the terminal (#1806). gpg therefore fails there before any prompt appears, and the script stops on that first failure and says to use Git Bash (#4135).
+
 **Recommended path — `--cerberus-pem-gpg` (encrypted at rest, reusable):**
 
 ```bash
@@ -150,7 +152,7 @@ The script reads the plaintext `.pem`, deploys, then unlinks the file. Fine for 
 
 Either `--cerberus-pem-gpg` OR `--cerberus-pem` is **required** when creating a GitHub repo (#1206) — Cerberus auto-approval is part of the new-repo contract, and without the secrets every PR sits blocked. The only override is `--no-github` (local scaffold only, skips the GitHub side entirely). The two flags are mutually exclusive.
 
-gpg-agent will prompt for your passphrase once per cache window (controlled by `~/.gnupg/gpg-agent.conf`) and the script handles the rest.
+With gpg-agent at `default-cache-ttl 0` (ADR-0216), pinentry asks once for each secret the run decrypts: the classic PAT, and the Cerberus PEM when `--cerberus-pem-gpg` is used. The script handles the rest.
 
 **Defaults the script picks unless you override:**
 - **License**: PolyForm Noncommercial 1.0.0. Pass `--license mit` if you want MIT instead.
@@ -186,7 +188,7 @@ gpg-agent will prompt for your passphrase once per cache window (controlled by `
 | 20 | **Enable Dependabot** (security_and_analysis PATCH + vulnerability-alerts PUT + automated-security-fixes PUT) | In-process classic PAT (#1331) |
 | — | **Cerberus secrets** (if `--cerberus-pem` passed): sealed-box encrypt + PUT | In-process classic PAT (#1007) |
 
-Steps in **bold** require classic-PAT scopes. The PAT never enters the env block or subprocess argv — privileged calls share a `classic_pat_session()`, and gpg-agent caches the passphrase across sessions, so you'll typically see the prompt at most once per shell.
+Steps in **bold** require classic-PAT scopes. The PAT never enters the env block or subprocess argv — privileged calls share one `classic_pat_session()`, so the classic PAT's passphrase is asked for once per run.
 
 The script handles all of the following automatically:
 - Local directory structure + all config files
@@ -195,7 +197,7 @@ The script handles all of the following automatically:
 - Repo settings: wiki disabled, projects disabled, squash-only merge, delete branch on merge
 - Branch protection: require PR (1 review), block force push, block deletion, enforce_admins, pr-sentinel check
 - PR governance workflow (`auto-reviewer.yml` — pr-sentinel check comes from the Cloudflare Worker fleet-wide)
-- `.unleashed.json`, `.claude/settings.json`, security hooks
+- `.unleashed.json`, and `.claude/settings.json` as `{}`. No hook is installed in the repo: the machine-wide managed settings register every security hook centrally (#3684, #4137)
 - **Python project bootstrap**: `pyproject.toml`, `poetry.lock`, `pytest`+`pytest-cov` in dev deps, `[tool.pytest.ini_options]` for deterministic test discovery, `tests/conftest.py` for `src/` import path. Pass `--lang none` to skip for non-Python projects. (#1058)
 - **Canonical labels**: `implementation` and `lld` on the GitHub repo (#1061)
 - **Per-repo `CLAUDE.md` (lean shape per ADR 0219)**: `## Project Identifiers` block plus a project-type-specific `## Project-Specific Context` stub. The scaffolded file is intentionally short (~15-25 lines) and ADDITIVE only — no merge-sequence / branch-protection / PR-rules content; those live in the auto-loaded universal `CLAUDE.md`. Pass `--project-type {minimal,python,chrome-extension,pypi,cf-worker,web}` to pick the stub; default `minimal` is a pure TODO block. Per-repo drift is auditable via `tools/lint_per_repo_claude_md.py` (#1290). See [ADR 0219](../adrs/0219-claude-md-division-of-responsibility.md) for the full division-of-responsibility rule. (#1258, #1291, #1266)
@@ -204,7 +206,7 @@ The script handles all of the following automatically:
 - **Create `data-g/`** (#1563): a git-tracked source-of-truth data directory with a README explaining the split. `data/` is ignored fleet-wide (ephemeral session artifacts); `data-g/` holds authoritative data the global ignore does not match, so it survives a machine wipe.
 - **Enable Dependabot at repo settings level** (#1331): PATCH `security_and_analysis.dependabot_security_updates`, PUT `/vulnerability-alerts`, PUT `/automated-security-fixes`. Without this step the `.github/dependabot.yml` generated above is inert on private repos — Dependabot defaults to disabled and no PRs emit. The defect was confirmed 2026-05-26 on a private decorative-deps fixture repo (yml in place, 65 decorative deps pinned to ~12-18mo old versions, zero PRs after 11+ hours). The tool `tools/enable_dependabot.py` can also be run standalone to backfill existing repos.
 
-The script prints a summary showing what succeeded and what failed.
+The script prints a summary of each step. It prints `[SUCCESS]` and exits 0 only when every step succeeded. Otherwise it prints `[FAILED] Repository '<name>' is incomplete. Failed: <steps>` on stderr, alerts you, and exits 1 (#4136). When the classic-PAT session never opened, the next steps name that cause; nothing was created on GitHub, and re-running resumes against the local scaffold.
 
 ### 2. Emergency fallback — `gh auth login` swap (legacy; should never be needed)
 
@@ -340,7 +342,7 @@ These all happen without any per-repo human intervention:
 | Directory structure + configs | Created by setup script |
 | Cerberus secrets deploy | Handled by the script when `--cerberus-pem PATH` is passed |
 
-The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agent cache window), downloading the Cerberus `.pem` if `--cerberus-pem` is used, revoking the Cerberus key when done, and optional wiki/domain setup.
+The **per-repo human steps** are: running the script in Git Bash, entering the gpg passphrase for each secret the run decrypts, downloading the Cerberus `.pem` if `--cerberus-pem` is used (never revoke the key after deploying; rotation is runbook 0939), and optional wiki/domain setup.
 
 ---
 
@@ -377,3 +379,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-05-26 | v6.6: #1293 — documented the per-repo `CLAUDE.md` lean shape per ADR 0219 (#1258) in the "What the script handles automatically" block. Surfaced the new `--project-type` flag (#1291) and pointed at the drift-detector lint tool (#1290). Per-repo CLAUDE.md is now explicitly framed as ADDITIVE only — no restatement of universal-CLAUDE.md content — with the lint tool as the audit-gate that catches regressions. |
 | 2026-05-26 | v6.7: #1331 — added Step 20 to the under-the-hood table: Enable Dependabot at the repo settings level (PATCH `security_and_analysis.dependabot_security_updates`, PUT `/vulnerability-alerts`, PUT `/automated-security-fixes`). Without this step the scaffolded `.github/dependabot.yml` is inert on private repos (Dependabot defaults to disabled; no PRs emit). Defect confirmed 2026-05-26 on a private decorative-deps fixture repo. Companion tool `tools/enable_dependabot.py` runs the same enablement against existing repos (`--repo OWNER/NAME` or `--fleet`, `--apply` per std 0017). |
 | 2026-06-10 | v6.8: #1334 + #1563 — script now generates `.github/dependabot.yml` at creation time (step 11c2; ecosystems by marker-file presence — `pyproject.toml`→pip, `package.json`→npm, `Dockerfile`→docker — plus `github-actions` always; non-workflow file, rides the initial commit). This is the version-update half that complements #1331's settings-level enablement — without the yml, only security PRs fire. Also creates `data-g/` (git-tracked source-of-truth data) with a README explaining the split vs the fleet-ignored `data/`. Updated the under-the-hood table (step 12) and the "handles automatically" list. |
+| 2026-10-08 | v6.9: #4141, after PR #4138. Run the script in Git Bash on Windows 11; on Ubuntu the decrypt cannot prompt (#1806, #4135). No hook is installed in a new repo, and `.claude/settings.json` is `{}` (#4137). `[SUCCESS]` and exit 0 only when every step succeeded; otherwise `[FAILED]`, an alert and exit 1 (#4136). Passphrase lines corrected for `default-cache-ttl 0`: one prompt per secret decrypted. The stale "revoke the Cerberus key when done" in the human-steps line is removed (#1295). |
