@@ -1,5 +1,5 @@
 {
-  "count": 303,
+  "count": 300,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -156,24 +156,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 94
-    },
-    "assemblyzero/core/resume_contract.py::_sha256_file::fail_open_tag::1": {
-      "detail": "# fail-open: None IS the signal -- an unreadable file hashes as",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 54
-    },
-    "assemblyzero/core/resume_contract.py::check_and_consume::fail_open_tag::1": {
-      "detail": "# fail-open: a verified contract that could not be deleted only",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 224
-    },
-    "assemblyzero/core/resume_contract.py::load_resume_contract::fail_open_tag::1": {
-      "detail": "# fail-open: an unreadable or corrupt contract reads as no",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 127
     },
     "assemblyzero/core/run_record.py::RunRecord._restore_streams::fail_open_tag::1": {
       "detail": "# fail-open: a handle that will not close is already useless;",

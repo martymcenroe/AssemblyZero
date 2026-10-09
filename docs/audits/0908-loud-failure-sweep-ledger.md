@@ -676,14 +676,14 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/scripted_provider.py:260` | scripted fail | failure | compliant | none |
 | `assemblyzero/core/retry_gate.py:209` | unknown class | full budget | loud, logged, stops | raise |
 | `assemblyzero/core/loud_failure_check.py:173` | source | raises | compliant | none |
-| `assemblyzero/core/resume_contract.py:53` | hash | None | loud, logged | ERROR |
-| `assemblyzero/core/resume_contract.py:54` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/resume_contract.py:126` | contract read | None, resume unverified | all | raise |
-| `assemblyzero/core/resume_contract.py:127` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/resume_contract.py:148` | unhashable | missing | logged | real cause |
-| `assemblyzero/core/resume_contract.py:196` | world changed | print, False | loud, alerts | ERROR + alert |
-| `assemblyzero/core/resume_contract.py:223` | delete contract | WARN stdout | loud, alerts | ERROR |
-| `assemblyzero/core/resume_contract.py:224` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/resume_contract.py:53` | hash | None | loud, logged | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:54` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:126` | contract read | None, resume unverified | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:127` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:148` | unhashable | missing | logged | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:196` | world changed | print, False | loud, alerts | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:223` | delete contract | WARN stdout | loud, alerts | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:224` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
 | `assemblyzero/core/tdd_path_tracking.py:124` | delete scaffold | WARNING | loud, stops, alerts | raise |
 | `assemblyzero/core/merge_driver.py:69` | no file | reason | compliant | none |
 | `assemblyzero/core/merge_driver.py:160` | start | raise | compliant | none |

@@ -66,3 +66,15 @@ The spend-lock reads already failed closed: an unreadable home, lock or lift tim
 - All five withdrawn `# fail-open:` tags are gone.
 
 Baseline: six entries leave (five tags and `current_profile_name`'s handler). The fail-open audit lost 5 findings. Its three remaining lock handlers count as handled because they call `alert_operator`; a helper that only printed was not enough for it.
+
+### resume_contract.py (#3788, 8 sites)
+
+The contract exists so a resume never runs against a world nobody checked. Each site let one through.
+
+- **Only absence hashes as absent** (53, 54, 148). `_sha256_file` returns None only when the file does not exist; one that exists but cannot be read raises with its cause. It used to hash as absent, reported as "now missing".
+- **An unreadable or corrupt contract refuses the resume** (126, 127). It used to read as no contract, and the resume went ahead unverified, the one thing the contract prevents. `check_and_consume` refuses it with an alert naming the path and the way past it: move it aside to run without verification.
+- **An unreadable input refuses the resume** with an alert naming the cause.
+- **A refusal alerts** (196). "The world changed since the halt" used to reach only the console, and the operator found out by rerunning.
+- **A verified contract that cannot be deleted alerts** (223, 224). The resume does not depend on the deletion, so it proceeds, but a leftover contract would be checked again by the next launch for that issue.
+
+Baseline: three tags leave. The fail-open audit lost 3 findings.

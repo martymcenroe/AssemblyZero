@@ -43,3 +43,11 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Before the fix, measured** with `seats.py` stashed: 7 failed, 1 passed (`test_a_readable_lift_time_is_quiet`). Measured twice; the second time after the lock handlers moved from a printed line to `alert_operator`.
 
 **Neighbouring suites:** 344 passed across the seats, spend-lock, profile, attribution and agy-seat tests.
+
+## resume_contract.py
+
+**New: `tests/unit/test_resume_contract_loud_failure.py` (14)**, one or two per site, plus four that pin kept behaviour: an absent file is still absent, no contract is still a silent pass, an intact world is quiet and consumes the contract, and the contract is written as JSON.
+
+**Before the fix, measured** with `resume_contract.py` stashed: 10 failed, 4 passed (the four that pin kept behaviour).
+
+**Neighbouring suites:** 94 passed across the halt node, halt evidence, home-state guard, implementation and LLD runner tests that write or check contracts.
