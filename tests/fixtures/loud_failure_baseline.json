@@ -1,5 +1,5 @@
 {
-  "count": 309,
+  "count": 303,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -234,42 +234,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 104
-    },
-    "assemblyzero/core/seats.py::_lock_on::fail_open_tag::1": {
-      "detail": "# fail-open: this is the closed side; an unreadable lock counts as on, so seats stop",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 173
-    },
-    "assemblyzero/core/seats.py::_present::fail_open_tag::1": {
-      "detail": "# fail-open: unreadable is not proof of absence; kept, and the lock check fails closed on it",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 149
-    },
-    "assemblyzero/core/seats.py::current_profile_name::fail_open_tag::1": {
-      "detail": "# fail-open: a profile that cannot be read here was already reported",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 777
-    },
-    "assemblyzero/core/seats.py::current_profile_name::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 776
-    },
-    "assemblyzero/core/seats.py::lock_until::fail_open_tag::1": {
-      "detail": "# fail-open: None means no lift time, so the lock binds; this is the closed side",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 191
-    },
-    "assemblyzero/core/seats.py::other_side_claude_home::fail_open_tag::1": {
-      "detail": "# fail-open: no /proc/version means not Linux, so not WSL: there is no other side",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 128
     },
     "assemblyzero/core/section_utils.py::drafter_authored::fail_open_tag::1": {
       "detail": "# fail-open: only in shape -- with no stripper available the caller",

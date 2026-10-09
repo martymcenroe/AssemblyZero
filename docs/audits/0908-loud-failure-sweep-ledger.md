@@ -595,13 +595,13 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/gate_registry.py:1241` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/gate_registry.py:1453` | malformed site key | continue | all | raise |
 | `assemblyzero/core/gate_registry.py:1454` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/seats.py:128` | /proc/version | None | all | platform check, raise |
-| `assemblyzero/core/seats.py:149` | is_dir | True | loud, logged, alerts | log ERROR |
-| `assemblyzero/core/seats.py:173` | lock read | True | loud, logged, alerts | log ERROR |
-| `assemblyzero/core/seats.py:191` | until parse | None | loud, logged, alerts | log ERROR |
+| `assemblyzero/core/seats.py:128` | /proc/version | None | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:149` | is_dir | True | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:173` | lock read | True | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:191` | until parse | None | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
 | `assemblyzero/core/seats.py:564` | mock override | dropped | compliant | none |
-| `assemblyzero/core/seats.py:776` | active_profile | DEFAULT_PROFILE | all | raise |
-| `assemblyzero/core/seats.py:777` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/seats.py:776` | active_profile | DEFAULT_PROFILE | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:777` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
 | `assemblyzero/core/fail_open_audit.py:595` | unparse | label | all | raise |
 | `assemblyzero/core/fail_open_audit.py:596` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/fail_open_audit.py:699` | read/parse | files_unparseable, [] | all | raise |

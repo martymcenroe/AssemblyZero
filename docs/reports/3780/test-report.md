@@ -35,3 +35,11 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests**, each asserting the raise in place of "nothing found": `test_finalize_structured_output.py::test_empty_content`, `test_structured_stagnation.py::test_empty_feedback_cannot_be_compared` (renamed from `test_empty_feedback_not_stagnant`), `test_verdict_schema.py::test_empty_text`.
 
 **Neighbouring suites:** 801 passed across every test that imports the module, before the three changes above (the 3 failures were those three tests).
+
+## seats.py
+
+**New: `tests/unit/test_seats_loud_failure.py` (8)**, one per site plus `test_a_readable_lift_time_is_quiet` and the off-Linux case. `tests/conftest.py` replaces `other_side_claude_home` in every test, so the file captures the real function at import.
+
+**Before the fix, measured** with `seats.py` stashed: 7 failed, 1 passed (`test_a_readable_lift_time_is_quiet`). Measured twice; the second time after the lock handlers moved from a printed line to `alert_operator`.
+
+**Neighbouring suites:** 344 passed across the seats, spend-lock, profile, attribution and agy-seat tests.
