@@ -34,7 +34,7 @@ BASELINE = REPO_ROOT / "tests" / "fixtures" / "loud_failure_baseline.json"
 
 #: The baseline's size the day it was written (#3580). Each #3581 batch lowers
 #: this by the entries it removes; it is never raised.
-BASELINE_CEILING = 318  # #3584 removed two; #3581 core batch 1 (#3724) four; testing batch 1 (#3811) three; spec N6 (#3887) one; requirements N0b (#3864) one; new_repo main (#4136) one; post-ADR tags (#3767) five
+BASELINE_CEILING = 317  # #3584 removed two; #3581 core batch 1 (#3724) four; testing batch 1 (#3811) three; spec N6 (#3887) one; requirements N0b (#3864) one; new_repo main (#4136) one; post-ADR tags (#3767) five; impl runner main (#4150) one
 
 
 # ---------------------------------------------------------------------------

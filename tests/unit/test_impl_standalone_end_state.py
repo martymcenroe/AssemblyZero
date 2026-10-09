@@ -149,78 +149,9 @@ class TestAMockRunLeavesNothing:
         assert f"Checkpoint database (resume state): {db}" in out.getvalue()
 
 
-def _worktree_with_work(target: Path) -> Path:
-    """What a successful real run hands `finish_standalone_run`: a worktree
-    on `42-implementation` with a checkpoint commit, uncommitted work written
-    after it, and an ignored lineage directory."""
-    wt = target.parent / "target-42"
-    _git(target, "worktree", "add", "-q", "-b", "42-implementation", str(wt))
-    (wt / "impl.py").write_text("x = 1\n", encoding="utf-8")
-    _git(wt, "add", "impl.py")
-    _git(wt, "commit", "-qm", "[CP:post-green] issue #42")
-    (wt / "report.md").write_text("late\n", encoding="utf-8")
-    lineage = wt / "docs" / "lineage" / "active" / "42-testing"
-    lineage.mkdir(parents=True)
-    (lineage / "001-lld.md").write_text("lineage\n", encoding="utf-8")
-    (wt / "__pycache__").mkdir()
-    (wt / "__pycache__" / "x.pyc").write_bytes(b"\0")
-    return wt
-
-
-class TestARealRunFinishesItsWorktree:
-    def test_only_the_remote_branch_remains(self, target_repo):
-        from tools.run_implement_from_lld import finish_standalone_run
-
-        wt = _worktree_with_work(target_repo)
-        status_before = _git(target_repo, "status", "--porcelain").stdout
-
-        finished, lines = finish_standalone_run(
-            target_repo, wt, 42, "main", mock=False,
-        )
-
-        assert finished, lines
-        assert not wt.exists()
-        assert _git(target_repo, "worktree", "list", "--porcelain").stdout.count("worktree ") == 1
-        assert _git(target_repo, "branch", "--list", "42-*").stdout.strip() == ""
-        origin = target_repo.parent / "origin.git"
-        remote = _git(origin, "for-each-ref", "--format=%(refname)", "refs/heads/42-*").stdout
-        assert remote.strip() == "refs/heads/42-implementation"
-        assert _git(target_repo, "status", "--porcelain").stdout == status_before
-        assert any("gh pr create --head 42-implementation --base main" in ln for ln in lines)
-
-    def test_the_late_work_is_on_the_pushed_branch(self, target_repo):
-        from tools.run_implement_from_lld import finish_standalone_run
-
-        wt = _worktree_with_work(target_repo)
-        finish_standalone_run(target_repo, wt, 42, "main", mock=False)
-
-        origin = target_repo.parent / "origin.git"
-        files = _git(origin, "ls-tree", "--name-only", "42-implementation").stdout.split()
-        assert "impl.py" in files and "report.md" in files
-
-    def test_ignored_lineage_is_kept_and_caches_are_not(self, target_repo):
-        from tools.run_implement_from_lld import finish_standalone_run
-
-        wt = _worktree_with_work(target_repo)
-        finish_standalone_run(target_repo, wt, 42, "main", mock=False)
-
-        kept = list((target_repo / "data" / "runs-kept").rglob("001-lld.md"))
-        assert len(kept) == 1
-        assert kept[0].read_text(encoding="utf-8") == "lineage\n"
-        assert not list((target_repo / "data" / "runs-kept").rglob("x.pyc"))
-
-    def test_a_failed_push_keeps_the_worktree_and_the_branch(self, target_repo):
-        from tools.run_implement_from_lld import finish_standalone_run
-
-        wt = _worktree_with_work(target_repo)
-        _git(target_repo, "remote", "set-url", "origin", str(target_repo.parent / "gone.git"))
-
-        finished, lines = finish_standalone_run(target_repo, wt, 42, "main", mock=False)
-
-        assert not finished
-        assert wt.exists()
-        assert "42-implementation" in _git(target_repo, "branch", "--list").stdout
-        assert any(ln.startswith("stopped: push") for ln in lines)
+# A real run's finish (push, remove, delete) is gone: #4150 hands the worktree
+# and the branch to the merge driver. Its tests are in
+# test_impl_lands_through_driver.py, one for each that stood here.
 
 
 class TestTheEndStateIsWrittenDown:
@@ -229,6 +160,8 @@ class TestTheEndStateIsWrittenDown:
 
         text = create_argument_parser().format_help()
 
-        assert "End state (#3509)" in text
-        assert "Left: the remote branch" in text
+        assert "End state (#3509, #4150)" in text
+        assert "Left: the implementation merged on the base branch" in text
+        assert "AZ_MERGE_DRIVER" in text
         assert "--mock run cuts a detached worktree" in text
+        assert "gh pr create" not in text

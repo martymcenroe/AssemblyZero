@@ -60,8 +60,9 @@ def check_configured(environ: dict[str, str] | None = None) -> str | None:
     value = (env.get(DRIVER_ENV) or "").strip()
     if not value:
         return (
-            f"{DRIVER_ENV} is not set. The LLD workflow lands its PR through the "
-            "fleet merge driver (tracked_pr_land.py), because this machine's gh "
+            f"{DRIVER_ENV} is not set. A real LLD, implementation or orchestrated "
+            "run lands its PR through the fleet merge driver (tracked_pr_land.py), "
+            "because this machine's gh "
             "wrapper refuses `gh pr create` from anything else. Set it to the "
             "driver's absolute path and run again."
         )
