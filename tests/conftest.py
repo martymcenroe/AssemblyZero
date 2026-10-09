@@ -221,6 +221,20 @@ def no_spend_lock_from_the_machine(tmp_path, monkeypatch):
     monkeypatch.setattr(seats, "other_side_claude_home", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def no_merge_driver_from_the_machine(monkeypatch):
+    """A test sees ``AZ_MERGE_DRIVER`` only when it sets one (#4150).
+
+    The operator's machines export it and CI never does, so a real-run test
+    passed here and failed on CI once the implementation workflow began
+    refusing to start without it (PR #4159). Every tier starts with it unset;
+    a test that needs the driver points it at a file of its own.
+    """
+    from assemblyzero.core import merge_driver
+
+    monkeypatch.delenv(merge_driver.DRIVER_ENV, raising=False)
+
+
 class RealAlertTransportReached(BaseException):
     """A test reached SES or the toast runner for real (#3728).
 

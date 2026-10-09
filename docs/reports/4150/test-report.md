@@ -1,6 +1,6 @@
 # Test Report: #4150
 
-## New tests: `tests/unit/test_impl_lands_through_driver.py` (24)
+## New tests: `tests/unit/test_impl_lands_through_driver.py` (25)
 
 - **T1, the landing** (`TestARealRunLandsThroughTheDriver`): the driver is called once with the branch, the worktree, a title ending `(Closes #42)`, the issue and the base; the body file sits under `data/assemblyzero/pr-bodies/` with `Closes #42` on its own line; a spy on `subprocess.run` sees no `push` and no `gh`, and the origin's heads are unchanged; the late work is on the branch the driver gets; ignored lineage is kept and caches are not; no `gh pr create` line.
 - **T3, the stops** (`TestAnUnfinishedRunKeepsItsWork`): a driver refusal keeps the worktree and the branch and carries `stage=checks_failed`; a broken `.git` stops at `git status` before anything moves (ledger 296); work the final checkpoint missed is never moved aside or landed; the checkpoint's own exclusions do not stop the finish; a detached HEAD is a stop (ledger 353).
@@ -15,10 +15,19 @@
 - **T4:** `TestAMockRunLeavesNothing` is unchanged and passes.
 - `test_loud_failure_check.py`: `BASELINE_CEILING` 318 to 317.
 
-## Tiers (no other test run on the machine)
+## The first push failed CI, and why the local tier did not see it
+
+PR #4159's first `test` check failed `test_impl_no_push_before_work.py::test_a_run_that_halts_at_n0_leaves_the_origin_unchanged`: a real run, which now refuses without `AZ_MERGE_DRIVER`. The local tier had passed it because the operator's machines export that variable and CI does not.
+
+- `tests/conftest.py` gains `no_merge_driver_from_the_machine`, which unsets it for every tier; a test that needs the driver names a file of its own.
+- That test now names a stand-in driver; it still halts at N0, before any landing.
+- `test_the_machines_driver_never_reaches_a_test` pins the fixture.
+- The rest of the inherited `AZ_` environment is #4160.
+
+## Tiers (no other test run on the machine), after the CI fix
 
 ```
-pytest tests -q                                   22 failed, 11634 passed, 66 skipped, 90 deselected, 6 xfailed (13m 52s)
+pytest tests -q                                   22 failed, 11635 passed, 66 skipped, 90 deselected, 6 xfailed (13m 34s)
 pytest -m "integration or e2e or adversarial"     83 passed, 7 skipped
 ```
 

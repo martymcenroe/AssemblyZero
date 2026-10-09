@@ -356,6 +356,13 @@ def _args(**overrides):
 
 
 class TestTheDriverIsCheckedAtStart:
+    def test_the_machines_driver_never_reaches_a_test(self):
+        """tests/conftest.py unsets it for every tier, so a test that passes
+        here passes on CI, which never has it (PR #4159's failed check)."""
+        import os
+
+        assert merge_driver.DRIVER_ENV not in os.environ
+
     def test_a_real_run_needs_the_driver(self, monkeypatch):
         from tools.run_implement_from_lld import landing_preflight
 
@@ -375,7 +382,6 @@ class TestTheDriverIsCheckedAtStart:
     ):
         from tools import run_implement_from_lld as tool
 
-        monkeypatch.delenv(merge_driver.DRIVER_ENV, raising=False)
         argv = ["prog", "--issue", "42", "--repo", str(target_repo), "--auto",
                 "--db-path", str(tmp_path / "ckpt.db")]
         with patch("sys.argv", argv), \

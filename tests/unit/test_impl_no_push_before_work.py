@@ -97,9 +97,17 @@ class TestNoPushBeforeWork:
                 pass
         return out.getvalue()
 
-    def test_a_run_that_halts_at_n0_leaves_the_origin_unchanged(self, target_repo, tmp_path):
+    def test_a_run_that_halts_at_n0_leaves_the_origin_unchanged(
+        self, target_repo, tmp_path, monkeypatch,
+    ):
         """No LLD exists for issue 42 and this is not a mock run, so N0
-        halts. The worktree was cut; the origin's refs are what they were."""
+        halts. The worktree was cut; the origin's refs are what they were.
+
+        #4150: a real run refuses to start without the merge driver, so a
+        stand-in names one; the run halts at N0, long before it would land."""
+        driver = tmp_path / "tracked_pr_land.py"
+        driver.write_text("", encoding="utf-8")
+        monkeypatch.setenv("AZ_MERGE_DRIVER", str(driver))
         before = _origin_refs(target_repo)
 
         out = self._run(target_repo, tmp_path)
