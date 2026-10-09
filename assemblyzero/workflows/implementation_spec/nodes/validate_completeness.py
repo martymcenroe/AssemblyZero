@@ -2326,15 +2326,25 @@ def check_spec_test_functions_have_assertions(
         scenarios_from_spec_functions,
     )
     from assemblyzero.workflows.testing.nodes.scaffold_tests import (
+        ScaffoldImportError,
         generate_spec_test_file_content,
     )
     from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
         validate_test_structure,
     )
 
-    content = generate_spec_test_file_content(
-        suite, issue_number, files_to_modify or []
-    )
+    try:
+        content = generate_spec_test_file_content(
+            suite, issue_number, files_to_modify or []
+        )
+    except ScaffoldImportError as exc:
+        # #4148: the scaffolder will refuse this suite, so the gate fails it
+        # now, while the drafter can still fix the spec.
+        return CompletenessCheck(
+            check_name="spec_test_functions_have_assertions",
+            passed=False,
+            details=f"Section 10 cannot be scaffolded: {exc}",
+        )
     errors = validate_test_structure(content, scenarios_from_spec_functions(functions))
     if not errors:
         return CompletenessCheck(

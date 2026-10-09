@@ -223,9 +223,55 @@ def extract_spec_test_functions(spec_content: str) -> dict[str, Any]:
             functions.append({"name": name_match.group(1), "source": source})
 
         if functions:
-            return {"imports": imports, "functions": functions}
+            return {
+                "imports": imports,
+                "functions": functions,
+                # #4148: where each name the bodies use is defined, so the
+                # red-phase import names the right module for each.
+                "plan_code": extract_plan_code(spec_content),
+            }
 
     return empty
+
+
+def extract_plan_code(spec_content: str) -> dict[str, str]:
+    """Each planned Python file's code from the spec's Section 6 (#4148).
+
+    Section 6 is `### 6.N `path` (Change)` subsections, each with the file's
+    code in a python fence. Returns ``{path: code}`` for the first python (or
+    untagged) fence under each `.py` heading. Fences are tracked line by line,
+    so a `## ` comment inside code never reads as a heading.
+    """
+    out: dict[str, str] = {}
+    in_fence = in_section = False
+    current: str | None = None
+    buf: list[str] | None = None
+    for line in spec_content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            if not in_fence:
+                in_fence = True
+                tag = stripped[3:].strip().lower()
+                take = in_section and current and current not in out and tag in ("python", "py", "")
+                buf = [] if take else None
+            else:
+                in_fence = False
+                if buf is not None and current:
+                    out[current] = "\n".join(buf)
+                buf = None
+            continue
+        if in_fence:
+            if buf is not None:
+                buf.append(line)
+            continue
+        if line.startswith("## "):
+            in_section = line[3:].lstrip().startswith("6.")
+            current = None
+        elif in_section and line.startswith("### "):
+            heading = re.match(r"###\s+6\.\d+\s+`([^`]+)`", line)
+            path = heading.group(1).strip() if heading else ""
+            current = path if path.endswith(".py") else None
+    return out
 
 
 def scenarios_from_spec_functions(

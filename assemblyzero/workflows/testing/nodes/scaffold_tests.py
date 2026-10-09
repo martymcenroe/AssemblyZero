@@ -342,6 +342,20 @@ def _generate_assertion_from_expected(expected: str) -> str:
     return f'# Expected: {expected}\n    assert True  # TODO: Replace with real assertion'
 
 
+def _path_to_module(path: str) -> str:
+    """Convert a plan file path to its Python module path."""
+    module = path.replace("/", ".").replace("\\", ".")
+    if module.endswith(".py"):
+        module = module[:-3]
+    # Remove src/ prefix if present
+    if module.startswith("src."):
+        module = module[4:]
+    # Skip __init__.py - import the package instead
+    if module.endswith(".__init__"):
+        module = module[:-9]
+    return module
+
+
 def _extract_impl_module(files_to_modify: list[dict] | None) -> str | None:
     """Extract Python module path from files_to_modify.
 
@@ -360,19 +374,6 @@ def _extract_impl_module(files_to_modify: list[dict] | None) -> str | None:
     """
     if not files_to_modify:
         return None
-
-    def _path_to_module(path: str) -> str:
-        """Convert file path to Python module path."""
-        module = path.replace("/", ".").replace("\\", ".")
-        if module.endswith(".py"):
-            module = module[:-3]
-        # Remove src/ prefix if present
-        if module.startswith("src."):
-            module = module[4:]
-        # Skip __init__.py - import the package instead
-        if module.endswith(".__init__"):
-            module = module[:-9]
-        return module
 
     # First pass: look for NEW files (Add) - these won't exist yet
     for file_info in files_to_modify:
@@ -621,6 +622,189 @@ def generate_test_file_content(
     return content
 
 
+class ScaffoldImportError(ValueError):
+    """The scaffold cannot say which plan file defines a name the suite uses (#4148).
+
+    Raised, never guessed: assigning the name to the first Add file is what
+    gave boostgauge #2's run 59 an import of `GaugeWidget` from the wrong
+    module, which no implementation could satisfy.
+    """
+
+
+def _is_test_path(path: str) -> bool:
+    """A planned test file, by the rule `_extract_impl_module` uses."""
+    return "test" in path.lower()
+
+
+def _top_level_definitions(tree: ast.Module) -> dict[str, ast.stmt]:
+    """Names a module defines at top level: classes, functions, assignments."""
+    defs: dict[str, ast.stmt] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defs[stmt.name] = stmt
+        elif isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    defs[target.id] = stmt
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            defs[stmt.target.id] = stmt
+    return defs
+
+
+def _import_binding(tree: ast.Module, name: str) -> str | None:
+    """The import line, rendered for `name` alone, that binds it at top level."""
+    for stmt in tree.body:
+        if isinstance(stmt, ast.ImportFrom):
+            for alias in stmt.names:
+                if (alias.asname or alias.name) == name:
+                    source = "." * stmt.level + (stmt.module or "")
+                    rename = f" as {alias.asname}" if alias.asname else ""
+                    return f"from {source} import {alias.name}{rename}"
+        elif isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                if (alias.asname or alias.name.split(".")[0]) == name:
+                    rename = f" as {alias.asname}" if alias.asname else ""
+                    return f"import {alias.name}{rename}"
+    return None
+
+
+def _definition_source(code: str, node: ast.stmt) -> str:
+    """A top-level definition's source, decorators included."""
+    lines = code.splitlines()
+    decorators = getattr(node, "decorator_list", [])
+    start = (decorators[0].lineno if decorators else node.lineno) - 1
+    return "\n".join(lines[start:node.end_lineno])
+
+
+def resolve_red_phase_imports(
+    symbols: list[str],
+    plan_code: dict[str, str],
+    files_to_modify: list[dict] | None,
+) -> tuple[list[str], list[str]]:
+    """Which module each implementation name comes from, read from the plan (#4148).
+
+    R1: each name resolves to the plan file whose Section 6 code defines it at
+    module level, and names are grouped into one import line per module.
+
+    R2: a name defined only in a planned TEST file is a test helper. Its
+    definition is COPIED into the emitted suite, with the import lines from
+    its own file that it needs; it is never imported from an implementation
+    module. Copying, not importing from the test module, because the contract
+    suite must not depend on another test file the implementer has yet to
+    write, or on that file being importable as a package.
+
+    R3: a name defined in more than one implementation file (or more than one
+    test file), or in none, raises ScaffoldImportError naming it and the files.
+
+    R4: when no resolved module is one the plan adds, the first Add module is
+    imported too, so the suite still fails at collection before the
+    implementation exists.
+
+    Returns ``(import_lines, helper_lines)``.
+    """
+    added_paths = {
+        str(f.get("path", "")) for f in files_to_modify or []
+        if str(f.get("change_type", "")).lower() == "add"
+    }
+    parsed: dict[str, tuple[str, ast.Module, dict[str, ast.stmt]]] = {}
+    unparseable: list[str] = []
+    for path, code in plan_code.items():
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as exc:
+            # An Add file's Section 6 is its complete code. If it does not
+            # parse, a name it defines could be resolved to another file
+            # unseen, so the scaffold stops. A Modify file's Section 6 may
+            # legitimately be an excerpt; it is named in any error below.
+            if path in added_paths:
+                raise ScaffoldImportError(
+                    f"the Section 6 code for {path} (Add) does not parse "
+                    f"(line {exc.lineno}: {exc.msg}), so the names it defines "
+                    f"cannot be read (#4148)"
+                ) from exc
+            unparseable.append(path)
+            continue
+        parsed[path] = (code, tree, _top_level_definitions(tree))
+
+    by_module: dict[str, list[str]] = {}
+    helper_imports: list[str] = []
+    helpers: list[str] = []
+    builtin_names = set(dir(builtins))
+    pending = list(symbols)
+    seen: set[str] = set()
+    while pending:
+        name = pending.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        where = [path for path, (_c, _t, defs) in parsed.items() if name in defs]
+        impl = [path for path in where if not _is_test_path(path)]
+        tests = [path for path in where if _is_test_path(path)]
+        if len(impl) > 1 or (not impl and len(tests) > 1):
+            files = impl or tests
+            raise ScaffoldImportError(
+                f"`{name}` is defined at module level in more than one planned "
+                f"file ({', '.join(files)}), so the Section 10 suite cannot say "
+                f"which to import it from (#4148)"
+            )
+        if impl:
+            by_module.setdefault(_path_to_module(impl[0]), []).append(name)
+            continue
+        if tests:
+            code, tree, defs = parsed[tests[0]]
+            node = defs[name]
+            helpers.append(_definition_source(code, node))
+            needed = {
+                sub.id for sub in ast.walk(node)
+                if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load)
+            } - _names_bound_in(node) - builtin_names
+            for dependency in sorted(needed):
+                line = _import_binding(tree, dependency)
+                if line:
+                    if line not in helper_imports:
+                        helper_imports.append(line)
+                else:
+                    pending.append(dependency)
+            continue
+        note = (
+            f"; Section 6 code that does not parse, and so could not be read: "
+            f"{', '.join(unparseable)}" if unparseable else ""
+        )
+        raise ScaffoldImportError(
+            f"`{name}` is used by the Section 10 tests, but no planned file's "
+            f"Section 6 code defines it at module level{note} (#4148)"
+        )
+
+    import_lines = [
+        f"from {module} import {', '.join(sorted(names))}  # noqa: F401"
+        for module, names in sorted(by_module.items())
+    ]
+
+    added = [
+        _path_to_module(str(f.get("path", "")))
+        for f in files_to_modify or []
+        if str(f.get("change_type", "")).lower() == "add"
+        and str(f.get("path", "")).endswith(".py")
+        and not _is_test_path(str(f.get("path", "")))
+        and not str(f.get("path", "")).endswith("__init__.py")
+    ]
+    if added and not any(module in added for module in by_module):
+        import_lines.append(f"import {added[0]}  # noqa: F401")
+
+    helper_lines: list[str] = []
+    if helpers:
+        helper_lines = [
+            "# #4148: test helpers the spec defines in a planned test file,",
+            "# copied with the imports they need (never imported from the",
+            "# implementation)",
+            *helper_imports,
+            "",
+            "",
+            *[block for helper in helpers for block in (helper, "", "")],
+        ]
+    return import_lines, helper_lines
+
+
 def generate_spec_test_file_content(
     spec_test_suite: dict,
     issue_number: int,
@@ -704,7 +888,25 @@ def generate_spec_test_file_content(
     # suite whose bodies use no implementation name at all: the RED signal
     # must still come from somewhere.
     red_block: list[str] = []
-    if needs_red_phase:
+    helper_block: list[str] = []
+    plan_code = spec_test_suite.get("plan_code")
+    if symbols and plan_code is not None:
+        # #4148: each name from the plan file that defines it, one import line
+        # per module. Raises ScaffoldImportError on an ambiguous or undefined
+        # name rather than guessing the first Add file.
+        import_lines, helper_block = resolve_red_phase_imports(
+            [symbol for symbol, _ in symbols], plan_code, files_to_modify,
+        )
+        print(
+            f"    [N2] red-phase imports for {len(symbols)} symbol(s), by "
+            f"defining file: {'; '.join(import_lines)} (#4148)"
+        )
+        red_block = [
+            "# TDD: these imports fail until the implementation exists (RED phase)",
+            *import_lines,
+            "",
+        ]
+    elif needs_red_phase:
         if symbols:
             names = ", ".join(symbol for symbol, _ in symbols)
             print(
@@ -723,7 +925,7 @@ def generate_spec_test_file_content(
                 "",
             ]
 
-    return "\n".join([*head, *repair_block, *red_block, *body]).rstrip() + "\n"
+    return "\n".join([*head, *repair_block, *red_block, *helper_block, *body]).rstrip() + "\n"
 
 
 def _names_bound_in(node: ast.AST) -> set[str]:
@@ -1179,10 +1381,16 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     # Generate test file content
     module_name = f"issue_{issue_number}"
     if use_spec_bodies:
-        content = generate_spec_test_file_content(
-            spec_test_suite, issue_number, files_to_modify,
-            repo_root=repo_root,
-        )
+        try:
+            content = generate_spec_test_file_content(
+                spec_test_suite, issue_number, files_to_modify,
+                repo_root=repo_root,
+            )
+        except ScaffoldImportError as exc:
+            # #4148: stop loudly; the N2 router sends error_message to HALT.
+            message = f"Scaffold cannot build the red-phase imports: {exc}"
+            print(f"ERROR [N2] {message}", file=sys.stderr)
+            return {"error_message": message}
         emitted = len(spec_test_suite["functions"])
     else:
         content = generate_test_file_content(

@@ -591,6 +591,15 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         ),
     ),
     Gate(
+        "impl.scaffold_import_unresolved", "impl", JUDGES_UPSTREAM, ACTION_HALT,
+        "Scaffold cannot build the red-phase imports",
+        _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 1),
+        created_by="#4148 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a name the Section 10 bodies use is defined in two planned files, or "
+              "in none; it used to be imported from the first Add file, which "
+              "stalled boostgauge #2's run 59 at 12/22 for five iterations",
+    ),
+    Gate(
         "impl.no_test_files", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "No test",
         _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 0)
