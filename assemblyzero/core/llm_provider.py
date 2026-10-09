@@ -84,11 +84,13 @@ def _extract_text_from_stream_events(events: object, raw_stdout: str) -> str:
     1. The `result` event's `result` field (canonical, full final text).
     2. The first assistant message's text content (fallback if no result
        event is present in the array — happens on some error paths).
-    3. The raw stdout (last resort, preserves the existing behavior for
-       unknown shapes).
+    3. Nothing: "" (#3780). The raw stdout used to be the last resort, which
+       handed a JSON event dump to the caller as the model's answer. The
+       caller fails an empty result. ``raw_stdout`` is kept in the signature
+       for the callers that still pass it.
     """
     if not isinstance(events, list):
-        return raw_stdout.strip()
+        return ""
 
     # 1. result event
     for event in events:
@@ -116,8 +118,8 @@ def _extract_text_from_stream_events(events: object, raw_stdout: str) -> str:
                 if isinstance(text, str) and text:
                     return text
 
-    # 3. last-resort raw stdout
-    return raw_stdout.strip()
+    # 3. nothing the caller can use (#3780)
+    return ""
 
 
 @dataclass
@@ -271,6 +273,19 @@ def log_llm_call(result: LLMCallResult) -> None:
         parts.append(f"class={result.failure_class}")
 
     print("    " + " ".join(parts))
+    if not result.success:
+        # #3780 (ADR 0236): a failed call is loud where it happens. The caller
+        # reads the failed result and routes to HALT, which alerts.
+        _loud_error(
+            f"provider={result.provider} model={result.model_used} call failed: "
+            f"{result.error_message or 'no error message'}"
+        )
+
+
+def _loud_error(message: str) -> None:
+    """An ERROR line on stderr, and the log (ADR 0236 property 1)."""
+    logger.error("[LLM] %s", message)
+    print(f"ERROR [LLM] {message}", file=sys.stderr, flush=True)
 
 
 def _load_anthropic_api_key() -> Optional[str]:
@@ -288,8 +303,12 @@ def _load_anthropic_api_key() -> Optional[str]:
 
     try:
         text = env_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
+    except OSError as exc:
+        # #3780: an unreadable .env is not an absent key. Reading it as None
+        # silently turned the API fallback off.
+        raise RuntimeError(
+            f"cannot read {env_path} for ANTHROPIC_API_KEY: {type(exc).__name__}: {exc}"
+        ) from exc
 
     for line in text.splitlines():
         line = line.strip()
@@ -390,6 +409,10 @@ ENV_IDLE_TIMEOUT = "AZ_LLM_IDLE_TIMEOUT"
 #: cost nothing over a call measured in minutes.
 _IDLE_POLL_SECONDS = 0.5
 
+#: How long the pumps get to drain after the process ends. A pump still
+#: running after it is a failure of the call (#3780).
+_PUMP_JOIN_SECONDS = 5
+
 #: Event types retained for parsing. `stream_event` deltas are the liveness
 #: signal and arrive in the thousands, so they are counted and discarded rather
 #: than accumulated — the final `result` event carries the complete text anyway.
@@ -399,27 +422,23 @@ _DELTA_EVENT_TYPE = "stream_event"
 def idle_timeout_seconds() -> int:
     """Idle threshold in seconds, environment-overridable.
 
-    A missing, unparseable, or non-positive override falls back to the default:
-    an operator setting this is usually rescuing a stalled run, and a typo must
-    not make every call immortal or instantly fatal.
+    A missing override means the default. An unparseable or non-positive one
+    raises (#3780, ADR 0236): the operator set it to change how long a call
+    may go quiet, and running on a value he did not choose, with only a
+    warning, hid the typo. A typo still cannot make a call immortal or
+    instantly fatal; it stops the run and names the variable instead.
     """
     raw = os.environ.get(ENV_IDLE_TIMEOUT, "").strip()
     if not raw:
         return IDLE_TIMEOUT_SECONDS
     try:
         value = int(raw)
-    except ValueError:
-        logger.warning(
-            "%s=%r is not an integer; using %ss",
-            ENV_IDLE_TIMEOUT, raw, IDLE_TIMEOUT_SECONDS,
-        )
-        return IDLE_TIMEOUT_SECONDS
+    except ValueError as exc:
+        raise ValueError(
+            f"{ENV_IDLE_TIMEOUT}={raw!r} is not an integer number of seconds"
+        ) from exc
     if value <= 0:
-        logger.warning(
-            "%s=%s is not positive; using %ss",
-            ENV_IDLE_TIMEOUT, value, IDLE_TIMEOUT_SECONDS,
-        )
-        return IDLE_TIMEOUT_SECONDS
+        raise ValueError(f"{ENV_IDLE_TIMEOUT}={value} is not a positive number of seconds")
     return value
 
 
@@ -433,10 +452,28 @@ class _StreamOutcome:
     timeout_kind: str = ""  # "" | "idle" | "wall"
     silent_seconds: float = 0.0
     total_events: int = 0
+    #: #3780: what went wrong in the pipes, each named with its cause. A call
+    #: whose prompt was not fully written, or whose output was not fully read,
+    #: did not produce what its caller needs, so the caller fails on any entry.
+    pump_errors: list = field(default_factory=list)
+    #: Stream lines that were not JSON, and the first of them. stream-json
+    #: writes JSON only, so any such line is output the parser lost.
+    undecodable_lines: int = 0
+    first_undecodable: str = ""
 
     @property
     def timed_out(self) -> bool:
         return bool(self.timeout_kind)
+
+    def stream_problems(self) -> str:
+        """The pipe and parse failures, in one line, or "" when there were none."""
+        problems = list(self.pump_errors)
+        if self.undecodable_lines:
+            problems.append(
+                f"{self.undecodable_lines} stream line(s) were not JSON "
+                f"(first: {self.first_undecodable[:120]!r})"
+            )
+        return "; ".join(problems)
 
     def result_payload(self) -> str:
         """The bytes the existing parser expects.
@@ -484,9 +521,12 @@ def _stream_with_idle_timeout(
             if proc.stdin:
                 proc.stdin.write(content)
                 proc.stdin.close()
-        except (OSError, ValueError):
-            # Child died before consuming stdin; the watchdog reports why.
-            pass
+        except (OSError, ValueError) as exc:
+            # #3780: the child did not receive the whole prompt, so whatever it
+            # answered was an answer to something else.
+            outcome.pump_errors.append(
+                f"the prompt could not be written to stdin: {type(exc).__name__}: {exc}"
+            )
 
     def _pump_stdout() -> None:
         try:
@@ -503,19 +543,27 @@ def _stream_with_idle_timeout(
                 try:
                     event = json.loads(stripped)
                 except json.JSONDecodeError:
+                    # #3780: counted and named, not passed over.
+                    outcome.undecodable_lines += 1
+                    if not outcome.first_undecodable:
+                        outcome.first_undecodable = stripped
                     continue
                 if isinstance(event, dict) and event.get("type") == _DELTA_EVENT_TYPE:
                     continue
                 outcome.events.append(event)
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            outcome.pump_errors.append(
+                f"stdout could not be read to the end: {type(exc).__name__}: {exc}"
+            )
 
     def _pump_stderr() -> None:
         try:
             if proc.stderr:
                 outcome.stderr = proc.stderr.read() or ""
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            outcome.pump_errors.append(
+                f"stderr could not be read: {type(exc).__name__}: {exc}"
+            )
 
     threads = [
         threading.Thread(target=_pump_stdin, daemon=True),
@@ -549,8 +597,14 @@ def _stream_with_idle_timeout(
 
     # Let the readers drain what is already buffered. They are daemons on
     # pipes that are closing, so a bounded join cannot hang the caller.
-    for thread in threads:
-        thread.join(timeout=5)
+    for name, thread in zip(("stdin", "stdout", "stderr"), threads):
+        thread.join(timeout=_PUMP_JOIN_SECONDS)
+        if thread.is_alive():
+            # #3780: a reader still running has not delivered all it will.
+            outcome.pump_errors.append(
+                f"the {name} pump was still running {_PUMP_JOIN_SECONDS} s after "
+                "the process ended, so its output may be incomplete"
+            )
 
     if outcome.returncode is None:
         outcome.returncode = proc.poll()
@@ -717,11 +771,13 @@ class ClaudeCLIProvider(LLMProvider):
         able to indict that transport, so it cannot depend on it. A trivial
         prompt answers in seconds, which is the one case where wall-clock is
         the right instrument.
+
+        #3780: False means the provider was asked and did not answer. A probe
+        that could not be sent raises with its cause instead, and
+        ``provider_storm.diagnose`` reports that to the operator: "the CLI is
+        missing" and "the provider is down" call for different next actions.
         """
-        try:
-            cli_path = self._find_cli()
-        except RuntimeError:
-            return False
+        cli_path = self._find_cli()  # RuntimeError, naming the missing CLI
 
         cmd = [
             cli_path,
@@ -754,8 +810,10 @@ class ClaudeCLIProvider(LLMProvider):
                 start_new_session=sys.platform != "win32",
                 env=env,
             )
-        except OSError:
-            return False
+        except OSError as exc:
+            raise RuntimeError(
+                f"the probe could not start {cli_path}: {type(exc).__name__}: {exc}"
+            ) from exc
 
         try:
             stdout, _ = proc.communicate(
@@ -766,11 +824,18 @@ class ClaudeCLIProvider(LLMProvider):
             _kill_process_tree(proc.pid)
             try:
                 proc.communicate(timeout=5)
-            except (subprocess.TimeoutExpired, OSError):
-                pass
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                # #3780: the timed-out probe is the answer (False); a probe
+                # that will not drain after its kill is a separate failure.
+                _loud_error(
+                    f"the storm probe's process (pid {proc.pid}) did not exit 5 s "
+                    f"after it was killed: {type(exc).__name__}: {exc}"
+                )
             return False
-        except OSError:
-            return False
+        except OSError as exc:
+            raise RuntimeError(
+                f"the probe could not talk to {cli_path}: {type(exc).__name__}: {exc}"
+            ) from exc
 
         return proc.returncode == 0 and bool(stdout and stdout.strip())
 
@@ -824,7 +889,7 @@ class ClaudeCLIProvider(LLMProvider):
         try:
             cli_path = self._find_cli()
         except RuntimeError as e:
-            return LLMCallResult(
+            call_result = LLMCallResult(
                 success=False,
                 response=None,
                 raw_response=None,
@@ -833,7 +898,10 @@ class ClaudeCLIProvider(LLMProvider):
                 model_used=self._model,
                 duration_ms=0,
                 attempts=0,
+                retryable=False,
             )
+            log_llm_call(call_result)  # #3780: loud, like every other failure
+            return call_result
 
         # Build command - prompt passed via stdin
         # #2405: stream-json instead of json, so the transport can see progress
@@ -982,6 +1050,8 @@ class ClaudeCLIProvider(LLMProvider):
                         consecutive = provider_storm.record_timeout(idle_limit)
                         if provider_storm.is_storm():
                             message = self._classify_storm(message, consecutive)
+                    if outcome.stream_problems():
+                        message = f"{message}; and {outcome.stream_problems()}"
                     # #2423: the transport is the only place that KNOWS which
                     # wall was hit, so it says so structurally rather than
                     # leaving every retry gate to re-derive it from prose. A
@@ -1026,7 +1096,7 @@ class ClaudeCLIProvider(LLMProvider):
                         from assemblyzero.core.capacity import record_exhaustion
 
                         recorded = record_exhaustion("claude", error_msg)
-                        print(f"    [CAPACITY] {recorded.wait_summary()}")
+                        _loud_error(f"[CAPACITY] {recorded.wait_summary()}")
 
                     call_result = LLMCallResult(
                         success=False,
@@ -1045,6 +1115,16 @@ class ClaudeCLIProvider(LLMProvider):
                     log_llm_call(call_result)
                     return call_result
 
+                # #3780: a process that exited 0 but whose prompt was not fully
+                # written, or whose stream was not fully read, did not answer
+                # the question it was asked.
+                if outcome.stream_problems():
+                    return self._failed(
+                        f"claude -p exited 0 but its stream cannot be trusted: "
+                        f"{outcome.stream_problems()}",
+                        stdout, duration_ms,
+                    )
+
                 # Parse JSON response â€” extract usage stats (Issue #398)
                 input_tokens = 0
                 output_tokens = 0
@@ -1061,11 +1141,7 @@ class ClaudeCLIProvider(LLMProvider):
                     # #1431: Defensive — claude -p sometimes returns a top-level
                     # JSON array (rare; observed under certain --json-schema /
                     # error conditions). Calling .get() on a list raises
-                    # AttributeError that the bare-except below swallows with a
-                    # cryptic "'list' object has no attribute 'get'" message.
-                    # Treat any non-dict shape as "use raw stdout" so the call
-                    # still completes with a useful response and the raw bytes
-                    # are preserved for debugging.
+                    # AttributeError, so the shape is checked first.
                     if isinstance(response_data, list):
                         # #1767: the streaming-events array IS the current
                         # CLI's normal `--output-format json` shape (#1498) —
@@ -1080,16 +1156,15 @@ class ClaudeCLIProvider(LLMProvider):
                             response_data, stdout
                         )
                     elif not isinstance(response_data, dict):
-                        # Genuinely unexpected shape (neither dict nor list) —
-                        # this one deserves the warning. #1431.
-                        logger.warning(
-                            "claude -p returned unexpected JSON shape "
-                            "(type=%s); attempting stream extraction. "
-                            "stdout[:500]=%r",
-                            type(response_data).__name__, stdout[:500]
-                        )
-                        response_text = _extract_text_from_stream_events(
-                            response_data, stdout
+                        # #3780: neither the result object nor the event list.
+                        # This used to be read as a success holding the raw
+                        # stdout, so a JSON number or string reached the
+                        # caller as the model's answer.
+                        return self._failed(
+                            f"claude -p returned JSON of type "
+                            f"{type(response_data).__name__}, not a result "
+                            f"object or an event list: {stdout[:300]!r}",
+                            stdout, duration_ms,
                         )
                     else:
                         # Issue #779: When --json-schema is used, claude -p puts the
@@ -1110,9 +1185,21 @@ class ClaudeCLIProvider(LLMProvider):
                         cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
                         cost_usd = response_data.get("total_cost_usd", 0.0)
 
-                except json.JSONDecodeError:
-                    # Fall back to raw stdout if not valid JSON
-                    response_text = stdout.strip()
+                except json.JSONDecodeError as exc:
+                    # #3780: this used to hand the raw stdout back as a
+                    # successful answer. stream-json output that is not JSON
+                    # is not an answer.
+                    return self._failed(
+                        f"claude -p output was not JSON ({exc}): {stdout[:300]!r}",
+                        stdout, duration_ms,
+                    )
+
+                if not response_text:
+                    # #3780: an empty result, or an event list with no result
+                    # and no assistant text, used to be a success with "".
+                    return self._failed(
+                        "claude -p exited 0 with no result text", stdout, duration_ms,
+                    )
 
                 # Issue #527: Strip emojis from response (preserve raw_response)
                 response_text = strip_emoji(response_text)
@@ -1143,19 +1230,34 @@ class ClaudeCLIProvider(LLMProvider):
                 return call_result
 
         except Exception as e:
-            duration_ms = int((time.time() - start_time) * 1000)
-            call_result = LLMCallResult(
-                success=False,
-                response=None,
-                raw_response=None,
-                error_message=str(e),
-                provider=self.provider_name,
-                model_used=self._model,
-                duration_ms=duration_ms,
-                attempts=1,
+            # #3780: a transport failure (the process could not be started or
+            # its pipes failed) is a failed call, the provider's contract. Any
+            # other exception is a fault in this code or its configuration,
+            # and it is raised: reading it as a failed call made a bug look
+            # like weather, and a retry paid for it again.
+            if not isinstance(e, (OSError, subprocess.SubprocessError)):
+                raise
+            return self._failed(
+                f"claude -p could not be run: {type(e).__name__}: {e}",
+                None, int((time.time() - start_time) * 1000),
             )
-            log_llm_call(call_result)
-            return call_result
+
+    def _failed(self, message: str, raw: str | None, duration_ms: int) -> LLMCallResult:
+        """A failed call, logged (and so loud), returned to the caller (#3780)."""
+        call_result = LLMCallResult(
+            success=False,
+            response=None,
+            raw_response=raw,
+            error_message=message,
+            provider=self.provider_name,
+            model_used=self._model,
+            duration_ms=duration_ms,
+            attempts=1,
+            retryable=False,
+            failure_class=retry_gate.classify_failure(message, retryable=False),
+        )
+        log_llm_call(call_result)
+        return call_result
 
 
 class AnthropicProvider(LLMProvider):
@@ -1243,10 +1345,16 @@ class AnthropicProvider(LLMProvider):
 
         Cache read tokens are charged at 10% of input price.
         Cache creation tokens are charged at 125% of input price.
+
+        #3780: an unpriced model raises. Returning 0.0 let every call on it
+        pass the cost budget for free; ``invoke`` refuses such a model before
+        it spends anything, so this is the backstop.
         """
         pricing = self._PRICING.get(self._model_id)
         if not pricing:
-            return 0.0
+            raise ValueError(
+                f"no price for {self._model_id}; its cost cannot be counted against --budget"
+            )
         input_price, output_price = pricing
         cost = (input_tokens * input_price / 1_000_000) + (
             output_tokens * output_price / 1_000_000
@@ -1282,6 +1390,26 @@ class AnthropicProvider(LLMProvider):
         locked = _spend_locked_result(self.provider_name, self._model)
         if locked is not None:
             return locked
+        if self._model_id not in self._PRICING:
+            # #3780: a paid call whose cost cannot be counted is refused before
+            # it is made. It used to be priced at $0.00, so --budget never saw it.
+            call_result = LLMCallResult(
+                success=False,
+                response=None,
+                raw_response=None,
+                error_message=(
+                    f"refused: no price for {self._model_id}, so its cost cannot be "
+                    f"counted against --budget. Priced models: {sorted(self._PRICING)}"
+                ),
+                provider=self.provider_name,
+                model_used=self._model,
+                duration_ms=0,
+                attempts=0,
+                retryable=False,
+                failure_class="permanent",
+            )
+            log_llm_call(call_result)
+            return call_result
         start_time = time.time()
 
         try:
@@ -1391,19 +1519,17 @@ class AnthropicProvider(LLMProvider):
 
             # Issue #542/#546: Classify through the typed error hierarchy
             # and propagate status_code, retry_after, retryable to LLMCallResult
-            if isinstance(e, (anthropic.APIError, anthropic.APITimeoutError)):
-                classified = classify_anthropic_error(e)
-                rate_limited = isinstance(classified, RateLimitError)
-                error_msg = str(classified)
-                status_code = classified.status_code
-                retry_after = classified.retry_after
-                retryable = classified.retryable
-            else:
-                rate_limited = False
-                error_msg = f"Anthropic API error: {e}"
-                status_code = None
-                retry_after = None
-                retryable = False
+            if not isinstance(e, (anthropic.APIError, anthropic.APITimeoutError)):
+                # #3780: only the API's own errors are a failed call. Anything
+                # else is a fault in this code, raised rather than reported as
+                # "Anthropic API error" and handed to the retry loop.
+                raise
+            classified = classify_anthropic_error(e)
+            rate_limited = isinstance(classified, RateLimitError)
+            error_msg = str(classified)
+            status_code = classified.status_code
+            retry_after = classified.retry_after
+            retryable = classified.retryable
 
             call_result = LLMCallResult(
                 success=False,
@@ -1558,8 +1684,7 @@ class FallbackProvider(LLMProvider):
                 f"[CIRCUIT BREAKER] {n} consecutive failures. "
                 f"Use --resume after API recovers."
             )
-            print(f"    {msg}")
-            return LLMCallResult(
+            call_result = LLMCallResult(
                 success=False,
                 response=None,
                 raw_response=None,
@@ -1568,7 +1693,10 @@ class FallbackProvider(LLMProvider):
                 model_used=self.model,
                 duration_ms=0,
                 attempts=0,
+                retryable=False,
             )
+            log_llm_call(call_result)  # #3780: loud, where it was a print
+            return call_result
 
         # Issue #539: Skip CLI for large prompts â€” they always time out.
         # LLD/spec prompts are 100K+ chars; the CLI subprocess overhead
@@ -1591,11 +1719,13 @@ class FallbackProvider(LLMProvider):
                 self._answered = self._primary
                 return result
 
-            # Primary failed â€” try fallback with full timeout
-            print(
-                f"    [LLM] {self._primary.provider_name} failed "
-                f"({result.error_message[:80] if result.error_message else 'unknown'}), "
-                f"falling back to {self._fallback.provider_name}..."
+            # Primary failed â€” try fallback with full timeout. #3780: the
+            # primary's failure is loud (its own log_llm_call); this line
+            # says, at the same level, that a paid fallback is now spending.
+            _loud_error(
+                f"{self._primary.provider_name} failed "
+                f"({result.error_message[:200] if result.error_message else 'no error message'}); "
+                f"falling back to {self._fallback.provider_name}"
             )
         fallback_result = self._fallback.invoke(
             system_prompt, content, timeout_seconds,
@@ -1608,15 +1738,16 @@ class FallbackProvider(LLMProvider):
             # Issue #516: Non-retryable errors trip breaker immediately
             if is_non_retryable_error(fallback_result.error_message):
                 _circuit_breaker_registry[self._breaker_key] = _CIRCUIT_BREAKER_MAX
-                print(
-                    f"    [CIRCUIT BREAKER] Non-retryable error detected: "
-                    f"{fallback_result.error_message[:100]}"
+                _loud_error(
+                    f"[CIRCUIT BREAKER] tripped by a non-retryable error: "
+                    f"{fallback_result.error_message[:200]}"
                 )
             else:
                 current = _circuit_breaker_registry.get(self._breaker_key, 0)
                 _circuit_breaker_registry[self._breaker_key] = current + 1
-                print(
-                    f"    [CIRCUIT] {current + 1}/"
+                _loud_error(
+                    f"[CIRCUIT] both {self._primary.provider_name} and "
+                    f"{self._fallback.provider_name} failed: {current + 1}/"
                     f"{_CIRCUIT_BREAKER_MAX} consecutive failures"
                 )
         return fallback_result
@@ -1722,11 +1853,12 @@ class GeminiProvider(LLMProvider):
                 response_schema=response_schema,
             )
 
-            # Issue #399: detect 429 from error type
-            was_rate_limited = (
-                result.error_type is not None
-                and str(result.error_type) == "GeminiErrorType.QUOTA_EXHAUSTED"
-            ) if hasattr(result, "error_type") else False
+            # Issue #399: detect 429 from error type. #3780: read directly;
+            # GeminiCallResult always carries error_type, and a hasattr guard
+            # would read a changed contract as "not rate-limited".
+            from assemblyzero.core.gemini_client import GeminiErrorType
+
+            was_rate_limited = result.error_type == GeminiErrorType.QUOTA_EXHAUSTED
 
             # Issue #527: Strip emojis from response (preserve raw_response)
             sanitized_response = strip_emoji(result.response) if result.response else result.response
@@ -1755,9 +1887,14 @@ class GeminiProvider(LLMProvider):
 
         except Exception as e:
             # Issue #546: Classify through the typed error hierarchy
-            from assemblyzero.core.errors import classify_agy_error
+            from assemblyzero.core.errors import APIError, classify_agy_error
 
             classified = classify_agy_error(e)
+            if type(classified) is APIError:
+                # #3780: nothing agy reports (no rate limit, capacity, auth or
+                # timeout text): a fault in this code or its configuration,
+                # raised rather than handed back as a failed call to retry.
+                raise
             is_rate_limit = isinstance(classified, RateLimitError)
             if is_rate_limit:
                 # #2476: name the transport. This prints when something has
@@ -1993,25 +2130,23 @@ def _recorded(
     `get_provider` returns exactly what it always returned, which is what keeps
     the scripted-provider identity contract intact.
     """
-    try:
-        from assemblyzero.core.call_recording import (
-            RecordingProvider,
-            recording_is_armed,
+    # #3780 (ADR 0236): no handler. The old one ran the roll on the bare
+    # transport when the recorder could not be set up, so the run's model
+    # record and its replay inputs were missing with nothing said; the replay
+    # discovered it later, if anyone ran one. A recorder that cannot be built
+    # is a failure, and it stops the stage that asked for the transport.
+    from assemblyzero.core.call_recording import (
+        RecordingProvider,
+        recording_is_armed,
+    )
+    from assemblyzero.core.model_record import model_record_is_armed
+
+    if recording_is_armed() or model_record_is_armed():
+        from assemblyzero.core.seats import last_resolved_seat
+
+        return RecordingProvider(
+            provider, spec=spec, effort=effort, seat=last_resolved_seat(spec),
         )
-        from assemblyzero.core.model_record import model_record_is_armed
-
-        if recording_is_armed() or model_record_is_armed():
-            from assemblyzero.core.seats import last_resolved_seat
-
-            return RecordingProvider(
-                provider, spec=spec, effort=effort, seat=last_resolved_seat(spec),
-            )
-    except Exception:  # noqa: BLE001 - a recording never costs a roll
-        # fail-open: if the recorder cannot be reached, the run proceeds on the
-        # bare transport. A missing recording is reported by the replay, which
-        # says it fell back to reconstruction; a roll that dies because it could
-        # not set up a diagnostic is unrecoverable.
-        pass
     return provider
 
 

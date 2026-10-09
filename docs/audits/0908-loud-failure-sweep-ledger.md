@@ -483,38 +483,38 @@ A file is marked read only after every line of it has been read. Each finding is
 
 | Site | What fails | What the code does now | Violates | Fix |
 |---|---|---|---|---|
-| `assemblyzero/core/llm_provider.py:291` | .env read | None | loud, logged, alerts | raise |
-| `assemblyzero/core/llm_provider.py:412` | idle timeout not int | default | loud, stops, alerts | raise |
-| `assemblyzero/core/llm_provider.py:418` | idle timeout <=0 | default | loud, stops, alerts | raise |
-| `assemblyzero/core/llm_provider.py:487` | stdin write | pass | all | record |
-| `assemblyzero/core/llm_provider.py:505` | bad stream line | continue | loud, logged, stops | count |
-| `assemblyzero/core/llm_provider.py:510` | stdout read | pass | all | record |
-| `assemblyzero/core/llm_provider.py:517` | stderr read | pass | loud, logged | record |
-| `assemblyzero/core/llm_provider.py:553` | reader alive | unchecked | stops, logged | check |
-| `assemblyzero/core/llm_provider.py:723` | probe no cli | False | loud, logged, alerts | raise |
-| `assemblyzero/core/llm_provider.py:757` | probe spawn | False | loud, logged, alerts | raise |
+| `assemblyzero/core/llm_provider.py:291` | .env read | None | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:412` | idle timeout not int | default | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:418` | idle timeout <=0 | default | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:487` | stdin write | pass | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:505` | bad stream line | continue | loud, logged, stops | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:510` | stdout read | pass | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:517` | stderr read | pass | loud, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:553` | reader alive | unchecked | stops, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:723` | probe no cli | False | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:757` | probe spawn | False | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:765` | probe timeout | False | compliant | none |
-| `assemblyzero/core/llm_provider.py:769` | drain | pass | loud, logged | ERROR |
-| `assemblyzero/core/llm_provider.py:772` | communicate | False | loud, logged, alerts | raise |
-| `assemblyzero/core/llm_provider.py:826` | no cli | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:953` | timeout | failed result | loud, alerts | stderr |
-| `assemblyzero/core/llm_provider.py:1016` | nonzero | failed result | loud, alerts | stderr |
-| `assemblyzero/core/llm_provider.py:1029` | capacity | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1085` | odd json | success | loud, stops, alerts | fail |
-| `assemblyzero/core/llm_provider.py:1103` | empty result | success | all | fail |
-| `assemblyzero/core/llm_provider.py:1113` | non-json | success | all | fail |
-| `assemblyzero/core/llm_provider.py:1145` | invoke | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1248` | unpriced | 0.0 | loud, logged | raise |
-| `assemblyzero/core/llm_provider.py:1372` | no key | failed result | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1387` | api exc | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1555` | breaker | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1596` | primary | fallback | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1609` | fallback | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1617` | both | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1729` | contract | False | logged | direct |
-| `assemblyzero/core/llm_provider.py:1756` | gemini invoke | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:2009` | recording wrap | bare | all | raise |
-| `assemblyzero/core/llm_provider.py:2010` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/llm_provider.py:769` | drain | pass | loud, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:772` | communicate | False | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:826` | no cli | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:953` | timeout | failed result | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1016` | nonzero | failed result | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1029` | capacity | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1085` | odd json | success | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1103` | empty result | success | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1113` | non-json | success | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1145` | invoke | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1248` | unpriced | 0.0 | loud, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1372` | no key | failed result | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1387` | api exc | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1555` | breaker | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1596` | primary | fallback | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1609` | fallback | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1617` | both | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1729` | contract | False | logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1756` | gemini invoke | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:2009` | recording wrap | bare | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:2010` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/verdict_schema.py:196` | missing rationale | "" | loud, logged, stops | reject |
 | `assemblyzero/core/verdict_schema.py:199` | parse | None | compliant | none |
 | `assemblyzero/core/verdict_schema.py:208` | missing rationale | "" | loud, logged, stops | reject |
@@ -574,7 +574,7 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/alert.py:170` | delivery | raise | compliant | none |
 | `assemblyzero/core/alert.py:190` | ses | raise | compliant | none |
 | `assemblyzero/core/alert.py:212` | log | raise | compliant | none |
-| `assemblyzero/core/provider_storm.py:147` | probe raises | storm | loud, logged, alerts | ERROR |
+| `assemblyzero/core/provider_storm.py:147` | probe raises | storm | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/stage_watchdog.py:139` | stalled | stdout | loud, alerts | ERROR + alert |
 | `assemblyzero/core/preflight.py:64` | unknown alias | default | logged, stops | raise |
 | `assemblyzero/core/preflight.py:83` | no agy | failed | loud, alerts | ERROR |

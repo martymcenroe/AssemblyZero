@@ -1,3 +1,17 @@
 # Test Report: the core/ package under standard 0034 (#3581 step 5)
 
 Each fixed site has a test that fails before its fix and passes after, measured by stashing the module's source by named path in the worktree. Filled in module by module.
+
+## llm_provider.py and provider_storm.py
+
+**New: `tests/unit/test_llm_provider_loud_failure.py` (40).** Each test is named for its ledger line. One per site, plus a clean-stream test and a real-answer test that pin what is kept.
+
+**Before the fix, measured** with `llm_provider.py` and `provider_storm.py` stashed: 38 failed, 2 passed. The two are `test_a_real_answer_still_succeeds` and `test_1729_the_rate_limit_is_read_from_error_type`, which pin kept behaviour.
+
+**Changed tests, each asserting the new behaviour in place of the retired one:**
+- `test_llm_provider.py::test_cost_calculation_unknown_model`: an unpriced model raises; it returned 0.0.
+- `test_llm_provider.py`: the two raw-stdout fallback tests now expect `""`.
+- `test_llm_idle_timeout.py::test_the_idle_threshold_is_overridable_too`: a bad or non-positive value raises.
+- `test_provider_storm.py::test_non_timeout_errors_do_not_trip_the_storm_counter`: a source-text check, now anchored on the timeout branch (`if outcome.timed_out:`). Its old anchor was the storm probe's `except subprocess.TimeoutExpired`, and the slice reached the real branch only while no `return call_result` sat between them.
+
+**Neighbouring suites:** 266 passed across `test_llm_provider.py`, `test_llm_idle_timeout.py`, `test_one_claude_cli_transport.py`, `test_provider_storm.py`, `test_llm_instrumentation.py`, `test_prompt_caching.py`, `test_nested_claude_env.py`, `test_model_record.py`, `test_seat_attribution.py` and the new file.
