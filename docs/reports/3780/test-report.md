@@ -25,3 +25,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed test:** `test_llm_instrumentation.py::test_missing_usage_metadata` now expects the raise. It is joined by `test_a_named_model_with_no_usage_has_no_counts`, which keeps the absent-counts case.
 
 **Neighbouring suites:** 266 passed across the agy transport, sandbox, call-bound, client, headline, scorecard, call-guard, instrumentation, preflight, scout and structured-output tests.
+
+## verdict_schema.py
+
+**New: `tests/unit/test_verdict_schema_loud_failure.py` (7):** the four fixed sites, a verdict that still parses with its reason, and two `test_716_*` that pin the won't-do (rendered feedback is still compared by its lines).
+
+**Before the fix, measured** with `verdict_schema.py` stashed: the 4 site tests failed and the 3 that pin kept behaviour passed.
+
+**Changed tests**, each asserting the raise in place of "nothing found": `test_finalize_structured_output.py::test_empty_content`, `test_structured_stagnation.py::test_empty_feedback_cannot_be_compared` (renamed from `test_empty_feedback_not_stagnant`), `test_verdict_schema.py::test_empty_text`.
+
+**Neighbouring suites:** 801 passed across every test that imports the module, before the three changes above (the 3 failures were those three tests).

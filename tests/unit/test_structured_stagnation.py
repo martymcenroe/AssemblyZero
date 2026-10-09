@@ -95,10 +95,17 @@ class TestStructuredStagnation:
         ])
         assert same_blocking_issues(current, previous) is False
 
-    def test_empty_feedback_not_stagnant(self):
-        assert same_blocking_issues("", "some feedback") is False
-        assert same_blocking_issues("some feedback", "") is False
-        assert same_blocking_issues("", "") is False
+    def test_empty_feedback_cannot_be_compared(self):
+        """#3802: an empty verdict raises, naming which side is empty. "Not
+        stagnant" sent the drafter round again with no feedback to act on."""
+        import pytest
+
+        with pytest.raises(ValueError, match="the current verdict text is empty"):
+            same_blocking_issues("", "some feedback")
+        with pytest.raises(ValueError, match="the previous verdict text is empty"):
+            same_blocking_issues("some feedback", "")
+        with pytest.raises(ValueError, match="the current and previous verdict"):
+            same_blocking_issues("", "")
 
 
 class TestLineOverlapFallback:

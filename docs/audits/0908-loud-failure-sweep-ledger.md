@@ -515,14 +515,14 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/llm_provider.py:1756` | gemini invoke | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:2009` | recording wrap | bare | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:2010` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/verdict_schema.py:196` | missing rationale | "" | loud, logged, stops | reject |
+| `assemblyzero/core/verdict_schema.py:196` | missing rationale | "" | loud, logged, stops | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
 | `assemblyzero/core/verdict_schema.py:199` | parse | None | compliant | none |
-| `assemblyzero/core/verdict_schema.py:208` | missing rationale | "" | loud, logged, stops | reject |
+| `assemblyzero/core/verdict_schema.py:208` | missing rationale | "" | loud, logged, stops | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
 | `assemblyzero/core/verdict_schema.py:211` | parse | None | compliant | none |
 | `assemblyzero/core/verdict_schema.py:511` | verdict count | None | compliant | none |
-| `assemblyzero/core/verdict_schema.py:651` | empty doc | False | all | raise |
-| `assemblyzero/core/verdict_schema.py:703` | missing verdict | False | logged | raise |
-| `assemblyzero/core/verdict_schema.py:716` | structured parse | heuristic | loud, logged | raise |
+| `assemblyzero/core/verdict_schema.py:651` | empty doc | False | all | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
+| `assemblyzero/core/verdict_schema.py:703` | missing verdict | False | logged | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
+| `assemblyzero/core/verdict_schema.py:716` | structured parse | heuristic | loud, logged | WON'T FIX (#3802): not a failure path. current_verdict holds rendered feedback by design (#506), so the line comparison is the comparison; raising would end stagnation detection. Pinned by test_716_* in test_verdict_schema_loud_failure.py |
 | `assemblyzero/core/gemini_client.py:174` | windows agy | None | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
 | `assemblyzero/core/gemini_client.py:199` | wsl.exe | None cached | loud, logged, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
 | `assemblyzero/core/gemini_client.py:200` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
