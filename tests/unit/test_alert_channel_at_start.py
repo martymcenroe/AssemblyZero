@@ -70,12 +70,19 @@ class TestEveryEntryPointRefuses:
         run.assert_not_called()
         _assert_refused(exc, capsys, operator_alerts, "tools/run_requirements_workflow.py")
 
-    def test_the_implementation_workflow(self, broken_channel, capsys, operator_alerts):
+    def test_the_implementation_workflow(
+        self, broken_channel, capsys, operator_alerts, tmp_path,
+    ):
+        """`--repo` is a temporary directory (#4161): if the check ever stops
+        refusing, the run it lets through cannot write into a real checkout,
+        as it did into the worktree the first time this test was measured."""
         tool = importlib.import_module("tools.run_implement_from_lld")
-        argv = ["prog", "--issue", "42", "--mock", "--auto"]
+        argv = ["prog", "--issue", "42", "--mock", "--auto", "--repo", str(tmp_path)]
         with patch("sys.argv", argv), \
-             patch("assemblyzero.workflows.testing.build_testing_workflow") as build, \
-             patch("assemblyzero.core.resume_contract.check_and_consume") as consume, \
+             patch("assemblyzero.workflows.testing.build_testing_workflow",
+                   side_effect=AssertionError("ran past the start-up check")) as build, \
+             patch("assemblyzero.core.resume_contract.check_and_consume",
+                   side_effect=AssertionError("ran past the start-up check")) as consume, \
              pytest.raises(SystemExit) as exc:
             tool.main()
         build.assert_not_called()
