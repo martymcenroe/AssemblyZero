@@ -607,11 +607,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/fail_open_audit.py:699` | read/parse | files_unparseable, [] | all | raise |
 | `assemblyzero/core/fail_open_audit.py:700` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/fail_open_audit.py:739` | missing subdir | continue | all | raise |
-| `assemblyzero/core/validation/test_plan_validator.py:136` | section 3 missing | WARNING, [] | loud, logged | ERROR |
-| `assemblyzero/core/validation/test_plan_validator.py:225` | section 10 missing | WARNING, [] | loud, logged | ERROR + violation |
-| `assemblyzero/core/validation/test_plan_validator.py:237` | no table | zero scenarios | loud, logged | ERROR |
-| `assemblyzero/core/validation/test_plan_validator.py:248` | malformed row | dropped | loud, logged, stops | violation |
-| `assemblyzero/core/validation/test_plan_validator.py:262` | bad id | dropped | loud, logged, stops | violation |
+| `assemblyzero/core/validation/test_plan_validator.py:136` | section 3 missing | WARNING, [] | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:225` | section 10 missing | WARNING, [] | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:237` | no table | zero scenarios | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:248` | malformed row | dropped | loud, logged, stops | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:262` | bad id | dropped | loud, logged, stops | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
 | `assemblyzero/core/interface_surface.py:107` | parse target | first 50 lines | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/interface_surface.py:267` | walk | WARNING, [] | loud, stops, alerts | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/interface_surface.py:295` | out-of-repo token | skip | compliant | none |

@@ -250,6 +250,23 @@ def no_az_environment_from_the_machine(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def call_recording_disarmed():
+    """No test inherits an armed call recorder (#4163).
+
+    ``call_recording`` keeps the current node and its ``audit_dir`` in a
+    module global. A test that ran a graph with a relative ``audit_dir`` left
+    it armed, and every later model call in the process was recorded into
+    ``audit/calls.jsonl`` under pytest's working directory, which is the
+    checkout. Reset before and after every test, in every tier.
+    """
+    from assemblyzero.core import call_recording
+
+    call_recording.reset_context()
+    yield
+    call_recording.reset_context()
+
+
 STAND_IN_SENDER = "tests@example.invalid"
 
 

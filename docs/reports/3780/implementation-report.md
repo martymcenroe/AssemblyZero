@@ -96,3 +96,18 @@ The module grounds the LLD drafter in the target's real signatures. Its document
 - **Callers.** Both live in the requirements package. `analyze_codebase` and `generate_draft` still wrap the call in a broad handler that logs and continues (their own ledger rows), so runs are unchanged until the requirements batch routes those to HALT. The implementation-spec stage calls `summarize_python_file` on the base branch's non-test files; one that does not parse now stops that stage, where its head used to be shown as its API.
 
 Baseline: both entry points' handlers leave. The fail-open audit lost 12 findings.
+
+### validation/test_plan_validator.py (#3801, 5 sites)
+
+The test plan used to shrink without a word.
+
+- **A missing Section 3 is loud** (136). The empty list stays its contract, since the coverage check turns it into "No requirements found in Section 3", but its cause was a WARNING.
+- **A missing Section 10, or one with no scenario rows, is loud and an error** (225, 237). A Section 10 heading that holds no table at all used to be reported as missing; it now says what it is.
+- **No row drops out of a scenario table** (248, 262). Inside a table whose header starts `ID`, `Test ID` or `#`, a row with too few cells or an ID that is neither a number nor a T-number is recorded. `extract_test_scenarios` takes an optional `problems` list; `validate_test_plan` passes one and makes each entry a `parse` error violation, so the plan fails. Other tables in Section 10 (coverage targets and the like) are not scenarios, are not read as such, and raise nothing.
+
+## Also carried: #4163, a committed test artifact the tiers kept appending to
+
+`audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:
+
+- `tests/conftest.py`'s `call_recording_disarmed` resets the recorder before and after every test, in every tier.
+- The artifact is removed, and `/audit/` is ignored.

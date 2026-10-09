@@ -61,3 +61,17 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** `test_interface_surface.py::test_syntax_error_raises` (was `test_syntax_error_falls_back_to_head`) and `test_missing_repo_raises` (was `test_missing_repo_yields_empty_map`).
 
 **Neighbouring suites:** 232 passed across `test_interface_surface.py` and `test_implementation_spec_workflow.py` before those two changes, which were the 2 failures.
+
+## validation/test_plan_validator.py
+
+**New: `tests/unit/test_test_plan_validator_loud_failure.py` (7)**: the five sites, plus `test_another_table_in_section_10_is_not_read_as_scenarios` and `test_a_clean_plan_has_no_parse_errors_and_passes`, which pin that only scenario tables are read.
+
+**Before the fix, measured** with the validator stashed: 5 failed, 2 passed (the two that pin kept behaviour).
+
+**Neighbouring suites:** 540 passed, 1 skipped, across every test that imports the validator, the integration parsing chain included.
+
+## #4163: the call recorder between tests
+
+**New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.
+
+**Before the fix, measured** with the conftest change stashed: `test_2_the_next_test_finds_it_disarmed` failed, which is the leak shown.
