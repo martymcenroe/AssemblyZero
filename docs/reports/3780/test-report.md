@@ -15,3 +15,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 - `test_provider_storm.py::test_non_timeout_errors_do_not_trip_the_storm_counter`: a source-text check, now anchored on the timeout branch (`if outcome.timed_out:`). Its old anchor was the storm probe's `except subprocess.TimeoutExpired`, and the slice reached the real branch only while no `return call_result` sat between them.
 
 **Neighbouring suites:** 266 passed across `test_llm_provider.py`, `test_llm_idle_timeout.py`, `test_one_claude_cli_transport.py`, `test_provider_storm.py`, `test_llm_instrumentation.py`, `test_prompt_caching.py`, `test_nested_claude_env.py`, `test_model_record.py`, `test_seat_attribution.py` and the new file.
+
+## gemini_client.py
+
+**New: `tests/unit/test_gemini_client_loud_failure.py` (12)**, each named for its ledger line, plus `test_a_good_answer_is_quiet`.
+
+**Before the fix, measured** with `gemini_client.py` stashed: 11 failed, 1 passed (`test_a_good_answer_is_quiet`, which pins kept behaviour).
+
+**Changed test:** `test_llm_instrumentation.py::test_missing_usage_metadata` now expects the raise. It is joined by `test_a_named_model_with_no_usage_has_no_counts`, which keeps the absent-counts case.
+
+**Neighbouring suites:** 266 passed across the agy transport, sandbox, call-bound, client, headline, scorecard, call-guard, instrumentation, preflight, scout and structured-output tests.

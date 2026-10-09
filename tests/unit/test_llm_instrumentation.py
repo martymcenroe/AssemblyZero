@@ -355,10 +355,17 @@ class TestGeminiParser:
         assert result["output_tokens"] == 680
 
     def test_missing_usage_metadata(self):
+        """#3777: no modelVersion raises; it was recorded as "gemini-unknown"."""
         from assemblyzero.core.gemini_client import _parse_usage_from_gemini_response
 
-        result = _parse_usage_from_gemini_response({})
-        assert result["model_used"] == "gemini-unknown"
+        with pytest.raises(ValueError, match="names no modelVersion"):
+            _parse_usage_from_gemini_response({})
+
+    def test_a_named_model_with_no_usage_has_no_counts(self):
+        from assemblyzero.core.gemini_client import _parse_usage_from_gemini_response
+
+        result = _parse_usage_from_gemini_response({"modelVersion": "gemini-3.1-pro-high"})
+        assert result["model_used"] == "gemini-3.1-pro-high"
         assert result.get("input_tokens") is None
 
 

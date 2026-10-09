@@ -52,6 +52,17 @@ from assemblyzero.core.errors import (
 
 from assemblyzero.telemetry.llm_call_record import LLMOutputMetadata
 
+import logging
+import sys
+
+logger = logging.getLogger(__name__)
+
+
+def _loud(message: str) -> None:
+    """An ERROR line on stderr, and the log (ADR 0236 property 1, #3777)."""
+    logger.error("[agy] %s", message)
+    print(f"ERROR [agy] {message}", file=sys.stderr, flush=True)
+
 
 # =============================================================================
 # Error Classification
@@ -172,6 +183,13 @@ def _find_linux_agy() -> Optional[str]:
         return str(local)
     found = shutil.which("agy")
     if found and found.startswith("/mnt/"):
+        # #3777: refused, and said so. "Not found" alone sent the operator
+        # looking for an install that was there, in the wrong place.
+        _loud(
+            f"the only agy on PATH is {found}, a Windows build reached through "
+            "WSL interop, which runs outside the shell guard; it is not used. "
+            "Install agy in Ubuntu (~/.local/bin/agy)."
+        )
         return None
     return found
 
@@ -190,26 +208,35 @@ def _find_wsl_agy() -> Optional[str]:
     if not wsl:
         return None
 
-    def run(*argv: str) -> Optional[subprocess.CompletedProcess]:
+    def run(*argv: str) -> subprocess.CompletedProcess:
+        # #3777: a wsl.exe that cannot run raises. It used to be None, read as
+        # "agy not found", and the lru_cache kept that answer for the life of
+        # the process; an exception is not cached, so the next ask tries again.
         try:
             return subprocess.run(
                 [wsl, "--exec", *argv], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=30,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            # fail-open: None becomes "agy not found", which the preflight and
-            # every invoke report as a failed call; no answer is invented.
-            return None
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                f"could not run `{wsl} --exec {' '.join(argv)}` to find agy in WSL: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
     found = run("which", "agy")
-    if found and found.returncode == 0 and found.stdout.strip().startswith("/"):
+    if found.returncode == 0 and found.stdout.strip().startswith("/"):
         return found.stdout.strip().splitlines()[0]
     home = run("printenv", "HOME")
-    if not (home and home.returncode == 0 and home.stdout.strip().startswith("/")):
+    if not (home.returncode == 0 and home.stdout.strip().startswith("/")):
+        _loud(
+            f"WSL's HOME could not be read (exit {home.returncode}: "
+            f"{(home.stderr or home.stdout).strip()[:200]!r}), so ~/.local/bin/agy "
+            "was not looked for; agy is reported not found"
+        )
         return None
     candidate = home.stdout.strip() + "/.local/bin/agy"
     probe = run("test", "-x", candidate)
-    if probe and probe.returncode == 0:
+    if probe.returncode == 0:
         return candidate
     return None
 
@@ -511,8 +538,13 @@ class GeminiClient:
                     kill_process_tree(proc.pid)
                     try:
                         proc.communicate(timeout=10)
-                    except (subprocess.TimeoutExpired, OSError, ValueError):
-                        pass
+                    except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
+                        # #3777: the timeout is the answer; a killed process
+                        # that will not drain is its own failure, said aloud.
+                        _loud(
+                            f"agy (pid {proc.pid}) did not exit 10 s after it was "
+                            f"killed for timing out: {type(exc).__name__}: {exc}"
+                        )
                     return False, "", (
                         f"agy CLI timeout ({timeout_seconds:.0f}s, stdin path)"
                     )
@@ -564,6 +596,26 @@ class GeminiClient:
         budget_exhausted = False
         last_error_type: GeminiErrorType | None = None
 
+        if not self._agy_cli:
+            # #3777: a missing agy fails at once. It was a failed attempt the
+            # loop retried with backoff until the call budget ran out, and no
+            # wait installs a CLI.
+            message = (
+                f"{TRANSPORT_LABEL} not found: no agy for this machine "
+                "(Ubuntu: ~/.local/bin/agy; Windows: agy inside WSL)"
+            )
+            _loud(f"model {self.model}: {message}")
+            return GeminiCallResult(
+                success=False,
+                response=None,
+                raw_response=None,
+                error_type=GeminiErrorType.UNKNOWN,
+                error_message=message,
+                attempts=0,
+                duration_ms=int((time.time() - start_time) * 1000),
+                model_verified="",
+            )
+
         for attempt in range(1, MAX_RETRIES_PER_CREDENTIAL + 1):
             remaining = self._remaining_budget(start_time)
             if remaining < MIN_ATTEMPT_SECONDS:
@@ -574,100 +626,100 @@ class GeminiClient:
 
             total_attempts += 1
 
-            try:
-                success, response_text, error_msg = self._invoke_via_cli(
-                    system_instruction,
-                    content,
-                    timeout_seconds=min(AGY_CALL_TIMEOUT_SECONDS, remaining),
+            # #3777: no handler around the call. `_invoke_via_cli` reports
+            # every transport failure as (False, "", reason); the old loop
+            # raised that reason only to catch it with `except Exception`,
+            # which also caught programming errors and handed them back as a
+            # failed call. Now an exception here is a fault and propagates.
+            success, response_text, error_str = self._invoke_via_cli(
+                system_instruction,
+                content,
+                timeout_seconds=min(AGY_CALL_TIMEOUT_SECONDS, remaining),
+            )
+            if success:
+                duration_ms = int((time.time() - start_time) * 1000)
+                return GeminiCallResult(
+                    success=True,
+                    response=strip_emoji(response_text),
+                    raw_response=response_text,
+                    error_type=None,
+                    error_message=None,
+                    attempts=total_attempts,
+                    duration_ms=duration_ms,
+                    model_verified=self.model,
                 )
-                if success:
-                    duration_ms = int((time.time() - start_time) * 1000)
-                    return GeminiCallResult(
-                        success=True,
-                        response=strip_emoji(response_text),
-                        raw_response=response_text,
-                        error_type=None,
-                        error_message=None,
-                        attempts=total_attempts,
-                        duration_ms=duration_ms,
-                        model_verified=self.model,
-                    )
-                else:
-                    raise RuntimeError(error_msg)
 
-            except Exception as e:
-                error_str = str(e)
+            classified = classify_agy_error(RuntimeError(error_str))
+            error_type = self._error_type_from_classified(classified)
 
-                if isinstance(e, (TypeError, AttributeError, NameError, ImportError)):
-                    msg = f"{type(e).__name__}: {error_str}"
-                    return GeminiCallResult(
-                        success=False,
-                        response=None,
-                        raw_response=None,
-                        error_type=GeminiErrorType.UNKNOWN,
-                        error_message=f"Programming error (not retried): {msg}",
-                        attempts=total_attempts,
-                        duration_ms=int((time.time() - start_time) * 1000),
-                        model_verified="",
-                    )
+            if error_type == GeminiErrorType.UNKNOWN and "timed out" in error_str.lower():
+                error_type = GeminiErrorType.CAPACITY_EXHAUSTED
 
-                classified = classify_agy_error(e)
-                status_code = classified.status_code
-                error_type = self._error_type_from_classified(classified)
+            # #3777: every failed attempt is loud with its cause, retried or not.
+            _loud(
+                f"model {self.model}: attempt {total_attempts} failed "
+                f"({error_type.name}): {error_str[:400]}"
+            )
 
-                if error_type == GeminiErrorType.UNKNOWN and "timed out" in error_str.lower():
-                    error_type = GeminiErrorType.CAPACITY_EXHAUSTED
-                    last_error_type = error_type
+            if "did not run as" in error_str:
+                return GeminiCallResult(
+                    success=False,
+                    response=None,
+                    raw_response=None,
+                    error_type=GeminiErrorType.UNKNOWN,
+                    error_message=error_str,
+                    attempts=total_attempts,
+                    duration_ms=int((time.time() - start_time) * 1000),
+                    model_verified="",
+                )
 
-                if "did not run as" in error_str:
-                    return GeminiCallResult(
-                        success=False,
-                        response=None,
-                        raw_response=None,
-                        error_type=GeminiErrorType.UNKNOWN,
-                        error_message=error_str,
-                        attempts=total_attempts,
-                        duration_ms=int((time.time() - start_time) * 1000),
-                        model_verified="",
-                    )
+            last_error_type = error_type
 
-                last_error_type = error_type
+            if error_type in (GeminiErrorType.AUTH_ERROR, GeminiErrorType.MODEL_MISMATCH):
+                return GeminiCallResult(
+                    success=False,
+                    response=None,
+                    raw_response=None,
+                    error_type=error_type,
+                    error_message=error_str,
+                    attempts=total_attempts,
+                    duration_ms=int((time.time() - start_time) * 1000),
+                    model_verified="",
+                )
 
-                if error_type in (GeminiErrorType.AUTH_ERROR, GeminiErrorType.MODEL_MISMATCH):
-                    return GeminiCallResult(
-                        success=False,
-                        response=None,
-                        raw_response=None,
-                        error_type=error_type,
-                        error_message=error_str,
-                        attempts=total_attempts,
-                        duration_ms=int((time.time() - start_time) * 1000),
-                        model_verified="",
-                    )
+            if error_type == GeminiErrorType.QUOTA_EXHAUSTED:
+                return GeminiCallResult(
+                    success=False,
+                    response=None,
+                    raw_response=None,
+                    error_type=error_type,
+                    error_message=f"Quota exhausted via {TRANSPORT_LABEL}. Wait for quota reset.",
+                    attempts=total_attempts,
+                    duration_ms=int((time.time() - start_time) * 1000),
+                    model_verified="",
+                )
 
-                if error_type == GeminiErrorType.QUOTA_EXHAUSTED:
-                    return GeminiCallResult(
-                        success=False,
-                        response=None,
-                        raw_response=None,
-                        error_type=error_type,
-                        error_message=f"Quota exhausted via {TRANSPORT_LABEL}. Wait for quota reset.",
-                        attempts=total_attempts,
-                        duration_ms=int((time.time() - start_time) * 1000),
-                        model_verified="",
-                    )
+            delay = self._backoff_delay(total_attempts)
+            errors.append(f"Attempt {total_attempts} failed ({error_type.name}): {error_str[:100]}")
 
-                delay = self._backoff_delay(total_attempts)
-                errors.append(f"Attempt {total_attempts} failed ({error_type.name}): {error_str[:100]}")
-                
-                remaining_after = self._remaining_budget(start_time)
-                if remaining_after < MIN_ATTEMPT_SECONDS:
-                    budget_exhausted = True
-                    break
+            remaining_after = self._remaining_budget(start_time)
+            if remaining_after < MIN_ATTEMPT_SECONDS:
+                budget_exhausted = True
+                break
 
-                if delay > 0:
-                    time.sleep(delay)
+            if delay > 0:
+                # #3777: the retry is said, with its wait.
+                logger.warning(
+                    "[agy] model %s: retrying attempt %d in %.0fs",
+                    self.model, total_attempts + 1, delay,
+                )
+                time.sleep(delay)
 
+        # #3777: the call failed for good; say so with every attempt's cause.
+        _loud(
+            f"model {self.model}: the call failed after {total_attempts} attempt(s): "
+            f"{'; '.join(errors)}"
+        )
         return GeminiCallResult(
             success=False,
             response=None,
@@ -725,9 +777,17 @@ def _parse_usage_from_gemini_response(response_dict: dict) -> LLMOutputMetadata:
 
     Issue #774: Parse token counts from Gemini GenerateContentResponse.
     Cost estimation for Gemini is deferred (returns 0.0 via cost.py unknown model path).
+
+    #3777: a response that does not name its model raises. It was recorded as
+    "gemini-unknown", which a model record cannot tell from a real model id.
     """
     usage = response_dict.get("usageMetadata", {})
-    model_version = response_dict.get("modelVersion", "gemini-unknown")
+    model_version = response_dict.get("modelVersion")
+    if not model_version:
+        raise ValueError(
+            "the Gemini response names no modelVersion, so the model that "
+            f"answered is unknown; keys present: {sorted(response_dict)}"
+        )
 
     return LLMOutputMetadata(
         model_used=model_version,

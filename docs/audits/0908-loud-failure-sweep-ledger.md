@@ -523,18 +523,18 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/verdict_schema.py:651` | empty doc | False | all | raise |
 | `assemblyzero/core/verdict_schema.py:703` | missing verdict | False | logged | raise |
 | `assemblyzero/core/verdict_schema.py:716` | structured parse | heuristic | loud, logged | raise |
-| `assemblyzero/core/gemini_client.py:174` | windows agy | None | logged | ERROR |
-| `assemblyzero/core/gemini_client.py:199` | wsl.exe | None cached | loud, logged, alerts | raise |
-| `assemblyzero/core/gemini_client.py:200` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/gemini_client.py:208` | printenv | None | logged | ERROR |
-| `assemblyzero/core/gemini_client.py:454` | no agy | retried | stops | fail fast |
-| `assemblyzero/core/gemini_client.py:514` | drain | pass | loud, logged | ERROR |
-| `assemblyzero/core/gemini_client.py:520` | spawn | retried | loud, alerts | ERROR |
-| `assemblyzero/core/gemini_client.py:598` | attempt | retry, no log | loud, alerts | ERROR |
-| `assemblyzero/core/gemini_client.py:601` | programming error | failed result | all | re-raise |
-| `assemblyzero/core/gemini_client.py:660` | retry | no log | loud | log |
-| `assemblyzero/core/gemini_client.py:671` | exhausted | no log | loud, alerts | ERROR |
-| `assemblyzero/core/gemini_client.py:730` | metadata | unknown | logged | raise |
+| `assemblyzero/core/gemini_client.py:174` | windows agy | None | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:199` | wsl.exe | None cached | loud, logged, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:200` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:208` | printenv | None | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:454` | no agy | retried | stops | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:514` | drain | pass | loud, logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:520` | spawn | retried | loud, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:598` | attempt | retry, no log | loud, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:601` | programming error | failed result | all | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:660` | retry | no log | loud | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:671` | exhausted | no log | loud, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:730` | metadata | unknown | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
 | `assemblyzero/core/call_recording.py:153` | write | False | all | raise |
 | `assemblyzero/core/call_recording.py:154` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/call_recording.py:179` | corrupt line | count | loud, logged | ERROR |

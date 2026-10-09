@@ -34,3 +34,16 @@ A provider's failed `LLMCallResult` is its declared contract: every caller reads
 - **`provider_storm.diagnose` alerts** (147) when its probe raises, naming the cause. The storm reading still stands, so the roll still halts.
 
 Baseline: six entries leave (`AnthropicProvider.invoke`, `ClaudeCLIProvider.invoke` and `GeminiProvider.invoke` handlers; `_recorded`'s handler and tag; `diagnose`'s handler). The fail-open audit lost 11 findings.
+
+### gemini_client.py (#3777, 12 sites)
+
+The agy transport every default target run uses.
+
+- **The loop has no handler around the call** (598, 601). `_invoke_via_cli` reports every transport failure as `(False, "", reason)`. The old loop raised that reason as `RuntimeError` only to catch it with `except Exception`. That also caught programming errors and returned them as "Programming error (not retried)" failed calls. Now an exception is a fault and propagates.
+- **Every failed attempt is loud with its cause** (520, 598), and so is the final failure, with every attempt's cause (671). A retry is logged with its wait (660).
+- **A missing agy fails at once** (454). It was a failed attempt, retried with backoff until the call budget ran out.
+- **Finding agy says what it found** (174, 199, 200, 208). A Windows agy on PATH is refused out loud, naming its path. A `wsl.exe` that cannot run raises, where it used to be cached as "agy not found" for the life of the process. An unreadable WSL `HOME` is said.
+- **A killed agy that will not drain** is an ERROR line (514); the timeout stays the call's answer.
+- **A Gemini response with no `modelVersion` raises** (730). It was recorded as "gemini-unknown".
+
+Baseline: two entries leave (`GeminiClient.invoke`'s handler; `_find_wsl_agy.run`'s tag). The fail-open audit lost 2 findings.

@@ -1,5 +1,5 @@
 {
-  "count": 311,
+  "count": 309,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -60,18 +60,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 1283
-    },
-    "assemblyzero/core/gemini_client.py::GeminiClient.invoke::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 598
-    },
-    "assemblyzero/core/gemini_client.py::_find_wsl_agy.run::fail_open_tag::1": {
-      "detail": "# fail-open: None becomes \"agy not found\", which the preflight and",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 200
     },
     "assemblyzero/core/halt_evidence.py::_preserved_tail::fail_open_tag::1": {
       "detail": "# fail-open: one corrupt record in the preservation log",
