@@ -116,6 +116,29 @@ def check_alert_channel(*, credentials: Any = None) -> str:
     return sender
 
 
+def require_alert_channel(entry: str) -> str:
+    """The start-up check every workflow entry point runs before its first
+    node (ADR 0236, #3729). Returns the sender.
+
+    When the channel cannot work, the reason goes to standard error at ERROR
+    and the run exits 1, before anything has run. It does not alert, because
+    the channel is the thing that is broken. A mock run checks it too: the
+    rule has no carve-out, and a mock run's halts alert like any other.
+
+    ``check_alert_channel`` is looked up on this module at call time, so the
+    test tiers replace it in one place (``tests/conftest.py``).
+    """
+    try:
+        return check_alert_channel()
+    except AlertDeliveryError as exc:
+        sys.stderr.write(
+            f"ERROR [preflight] {entry}: the operator alert channel cannot work, "
+            f"so the run refuses to start: {exc}\n"
+        )
+        sys.stderr.flush()
+        raise SystemExit(1) from exc
+
+
 def _subject(record: dict) -> str:
     where = record["where"]
     issue = f" #{record['issue']}" if record.get("issue") else ""

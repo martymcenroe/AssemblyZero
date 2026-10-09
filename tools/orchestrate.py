@@ -227,6 +227,11 @@ Examples:
 
     args = parser.parse_args()
 
+    # #3729 (ADR 0236): every failure alerts, so a run whose alert channel
+    # cannot work refuses before its first stage. Mock and dry runs too.
+    from assemblyzero.core import alert
+    alert.require_alert_channel("tools/orchestrate.py")
+
     # Build config overrides from CLI args
     overrides: dict = {}
     if args.skip_lld:

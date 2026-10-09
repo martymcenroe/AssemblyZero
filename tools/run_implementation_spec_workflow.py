@@ -715,6 +715,11 @@ def main() -> int:
     """
     args = parse_args()
 
+    # #3729 (ADR 0236): every failure alerts, so a run whose alert channel
+    # cannot work refuses before its first node. Mock and dry runs too.
+    from assemblyzero.core import alert
+    alert.require_alert_channel("tools/run_implementation_spec_workflow.py")
+
     # Issue #773: Set API policy before any providers are created
     from assemblyzero.core.llm_provider import set_api_policy
     set_api_policy(args.allow_api)
