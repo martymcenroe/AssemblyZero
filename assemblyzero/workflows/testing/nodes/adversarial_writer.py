@@ -21,6 +21,14 @@ from assemblyzero.workflows.testing.adversarial_state import (
 logger = logging.getLogger(__name__)
 
 
+class AdversarialWriteError(RuntimeError):
+    """The adversarial tests could not be written as analysed (#3819).
+
+    Raised, never returned: N7.5 turns it into an error that routes to HALT,
+    which alerts (#3725).
+    """
+
+
 def write_adversarial_tests(
     analysis: AdversarialAnalysis,
     issue_id: int,
@@ -39,11 +47,18 @@ def write_adversarial_tests(
 
     Returns:
         Dictionary of filepath -> file content written.
+
+    Raises:
+        AdversarialWriteError: the analysis holds no test cases, a test case
+            has no code, a file cannot be written, or the staging directory
+            cannot be removed (#3819).
     """
     test_cases = analysis.get("test_cases", [])
     if not test_cases:
-        logger.info("No adversarial test cases to write")
-        return {}
+        # #3819: a review that produced no tests has not reviewed anything.
+        raise AdversarialWriteError(
+            f"the adversarial analysis for issue #{issue_id} holds no test cases"
+        )
 
     # Group by category
     grouped: dict[str, list[AdversarialTestCase]] = defaultdict(list)
@@ -79,17 +94,38 @@ def write_adversarial_tests(
                 "Wrote adversarial test file: %s (%d tests)", filepath, len(cases)
             )
 
-    except Exception:
+    except OSError as exc:
+        # #3819: logged here, and raised as the error N7.5 halts on, which
+        # alerts. It used to re-raise into a node with no route to HALT.
         logger.exception("Error writing adversarial test files")
-        raise
+        raise AdversarialWriteError(
+            f"could not write the adversarial tests for issue #{issue_id} "
+            f"into {output_dir} ({type(exc).__name__}: {exc})"
+        ) from exc
     finally:
-        # Clean up the staging directory: the one mkdtemp made in this call,
-        # inside output_dir (the assertion is the #3518 ownership gate).
-        if os.path.exists(temp_dir):
-            assert os.path.realpath(os.path.dirname(temp_dir)) == os.path.realpath(output_dir)
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        _remove_staging_dir(temp_dir, output_dir)
 
     return result
+
+
+def _remove_staging_dir(temp_dir: str, output_dir: str) -> None:
+    """Remove the staging directory this call made, or raise (#3819).
+
+    The assertion is the #3518 ownership gate: only the directory mkdtemp
+    made in this call, inside output_dir. A failed removal used to be
+    ignored and left a staging directory beside the tests.
+    """
+    if not os.path.exists(temp_dir):
+        return
+    assert os.path.realpath(os.path.dirname(temp_dir)) == os.path.realpath(output_dir)
+    try:
+        shutil.rmtree(temp_dir)
+    except OSError as exc:
+        logger.error("[ADV] Could not remove staging dir %s: %s", temp_dir, exc)
+        raise AdversarialWriteError(
+            f"could not remove the staging directory {temp_dir} "
+            f"({type(exc).__name__}: {exc})"
+        ) from exc
 
 
 def _render_test_file(
@@ -131,7 +167,12 @@ def _render_test_file(
     for tc in test_cases:
         test_code = tc.get("test_code", "").strip()
         if not test_code:
-            continue
+            # #3819: an empty case used to be dropped silently, leaving a
+            # file that claimed fewer tests than the analysis did.
+            raise AdversarialWriteError(
+                f"adversarial test case {tc.get('test_id') or '(no id)'} for "
+                f"issue #{issue_id} ({category}) has no test code"
+            )
 
         # Add a comment with test metadata
         description = tc.get("description", "")

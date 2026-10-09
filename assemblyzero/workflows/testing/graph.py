@@ -543,18 +543,21 @@ def route_after_finalize(
 
 def route_after_adversarial(
     state: TestingWorkflowState,
-) -> Literal["N8_document", "end"]:
+) -> Literal["N8_document", "HALT"]:
     """Route after N7.5 (adversarial node).
 
-    Issue #352: Adversarial node is non-blocking. Always routes to N8
-    regardless of adversarial verdict (pass, fail, or error).
+    #3725: a review that could not run, or ran and produced no valid tests,
+    sets error_message and halts; HALT alerts (#3724). It used to route to N8
+    whatever happened, so the PR proceeded unreviewed (ADR 0236).
 
     Args:
         state: The current workflow state.
 
     Returns:
-        Always "N8_document" to continue the workflow.
+        "HALT" on error_message, otherwise "N8_document".
     """
+    if state.get("error_message"):
+        return "HALT"
     return "N8_document"
 
 
@@ -765,13 +768,13 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N7.5 -> N8 (always, non-blocking) - Issue #352
+    # N7.5 -> N8, or HALT when the review failed (#3725)
     workflow.add_conditional_edges(
         "N7_5_adversarial",
         route_after_adversarial,
         {
             "N8_document": "N8_document",
-            "end": END,
+            "HALT": "HALT",
         },
     )
 

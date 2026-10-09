@@ -635,6 +635,16 @@ GATE_REGISTRY: tuple[Gate, ...] = (
               "cannot write; each used to be skipped with a warning (ADR 0236)",
     ),
     Gate(
+        "impl.adversarial_review_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "N7.5 adversarial review failed",
+        _s(f"{_TS}/nodes/adversarial_node.py::_review_failed::return", 0),
+        created_by="#3725 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="no implementation files, no client, an unreadable context file, a quota, "
+              "forbidden model, non-Pro reply, failed call or empty reply, a malformed "
+              "response, a write failure, rejected tests or zero valid tests; each used "
+              "to record 'skipped' or a verdict and continue to N8 (#3817)",
+    ),
+    Gate(
         "impl.coverage_unreadable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "COVERAGE MEASUREMENT FAILED",
         _s(f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage::return", 0)

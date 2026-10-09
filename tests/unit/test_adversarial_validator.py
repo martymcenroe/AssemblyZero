@@ -197,8 +197,8 @@ class TestValidateAdversarialTests:
         assert result["valid"] is False
         assert len(result["mock_violations"]) > 0
 
-    def test_warnings_for_missing_assertions(self):
-        """Files with test functions missing assertions produce warnings."""
+    def test_errors_for_missing_assertions(self):
+        """#3818: a test that asserts nothing is an error, not a warning."""
         files = {
             "test_352_boundary.py": (
                 "def test_no_assert():\n"
@@ -206,9 +206,8 @@ class TestValidateAdversarialTests:
             )
         }
         result = validate_adversarial_tests(files)
-        # Missing assertions are warnings, not errors
-        assert len(result["warnings"]) > 0
-        assert "no assertions" in result["warnings"][0]
+        assert result["warnings"] == []
+        assert "no assertions" in result["errors"][0]
 
     def test_duplicate_test_names_warning(self):
         """Duplicate test function names across files produce warnings."""
@@ -241,8 +240,8 @@ class TestValidateAdversarialTests:
         # since AST analysis is skipped
         assert result["mock_violations"] == []
 
-    def test_only_mock_violations_make_invalid(self):
-        """Warnings alone don't make result invalid; mock violations do."""
+    def test_a_test_without_assertions_makes_the_set_invalid(self):
+        """#3818: valid used to stay True with an assertion-free test."""
         files = {
             "test_352_boundary.py": (
                 "def test_no_assert():\n"
@@ -250,9 +249,17 @@ class TestValidateAdversarialTests:
             )
         }
         result = validate_adversarial_tests(files)
-        # Only warnings (missing assertions), no errors or mock violations
+        assert result["valid"] is False
+
+    def test_duplicate_names_alone_stay_valid(self):
+        """A duplicate name is still a warning: both tests assert something."""
+        files = {
+            "a.py": "def test_dup():\n    assert True\n",
+            "b.py": "def test_dup():\n    assert True\n",
+        }
+        result = validate_adversarial_tests(files)
         assert result["valid"] is True
-        assert len(result["warnings"]) > 0
+        assert result["warnings"]
 
 
 class TestCheckSyntax:

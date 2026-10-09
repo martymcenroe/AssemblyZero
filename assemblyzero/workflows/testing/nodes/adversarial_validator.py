@@ -31,8 +31,8 @@ def validate_adversarial_tests(test_files: dict[str, str]) -> ValidationResult:
     Checks:
     1. Syntax check (compile each file).
     2. No-mock enforcement (scan for unittest.mock, MagicMock, patch, monkeypatch).
-    3. No duplicate test function names across files.
-    4. Each test has at least one assert statement.
+    3. No duplicate test function names across files (a warning).
+    4. Each test has at least one assert statement (an error, #3818).
 
     Args:
         test_files: Dictionary of filepath -> file content.
@@ -58,26 +58,32 @@ def validate_adversarial_tests(test_files: dict[str, str]) -> ValidationResult:
         mock_violations = _check_no_mocks(source_code, filepath)
         all_mock_violations.extend(mock_violations)
 
-        # 3. Assertion check
-        assertion_warnings = _check_assertions(source_code, filepath)
-        all_warnings.extend(assertion_warnings)
+        # 3. Assertion check. #3818: a test that asserts nothing proves
+        # nothing, so it is an error, not a warning that leaves valid True.
+        all_errors.extend(_check_assertions(source_code, filepath))
 
         # 4. Duplicate function name check
         try:
             tree = ast.parse(source_code)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name.startswith(
-                    "test_"
-                ):
-                    if node.name in seen_test_names:
-                        all_warnings.append(
-                            f"{filepath}: Duplicate test function '{node.name}' "
-                            f"(also in {seen_test_names[node.name]})"
-                        )
-                    else:
-                        seen_test_names[node.name] = filepath
-        except SyntaxError:
-            pass  # Already caught above
+        except SyntaxError as exc:
+            # #3818: compile() accepted this source, so a parse failure here
+            # is unexpected; it is recorded, never passed over.
+            message = (
+                f"{filepath}: compiled but did not parse ({exc.msg}, line "
+                f"{exc.lineno}); duplicate check not run"
+            )
+            logger.error("[ADV] %s", message)
+            all_errors.append(message)
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+                if node.name in seen_test_names:
+                    all_warnings.append(
+                        f"{filepath}: Duplicate test function '{node.name}' "
+                        f"(also in {seen_test_names[node.name]})"
+                    )
+                else:
+                    seen_test_names[node.name] = filepath
 
     is_valid = len(all_errors) == 0 and len(all_mock_violations) == 0
 
@@ -234,7 +240,7 @@ def _check_syntax(source_code: str, filepath: str) -> list[str]:
 def _check_assertions(source_code: str, filepath: str) -> list[str]:
     """AST-scan for assert statements in each test function.
 
-    Returns warnings for test functions with zero assertions.
+    Returns an error for each test function with zero assertions (#3818).
     Also checks for pytest.raises as an assertion equivalent.
 
     Args:
@@ -242,14 +248,14 @@ def _check_assertions(source_code: str, filepath: str) -> list[str]:
         filepath: File path for error reporting.
 
     Returns:
-        List of warning descriptions for test functions without assertions.
+        List of error descriptions for test functions without assertions.
     """
-    warnings: list[str] = []
+    errors: list[str] = []
 
     try:
         tree = ast.parse(source_code)
     except SyntaxError:
-        return warnings  # Syntax errors handled separately
+        return errors  # Syntax errors handled separately
 
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
@@ -274,8 +280,8 @@ def _check_assertions(source_code: str, filepath: str) -> list[str]:
                         break
 
             if not has_assertion:
-                warnings.append(
+                errors.append(
                     f"{filepath}: {node.name} has no assertions"
                 )
 
-    return warnings
+    return errors

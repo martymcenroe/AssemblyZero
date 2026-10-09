@@ -5,8 +5,10 @@ Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 
 import os
 
+import pytest
 
 from assemblyzero.workflows.testing.nodes.adversarial_writer import (
+    AdversarialWriteError,
     _render_test_file,
     _sanitize_category,
     write_adversarial_tests,
@@ -75,8 +77,9 @@ class TestWriteAdversarialTests:
         assert len(filepaths) == 1
         assert filepaths[0].endswith("test_352_injection.py")
 
-    def test_empty_test_cases_no_files(self, tmp_path):
-        """Empty test_cases returns empty dict."""
+    def test_empty_test_cases_raise(self, tmp_path):
+        """#3819: an analysis with no test cases is a review that reviewed
+        nothing. It used to return {} at INFO."""
         analysis = {
             "uncovered_edge_cases": [],
             "false_claims": [],
@@ -86,8 +89,9 @@ class TestWriteAdversarialTests:
         }
 
         output_dir = str(tmp_path / "adversarial")
-        result = write_adversarial_tests(analysis, issue_id=352, output_dir=output_dir)
-        assert result == {}
+        with pytest.raises(AdversarialWriteError, match="holds no test cases"):
+            write_adversarial_tests(analysis, issue_id=352, output_dir=output_dir)
+        assert not (tmp_path / "adversarial").exists()
 
     def test_creates_output_dir(self, tmp_path):
         """Output directory is created if it doesn't exist."""
@@ -237,16 +241,15 @@ class TestRenderTestFile:
         assert "def test_three():" in content
         compile(content, "test_352_boundary.py", "exec")
 
-    def test_empty_test_code_skipped(self):
-        """Test cases with empty test_code are skipped."""
+    def test_empty_test_code_raises(self):
+        """#3819: a case with no code used to be dropped silently, leaving a
+        file with fewer tests than the analysis claimed."""
         cases = [
             _make_test_case(test_id="ADV_001", test_code=""),
             _make_test_case(test_id="ADV_002", test_code="def test_real():\n    assert True"),
         ]
-        content = _render_test_file(cases, "boundary", 352)
-        assert "def test_real():" in content
-        # The empty one should not generate a broken function
-        compile(content, "test_352_boundary.py", "exec")
+        with pytest.raises(AdversarialWriteError, match="ADV_001"):
+            _render_test_file(cases, "boundary", 352)
 
     def test_generator_comment_in_header(self):
         """Header includes generator identification."""

@@ -79,6 +79,7 @@ class TestTheGraphReachesHalt:
             "N5_verify_green",
             "N6_e2e_validation",
             "N7_finalize",
+            "N7_5_adversarial",  # #3725: a review that cannot run halts
         }, inbound
 
     def test_halt_still_ends_the_run(self):
