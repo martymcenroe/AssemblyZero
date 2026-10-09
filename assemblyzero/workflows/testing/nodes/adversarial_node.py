@@ -14,12 +14,15 @@ This node:
 import json
 import logging
 import os
+import sys
 from collections.abc import Mapping
 from typing import Any
 
 from assemblyzero.workflows.testing.adversarial_gemini import (
+    SEAT,
     AdversarialGeminiClient,
     ForbiddenModelError,
+    GeminiEmptyResponseError,
     GeminiModelDowngradeError,
     GeminiQuotaExhaustedError,
     GeminiTimeoutError,
@@ -32,6 +35,7 @@ from assemblyzero.workflows.testing.nodes.adversarial_validator import (
     validate_adversarial_tests,
 )
 from assemblyzero.workflows.testing.nodes.adversarial_writer import (
+    AdversarialWriteError,
     write_adversarial_tests,
 )
 
@@ -52,10 +56,8 @@ _REQUIRED_ANALYSIS_CATEGORIES = [
 
 
 def _skipped(state: AdversarialNodeState, reason: str) -> AdversarialNodeState:
-    """The review did not run. Recorded, never raised: this node is
-    non-blocking by design (route_after_adversarial always proceeds to N8),
-    and the reason travels to the run report and the PR body through
-    ``adversarial_summary`` (#2926)."""
+    """A mock run makes no review. The only "skipped" this node returns:
+    every other way the review fails to run is ``_review_failed`` (#3725)."""
     return {
         **state,
         "adversarial_skipped_reason": reason,
@@ -63,6 +65,37 @@ def _skipped(state: AdversarialNodeState, reason: str) -> AdversarialNodeState:
         "adversarial_test_count": 0,
         "adversarial_error": None,
         "generated_test_files": {},
+    }
+
+
+def _review_failed(
+    state: AdversarialNodeState,
+    what: str,
+    exc: BaseException | None = None,
+    *,
+    spec: str = "",
+) -> AdversarialNodeState:
+    """The review could not run or did not produce a review: a failure (#3725).
+
+    ADR 0236: loud (an ERROR line on stderr), logged with details (the seat,
+    the spec, the exception type and its message), and it stops the run:
+    ``error_message`` routes N7.5 to HALT, which alerts the operator (#3724).
+    """
+    cause = f"{type(exc).__name__}: {exc}" if exc is not None else "no exception"
+    message = (
+        f"N7.5 adversarial review failed: {what}. Seat {SEAT}, spec "
+        f"{spec or '(not resolved)'}; {cause}"
+    )
+    logger.error("[ADV] %s", message)
+    print(f"ERROR [ADV] {message}", file=sys.stderr)
+    return {
+        **state,
+        "adversarial_skipped_reason": None,
+        "adversarial_verdict": "error",
+        "adversarial_test_count": 0,
+        "adversarial_error": message,
+        "generated_test_files": {},
+        "error_message": message,
     }
 
 
@@ -99,8 +132,9 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     5. Delegates to writer and validator.
     6. Returns updated state with generated tests.
 
-    Never blocks the run: a review that cannot run is recorded as "skipped"
-    with its reason, and ``adversarial_summary`` carries that to the report.
+    A review that cannot run, or runs and produces no valid tests, is a
+    failure (ADR 0236, #3725): ``_review_failed`` sets ``error_message``, and
+    ``route_after_adversarial`` sends it to HALT. Only a mock run is skipped.
 
     Args:
         state: The current workflow state.
@@ -127,33 +161,43 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
         logger.info("[ADV] Mock run — no adversarial review")
         return _skipped(state, "mock run, no adversarial review is made")
 
-    # Check for implementation files
+    # #3725: no implementation files at N7.5 is a failure, not a declared
+    # contract. N7 finalize only routes here after the implementation stage
+    # wrote files, so an empty list means that state was lost on the way,
+    # and a review with nothing to review would pass the run unexamined.
     impl_files = state.get("implementation_files", [])
     if not impl_files:
-        logger.info("[ADV] No implementation files in state — skipping")
-        return _skipped(state, "No implementation files in state")
-
-    # Collect and trim context
-    impl_context, lld_context, test_context = _collect_context(state)
+        return _review_failed(
+            state, "no implementation files in state, so there is nothing to review"
+        )
 
     # #2926: the sanctioned transport and nothing else. Construction fails
-    # only on a forbidden alias or a spec get_provider refuses, and neither
-    # blocks the run: the reason is recorded and the run continues.
-    # #3563: the model is the run profile's `impl.adversarial` seat.
+    # on a forbidden alias or a spec get_provider refuses; either is a review
+    # that cannot run (#3725). #3563: the model is the run profile's
+    # `impl.adversarial` seat.
+    spec = ""
     try:
         from assemblyzero.core.seats import resolve
 
-        seat = resolve(state, "impl.adversarial")
+        seat = resolve(state, SEAT)
+        spec = seat.spec
         client = AdversarialGeminiClient(spec=seat.spec, effort=seat.effort)
     except (ForbiddenModelError, ValueError) as exc:
-        logger.warning("[ADV] No adversarial client — skipping: %s", exc)
-        return _skipped(state, f"no adversarial client: {exc}")
+        return _review_failed(state, "the adversarial client could not be built", exc, spec=spec)
+
+    # #3817: a file that cannot be read is a failure, never an empty context.
+    try:
+        impl_context, lld_context, test_context = _collect_context(state)
+    except (OSError, UnicodeDecodeError) as exc:
+        return _review_failed(state, "a file for the review context could not be read", exc, spec=spec)
 
     # One call. The transport has already retried and rotated before it
     # reports a failure (#1907); the second lap this node used to take
     # doubled a gauntlet that had run its course, and printed "timeout --
     # retrying" in every run log since 2026-07-31 when the cause was a dead
     # API key (#2926). The transport's own message is what gets recorded.
+    # #2286: the handlers name specific errors rather than catching broadly.
+    # #3725: each one is a review that did not run, and halts the run.
     try:
         raw_response = client.generate_adversarial_tests(
             implementation_code=impl_context,
@@ -162,35 +206,20 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
             timeout=120,
         )
     except GeminiQuotaExhaustedError as e:
-        logger.warning("[ADV] Gemini quota exhausted — skipping: %s", e)
-        return _skipped(state, f"Gemini quota exhausted: {e}")
+        return _review_failed(state, "the Gemini quota is exhausted", e, spec=spec)
     except ForbiddenModelError as e:
-        # #2286: the requested model is checked before the call. The handlers
-        # here name specific errors rather than catching broadly, so a new
-        # exception type would escape and halt a pipeline that is supposed to
-        # continue without adversarial coverage.
-        logger.warning("[ADV] Adversarial model not permitted — skipping: %s", e)
-        return _skipped(state, f"adversarial model not permitted: {e}")
+        return _review_failed(state, "the adversarial model is not permitted", e, spec=spec)
     except GeminiModelDowngradeError as e:
-        logger.warning("[ADV] Gemini model downgraded to Flash — skipping: %s", e)
-        return _skipped(state, f"Gemini model downgraded to Flash: {e}")
+        return _review_failed(state, "the reply did not come from a Gemini Pro model", e, spec=spec)
     except GeminiTimeoutError as e:
-        logger.warning("[ADV] Gemini call failed — skipping: %s", e)
-        return _skipped(state, f"Gemini call failed: {e}")
+        return _review_failed(state, "the Gemini call failed", e, spec=spec)
+    except GeminiEmptyResponseError as e:
+        return _review_failed(state, "Gemini returned an empty response", e, spec=spec)
 
-    # Parse response
     try:
         analysis = _parse_gemini_response(raw_response)
     except ValueError as e:
-        logger.error("[ADV] Malformed Gemini response: %s", e)
-        return {
-            **state,
-            "adversarial_verdict": "error",
-            "adversarial_error": f"Malformed Gemini response: {e}",
-            "adversarial_test_count": 0,
-            "adversarial_skipped_reason": None,
-            "generated_test_files": {},
-        }
+        return _review_failed(state, "the Gemini response was malformed", e, spec=spec)
 
     # Write test files. #1757: root them in the target repo/worktree —
     # the writer's CWD-relative default would land target-repo tests in
@@ -204,40 +233,39 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
         if repo_root
         else "tests/adversarial"
     )
-    generated_files = write_adversarial_tests(
-        analysis, issue_id, output_dir=output_dir
-    )
+    try:
+        generated_files = write_adversarial_tests(
+            analysis, issue_id, output_dir=output_dir
+        )
+    except AdversarialWriteError as e:
+        return _review_failed(state, "the adversarial tests could not be written", e, spec=spec)
 
     # Validate (AST no-mock scan, syntax, assertions)
     validation = validate_adversarial_tests(generated_files)
 
-    # Remove files with mock violations or syntax errors
-    clean_files: dict[str, str] = {}
-    violation_files: set[str] = set()
-
-    for violation in validation["mock_violations"]:
-        # Extract filepath from violation string (format: "filepath:line: message")
-        parts = violation.split(":")
-        if parts:
-            vpath = parts[0]
-            violation_files.add(vpath)
-
-    for error in validation["errors"]:
-        parts = error.split(":")
-        if parts:
-            epath = parts[0]
-            violation_files.add(epath)
-
-    for filepath, content in generated_files.items():
-        if filepath not in violation_files:
-            clean_files[filepath] = content
-        else:
-            logger.warning("[ADV] Rejected test file: %s", filepath)
-            # Remove from disk
+    # #3817: a generated file that fails validation fails the review. It used
+    # to be dropped at WARNING, and the review counted with a partial set.
+    # The rejected files are removed from disk first, so a halted run leaves
+    # no invalid test behind; a file that cannot be removed is named too.
+    problems = list(validation["mock_violations"]) + list(validation["errors"])
+    if problems:
+        rejected = sorted({p.split(":")[0] for p in problems} & set(generated_files))
+        not_removed: list[str] = []
+        for filepath in rejected:
             try:
                 os.remove(filepath)
-            except OSError:
-                pass
+            except OSError as exc:
+                not_removed.append(f"{filepath} ({type(exc).__name__}: {exc})")
+        detail = "; ".join(problems[:5]) + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else "")
+        if not_removed:
+            detail += f"; could not remove: {', '.join(not_removed)}"
+        return _review_failed(
+            state,
+            f"{len(rejected)} generated test file(s) failed validation and were "
+            f"rejected: {detail}",
+            spec=spec,
+        )
+    clean_files = dict(generated_files)
 
     # Count valid test functions using simple line scan
     test_count = 0
@@ -247,7 +275,10 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
             if stripped.startswith("def test_"):
                 test_count += 1
 
-    verdict = "pass" if test_count > 0 else "fail"
+    # #3817: a review that wrote no runnable test has not reviewed anything.
+    if test_count == 0:
+        return _review_failed(state, "the review produced zero valid tests", spec=spec)
+    verdict = "pass"
 
     logger.info(
         "[ADV] Adversarial testing complete: %d tests, verdict=%s",
@@ -286,14 +317,14 @@ def _collect_context(state: AdversarialNodeState) -> tuple[str, str, str]:
     # Build raw context strings by reading files from disk
     impl_parts: list[str] = []
     for filepath in impl_files:
-        content = _read_file_safe(filepath)
+        content = _read_file(filepath)
         if content:
             impl_parts.append(f"# {filepath}\n{content}")
     impl_raw = "\n\n".join(impl_parts)
 
     test_parts: list[str] = []
     for filepath in test_files:
-        content = _read_file_safe(filepath)
+        content = _read_file(filepath)
         if content:
             test_parts.append(f"# {filepath}\n{content}")
     test_raw = "\n\n".join(test_parts)
@@ -357,21 +388,17 @@ def _trim_to_budget(text: str, max_bytes: int) -> str:
     return truncated + "\n\n... [TRUNCATED - token budget exceeded] ..."
 
 
-def _read_file_safe(filepath: str) -> str:
-    """Read a file from disk, returning empty string on failure.
+def _read_file(filepath: str) -> str:
+    """Read a file for the review context.
 
-    Args:
-        filepath: Path to the file to read.
+    #3817: an unreadable file used to become "" and the review ran on a
+    partial context. It now raises; run_adversarial_node halts on it.
 
-    Returns:
-        File contents, or empty string if the file cannot be read.
+    Raises:
+        OSError, UnicodeDecodeError: the file cannot be read as UTF-8.
     """
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return f.read()
-    except (OSError, UnicodeDecodeError) as e:
-        logger.warning("[ADV] Could not read file %s: %s", filepath, e)
-        return ""
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read()
 
 
 def _parse_gemini_response(raw_response: str) -> AdversarialAnalysis:

@@ -21,6 +21,15 @@ from assemblyzero.workflows.testing.nodes.adversarial_node import (
 )
 
 
+@pytest.fixture
+def impl_file(tmp_path):
+    """A real implementation file. #3817: an unreadable context file is now a
+    failure, so the old "/fake/module.py" no longer reads as empty."""
+    path = tmp_path / "module.py"
+    path.write_text("def function(x):\n    return x\n", encoding="utf-8")
+    return str(path)
+
+
 def _make_valid_analysis_json(**overrides):
     """Helper to build valid AdversarialAnalysis JSON."""
     base = {
@@ -57,7 +66,7 @@ class TestRunAdversarialNode:
         "assemblyzero.workflows.testing.nodes.adversarial_node.validate_adversarial_tests"
     )
     def test_happy_path_generates_tests(
-        self, mock_validate, mock_write, mock_client_cls, tmp_path
+        self, mock_validate, mock_write, mock_client_cls, tmp_path, impl_file
     ):
         """T010: Given valid impl + LLD, generates test files and returns pass."""
         mock_client = MagicMock()
@@ -80,7 +89,7 @@ class TestRunAdversarialNode:
         }
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# Feature\n## Requirements\n1. Handles all inputs",
             "test_files": [],
             "issue_id": 352,
@@ -92,6 +101,7 @@ class TestRunAdversarialNode:
         assert result["adversarial_test_count"] > 0
         assert result["adversarial_skipped_reason"] is None
         assert result["generated_test_files"]
+        assert not result.get("error_message")
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
@@ -103,7 +113,7 @@ class TestRunAdversarialNode:
         "assemblyzero.workflows.testing.nodes.adversarial_node.validate_adversarial_tests"
     )
     def test_output_dir_rooted_in_repo_root(
-        self, mock_validate, mock_write, mock_client_cls, tmp_path
+        self, mock_validate, mock_write, mock_client_cls, tmp_path, impl_file
     ):
         """#1757: when state carries repo_root (the worktree), generated
         tests are written under it — NOT under the process CWD, which is
@@ -122,7 +132,7 @@ class TestRunAdversarialNode:
 
         worktree = str(tmp_path / "boostgauge-7")
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# Feature",
             "test_files": [],
             "issue_id": 7,
@@ -145,7 +155,7 @@ class TestRunAdversarialNode:
         "assemblyzero.workflows.testing.nodes.adversarial_node.validate_adversarial_tests"
     )
     def test_output_dir_cwd_relative_without_repo_root(
-        self, mock_validate, mock_write, mock_client_cls
+        self, mock_validate, mock_write, mock_client_cls, impl_file
     ):
         """Backward compatibility: states without repo_root keep the old
         CWD-relative behavior (#1757)."""
@@ -160,7 +170,7 @@ class TestRunAdversarialNode:
         }
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# Feature",
             "test_files": [],
             "issue_id": 7,
@@ -173,9 +183,9 @@ class TestRunAdversarialNode:
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_quota_skip(self, mock_client_cls):
-        """T020: On GeminiQuotaExhaustedError, sets skipped_reason and the
-        skipped verdict (#2926: a review that did not run is not an error)."""
+    def test_quota_halts(self, mock_client_cls, impl_file):
+        """T020, #3725: an exhausted quota is a review that did not run, and
+        a failure. It used to record "skipped" and let the run continue."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.generate_adversarial_tests.side_effect = (
@@ -183,7 +193,7 @@ class TestRunAdversarialNode:
         )
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# LLD",
             "test_files": [],
             "issue_id": 352,
@@ -191,42 +201,40 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "skipped"
-        assert "quota" in result["adversarial_skipped_reason"].lower()
+        assert result["adversarial_verdict"] == "error"
+        assert "quota" in result["error_message"].lower()
         assert result["adversarial_test_count"] == 0
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_no_client_available_skips(self, mock_client_cls):
-        """#1602 / #2926: if the client cannot be built -- get_provider refuses
-        the spec, or the alias is forbidden -- the non-blocking node records
-        the reason and continues instead of halting the workflow. It used to
-        record this as verdict "success"."""
+    def test_no_client_available_halts(self, mock_client_cls, impl_file):
+        """#1602 / #2926 / #3725: a client that cannot be built -- get_provider
+        refuses the spec, or the alias is forbidden -- is a review that cannot
+        run. It is caught, not raised, and returned as an error for HALT."""
         mock_client_cls.side_effect = ValueError(
             "Unknown provider 'gemini'. Supported: claude, anthropic, gemini, mock, scripted"
         )
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# LLD",
             "test_files": [],
             "issue_id": 352,
         }
 
-        # Must NOT raise — the construction failure is caught and skipped.
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "skipped"
-        assert result["adversarial_skipped_reason"].startswith("no adversarial client")
-        assert "Unknown provider" in result["adversarial_skipped_reason"]
+        assert result["adversarial_verdict"] == "error"
+        assert "could not be built" in result["error_message"]
+        assert "Unknown provider" in result["error_message"]
         assert result["adversarial_test_count"] == 0
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_downgrade_skip(self, mock_client_cls):
-        """T030: On GeminiModelDowngradeError, sets skipped_reason with Flash."""
+    def test_downgrade_halts(self, mock_client_cls, impl_file):
+        """T030, #3725: a reply from Flash is a failure, named in the message."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.generate_adversarial_tests.side_effect = (
@@ -234,7 +242,7 @@ class TestRunAdversarialNode:
         )
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# LLD",
             "test_files": [],
             "issue_id": 352,
@@ -242,11 +250,12 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "skipped"
-        assert "Flash" in result["adversarial_skipped_reason"]
+        assert result["adversarial_verdict"] == "error"
+        assert "gemini-2.0-flash" in result["error_message"]
 
-    def test_empty_implementation_skip(self):
-        """T040: With no implementation files, skips gracefully."""
+    def test_empty_implementation_halts(self):
+        """T040, #3725: no implementation files at N7.5 is a failure (the
+        decision is recorded on #3725): there is nothing to review."""
         state = {
             "implementation_files": [],
             "lld_content": "# LLD",
@@ -256,21 +265,22 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "skipped"
-        assert "No implementation files" in result["adversarial_skipped_reason"]
+        assert result["adversarial_verdict"] == "error"
+        assert "no implementation files" in result["error_message"]
         assert result["adversarial_test_count"] == 0
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_malformed_response_error(self, mock_client_cls):
-        """On malformed Gemini response, sets adversarial_error."""
+    def test_malformed_response_error(self, mock_client_cls, impl_file):
+        """On malformed Gemini response, sets adversarial_error and, since
+        #3725 (#3817:184), error_message for HALT."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.generate_adversarial_tests.return_value = "{broken json"
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# LLD",
             "test_files": [],
             "issue_id": 352,
@@ -279,12 +289,13 @@ class TestRunAdversarialNode:
         result = run_adversarial_node(state)
 
         assert result["adversarial_verdict"] == "error"
-        assert "Malformed Gemini response" in result["adversarial_error"]
+        assert "malformed" in result["adversarial_error"]
+        assert result["error_message"] == result["adversarial_error"]
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_a_reported_failure_is_recorded_once_and_not_retried(self, mock_client_cls):
+    def test_a_reported_failure_is_recorded_once_and_not_retried(self, mock_client_cls, impl_file):
         """#2926: the transport has already retried and rotated before it
         reports a failure (#1907). The node used to take a second lap with a
         longer timeout, which doubled the gauntlet and printed "timeout --
@@ -297,7 +308,7 @@ class TestRunAdversarialNode:
         )
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# LLD",
             "test_files": [],
             "issue_id": 352,
@@ -305,9 +316,9 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "skipped"
-        assert "API key not valid" in result["adversarial_skipped_reason"]
-        assert "retry" not in result["adversarial_skipped_reason"].lower()
+        assert result["adversarial_verdict"] == "error"
+        assert "API key not valid" in result["error_message"]
+        assert "retry" not in result["error_message"].lower()
         assert mock_client.generate_adversarial_tests.call_count == 1
 
     @patch(
@@ -319,37 +330,33 @@ class TestRunAdversarialNode:
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.validate_adversarial_tests"
     )
-    def test_mock_violations_rejected(
-        self, mock_validate, mock_write, mock_client_cls
+    def test_mock_violations_fail_the_review(
+        self, mock_validate, mock_write, mock_client_cls, tmp_path, impl_file
     ):
-        """Files with mock violations are excluded from clean_files."""
+        """#3817: a file with mock violations fails the review. It used to be
+        dropped at WARNING and the review counted with a partial set. The
+        rejected file is removed from disk and named in the error."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.generate_adversarial_tests.return_value = (
             _make_valid_analysis_json()
         )
 
-        mock_write.return_value = {
-            "tests/adversarial/test_352_boundary.py": (
-                "from unittest.mock import patch\n\n"
-                "def test_bad():\n    assert True\n"
-            ),
-            "tests/adversarial/test_352_contract.py": (
-                "def test_good():\n    assert True\n"
-            ),
-        }
+        bad = tmp_path / "test_352_boundary.py"
+        good = tmp_path / "test_352_contract.py"
+        bad.write_text("from unittest.mock import patch\n\ndef test_bad():\n    assert True\n")
+        good.write_text("def test_good():\n    assert True\n")
+        mock_write.return_value = {str(bad): bad.read_text(), str(good): good.read_text()}
 
         mock_validate.return_value = {
             "valid": False,
             "errors": [],
             "warnings": [],
-            "mock_violations": [
-                "tests/adversarial/test_352_boundary.py:1: Mock import detected"
-            ],
+            "mock_violations": [f"{bad}:1: Mock import detected"],
         }
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# LLD",
             "test_files": [],
             "issue_id": 352,
@@ -357,12 +364,11 @@ class TestRunAdversarialNode:
 
         result = run_adversarial_node(state)
 
-        # Only clean file should remain
-        assert "tests/adversarial/test_352_contract.py" in result["generated_test_files"]
-        assert (
-            "tests/adversarial/test_352_boundary.py"
-            not in result["generated_test_files"]
-        )
+        assert result["adversarial_verdict"] == "error"
+        assert "1 generated test file(s) failed validation" in result["error_message"]
+        assert "Mock import detected" in result["error_message"]
+        assert not bad.exists()
+        assert result["generated_test_files"] == {}
 
 
 class TestParseGeminiResponse:
@@ -654,20 +660,17 @@ class TestCollectContext:
         assert lld == ""
         assert tests == ""
 
-class TestARefusedModelDoesNotHaltThePipeline:
-    """#2286 added a pre-request model check, and this node is non-blocking.
-
-    The handlers around the generate call name specific Gemini errors rather
-    than catching broadly, which is deliberate -- but it means a NEW exception
-    type escapes and halts a pipeline that is meant to continue without
-    adversarial coverage. The check and its handler ship together for that
-    reason.
+class TestARefusedModelHaltsThePipeline:
+    """#2286 added a pre-request model check. The handlers around the generate
+    call name specific Gemini errors rather than catching broadly, so the
+    check and its handler ship together. #3725: the handler returns an error
+    that routes to HALT; it used to record a skip and continue.
     """
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_it_skips_rather_than_raising(self, mock_client_cls):
+    def test_it_halts_rather_than_raising(self, mock_client_cls, impl_file):
         from assemblyzero.workflows.testing.adversarial_gemini import (
             ForbiddenModelError,
         )
@@ -679,7 +682,7 @@ class TestARefusedModelDoesNotHaltThePipeline:
         )
 
         state = {
-            "implementation_files": ["/fake/module.py"],
+            "implementation_files": [impl_file],
             "lld_content": "# LLD",
             "test_files": [],
             "issue_id": 2286,
@@ -687,14 +690,14 @@ class TestARefusedModelDoesNotHaltThePipeline:
 
         result = run_adversarial_node(state)
 
-        assert result["adversarial_verdict"] == "skipped"
+        assert result["adversarial_verdict"] == "error"
         assert result["adversarial_test_count"] == 0
-        assert "not permitted" in result["adversarial_skipped_reason"]
+        assert "not permitted" in result["error_message"]
 
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
-    def test_the_reason_is_distinct_from_a_downgrade(self, mock_client_cls):
+    def test_the_reason_is_distinct_from_a_downgrade(self, mock_client_cls, impl_file):
         """A refused REQUEST and a downgraded RESPONSE are different failures
         and must not be reported with each other's wording."""
         from assemblyzero.workflows.testing.adversarial_gemini import (
@@ -709,14 +712,15 @@ class TestARefusedModelDoesNotHaltThePipeline:
 
         result = run_adversarial_node(
             {
-                "implementation_files": ["/fake/module.py"],
+                "implementation_files": [impl_file],
                 "lld_content": "# LLD",
                 "test_files": [],
                 "issue_id": 2286,
             }
         )
 
-        assert "downgraded to Flash" not in result["adversarial_skipped_reason"]
+        assert "Pro model" not in result["error_message"]
+        assert "not permitted" in result["error_message"]
 
 
 def _refuse_network(monkeypatch) -> list:

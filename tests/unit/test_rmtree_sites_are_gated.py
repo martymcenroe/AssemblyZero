@@ -30,7 +30,7 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("assemblyzero/visual_gate/gate.py", "render_round"):
         "the cand-<key>-<n> directory sub.mkdir() made in the same iteration "
         "(no exist_ok); asserted to sit in round_dir",
-    ("assemblyzero/workflows/testing/nodes/adversarial_writer.py", "write_adversarial_tests"):
+    ("assemblyzero/workflows/testing/nodes/adversarial_writer.py", "_remove_staging_dir"):
         "the staging directory mkdtemp() made in this call inside output_dir; "
         "asserted before removal",
     ("assemblyzero/workflows/testing/nodes/verify_phases.py", "_hill_climb"):

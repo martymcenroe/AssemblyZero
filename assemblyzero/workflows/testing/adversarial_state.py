@@ -54,13 +54,16 @@ class AdversarialNodeState(TypedDict, total=False):
     # Outputs (populated by adversarial node)
     adversarial_analysis: AdversarialAnalysis
     generated_test_files: dict[str, str]
-    #: "skipped" (#2926): the review did not run, and
-    #: adversarial_skipped_reason says why. It used to be reported as "error"
-    #: or, for a client that could not be built, as "success".
+    #: "skipped" only for a mock run, with adversarial_skipped_reason (#2926).
+    #: Every other review that did not run is "error" with error_message set,
+    #: which route_after_adversarial sends to HALT (#3725).
     adversarial_verdict: Literal["pass", "fail", "error", "skipped"]
     adversarial_error: str | None
     adversarial_test_count: int
     adversarial_skipped_reason: str | None
+    #: #3725: declared so the halt reaches the graph through this boundary;
+    #: route_after_adversarial reads it.
+    error_message: str
 
 
 class ValidationResult(TypedDict):

@@ -244,13 +244,14 @@ ATLAS: dict[str, dict] = {
         "ordinal": 12,
         "goal": "Attack the finished work looking for what the tests missed.",
         "teach": (
-            "Non-blocking by design: its findings are recorded and the run "
-            "continues, because a late adversarial opinion is evidence for a "
-            "human rather than a gate on the machine."
+            "A gate since #3725: a review that cannot run, or runs and writes "
+            "no valid test, is a failure under ADR 0236 and halts the run with "
+            "an alert, rather than letting the work land unreviewed. Only a "
+            "mock run skips it."
         ),
         "successors": {
-            "N8_document": "always, whatever it found",
-            "END": "the adversarial step itself errored",
+            "N8_document": "the review ran and wrote valid adversarial tests",
+            "HALT": "the review could not run, or produced no valid tests",
         },
     },
     "N8_document": {

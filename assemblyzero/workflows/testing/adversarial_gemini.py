@@ -46,9 +46,13 @@ GeminiTimeoutError = TypedTimeoutError
 
 
 class GeminiModelDowngradeError(Exception):
-    """Raised when Gemini silently downgrades from Pro to Flash."""
+    """Raised when the reply did not come from a Gemini Pro model."""
 
     pass
+
+
+class GeminiEmptyResponseError(Exception):
+    """Raised when the transport reports success with no text (#3808)."""
 
 
 class ForbiddenModelError(Exception):
@@ -190,7 +194,8 @@ class AdversarialGeminiClient:
             True if Pro model confirmed.
 
         Raises:
-            GeminiModelDowngradeError: If Flash model detected or no model info present.
+            GeminiModelDowngradeError: If Flash, an unrecognised model, or no
+                model info is present.
         """
         model_name = response_metadata.get("model", "")
 
@@ -210,11 +215,12 @@ class AdversarialGeminiClient:
             logger.info("Gemini Pro model confirmed: %s", model_name)
             return True
 
-        # Unknown model — warn but don't block
-        logger.warning(
-            "Unknown Gemini model variant: %s. Proceeding cautiously.", model_name
+        # #3808: a model that is neither Pro nor Flash is not a confirmed Pro.
+        # It used to warn and pass, so an unverified model's review counted.
+        raise GeminiModelDowngradeError(
+            f"Expected Gemini Pro but the reply names {model_name!r}, which is "
+            f"not a recognised Pro model"
         )
-        return True
 
     def generate_adversarial_tests(
         self,
@@ -241,8 +247,10 @@ class AdversarialGeminiClient:
 
         Raises:
             GeminiQuotaExhaustedError: If 429 or quota message detected.
-            GeminiModelDowngradeError: If Flash detected instead of Pro.
-            GeminiTimeoutError: If response exceeds timeout.
+            GeminiModelDowngradeError: If the reply is not from a Pro model.
+            GeminiTimeoutError: If response exceeds timeout, or any other
+                transport failure, with its original type named.
+            GeminiEmptyResponseError: If the transport succeeded with no text.
         """
         if adversarial_patterns is None:
             adversarial_patterns = get_adversarial_patterns()
@@ -265,7 +273,7 @@ class AdversarialGeminiClient:
                 user_prompt=user_prompt,
                 timeout=timeout,
             )
-        except (GeminiQuotaExhaustedError, GeminiTimeoutError):
+        except (GeminiQuotaExhaustedError, GeminiTimeoutError, GeminiEmptyResponseError):
             # #2926: already typed by the sanctioned path, with the transport's
             # own message. Re-wrapping below would rename a reported failure
             # to "exceeded {timeout}s timeout", which is the misreading that
@@ -289,14 +297,22 @@ class AdversarialGeminiClient:
             # this node. Propagate as-is, like the TypeError above (#2282).
             raise
         except Exception as e:
-            # Issue #546: Classify through the typed error hierarchy
+            # Issue #546: Classify through the typed error hierarchy. #3808:
+            # the original type is logged at ERROR and carried in the message,
+            # so an unexpected exception is never read as a plain timeout; the
+            # node halts on either class (#3725).
+            logger.error(
+                "Gemini adversarial call raised %s: %s", type(e).__name__, e
+            )
             classified = classify_agy_error(e)
             if isinstance(classified, RateLimitError):
                 raise GeminiQuotaExhaustedError(
-                    f"Gemini quota exhausted: {e}", provider="gemini",
+                    f"Gemini quota exhausted ({type(e).__name__}): {e}",
+                    provider="gemini",
                 ) from e
             raise GeminiTimeoutError(
-                f"Gemini API error (status={classified.status_code}): {e}",
+                f"Gemini API error ({type(e).__name__}, "
+                f"status={classified.status_code}): {e}",
                 provider="gemini",
             ) from e
 
@@ -359,6 +375,12 @@ class AdversarialGeminiClient:
                 )
             # Issue #527: Strip emojis from Gemini response
             text = strip_emoji(result.response or "")
+            if not text.strip():
+                # #3808: success with nothing in it is not a review.
+                raise GeminiEmptyResponseError(
+                    f"Gemini reported success with an empty response "
+                    f"(model {result.model_used or 'unknown'})"
+                )
             return text, {"model": result.model_used}
 
         # A plain callable, standing in for the transport in tests.

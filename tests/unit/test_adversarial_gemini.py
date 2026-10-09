@@ -185,11 +185,12 @@ class TestVerifyModelIsPro:
         with pytest.raises(GeminiModelDowngradeError, match="No model information"):
             client.verify_model_is_pro({})
 
-    def test_unknown_model_passes_with_warning(self):
-        """Unknown model name passes but with warning."""
+    def test_unknown_model_raises(self):
+        """#3808: a model neither Pro nor Flash is not a confirmed Pro. It
+        used to warn and pass."""
         client = AdversarialGeminiClient(provider=MagicMock())
-        result = client.verify_model_is_pro({"model": "gemini-ultra-2026"})
-        assert result is True
+        with pytest.raises(GeminiModelDowngradeError, match="gemini-ultra-2026"):
+            client.verify_model_is_pro({"model": "gemini-ultra-2026"})
 
     def test_pro_case_insensitive(self):
         """Model name check is case-insensitive."""
