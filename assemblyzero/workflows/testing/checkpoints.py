@@ -55,11 +55,10 @@ from pathlib import Path
 from typing import NamedTuple
 
 # Paths excluded from checkpoint commits (workflow-internal, not user work).
-_EXCLUDE_PATHSPECS = (
-    ":!.assemblyzero",
-    ":!data/lineage",
-    ":!data/hourglass",
-)
+# Named once: the standalone finish (#4150) reads this to tell a deliberate
+# exclusion from work the final checkpoint failed to commit.
+EXCLUDED_PATHS = (".assemblyzero", "data/lineage", "data/hourglass")
+_EXCLUDE_PATHSPECS = tuple(f":!{path}" for path in EXCLUDED_PATHS)
 
 _GIT_TIMEOUT_S = 30
 

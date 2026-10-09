@@ -1,5 +1,5 @@
 {
-  "count": 318,
+  "count": 317,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -53,13 +53,13 @@
       "detail": "# fail-open: a row naming something that is not a site key at all",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1468
+      "line": 1496
     },
     "assemblyzero/core/gate_registry.py::scan_halt_sites::fail_open_tag::1": {
       "detail": "# fail-open: a file that will not parse is recorded in",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1255
+      "line": 1283
     },
     "assemblyzero/core/gemini_client.py::GeminiClient.invoke::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -743,13 +743,13 @@
       "detail": "# fail-open: a name the standard library does not have resolves to",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 3466
+      "line": 3476
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_manifest_traceability::fail_open_tag::1": {
       "detail": "# fail-open: #2533's ruled abstention (#2526: unknown is not",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2668
+      "line": 2678
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::check_section_ten_carries_test_functions::fail_open_tag::1": {
       "detail": "# fail-open: the heading was found above, so the section exists; only",
@@ -767,7 +767,7 @@
       "detail": "# fail-open: abstains audibly -- the details say not applicable, the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2447
+      "line": 2457
     },
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::validate_completeness::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1409,13 +1409,13 @@
       "detail": "# fail-open: the rebuild is a recovery attempt on a path that",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 325
+      "line": 371
     },
     "assemblyzero/workflows/testing/nodes/load_lld.py::find_lld_path::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 324
+      "line": 370
     },
     "assemblyzero/workflows/testing/nodes/review_test_plan.py::review_test_plan::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1427,13 +1427,13 @@
       "detail": "# fail-open: a name the finders choke on is not evidence of a",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 834
+      "line": 1036
     },
     "assemblyzero/workflows/testing/nodes/scaffold_tests.py::unbound_names::fail_open_tag::1": {
       "detail": "# fail-open: this is a repair, not the verdict. A file that does not",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 788
+      "line": 990
     },
     "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py::imported_helper_sources::fail_open_tag::1": {
       "detail": "# fail-open: returning no helpers is strictly more conservative than",
@@ -1686,12 +1686,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 801
-    },
-    "tools/run_implement_from_lld.py::main::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 1458
     },
     "tools/run_implementation_spec_workflow.py::run_workflow::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

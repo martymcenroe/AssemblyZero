@@ -239,30 +239,33 @@ def create_worktree(
     return worktree_path, ""
 
 
-#: The end state of a standalone run (#3509). Printed in --help and restated
-#: by the final report, so the operator and the run agree on what "done" is.
+#: The end state of a standalone run (#3509, #4150). Printed in --help and
+#: restated by the final report, so the operator and the run agree on "done".
 END_STATE = """\
-End state (#3509)
------------------
-A run that SUCCEEDS finishes its own worktree:
+End state (#3509, #4150)
+------------------------
+A run SUCCEEDS only when N7 finalize says so (workflow_status "completed").
+Every other end is a failure, below. A run that succeeds lands its work:
   - whatever was written after the last checkpoint is committed ([CP:final])
   - untracked and ignored files in the worktree (lineage, anything the
     checkpoints exclude or .gitignore hides) are moved to
     <repo>/data/runs-kept/impl-<issue>-<HHMMSS>/, never deleted;
     caches (__pycache__, .pytest_cache, .ruff_cache, .mypy_cache, .coverage,
     .venv, node_modules) are not kept
-  - the branch <issue>-implementation is pushed to origin (a real run only)
-  - the worktree is removed (plain `git worktree remove`, never --force)
-  - the local branch is deleted with `git branch -d` once origin holds it
-  Left: the remote branch <issue>-implementation, and nothing else. The
-  final report prints the `gh pr create` that turns it into a PR and the
-  command that deletes it once the PR has merged or been closed.
-A --mock run cuts a detached worktree (no branch), pushes nothing and
-removes the worktree: it leaves nothing at all.
-A run that FAILS or HALTS keeps its worktree and branch so `--resume` can
-continue; the report lists both and prints the commands that remove them.
-If any step cannot complete (a dirty worktree, a failed push), the run stops
-there, keeps what it has, and the report says which step and why.
+  - the worktree and the branch <issue>-implementation are handed to the
+    fleet merge driver named in AZ_MERGE_DRIVER, which pushes, opens the PR
+    (Closes #<issue>), waits for its checks, merges, and removes the
+    worktree and the branch. Nothing is pushed before the driver runs.
+  Left: the implementation merged on the base branch, and nothing else.
+  A real run refuses to start when AZ_MERGE_DRIVER is unset.
+A --mock run cuts a detached worktree (no branch), pushes nothing, runs no
+driver and removes the worktree: it leaves nothing at all.
+A --scaffold-only run lands nothing, because its tests are red by design: it
+keeps the worktree and the branch for the full run.
+A run that FAILS or HALTS, or whose end state cannot be reached (a dirty
+worktree, a git failure, a driver refusal), keeps its worktree and branch,
+goes through the HALT node, which alerts the operator, and exits 1. After a
+driver refusal, follow the driver's route for the stage it printed.
 The status file is <repo>/data/speedrun/runs/.implement-status-<issue>.json.
 """
 
@@ -281,6 +284,26 @@ def _git_out(repo: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+class _FinishStopped(Exception):
+    """A step of the end state could not complete; the message is the line."""
+
+
+def _git_checked(repo: Path, *args: str) -> str:
+    """git's stdout, or _FinishStopped naming the command and its stderr.
+
+    #4150 (ledger 0908, lines 296, 345, 353): these reads were unchecked, so a
+    failed `git status` read as clean and a failed branch read as no branch.
+    """
+    result = _git_out(repo, *args)
+    if result.returncode != 0:
+        raise _FinishStopped(
+            f"stopped: `git {' '.join(args)}` failed in {repo} "
+            f"(exit {result.returncode}), so the worktree is kept as it is: "
+            f"{result.stderr.strip()}"
+        )
+    return result.stdout
+
+
 def _keep_uncommitted(worktree: Path, keep_root: Path) -> list[str]:
     """Move every untracked or ignored, non-cache entry out of ``worktree``
     into ``keep_root`` at the same relative path.
@@ -289,12 +312,13 @@ def _keep_uncommitted(worktree: Path, keep_root: Path) -> list[str]:
     status`` calls the tree clean, so this is the only thing standing between
     a lineage directory and the bin. Untracked entries are the checkpoint's
     own exclusions (``.assemblyzero/``, ``data/lineage/``), which no commit
-    carries. Returns one line per entry moved."""
+    carries. Returns one line per entry moved; a `git status` that fails is
+    _FinishStopped before anything moves."""
     import shutil
 
     moved: list[str] = []
-    listing = _git_out(worktree, "status", "--porcelain", "--ignored")
-    for line in listing.stdout.splitlines():
+    listing = _git_checked(worktree, "status", "--porcelain", "--ignored")
+    for line in listing.splitlines():
         if not (line.startswith("!! ") or line.startswith("?? ")):
             continue
         rel = line[3:].strip().strip('"').rstrip("/")
@@ -310,83 +334,172 @@ def _keep_uncommitted(worktree: Path, keep_root: Path) -> list[str]:
     return moved
 
 
+def landing_preflight(args) -> str | None:
+    """Why this run could not land its result, or None (#4150).
+
+    A real run that will finish a worktree lands it through the merge driver
+    named in ``AZ_MERGE_DRIVER``; without it the run would spend its model
+    calls and end with a branch nothing can land. A dry run, a mock run, a
+    scaffold-only run and a --no-worktree run land nothing and are not asked.
+    """
+    if args.dry_run or args.mock or args.scaffold_only or args.no_worktree:
+        return None
+    from assemblyzero.core import merge_driver
+
+    return merge_driver.check_configured()
+
+
+def _run_completed(values: dict, scaffold_only: bool) -> bool:
+    """Whether the final state proves the run did what it was asked (#4150).
+
+    N7 finalize alone sets ``workflow_status`` to "completed" (#2677). A
+    scaffold-only run stops after N2 by design, so its proof is the scaffold.
+    """
+    if values.get("workflow_status") == "completed":
+        return True
+    return scaffold_only and bool(values.get("test_files"))
+
+
+def halt_unfinished_run(values: dict, reason: str) -> dict:
+    """Send a run that ended without its end state through the testing HALT
+    node (#4150, ADR 0236): it saves the state and a recovery plan, and it
+    alerts the operator with ``reason`` as the cause."""
+    from assemblyzero.core.halt_node import create_halt_node
+
+    return create_halt_node("testing")({**values, "error_message": reason})
+
+
+def impl_pr_title(issue_number: int) -> str:
+    """The implementation PR's title; the driver requires the directive in it."""
+    return f"feat: implement #{issue_number} from its approved LLD (Closes #{issue_number})"
+
+
+def impl_pr_body(issue_number: int, summary: str = "") -> str:
+    """The implementation PR's body: the directive on its own line, first,
+    because pr-sentinel reads the body and the driver checks it too."""
+    body = (
+        f"Closes #{issue_number}\n\n"
+        f"Implementation of issue #{issue_number}, written by AssemblyZero's "
+        "implementation workflow (`tools/run_implement_from_lld.py`) from the "
+        "issue's approved LLD, and landed by the fleet merge driver.\n"
+    )
+    return body + (f"\n{summary.strip()}\n" if summary.strip() else "")
+
+
 def finish_standalone_run(
     original_repo_root: Path, worktree_path: Path, issue_number: int,
-    base_branch: str, mock: bool,
+    base_branch: str, mock: bool, *, scaffold_only: bool = False,
+    pr_summary: str = "",
 ) -> tuple[bool, list[str]]:
-    """Bring a SUCCESSFUL standalone run to END_STATE (#3509).
+    """Bring a SUCCESSFUL standalone run to END_STATE (#3509, #4150).
 
     N9 cleans up only when ``pr_url`` is set, and nothing standalone sets it,
     so every standalone run used to end with its worktree, branch and lineage
     in place and a "Next steps" that asked the operator to commit by hand.
 
+    #4150: a real run then pushed its branch and printed a `gh pr create`
+    that this machine's gh wrapper refuses to every process but the merge
+    driver. It now hands the worktree and the branch to `merge_driver.land`,
+    which pushes, opens the PR, merges and removes both; nothing here pushes.
+
     Returns ``(finished, lines)``: whether the end state was reached, and one
-    line per step taken or refused. Never raises for a git refusal; the
-    refusal is the line.
+    line per step taken or refused. Never raises for a git or driver refusal;
+    the refusal is the line, and the caller halts on ``finished`` False.
     """
+    lines: list[str] = []
+    try:
+        _finish(
+            Path(original_repo_root), Path(worktree_path), issue_number,
+            base_branch, mock, scaffold_only, pr_summary, lines,
+        )
+    except _FinishStopped as stop:
+        lines.append(str(stop))
+        return False, lines
+    return True, lines
+
+
+def _finish(
+    repo: Path, wt: Path, issue_number: int, base_branch: str, mock: bool,
+    scaffold_only: bool, pr_summary: str, lines: list[str],
+) -> None:
     from datetime import datetime
 
-    repo = Path(original_repo_root)
-    wt = Path(worktree_path)
-    lines: list[str] = []
+    from assemblyzero.core import merge_driver
+    from assemblyzero.workflows.orchestrator.stages import impl_pr_body_path
+    from assemblyzero.workflows.testing.checkpoints import (
+        EXCLUDED_PATHS,
+        commit_checkpoint,
+    )
 
     # What the nodes after the last checkpoint wrote (N6-N8: e2e, docs,
     # reports) is committed first, so the branch carries the whole result.
-    from assemblyzero.workflows.testing.checkpoints import commit_checkpoint
-
     if commit_checkpoint(wt, issue_number, "final"):
         lines.append("committed: [CP:final], the work written after the last checkpoint")
+
+    # #4150: the checkpoint commits everything but its own exclusions, and
+    # reports a failed commit only on stdout (#3810). Anything else still
+    # untracked or modified is work it did not take; moving that aside as
+    # "kept" would land the branch without it. Ignored files are not listed
+    # here and are kept below.
+    missed = []
+    for entry in _git_checked(wt, "status", "--porcelain").splitlines():
+        rel = entry[3:].strip().strip('"').rstrip("/")
+        if not any(rel == p or rel.startswith(p + "/") for p in EXCLUDED_PATHS):
+            missed.append(entry)
+    if missed:
+        raise _FinishStopped(
+            f"stopped: the final checkpoint did not commit everything in {wt}, "
+            "so it is kept as it is:\n"
+            + "\n".join(f"    {ln}" for ln in missed[:20])
+        )
+
+    if scaffold_only and not mock:
+        # The suite is red by design: landing it would put failing tests on
+        # the base branch. The full run resumes from this worktree.
+        lines.append(
+            f"kept: {wt} and its branch, for the full run (--scaffold-only "
+            "lands nothing: its tests are red by design)"
+        )
+        return
 
     keep_root = repo / "data" / "runs-kept" / (
         f"impl-{issue_number}-{datetime.now().strftime('%H%M%S')}"
     )
     lines += _keep_uncommitted(wt, keep_root)
 
-    dirty = _git_out(wt, "status", "--porcelain").stdout.strip()
-    if dirty:
-        lines.append(
-            f"stopped: {wt} has uncommitted changes, so it is kept as it is:\n"
-            + "\n".join(f"    {ln}" for ln in dirty.splitlines()[:20])
-        )
-        return False, lines
-
-    branch = _git_out(wt, "branch", "--show-current").stdout.strip()
-    pushed = False
-    if branch and not mock:
-        push = _git_out(wt, "push", "-u", "origin", branch)
-        if push.returncode != 0:
-            lines.append(
-                f"stopped: push of {branch} to origin failed, so the worktree "
-                f"and branch are kept: {push.stderr.strip()}"
+    if mock:
+        removed = _git_out(repo, "worktree", "remove", str(wt))
+        if removed.returncode != 0:
+            raise _FinishStopped(
+                f"stopped: `git worktree remove {wt}` refused: {removed.stderr.strip()}"
             )
-            return False, lines
-        pushed = True
-        lines.append(f"pushed: {branch} -> origin/{branch}")
+        lines.append(f"removed worktree: {wt}")
+        return
 
-    removed = _git_out(repo, "worktree", "remove", str(wt))
-    if removed.returncode != 0:
-        lines.append(
-            f"stopped: `git worktree remove {wt}` refused: {removed.stderr.strip()}"
+    branch = _git_checked(wt, "branch", "--show-current").strip()
+    if not branch:
+        raise _FinishStopped(
+            f"stopped: {wt} is on no branch (a detached HEAD), so there is "
+            "nothing for the merge driver to land; the worktree is kept"
         )
-        return False, lines
-    lines.append(f"removed worktree: {wt}")
 
-    if pushed:
-        deleted = _git_out(repo, "branch", "-d", branch)
-        if deleted.returncode != 0:
-            lines.append(
-                f"stopped: `git branch -d {branch}` refused, so the local "
-                f"branch is kept: {deleted.stderr.strip()}"
-            )
-            return False, lines
-        lines.append(f"deleted local branch: {branch} (origin/{branch} holds it)")
-        base = f" --base {base_branch}" if base_branch else ""
-        lines.append(
-            f"to finish: gh pr create --head {branch}{base}   "
-            f"(then, once it has merged or been closed: "
-            f"git -C {repo} push origin --delete {branch})"
+    body_file = impl_pr_body_path(repo, issue_number)
+    body_file.parent.mkdir(parents=True, exist_ok=True)
+    body_file.write_text(impl_pr_body(issue_number, pr_summary), encoding="utf-8")
+    try:
+        landing = merge_driver.land(
+            worktree=wt, branch=branch, title=impl_pr_title(issue_number),
+            body_file=body_file, issue=issue_number, base=base_branch or None,
         )
-    return True, lines
+    except merge_driver.MergeDriverError as exc:
+        raise _FinishStopped(
+            f"stopped: {exc}\n    The worktree {wt} and the branch {branch} are "
+            "kept. Follow the merge driver's route for the stage it printed."
+        ) from exc
+    lines.append(
+        f"landed: PR #{landing.pr_number}, squash {landing.squash_sha}, on "
+        f"{base_branch or 'the base branch'}; the driver removed {wt} and {branch}"
+    )
 
 
 def _checkpoint_db_name(issue_number: int) -> str:
@@ -1008,6 +1121,24 @@ def main():
         print("Error: --issue must be a positive integer")
         sys.exit(1)
 
+    # #4150: a real run lands through the fleet merge driver. Refuse here,
+    # before the resume contract is consumed, a worktree is cut or a model is
+    # called, as the LLD workflow does since #3704.
+    # ADR 0236 property 4 for failures this tool owns rather than a graph
+    # node: through the module attribute, which the test tiers' recorder replaces.
+    from assemblyzero.core import alert
+
+    reason = landing_preflight(args)
+    if reason:
+        print(f"[implement] ERROR: {reason}", file=sys.stderr)
+        alert.alert_operator(
+            what="the implementation run refused to start",
+            where="tools/run_implement_from_lld.py main, preflight", cause=reason,
+            consequence="nothing ran: no worktree was cut and no model was called",
+            repo=str(repo_root), issue=args.issue,
+        )
+        sys.exit(1)
+
     # #2570: a resume finds the world the halt described, or refuses by
     # name -- before the worktree is touched and any token is spent. A
     # fresh run has no contract and passes silently.
@@ -1057,7 +1188,8 @@ def main():
             else:
                 print(
                     f"  Branch would be: {args.issue}-implementation from {base}, local "
-                    "until the run succeeds; then pushed, and the worktree removed (End state, --help)"
+                    "until the run succeeds; then landed by the merge driver named in "
+                    "AZ_MERGE_DRIVER (End state, --help)"
                 )
         print(f"  LLD: {lld_path} ({'found' if lld_path.exists() else 'NOT FOUND'})")
         print(f"  Database: {db_path}")
@@ -1306,6 +1438,41 @@ def main():
         speedrun_splits = None
         speedrun_logger = None
 
+    def _run_failed(reason: str, values: dict) -> int:
+        """The record a failed run leaves (#3509): status file, speedrun
+        split, run record, and what it kept for --resume. The alert has
+        already gone, from HALT or from the caller (#4150)."""
+        print(f"Status: {reason}")
+        # Issue #646: Emit per-issue cost even on failure
+        total_cost = get_cumulative_cost()
+        if total_cost > 0:
+            print(f"Cost:   ${total_cost:.4f}")
+            emit(
+                "workflow.cost",
+                repo="AssemblyZero",
+                metadata={
+                    "workflow_type": "implementation",
+                    "issue_number": args.issue,
+                    "total_cost_usd": round(total_cost, 6),
+                    "status": "failed",
+                },
+            )
+        _write_status_file(
+            repo_root, args.issue, "FAILED", reason, state=values,
+            out_dir=runs_dir,
+        )
+        _finalize_speedrun("fail", state=values, error_msg=reason)
+        if worktree_path:
+            # #3509: a failed run keeps its worktree and branch for --resume;
+            # the report lists both and prints the commands that remove them.
+            print(
+                f"[implement] Kept for --resume: {worktree_path} "
+                f"(see 'left in place' below)"
+            )
+        print(f"[implement] Checkpoint database (resume state): {db_path}")
+        record.finish("fail", reason)
+        return 1
+
     try:
       # #2231: under a watchdog, so a stalled model call is visible WHILE it
       # stalls. Streaming prints a line per node, but a single node can run for
@@ -1338,116 +1505,125 @@ def main():
                     if node_name == "__end__":
                         continue
 
-                    # Check for errors (node_output may be None/empty)
+                    # #4150 (ledger 0908, line 1344): a node's error is loud,
+                    # on stderr, when it happens. Routing decides what stops.
                     error = (node_output or {}).get("error_message", "")
                     if error:
-                        print(f"\n[ERROR] {error}")
-                        if "GUARD" in error or "BLOCKED" in error:
-                            # These are expected workflow stops, not crashes
-                            pass
+                        print(f"\n[ERROR] {error}", file=sys.stderr)
 
             # Get final state
             final_state = app.get_state(config)
-            if final_state and final_state.values:
-                values = final_state.values
-
-                # Print summary
-                print("\n" + "=" * 60)
-                print("WORKFLOW COMPLETE")
-                print("=" * 60)
-
-                # Debug: Show key final state values
-                print(f"DEBUG: Final state error_message: '{values.get('error_message', '')}'")
-                print(f"DEBUG: Final state next_node: '{values.get('next_node', '')}'")
-                print(f"DEBUG: Final state iteration_count: {values.get('iteration_count', 0)}")
-                print(f"DEBUG: Final state coverage_achieved: {values.get('coverage_achieved', 0)}")
-
-                if values.get("test_report_path"):
-                    print(f"Test Report: {values['test_report_path']}")
-
-                # #2926: the adversarial review's outcome, or why it did not
-                # run, is in the report where the run is judged.
-                from assemblyzero.workflows.testing.nodes.adversarial_node import (
-                    adversarial_summary,
+            values = dict(final_state.values) if final_state and final_state.values else {}
+            if not values:
+                # #4150 (ledger 0908, line 1484): this recorded a halt and
+                # then exited 0. With no final state the outcome is unknown.
+                reason = (
+                    "the testing graph produced no final state, so the run's "
+                    "outcome is unknown and nothing is landed"
                 )
+                print(f"[implement] ERROR: {reason}", file=sys.stderr)
+                alert.alert_operator(
+                    what="the implementation run ended without a final state",
+                    where="tools/run_implement_from_lld.py main", cause=reason,
+                    consequence="the run exits 1; its worktree and branch are kept",
+                    repo=str(original_repo_root), issue=args.issue,
+                )
+                return _run_failed(reason, {})
 
-                print(adversarial_summary(values))
+            # Print summary
+            print("\n" + "=" * 60)
+            print("WORKFLOW COMPLETE")
+            print("=" * 60)
 
-                if values.get("error_message"):
-                    print(f"Status: {values['error_message']}")
-                    # Issue #646: Emit per-issue cost even on failure
-                    total_cost = get_cumulative_cost()
-                    if total_cost > 0:
-                        print(f"Cost:   ${total_cost:.4f}")
-                        emit(
-                            "workflow.cost",
-                            repo="AssemblyZero",
-                            metadata={
-                                "workflow_type": "implementation",
-                                "issue_number": args.issue,
-                                "total_cost_usd": round(total_cost, 6),
-                                "status": "failed",
-                            },
-                        )
-                    _write_status_file(
-                        repo_root, args.issue, "FAILED",
-                        values.get("error_message", ""), state=values,
-                        out_dir=runs_dir,
+            # Debug: Show key final state values
+            print(f"DEBUG: Final state error_message: '{values.get('error_message', '')}'")
+            print(f"DEBUG: Final state next_node: '{values.get('next_node', '')}'")
+            print(f"DEBUG: Final state iteration_count: {values.get('iteration_count', 0)}")
+            print(f"DEBUG: Final state coverage_achieved: {values.get('coverage_achieved', 0)}")
+
+            if values.get("test_report_path"):
+                print(f"Test Report: {values['test_report_path']}")
+
+            # #2926: the adversarial review's outcome, or why it did not
+            # run, is in the report where the run is judged.
+            from assemblyzero.workflows.testing.nodes.adversarial_node import (
+                adversarial_summary,
+            )
+
+            print(adversarial_summary(values))
+
+            error = values.get("error_message") or ""
+            if error and values.get("workflow_status") != "halted":
+                # #4150 (ledger 0908, line 1377): the HALT node alerts on
+                # every halt (#3724); an error that reached END another way
+                # is sent through it here, so it alerts too.
+                halt_unfinished_run(values, error)
+            elif not error and not _run_completed(values, bool(args.scaffold_only)):
+                # #4150: only N7 finalize sets workflow_status "completed"
+                # (#2677). The testing graph still has routes to END with no
+                # reason (an iteration cap, a spent budget, an exhausted
+                # scaffold, #3581's testing/graph.py rows). Such an end is
+                # not a pass, and it must never be landed as one.
+                error = (
+                    "the run reached END without N7 finalize: workflow_status is "
+                    f"{values.get('workflow_status')!r}, not 'completed' (next_node "
+                    f"{values.get('next_node')!r}, iteration "
+                    f"{values.get('iteration_count', 0)}). A route ended the graph "
+                    "without a reason, which is not a pass, so nothing is landed."
+                )
+                print(f"[implement] ERROR: {error}", file=sys.stderr)
+                halt_unfinished_run(values, error)
+            if error:
+                return _run_failed(error, values)
+
+            # #3509, #4150: the run finishes its own worktree (END_STATE).
+            # #1756: the PR targets the integration branch the worktree was
+            # carved from, never a default main.
+            if worktree_path:
+                print()
+                print("[implement] Finishing the run (see --help, 'End state'):")
+                finished, steps = finish_standalone_run(
+                    original_repo_root, Path(worktree_path), args.issue,
+                    base_branch or "", mock=bool(args.mock),
+                    scaffold_only=bool(args.scaffold_only),
+                    pr_summary=adversarial_summary(values),
+                )
+                for step in steps:
+                    print(f"[implement]   {step}")
+                if not finished:
+                    # #4150 (ledger 0908, line 1442): this printed a note and
+                    # returned 0. An end state not reached is a failure.
+                    reason = (
+                        "the run passed, but its end state was not reached: "
+                        + (steps[-1] if steps else "no step reported why")
                     )
-                    _finalize_speedrun("fail", state=values, error_msg=values.get("error_message", ""))
-                    if worktree_path:
-                        # #3509: a failed run keeps its worktree and branch
-                        # for --resume; the report lists both and prints the
-                        # commands that remove them.
-                        print(
-                            f"[implement] Kept for --resume: {worktree_path} "
-                            f"(see 'left in place' below)"
-                        )
-                    print(f"[implement] Checkpoint database (resume state): {db_path}")
-                    record.finish("fail", values.get("error_message", ""))
-                    return 1
-                else:
-                    print("Status: SUCCESS")
-                    # Issue #646: Emit per-issue cost summary
-                    total_cost = get_cumulative_cost()
-                    if total_cost > 0:
-                        print(f"Cost:   ${total_cost:.4f}")
-                        emit(
-                            "workflow.cost",
-                            repo="AssemblyZero",
-                            metadata={
-                                "workflow_type": "implementation",
-                                "issue_number": args.issue,
-                                "total_cost_usd": round(total_cost, 6),
-                            },
-                        )
-                    _write_status_file(
-                        repo_root, args.issue, "SUCCESS", state=values,
-                        out_dir=runs_dir,
-                    )
-                    _finalize_speedrun("success", state=values)
+                    print(f"[implement] ERROR: {reason}", file=sys.stderr)
+                    halt_unfinished_run(values, reason)
+                    return _run_failed(reason, values)
 
-                    # #3509: the run finishes its own worktree (END_STATE).
-                    # #1756: the PR targets the integration branch the
-                    # worktree was carved from, never a default main.
-                    if worktree_path:
-                        print()
-                        print("[implement] Finishing the run (see --help, 'End state'):")
-                        finished, steps = finish_standalone_run(
-                            original_repo_root, Path(worktree_path), args.issue,
-                            base_branch or "", mock=bool(args.mock),
-                        )
-                        for step in steps:
-                            print(f"[implement]   {step}")
-                        if not finished:
-                            print(
-                                "[implement]   The end state was not reached; "
-                                "'left in place' below is what remains."
-                            )
-                    # #3547: the checkpoint database is an artifact the run leaves.
-                    print(f"[implement] Checkpoint database (resume state): {db_path}")
-                    record.finish("success")
-                    return 0
+            print("Status: SUCCESS")
+            # Issue #646: Emit per-issue cost summary
+            total_cost = get_cumulative_cost()
+            if total_cost > 0:
+                print(f"Cost:   ${total_cost:.4f}")
+                emit(
+                    "workflow.cost",
+                    repo="AssemblyZero",
+                    metadata={
+                        "workflow_type": "implementation",
+                        "issue_number": args.issue,
+                        "total_cost_usd": round(total_cost, 6),
+                    },
+                )
+            _write_status_file(
+                repo_root, args.issue, "SUCCESS", state=values,
+                out_dir=runs_dir,
+            )
+            _finalize_speedrun("success", state=values)
+            # #3547: the checkpoint database is an artifact the run leaves.
+            print(f"[implement] Checkpoint database (resume state): {db_path}")
+            record.finish("success")
+            return 0
 
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted. Use --resume to continue.")
@@ -1456,32 +1632,45 @@ def main():
         return 130
 
     except Exception as e:
+        # #4150 (ledger 0908, line 1458): both branches printed to stdout and
+        # alerted no one.
+        cause = f"{type(e).__name__}: {getattr(e, 'reason', None) or e}"
         # Check if this is an ImplementationError (issue #272)
         if type(e).__name__ == "ImplementationError":
-            print(f"\n{'='*60}")
-            print("IMPLEMENTATION FAILED")
-            print(f"{'='*60}")
-            print(f"File: {getattr(e, 'filepath', 'unknown')}")
-            print(f"Reason: {getattr(e, 'reason', str(e))}")
+            print(f"\n{'='*60}", file=sys.stderr)
+            print("IMPLEMENTATION FAILED", file=sys.stderr)
+            print(f"{'='*60}", file=sys.stderr)
+            print(f"File: {getattr(e, 'filepath', 'unknown')}", file=sys.stderr)
+            print(f"Reason: {getattr(e, 'reason', str(e))}", file=sys.stderr)
             preview = getattr(e, 'response_preview', None)
             if preview:
-                print(f"\nResponse preview:\n{preview[:500]}")
-            print("\nThis is a hard failure. The implementation node could not produce valid code.")
-            print("Check the LLD specification and try again.")
+                print(f"\nResponse preview:\n{preview[:500]}", file=sys.stderr)
+            print("\nThis is a hard failure. The implementation node could not produce valid code.",
+                  file=sys.stderr)
+            print("Check the LLD specification and try again.", file=sys.stderr)
             record.crash(e)
             record.finish("fail", getattr(e, "reason", str(e)))
+            alert.alert_operator(
+                what="the implementation node could not produce valid code",
+                where="tools/run_implement_from_lld.py main", cause=cause,
+                consequence="the run exits 1; its worktree and branch are kept",
+                repo=str(original_repo_root), issue=args.issue,
+            )
             return 1
 
-        print(f"\n[FATAL] Unexpected error: {e}")
+        print(f"\n[FATAL] Unexpected error: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         _finalize_speedrun("halt", error_msg=str(e), notes=f"exception:{type(e).__name__}")
         record.crash(e)
         record.finish("halt", str(e))
+        alert.alert_operator(
+            what="the implementation run crashed",
+            where="tools/run_implement_from_lld.py main", cause=cause,
+            consequence="the run exits 1; its worktree and branch are kept",
+            repo=str(original_repo_root), issue=args.issue,
+        )
         return 1
-
-    record.finish("halt", "the graph produced no final state")
-    return 0
 
 
 if __name__ == "__main__":
