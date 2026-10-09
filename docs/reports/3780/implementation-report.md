@@ -78,3 +78,21 @@ The contract exists so a resume never runs against a world nobody checked. Each 
 - **A verified contract that cannot be deleted alerts** (223, 224). The resume does not depend on the deletion, so it proceeds, but a leftover contract would be checked again by the next launch for that issue.
 
 Baseline: three tags leave. The fail-open audit lost 3 findings.
+
+### interface_surface.py (#3779, 12 sites)
+
+The module grounds the LLD drafter in the target's real signatures. Its documented contract was that every entry point degrades to an empty map with a warning, and called that not a pipeline failure. ADR 0236 retires the carve-out: an empty or partial map is the drafter working blind, inventing the functions this module exists to stop it inventing.
+
+- **Every failure raises, naming the file and the cause:**
+  - a file that does not parse (107); the first 50 lines used to stand in for its interface;
+  - a walk that fails (267);
+  - an import target that cannot be read (319); it used to read as "imports nothing";
+  - an unreadable file (394); it used to drop silently out of the map;
+  - a file outside the root (408); it used to be keyed by its bare name;
+  - a root that is not a directory (445, 518);
+  - a related path that cannot be resolved (472);
+  - the two entry points' broad handlers are gone (492, 552).
+- **Two outcomes are not failures, and are said.** A repo with no Python files has an empty surface, logged (449). Files left out to fit the character budget are named in the log, where it gave only a count (402).
+- **Callers.** Both live in the requirements package. `analyze_codebase` and `generate_draft` still wrap the call in a broad handler that logs and continues (their own ledger rows), so runs are unchanged until the requirements batch routes those to HALT. The implementation-spec stage calls `summarize_python_file` on the base branch's non-test files; one that does not parse now stops that stage, where its head used to be shown as its API.
+
+Baseline: both entry points' handlers leave. The fail-open audit lost 12 findings.

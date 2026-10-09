@@ -1,5 +1,5 @@
 {
-  "count": 300,
+  "count": 298,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -78,18 +78,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 44
-    },
-    "assemblyzero/core/interface_surface.py::build_interface_map::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 492
-    },
-    "assemblyzero/core/interface_surface.py::build_interface_map_for_paths::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 552
     },
     "assemblyzero/core/model_record.py::_resolved_id::fail_open_tag::1": {
       "detail": "# fail-open: a spec the registry cannot resolve (a scripted or",

@@ -612,19 +612,19 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/validation/test_plan_validator.py:237` | no table | zero scenarios | loud, logged | ERROR |
 | `assemblyzero/core/validation/test_plan_validator.py:248` | malformed row | dropped | loud, logged, stops | violation |
 | `assemblyzero/core/validation/test_plan_validator.py:262` | bad id | dropped | loud, logged, stops | violation |
-| `assemblyzero/core/interface_surface.py:107` | parse target | first 50 lines | all | raise |
-| `assemblyzero/core/interface_surface.py:267` | walk | WARNING, [] | loud, stops, alerts | raise |
+| `assemblyzero/core/interface_surface.py:107` | parse target | first 50 lines | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:267` | walk | WARNING, [] | loud, stops, alerts | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/interface_surface.py:295` | out-of-repo token | skip | compliant | none |
-| `assemblyzero/core/interface_surface.py:319` | import expansion | [] | all | raise |
-| `assemblyzero/core/interface_surface.py:394` | read file | WARNING, drop | loud, stops, alerts | raise |
-| `assemblyzero/core/interface_surface.py:402` | budget | drop | loud, logged | name dropped |
-| `assemblyzero/core/interface_surface.py:408` | not under root | bare name | loud, logged | raise |
-| `assemblyzero/core/interface_surface.py:445` | root not dir | {} | all | raise |
-| `assemblyzero/core/interface_surface.py:449` | empty | {} | loud, logged | log count |
-| `assemblyzero/core/interface_surface.py:472` | resolve | continue | all | raise |
-| `assemblyzero/core/interface_surface.py:492` | extraction | WARNING, {} | all | raise |
-| `assemblyzero/core/interface_surface.py:518` | root not dir | {} | all | raise |
-| `assemblyzero/core/interface_surface.py:552` | revision extraction | WARNING, {} | all | raise |
+| `assemblyzero/core/interface_surface.py:319` | import expansion | [] | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:394` | read file | WARNING, drop | loud, stops, alerts | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:402` | budget | drop | loud, logged | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:408` | not under root | bare name | loud, logged | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:445` | root not dir | {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:449` | empty | {} | loud, logged | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:472` | resolve | continue | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:492` | extraction | WARNING, {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:518` | root not dir | {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:552` | revision extraction | WARNING, {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/run_record.py:77` | tee write | pass | all | ERROR |
 | `assemblyzero/core/run_record.py:78` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/run_record.py:87` | flush | pass | all | ERROR |

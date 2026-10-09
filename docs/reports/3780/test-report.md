@@ -51,3 +51,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Before the fix, measured** with `resume_contract.py` stashed: 10 failed, 4 passed (the four that pin kept behaviour).
 
 **Neighbouring suites:** 94 passed across the halt node, halt evidence, home-state guard, implementation and LLD runner tests that write or check contracts.
+
+## interface_surface.py
+
+**New: `tests/unit/test_interface_surface_loud_failure.py` (13)**, one per site plus `test_a_readable_repo_still_gives_its_whole_surface`.
+
+**Before the fix, measured** with `interface_surface.py` stashed: 12 failed, 1 passed (the kept whole-surface case).
+
+**Changed tests:** `test_interface_surface.py::test_syntax_error_raises` (was `test_syntax_error_falls_back_to_head`) and `test_missing_repo_raises` (was `test_missing_repo_yields_empty_map`).
+
+**Neighbouring suites:** 232 passed across `test_interface_surface.py` and `test_implementation_spec_workflow.py` before those two changes, which were the 2 failures.

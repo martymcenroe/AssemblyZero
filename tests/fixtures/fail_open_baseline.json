@@ -2,8 +2,8 @@
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
     "files_scanned": 312,
-    "sites_examined": 9716,
-    "findings_total": 517
+    "sites_examined": 9699,
+    "findings_total": 505
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
@@ -19,20 +19,8 @@
     "assemblyzero/core/gemini_client.py::GeminiClient._invoke_via_stdin::except_handler::0",
     "assemblyzero/core/gemini_client.py::GeminiClient._invoke_via_stdin::except_handler::1",
     "assemblyzero/core/gemini_client.py::GeminiClient._invoke_via_stdin::except_handler::2",
-    "assemblyzero/core/interface_surface.py::build_interface_map::except_handler::0",
-    "assemblyzero/core/interface_surface.py::build_interface_map::except_handler::1",
-    "assemblyzero/core/interface_surface.py::build_interface_map::warned_return::0",
-    "assemblyzero/core/interface_surface.py::build_interface_map_for_paths::except_handler::0",
-    "assemblyzero/core/interface_surface.py::build_interface_map_for_paths::except_handler::1",
-    "assemblyzero/core/interface_surface.py::build_interface_map_for_paths::warned_return::0",
     "assemblyzero/core/interface_surface.py::extract_explicit_paths::except_handler::0",
-    "assemblyzero/core/interface_surface.py::extract_interface_map::except_handler::0",
-    "assemblyzero/core/interface_surface.py::extract_interface_map::except_handler::1",
-    "assemblyzero/core/interface_surface.py::list_repo_python_files::except_handler::0",
-    "assemblyzero/core/interface_surface.py::list_repo_python_files::warned_return::0",
     "assemblyzero/core/interface_surface.py::resolve_import_targets._add::except_handler::0",
-    "assemblyzero/core/interface_surface.py::resolve_import_targets::except_handler::0",
-    "assemblyzero/core/interface_surface.py::summarize_python_file::except_handler::0",
     "assemblyzero/core/llm_provider.py::AnthropicProvider.invoke::except_handler::0",
     "assemblyzero/core/llm_provider.py::ClaudeCLIProvider._probe_alive::except_handler::0",
     "assemblyzero/core/llm_provider.py::ClaudeCLIProvider._probe_alive::except_handler::1",
