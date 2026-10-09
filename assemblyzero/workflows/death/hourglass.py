@@ -312,6 +312,13 @@ def run_death(
     github_token: str | None = None,
 ) -> ReconciliationReport:
     """Execute the full DEATH reconciliation protocol."""
+    # #3729 (ADR 0236): the hourglass is a workflow entry point (the death
+    # skill calls it), so a run whose alert channel cannot work refuses
+    # before its first node.
+    from assemblyzero.core import alert
+
+    alert.require_alert_channel("assemblyzero.workflows.death.hourglass.run_death")
+
     age_meter = load_age_meter_state()
     if age_meter is None:
         age_meter = {

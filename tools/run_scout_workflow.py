@@ -126,6 +126,11 @@ def main():
 
     args = parser.parse_args()
 
+    # #3729 (ADR 0236): every failure alerts, so a run whose alert channel
+    # cannot work refuses before its first node. Offline runs too.
+    from assemblyzero.core import alert
+    alert.require_alert_channel("tools/run_scout_workflow.py")
+
     # Issue #773: Set API policy before any providers are created
     from assemblyzero.core.llm_provider import set_api_policy
     set_api_policy(args.allow_api)

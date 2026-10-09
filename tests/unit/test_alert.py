@@ -129,6 +129,25 @@ def test_channel_check_returns_the_sender(home, monkeypatch):
     assert check_alert_channel(credentials=object()) == SENDER
 
 
+def test_the_start_up_check_refuses_loudly_without_alerting(home, capsys):
+    """#3729: no sender resolves, so the run exits 1 with the reason at ERROR
+    on stderr; nothing is sent and nothing reaches the alerts log."""
+    with pytest.raises(SystemExit) as exc:
+        alert.require_alert_channel("tools/some_workflow.py")
+
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "ERROR [preflight] tools/some_workflow.py" in err
+    assert "no alert sender configured" in err
+    assert not (home / ".assemblyzero" / "alerts.jsonl").exists()
+
+
+def test_the_start_up_check_passes_a_working_channel(home, monkeypatch):
+    monkeypatch.setenv(alert.SENDER_ENV, SENDER)
+    with patch("assemblyzero.core.alert._aws_credentials", return_value=object()):
+        assert alert.require_alert_channel("tools/some_workflow.py") == SENDER
+
+
 def test_the_unit_tier_cannot_reach_real_ses(home, monkeypatch):
     monkeypatch.setenv(alert.SENDER_ENV, SENDER)
     with pytest.raises(RealAlertTransportReached):

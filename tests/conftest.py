@@ -221,18 +221,72 @@ def no_spend_lock_from_the_machine(tmp_path, monkeypatch):
     monkeypatch.setattr(seats, "other_side_claude_home", lambda: None)
 
 
+#: Every ``AZ_`` variable the code reads (#4160), a closed set.
+#: ``tests/unit/test_az_environment_isolation.py`` parses ``assemblyzero/`` and
+#: ``tools/`` and fails when the code reads one this set lacks.
+AZ_ENVIRONMENT = (
+    "AZ_FAIL_FAST",
+    "AZ_FILE_TIMEOUT_CAP",
+    "AZ_FILE_TIMEOUT_FLOOR",
+    "AZ_LLM_IDLE_TIMEOUT",
+    "AZ_MERGE_DRIVER",
+    "AZ_MODEL_PROFILE",
+    "AZ_OPERATOR_EMAIL_FROM",
+    "AZ_VISUAL_GATE_OPEN_BROWSER",
+)
+
+
 @pytest.fixture(autouse=True)
-def no_merge_driver_from_the_machine(monkeypatch):
-    """A test sees ``AZ_MERGE_DRIVER`` only when it sets one (#4150).
+def no_az_environment_from_the_machine(monkeypatch):
+    """A test sees an ``AZ_`` variable only when it sets one (#4150, #4160).
 
-    The operator's machines export it and CI never does, so a real-run test
-    passed here and failed on CI once the implementation workflow began
-    refusing to start without it (PR #4159). Every tier starts with it unset;
-    a test that needs the driver points it at a file of its own.
+    The operator's machines export some of these and CI exports none, so a
+    test that read one passed here and failed on CI: PR #4159's real-run test
+    did, once the implementation workflow refused to start without
+    ``AZ_MERGE_DRIVER``. Every tier starts with all of them unset; a test that
+    needs one sets it itself.
     """
-    from assemblyzero.core import merge_driver
+    for name in AZ_ENVIRONMENT:
+        monkeypatch.delenv(name, raising=False)
 
-    monkeypatch.delenv(merge_driver.DRIVER_ENV, raising=False)
+
+STAND_IN_SENDER = "tests@example.invalid"
+
+
+def _alert_channel_stand_in(*_args, **_kwargs) -> str:
+    return STAND_IN_SENDER
+
+
+def child_env_with_alert_channel(base: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment for a test that runs a workflow entry point as a child
+    process, where ``alert_channel_ready`` cannot reach (#3729).
+
+    The child's start-up check resolves this sender and these dummy keys,
+    which boto3 reads without a network call. Nothing is sent: SES is reached
+    only by an alert, and a test's child process stops long before one.
+    """
+    env = dict(os.environ if base is None else base)
+    env["AZ_OPERATOR_EMAIL_FROM"] = STAND_IN_SENDER
+    env["AWS_ACCESS_KEY_ID"] = "test-stand-in"
+    env["AWS_SECRET_ACCESS_KEY"] = "test-stand-in"
+    return env
+
+
+@pytest.fixture(autouse=True)
+def alert_channel_ready(request, monkeypatch):
+    """The start-up check on the alert channel passes in every tier (#3729).
+
+    Every workflow entry point calls ``alert.require_alert_channel`` before
+    its first node, and that reads the sender and the AWS credentials, which
+    CI has neither of. ``check_alert_channel`` is replaced with a stand-in, so
+    no test depends on the machine's AWS setup; a test of the refusal patches
+    it again to raise. ``test_alert.py`` is exempt: it tests the real one.
+    """
+    if request.module.__name__.endswith("test_alert"):
+        return
+    from assemblyzero.core import alert
+
+    monkeypatch.setattr(alert, "check_alert_channel", _alert_channel_stand_in)
 
 
 class RealAlertTransportReached(BaseException):

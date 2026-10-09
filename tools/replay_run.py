@@ -353,6 +353,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # #3729 (ADR 0236): a replay runs the spec graph, whose HALT alerts, so a
+    # replay whose alert channel cannot work refuses before its first node.
+    from assemblyzero.core import alert
+    alert.require_alert_channel("tools/replay_run.py")
+
     if not Path(args.clone).is_dir():
         parser.error(
             f"--clone {args.clone} is not a directory. Clone the target repo "

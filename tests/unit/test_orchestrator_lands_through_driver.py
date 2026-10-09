@@ -131,7 +131,13 @@ def test_a_driver_refusal_fails_the_pr_stage_once(tmp_path, gh_calls):
 
 
 def test_orchestrate_refuses_without_the_driver(tmp_path):
-    env = {k: v for k, v in os.environ.items() if k != merge_driver.DRIVER_ENV}
+    # #3729: the child checks the alert channel first, where the tiers' stand-in
+    # cannot reach; it gets a working one, so the driver refusal is what is tested.
+    from tests.conftest import child_env_with_alert_channel
+
+    env = child_env_with_alert_channel(
+        {k: v for k, v in os.environ.items() if k != merge_driver.DRIVER_ENV}
+    )
     proc = subprocess.run(
         [sys.executable, str(AZ_ROOT / "tools" / "orchestrate.py"),
          "--issue", "2", "--repo", str(tmp_path)],

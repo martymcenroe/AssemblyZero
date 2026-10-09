@@ -1079,6 +1079,13 @@ def main():
     parser = create_argument_parser()
     args = parser.parse_args()
 
+    # #3729 (ADR 0236): every failure alerts, so a run whose alert channel
+    # cannot work refuses before its first node. Mock and dry runs too.
+    # ADR 0236 property 4 for failures this tool owns rather than a graph
+    # node goes through the module attribute, which the test tiers replace.
+    from assemblyzero.core import alert
+    alert.require_alert_channel("tools/run_implement_from_lld.py")
+
     # Issue #773: Set API policy before any providers are created
     from assemblyzero.core.llm_provider import set_api_policy
     set_api_policy(args.allow_api)
@@ -1124,10 +1131,6 @@ def main():
     # #4150: a real run lands through the fleet merge driver. Refuse here,
     # before the resume contract is consumed, a worktree is cut or a model is
     # called, as the LLD workflow does since #3704.
-    # ADR 0236 property 4 for failures this tool owns rather than a graph
-    # node: through the module attribute, which the test tiers' recorder replaces.
-    from assemblyzero.core import alert
-
     reason = landing_preflight(args)
     if reason:
         print(f"[implement] ERROR: {reason}", file=sys.stderr)
