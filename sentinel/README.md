@@ -20,7 +20,7 @@ Every PR must reference an open issue (`Closes #N`) or declare `No-Issue: <reaso
 | Setting | Value |
 |---------|-------|
 | App name | `pr-sentinel-mm` |
-| App ID | `2975092` |
+| App ID | `pr_sentinel_app_id` in [`config/fleet-ids.json`](../config/fleet-ids.json) |
 | Private key | `/c/Users/mcwiz/Projects/pr-sentinel-mm.2026-02-28.private-key.pem` |
 
 ## Secrets (Wrangler)

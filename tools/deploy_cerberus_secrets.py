@@ -24,7 +24,7 @@ Usage:
     3. DELETE the .pem file immediately after (skip if dry-run with no .pem)
 
 The script sets two GitHub Actions secrets on each target repo:
-    - REVIEWER_APP_ID (3079970)
+    - REVIEWER_APP_ID (the Cerberus App ID, from config/fleet-ids.json)
     - REVIEWER_APP_PRIVATE_KEY (contents of the .pem)
 
 All secret writes use an in-process classic PAT via
@@ -52,7 +52,13 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from _pat_session import classic_pat_session, cerberus_pem_session
 
-APP_ID = "3079970"
+try:
+    import fleet_ids
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    import fleet_ids
+
+APP_ID = fleet_ids.get("cerberus_app_id")  # the fleet's identifier file (#4165)
 GITHUB_USER = "martymcenroe"
 _GH_API = "https://api.github.com"
 

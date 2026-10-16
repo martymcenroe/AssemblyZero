@@ -6,8 +6,8 @@ Issue #960 / #886 Phase 2.
 Per `data/branch-protection-audit.csv`, two repos in the fleet
 (AssemblyZero + sextant) gate branch protection on the legacy
 `issue-reference` check (app_id 15368, GitHub Actions workflow). The
-fleet-standard is `pr-sentinel / issue-reference` (app_id 2975092,
-Cloudflare Worker), which recognizes the `No-Issue:` exemption that
+fleet-standard is `pr-sentinel / issue-reference` (the pr-sentinel App,
+whose ID is in config/fleet-ids.json; Cloudflare Worker), which recognizes the `No-Issue:` exemption that
 dependabot and other automated tools rely on.
 
 This script flips both outlier repos to the fleet-standard context.
@@ -46,13 +46,14 @@ from typing import Any
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fleet_ids  # noqa: E402
 from _pat_session import classic_pat_session  # noqa: E402
 
 GITHUB_USER = "martymcenroe"
 GH_API = "https://api.github.com"
 OLD_CONTEXT = "issue-reference"
 NEW_CONTEXT = "pr-sentinel / issue-reference"
-WORKER_APP_ID = 2975092
+WORKER_APP_ID = int(fleet_ids.get("pr_sentinel_app_id"))  # the fleet's identifier file (#4165)
 AUDIT_CSV = Path(__file__).resolve().parent.parent / "data" / "branch-protection-audit.csv"
 HTTP_TIMEOUT_S = 30
 
