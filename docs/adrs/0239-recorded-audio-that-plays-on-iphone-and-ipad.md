@@ -1,6 +1,6 @@
 # ADR 0239: Recorded audio plays on iPhone and iPad only when the server answers byte ranges and the user's touch started the element
 
-**Status:** Proposed
+**Status:** Superseded by ADR 0240. Tested on a real iPad, neither condition below made a clip play: the cause was `play()` reached after an `await`, not the server's ranges or an unlocked element.
 **Date:** 2026-10-17
 **Deciders:** Operator
 **Related:** #4168
