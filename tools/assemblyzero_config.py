@@ -28,7 +28,7 @@ import json
 import logging
 import platform
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Literal, Optional
 
 # Configure logging
@@ -178,14 +178,21 @@ class AssemblyZeroConfig:
         # Additional check: normalize path using pathlib for Windows paths
         # This catches cases like 'C:\foo\..\bar' -> 'C:\bar'
         if sanitized and not sanitized.startswith('/'):
-            # Looks like Windows path - use pathlib normalization
-            try:
-                normalized = str(Path(sanitized).resolve())
-                # Only use normalized if it doesn't escape (sanity check)
-                if '..' not in normalized:
-                    sanitized = normalized
-            except (ValueError, OSError):
-                pass  # Keep the regex-sanitized version
+            if PureWindowsPath(sanitized).drive and self._get_os_format() != 'windows':
+                # Off Windows, a 'C:\...' path names a place on the Windows side,
+                # so it is normalized as a Windows path. resolve() would read it
+                # as a relative file name and join it to this side's current
+                # directory (#4180).
+                sanitized = str(PureWindowsPath(sanitized))
+            else:
+                # Looks like Windows path - use pathlib normalization
+                try:
+                    normalized = str(Path(sanitized).resolve())
+                    # Only use normalized if it doesn't escape (sanity check)
+                    if '..' not in normalized:
+                        sanitized = normalized
+                except (ValueError, OSError):
+                    pass  # Keep the regex-sanitized version
 
         # Final safety check: if '..' still present anywhere, path is suspicious
         if '..' in sanitized:
