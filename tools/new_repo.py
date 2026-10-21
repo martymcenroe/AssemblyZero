@@ -3241,7 +3241,10 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
     # Step 2: Initialize git
     print("\n2. Initializing git...")
-    run_command(["git", "init"], cwd=project_path)
+    # Name the branch: every later step pushes and protects main. Git for
+    # Windows sets init.defaultBranch=main; Ubuntu's git does not, and a bare
+    # init there made master, so the push failed (#4185).
+    run_command(["git", "init", "--initial-branch=main"], cwd=project_path)
     run_command(["git", "config", "pull.rebase", "true"], cwd=project_path)
     print("  Initialized git repository (pull.rebase=true)")
 
