@@ -8,6 +8,7 @@ Issue: #99
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -2111,3 +2112,34 @@ def test_a_wsl_project_root_writes_windows_paths_in_windows_form(tmp_path, monke
     assert content["inherit_from"] == r"C:\Users\dev\Projects\AssemblyZero"
     assert content["variables"]["PROJECT_ROOT"] == "/mnt/c/Users/dev/Projects/newthing"
     assert content["unix_paths_from"] == "linux"
+
+
+# ---------------------------------------------------------------------------
+# #4185 -- the scaffold's branch is main whatever git's configuration says
+# ---------------------------------------------------------------------------
+
+
+@patch("new_repo.config")
+@patch("new_repo.run_command")
+def test_the_scaffold_branch_is_main_with_no_git_configuration(mock_run, mock_config, tmp_path):
+    """Ubuntu's git sets no init.defaultBranch, so a bare init made master and
+    the push of main failed. Run the exact init command main() issues against
+    an empty configuration, where git's own default is master."""
+    _setup_config_mock(mock_config, tmp_path)
+    mock_run.side_effect = run_with_real_git_init
+    with patch("sys.argv", ["new_repo.py", "BranchCheck", "--no-github"]):
+        main()
+    init_cmds = [c[0][0] for c in mock_run.call_args_list if c[0][0][:2] == ["git", "init"]]
+    assert len(init_cmds) == 1
+
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    empty = tmp_path / "empty.gitconfig"
+    empty.write_text("", encoding="utf-8")
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": str(empty), "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run([*init_cmds[0], "-q"], cwd=repo, env=env, check=True)
+    head = subprocess.run(
+        ["git", "symbolic-ref", "--short", "HEAD"],
+        cwd=repo, env=env, capture_output=True, text=True, check=True,
+    )
+    assert head.stdout.strip() == "main"
