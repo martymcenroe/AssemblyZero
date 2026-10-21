@@ -320,7 +320,7 @@ class TestNoPromptStopsAtOnce:
         msg = str(excinfo.value)
         assert secret in msg
         assert "nothing was asked of you" in msg
-        assert "Git Bash" in msg
+        assert "Git Bash" not in msg, "#4179: WSL is a supported side, not a dead end"
         assert "Inappropriate ioctl" in msg, "gpg's own words must reach the operator"
 
     def test_generic_session_raises_after_one_call(self, tmp_path, monkeypatch):

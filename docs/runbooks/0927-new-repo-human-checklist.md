@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 6.9
-**Last Updated:** 2026-10-08
+**Version:** 7.0
+**Last Updated:** 2026-10-21
 
 ---
 
@@ -129,7 +129,7 @@ You CAN safely `rm ~/.secrets/cerberus-pem.gpg` at any time (deletes only your o
 
 ### 1. Run the setup script (bare — no env prefix needed)
 
-**Run it in Git Bash on Windows 11.** There, pinentry is a dialog with its own window. Ubuntu has only a terminal pinentry (`pinentry-curses`), and the script detaches its standard input so that no passphrase can arrive through the terminal (#1806). gpg therefore fails there before any prompt appears, and the script stops on that first failure and says to use Git Bash (#4135).
+**Run it in a WSL terminal on Ubuntu, or in Git Bash on Windows 11.** In Git Bash, pinentry is a dialog with its own window. On Ubuntu it is `pinentry-curses`, which draws its box in the terminal the script was started from. The script detaches its standard input so that no passphrase can reach it (#1806), but first records the terminal's name in `GPG_TTY`, so pinentry-curses can still open that terminal and read the passphrase itself (#4179). Started from cron, a background job or a pipe, it has no terminal, and it stops at the first decrypt and says so.
 
 **Recommended path — `--cerberus-pem-gpg` (encrypted at rest, reusable):**
 
@@ -380,3 +380,4 @@ The **per-repo human steps** are: running the script in Git Bash, entering the g
 | 2026-05-26 | v6.7: #1331 — added Step 20 to the under-the-hood table: Enable Dependabot at the repo settings level (PATCH `security_and_analysis.dependabot_security_updates`, PUT `/vulnerability-alerts`, PUT `/automated-security-fixes`). Without this step the scaffolded `.github/dependabot.yml` is inert on private repos (Dependabot defaults to disabled; no PRs emit). Defect confirmed 2026-05-26 on a private decorative-deps fixture repo. Companion tool `tools/enable_dependabot.py` runs the same enablement against existing repos (`--repo OWNER/NAME` or `--fleet`, `--apply` per std 0017). |
 | 2026-06-10 | v6.8: #1334 + #1563 — script now generates `.github/dependabot.yml` at creation time (step 11c2; ecosystems by marker-file presence — `pyproject.toml`→pip, `package.json`→npm, `Dockerfile`→docker — plus `github-actions` always; non-workflow file, rides the initial commit). This is the version-update half that complements #1331's settings-level enablement — without the yml, only security PRs fire. Also creates `data-g/` (git-tracked source-of-truth data) with a README explaining the split vs the fleet-ignored `data/`. Updated the under-the-hood table (step 12) and the "handles automatically" list. |
 | 2026-10-08 | v6.9: #4141, after PR #4138. Run the script in Git Bash on Windows 11; on Ubuntu the decrypt cannot prompt (#1806, #4135). No hook is installed in a new repo, and `.claude/settings.json` is `{}` (#4137). `[SUCCESS]` and exit 0 only when every step succeeded; otherwise `[FAILED]`, an alert and exit 1 (#4136). Passphrase lines corrected for `default-cache-ttl 0`: one prompt per secret decrypted. The stale "revoke the Cerberus key when done" in the human-steps line is removed (#1295). |
+| 2026-10-21 | v7.0: #4179. The operator runs the script from WSL. It records the terminal in `GPG_TTY` before detaching stdin, so `pinentry-curses` prompts in that terminal. Supersedes v6.9's Git Bash instruction. |

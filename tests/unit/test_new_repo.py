@@ -2080,3 +2080,34 @@ def test_warns_about_a_directory_dependabot_yml_never_declared(tmp_path, capsys)
         (d / "package-lock.json").write_text("{}", encoding="utf-8")
 
     assert _nr.warn_npm_dirs_without_test_script(tmp_path) == ["/dashboard"]
+
+
+# ---------------------------------------------------------------------------
+# #4180 -- a scaffold made from Ubuntu holds Windows paths in Windows form
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="this is the Ubuntu side's scaffold")
+def test_a_wsl_project_root_writes_windows_paths_in_windows_form(tmp_path, monkeypatch):
+    """The real config, not a mock: its sanitizer is half of the defect."""
+    import assemblyzero_config
+
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"version": "1.0", "paths": {
+        "assemblyzero_root": {"windows": r"C:\Users\dev\Projects\AssemblyZero",
+                              "unix": "/mnt/c/Users/dev/Projects/AssemblyZero"},
+        "projects_root": {"windows": r"C:\Users\dev\Projects",
+                          "unix": "/mnt/c/Users/dev/Projects"},
+        "user_claude_dir": {"windows": "/home/dev/.claude", "unix": "/home/dev/.claude"},
+    }}), encoding="utf-8")
+    monkeypatch.setattr(assemblyzero_config, "CONFIG_PATH", config_file)
+    monkeypatch.setattr(assemblyzero_config.AssemblyZeroConfig, "_detected_os", "unix")
+    monkeypatch.setattr(_nr, "config", assemblyzero_config.AssemblyZeroConfig())
+
+    content = _nr.project_json_content(
+        Path("/mnt/c/Users/dev/Projects/newthing"), "newthing", "u")
+
+    assert content["variables"]["PROJECT_ROOT_WINDOWS"] == r"C:\Users\dev\Projects\newthing"
+    assert content["inherit_from"] == r"C:\Users\dev\Projects\AssemblyZero"
+    assert content["variables"]["PROJECT_ROOT"] == "/mnt/c/Users/dev/Projects/newthing"
+    assert content["unix_paths_from"] == "linux"

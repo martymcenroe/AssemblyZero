@@ -10,10 +10,13 @@ Two failure modes, both diagnosed from real runs on 2026-07-25/26:
   broken security flow when the real fault is scaffolding over a live repo.
 - #1806: a passphrase typed while pinentry lacks focus must land nowhere.
   This process, and the children it spawns, must not be able to read it.
+- #4179: with stdin gone, a terminal pinentry (Ubuntu's pinentry-curses)
+  must still be told which terminal to draw on.
 
-Issues: #1805, #1806
+Issues: #1805, #1806, #4179
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -196,6 +199,75 @@ class TestDetachStdin:
                     main()
         assert detach.call_count == 1, "main() must detach stdin exactly once"
         assert parse.called
+
+
+# ===========================================================================
+# #4179 — gpg still finds the terminal after stdin is gone
+# ===========================================================================
+
+# A stand-in for gpg, found first on PATH. It reports what the real gpg would
+# use to place pinentry-curses: GPG_TTY, and whether its own stdin is a
+# terminal. Its report is the "decrypted" value, so the test reads it back
+# through classic_pat_session.
+_FAKE_GPG = (
+    "import os, sys\n"
+    "sys.stdout.write('GPG_TTY=%s STDIN_IS_TTY=%s' % "
+    "(os.environ.get('GPG_TTY', ''), os.isatty(0)))\n"
+)
+
+# What new_repo.py does: detach stdin first, then open the PAT session.
+_DETACH_THEN_DECRYPT = (
+    "import sys\n"
+    "from pathlib import Path\n"
+    "sys.path.insert(0, %r)\n"
+    "from new_repo import detach_stdin\n"
+    "from _pat_session import classic_pat_session\n"
+    "detach_stdin()\n"
+    "with classic_pat_session(Path(sys.argv[1])) as seen:\n"
+    "    sys.stdout.write(seen)\n"
+)
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="pseudo-terminals are POSIX; Windows pinentry is a dialog")
+class TestGpgFindsTheTerminal:
+
+    def _run(self, tmp_path, stdin):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        gpg = bin_dir / "gpg"
+        gpg.write_text(f"#!{sys.executable}\n{_FAKE_GPG}", encoding="utf-8")
+        gpg.chmod(0o755)
+        script = tmp_path / "run.py"
+        script.write_text(_DETACH_THEN_DECRYPT % str(TOOLS_DIR), encoding="utf-8")
+        secret = tmp_path / "classic-pat.gpg"
+        secret.write_bytes(b"not a gpg blob")
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        env.pop("GPG_TTY", None)
+        return subprocess.run(
+            [sys.executable, str(script), str(secret)],
+            stdin=stdin, capture_output=True, text=True, timeout=60, env=env,
+            check=False,
+        )
+
+    def test_gpg_is_given_the_terminal_and_still_has_null_stdin(self, tmp_path):
+        import pty
+
+        controller, terminal = pty.openpty()
+        try:
+            name = os.ttyname(terminal)
+            result = self._run(tmp_path, terminal)
+        finally:
+            os.close(controller)
+            os.close(terminal)
+        assert result.returncode == 0, result.stderr
+        assert f"GPG_TTY={name} " in result.stdout, result.stdout
+        assert "STDIN_IS_TTY=False" in result.stdout, "#1806: gpg's stdin stays the null device"
+
+    def test_no_terminal_records_nothing(self, tmp_path):
+        result = self._run(tmp_path, subprocess.DEVNULL)
+        assert result.returncode == 0, result.stderr
+        assert "GPG_TTY= " in result.stdout, result.stdout
 
 
 class TestSubprocessStdinIsolation:
