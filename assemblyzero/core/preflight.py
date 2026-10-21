@@ -47,7 +47,7 @@ def gemini_in_specs(*specs: str) -> bool:
 #: The probe's model when no spec names one. Not ``config.REVIEWER_MODEL``,
 #: even though ADR 0234 made it a Gemini id: it was a Claude id once and
 #: ``GeminiClient`` rejected it (#3541); the probe names its model itself.
-DEFAULT_PROBE_MODEL = "gemini-3.1-pro-high"
+DEFAULT_PROBE_MODEL = "gemini-3.8-flash-high"
 
 
 def gemini_model_for(*specs: str) -> str:

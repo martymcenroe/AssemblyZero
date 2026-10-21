@@ -840,7 +840,7 @@ class TestGeminiProvider:
     @pytest.mark.parametrize("alias", ["2.5-pro", "pro"])
     def test_legacy_pro_aliases_resolve_to_living_id(self, alias):
         """#3710: gemini-2.5-pro is gone from agy; the aliases remap as #1764 did."""
-        assert GeminiProvider.MODEL_MAP[alias] == "gemini-3.1-pro-high"
+        assert GeminiProvider.MODEL_MAP[alias] == "gemini-3.8-flash-high"
 
     def test_every_map_value_is_an_id_agy_serves(self):
         """#3710: one declared set of living ids, and the map stays inside it."""
@@ -863,17 +863,19 @@ class TestGeminiProvider:
         """#1764: agy retired the -preview IDs. Every Pro-line alias must
         resolve to a model the CLI actually serves (verified against
         `agy models` 2026-07-14) — a dead ID turns every pipeline LLM call
-        into an error banner."""
-        assert GeminiProvider.MODEL_MAP["3.1-pro-preview"] == "gemini-3.1-pro-high"
-        assert GeminiProvider.MODEL_MAP["3.1-pro"] == "gemini-3.1-pro-high"
-        assert GeminiProvider.MODEL_MAP["3.1-pro-high"] == "gemini-3.1-pro-high"
-        assert GeminiProvider.MODEL_MAP["3.1-pro-low"] == "gemini-3.1-pro-low"
+        into an error banner. #4178: the gemini-3.1-pro ids went the same
+        way (read 2026-10-21) and Argon is forbidden, so the aliases remap
+        to 3.8 Flash."""
+        assert GeminiProvider.MODEL_MAP["3.1-pro-preview"] == "gemini-3.8-flash-high"
+        assert GeminiProvider.MODEL_MAP["3.1-pro"] == "gemini-3.8-flash-high"
+        assert GeminiProvider.MODEL_MAP["3.1-pro-high"] == "gemini-3.8-flash-high"
+        assert GeminiProvider.MODEL_MAP["3.1-pro-low"] == "gemini-3.8-flash-low"
 
     def test_pro_preview_alias_maps_to_high_model_id(self):
         """The workflow default spec gemini:3.1-pro-preview must construct a
         provider whose resolved model ID is servable (#1764)."""
         provider = GeminiProvider(model="3.1-pro-preview")
-        assert provider._model_id == "gemini-3.1-pro-high"
+        assert provider._model_id == "gemini-3.8-flash-high"
 
     def test_invalid_model(self):
         """Test that invalid model raises ValueError."""

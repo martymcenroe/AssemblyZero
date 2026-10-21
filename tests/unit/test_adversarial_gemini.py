@@ -328,7 +328,12 @@ class TestTheSanctionedTransport:
     renamed to a timeout, and the node skipped itself each time."""
 
     def test_the_default_provider_comes_from_get_provider_with_the_gemini_spec(self):
-        with patch("assemblyzero.core.llm_provider.get_provider") as factory:
+        # #4178: while agy offers no Pro, the default seat's model check
+        # refuses (tested in TestTheRequestedModelIsChosenNotSpelled), so it
+        # is stubbed here to test which spec reaches get_provider.
+        with patch(
+            "assemblyzero.workflows.testing.adversarial_gemini.resolve_adversarial_model"
+        ), patch("assemblyzero.core.llm_provider.get_provider") as factory:
             factory.return_value = _FakeTransport(_result())
             client = AdversarialGeminiClient()
 
@@ -497,27 +502,14 @@ class TestTheRequestedModelIsChosenNotSpelled:
             "fleet migrations cannot reach this call"
         )
 
-    def test_it_resolves_to_a_pro_identifier(self):
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            resolve_adversarial_model,
-        )
+    def test_the_default_seat_is_refused_while_agy_offers_no_pro(self):
+        """#4178: agy lists no Pro and Argon is forbidden, so the default
+        seat's alias resolves to 3.8 Flash. This seat refuses Flash before
+        any request, so it stops with an error instead of running."""
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
 
-        model_id = resolve_adversarial_model()
-        assert "pro" in model_id
-        assert "flash" not in model_id
-        assert "preview" not in model_id, (
-            "a path that fails open should not run on a dated preview"
-        )
-
-    def test_the_requested_model_is_not_forbidden(self):
-        """The check #2286 asked for: the REQUEST is validated, where
-        verify_model_is_pro only ever inspected the reply."""
-        from assemblyzero.core.config import FORBIDDEN_MODELS
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            resolve_adversarial_model,
-        )
-
-        assert resolve_adversarial_model() not in FORBIDDEN_MODELS
+        with pytest.raises(ag.ForbiddenModelError, match="flash tier"):
+            ag.resolve_adversarial_model()
 
     @pytest.mark.parametrize("alias", ["flash", "2.5-flash", "3.1-flash-preview"])
     def test_a_forbidden_tier_is_refused_before_any_request(self, alias):
@@ -563,11 +555,13 @@ class TestTheRequestedModelIsChosenNotSpelled:
         """#2926: the model half of the provider spec is the alias
         resolve_adversarial_model validates, so what is checked and what is
         requested cannot drift apart. #3563: the spec the client is given is
-        the one both checked and built."""
+        the one both checked and built. #4178: while agy offers no Pro the
+        check refuses every Gemini alias, so it is stubbed here; what it is
+        called with is the point."""
         from assemblyzero.workflows.testing import adversarial_gemini as ag
 
         with patch.object(
-            ag, "resolve_adversarial_model", wraps=ag.resolve_adversarial_model
+            ag, "resolve_adversarial_model"
         ) as checked, patch("assemblyzero.core.llm_provider.get_provider") as factory:
             factory.return_value = _FakeTransport(_result())
             ag.AdversarialGeminiClient(spec="gemini:3.1-pro-high", effort="max")
