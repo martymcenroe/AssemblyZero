@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Primary review model - highest reasoning tier available
 # Issue #773 made this Claude Opus via the Max subscription. ADR 0234 (2026-09-24): Gemini in agy validates, so the reviewer id is the Gemini model the agy transport accepts.
-REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-4-argon-high")
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.8-flash-high")
 
 # Acceptable fallback models
 REVIEWER_MODEL_FALLBACKS: list[str] = []  # no Claude fallback for the reviewer seat (ADR 0234)
@@ -27,25 +27,21 @@ FORBIDDEN_MODELS = [
     "gemini-lite",
     "gemini-3-pro-preview",
     "gemini-3-pro",
+    # Never Argon: the operator's order, 2026-10-16 and again 2026-10-21
+    # ("DO NOT USE ARGON", #4178). Argon's budget is weekly, and a previous
+    # agent spent a whole week of it in one run. A family entry: every check
+    # matches it as a substring, so all three gemini-4-argon ids are refused.
+    "gemini-4-argon",
 ]
 
-# The Gemini ids GeminiProvider may send: the Gemini models `agy models` lists
-# (catalog read 2026-10-21, #4178; recorded in tests/fixtures/agy_models.txt).
-# Every GeminiProvider.MODEL_MAP value must be one of these; when agy's catalog
-# changes, re-record the fixture and update this.
-#
-# The review tier is the strongest Gemini agy offers. agy dropped the
-# gemini-3.1-pro ids by 2026-10-21, and Gemini 4 Argon is what it lists in
-# their place, so the Pro-line aliases resolve here.
-AGY_GEMINI_REVIEW_MODELS = frozenset(
-    {"gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low"}
-)
-# Flash is for callers that ask for it by name, such as cheap summaries (#4178).
-# No review gate's default resolves to it.
-AGY_GEMINI_FLASH_MODELS = frozenset(
+# The Gemini ids GeminiProvider may send: the 3.8 Flash models `agy models`
+# lists (catalog read 2026-10-21, #4178; recorded in tests/fixtures/
+# agy_models.txt). The catalog's other Gemini is Argon, which is forbidden
+# above, and it lists no Pro. Every GeminiProvider.MODEL_MAP value must be one
+# of these; when agy's catalog changes, re-record the fixture and update this.
+AGY_GEMINI_MODELS = frozenset(
     {"gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low"}
 )
-AGY_GEMINI_MODELS = AGY_GEMINI_REVIEW_MODELS | AGY_GEMINI_FLASH_MODELS
 
 # =============================================================================
 # Claude Model (REQ-2: Claude 4.6)

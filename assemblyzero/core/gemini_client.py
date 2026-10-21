@@ -392,7 +392,10 @@ class GeminiClient:
         model: str = REVIEWER_MODEL,
     ):
         """Initialize the client."""
-        if model in FORBIDDEN_MODELS:
+        # Exact match, then family (#4178): "gemini-4-argon" refuses every
+        # Argon id, the way seats.check_spec reads the list.
+        lowered = model.lower()
+        if any(entry.lower() in lowered for entry in FORBIDDEN_MODELS):
             raise ValueError(f"Model '{model}' is forbidden.")
             
         if not model.startswith("gemini-"):

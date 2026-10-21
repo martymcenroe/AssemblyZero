@@ -202,7 +202,7 @@ class TestTheBuiltInProfiles:
     def test_gemini_puts_every_seat_on_gemini_at_max(self):
         for name, seat in seat_table(load_profile(builtin_path("gemini"))).items():
             assert (seat.spec, seat.effort) == ("gemini:3.1-pro", "max"), name
-            assert seat.resolved_model_id == "gemini-4-argon-high", name
+            assert seat.resolved_model_id == "gemini-3.8-flash-high", name
             assert seat.provider == "GeminiProvider", name
 
     def test_claude_reproduces_the_pre_law_table(self):

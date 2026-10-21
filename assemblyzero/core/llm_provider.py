@@ -1632,15 +1632,13 @@ class GeminiProvider(LLMProvider):
     3-pro-preview and 3-flash-preview entries superseded by 3.1 equivalents.
 
     Supported models (every alias resolves to an id in config.AGY_GEMINI_MODELS):
-    - 4-argon, 4-argon-high - gemini-4-argon-high
-    - 4-argon-medium - gemini-4-argon-medium
-    - 4-argon-low - gemini-4-argon-low
-    - 3.8-flash-high, 3.8-flash-medium, 3.8-flash-low - gemini-3.8-flash-*,
-      for callers that ask for Flash by name (#4178)
+    - 3.8-flash-high, 3.8-flash-medium, 3.8-flash-low - gemini-3.8-flash-*
     - 3.1-pro (default), 3.1-pro-high, 3.1-pro-preview, 2.5-pro, pro - legacy
       aliases kept so profiles and older configs keep working; all resolve to
-      gemini-4-argon-high
-    - 3.1-pro-low - legacy alias, resolves to gemini-4-argon-low
+      gemini-3.8-flash-high
+    - 3.1-pro-low - legacy alias, resolves to gemini-3.8-flash-low
+
+    No alias resolves to Argon; config.FORBIDDEN_MODELS refuses it (#4178).
     """
 
     # Model mapping from friendly names to actual model IDs
@@ -1652,20 +1650,16 @@ class GeminiProvider(LLMProvider):
     # Issue #3710: gemini-2.5-pro, gemini-2.5-flash and gemini-3.1-flash-preview
     # are absent from `agy models` (read 2026-10-06). The 2.5 Pro aliases remap
     # the same way, and the Flash aliases were removed.
-    # Issue #4178: `agy models` (read 2026-10-21) lists neither
-    # gemini-3.1-pro id. The Pro-line aliases remap to gemini-4-argon, and the
-    # 3.8 Flash ids are allowed for callers that name them.
+    # Issue #4178: `agy models` (read 2026-10-21) lists no Pro id, only 3.8
+    # Flash and Argon, and the operator forbids Argon. Every alias resolves
+    # to 3.8 Flash.
     MODEL_MAP = {
-        "2.5-pro": "gemini-4-argon-high",  # dead at the CLI (#3710)
-        "pro": "gemini-4-argon-high",  # dead at the CLI (#3710)
-        "3.1-pro-preview": "gemini-4-argon-high",  # superseded preview (#1764)
-        "3.1-pro": "gemini-4-argon-high",  # dead at the CLI (#4178)
-        "3.1-pro-high": "gemini-4-argon-high",  # dead at the CLI (#4178)
-        "3.1-pro-low": "gemini-4-argon-low",  # dead at the CLI (#4178)
-        "4-argon": "gemini-4-argon-high",
-        "4-argon-high": "gemini-4-argon-high",
-        "4-argon-medium": "gemini-4-argon-medium",
-        "4-argon-low": "gemini-4-argon-low",
+        "2.5-pro": "gemini-3.8-flash-high",  # dead at the CLI (#3710)
+        "pro": "gemini-3.8-flash-high",  # dead at the CLI (#3710)
+        "3.1-pro-preview": "gemini-3.8-flash-high",  # superseded preview (#1764)
+        "3.1-pro": "gemini-3.8-flash-high",  # dead at the CLI (#4178)
+        "3.1-pro-high": "gemini-3.8-flash-high",  # dead at the CLI (#4178)
+        "3.1-pro-low": "gemini-3.8-flash-low",  # dead at the CLI (#4178)
         "3.8-flash-high": "gemini-3.8-flash-high",
         "3.8-flash-medium": "gemini-3.8-flash-medium",
         "3.8-flash-low": "gemini-3.8-flash-low",
@@ -1675,8 +1669,8 @@ class GeminiProvider(LLMProvider):
         """Initialize Gemini provider.
 
         Args:
-            model: Model alias, a key of MODEL_MAP (3.1-pro, 4-argon-low,
-                3.8-flash-low, etc.).
+            model: Model alias, a key of MODEL_MAP (3.1-pro, 3.8-flash-low,
+                etc.).
 
         Raises:
             ValueError: If model is not recognized.

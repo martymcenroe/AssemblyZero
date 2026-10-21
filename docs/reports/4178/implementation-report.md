@@ -4,17 +4,18 @@
 
 `agy models`, read 2026-10-21, lists `gemini-4-argon-{high,medium,low}` and `gemini-3.8-flash-{high,medium,low}` as its Gemini models. It lists no `gemini-3.1-pro` id. `config.AGY_GEMINI_MODELS` named only the two `gemini-3.1-pro` ids, and every `GeminiProvider.MODEL_MAP` alias resolved to one of them, so every Gemini call asked agy for a model it does not have.
 
-The Pro-line aliases now resolve to Gemini 4 Argon, the only non-Flash Gemini agy lists. This is the same remap #1764 and #3710 made when earlier ids died. The run profiles keep their `gemini:3.1-pro` specs, so no review gate's choice of seat changed.
+**Never Argon.** The operator forbids it: on 2026-10-16, because Argon's budget is weekly and a previous agent spent a whole week of it in one run, and again on 2026-10-21, after the first version of this change routed every default Gemini call to `gemini-4-argon-high`. That version never merged (PR #4191 was stopped before it could). The only Gemini left is 3.8 Flash, so every alias resolves to it. The run profiles keep their `gemini:3.1-pro` specs.
 
 | File | Change |
 |---|---|
-| `assemblyzero/core/config.py` | `AGY_GEMINI_REVIEW_MODELS` (Argon) and `AGY_GEMINI_FLASH_MODELS` (3.8 Flash); `AGY_GEMINI_MODELS` is their union. `REVIEWER_MODEL` defaults to `gemini-4-argon-high`. |
-| `assemblyzero/core/llm_provider.py` | Legacy Pro aliases resolve to `gemini-4-argon-high`, and `3.1-pro-low` to `gemini-4-argon-low`. New aliases `4-argon`, `4-argon-{high,medium,low}`, `3.8-flash-{high,medium,low}`. The "Flash is forbidden for governance" comment is removed; nothing traced it to the operator. |
-| `assemblyzero/core/preflight.py` | The probe's default model is `gemini-4-argon-high`. |
-| `assemblyzero/workflows/testing/adversarial_gemini.py` | `verify_model_is_pro` accepts the Argon ids, which do not contain "pro". The adversarial seat's own refusal of Flash is unchanged. |
-| `assemblyzero/core/gemini_client.py` | A comment that named `gemini-3.1-pro-high` as the model now says the model is Gemini. |
-| `tools/model_scorecard.py` | Prices the six catalog ids at zero (subscription). |
+| `assemblyzero/core/config.py` | `FORBIDDEN_MODELS` gains the family entry `gemini-4-argon`, with the operator's order beside it. `AGY_GEMINI_MODELS` is the three 3.8 Flash ids. `REVIEWER_MODEL` defaults to `gemini-3.8-flash-high`. |
+| `assemblyzero/core/gemini_client.py` | `GeminiClient` reads `FORBIDDEN_MODELS` by exact match and then by family, as `seats.check_spec` and the adversarial check already did, so it refuses every Argon id. A comment that named `gemini-3.1-pro-high` as the model now says the model is Gemini. |
+| `assemblyzero/core/llm_provider.py` | Legacy Pro aliases resolve to `gemini-3.8-flash-high`, and `3.1-pro-low` to `gemini-3.8-flash-low`. New aliases `3.8-flash-{high,medium,low}`. The "Flash is forbidden for governance" comment is removed; nothing traced it to the operator. |
+| `assemblyzero/core/preflight.py` | The probe's default model is `gemini-3.8-flash-high`. |
+| `tools/model_scorecard.py` | Prices the three Flash ids at zero (subscription). |
 | `tests/fixtures/agy_models.txt` | The `agy models` output, as read. |
+
+**The adversarial review step stops.** Its seat is `gemini:3.1-pro`, which now resolves to Flash, and `resolve_adversarial_model` refuses Flash before any request. The step fails with `ForbiddenModelError` instead of running. `adversarial_gemini.py` is unchanged from `main`; the operator approved this outcome on 2026-10-21.
 
 ## #4189: runbook 0935
 

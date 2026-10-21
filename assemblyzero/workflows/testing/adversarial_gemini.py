@@ -211,11 +211,7 @@ class AdversarialGeminiClient:
                 f"Expected Gemini Pro but received {model_name}"
             )
 
-        # #4178: agy's review tier is now gemini-4-argon, whose ids do not
-        # say "pro", so the tier is read from config rather than the name.
-        from assemblyzero.core.config import AGY_GEMINI_REVIEW_MODELS
-
-        if "pro" in model_lower or model_lower in AGY_GEMINI_REVIEW_MODELS:
+        if "pro" in model_lower:
             logger.info("Gemini Pro model confirmed: %s", model_name)
             return True
 

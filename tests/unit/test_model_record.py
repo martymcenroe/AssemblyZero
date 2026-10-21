@@ -232,7 +232,7 @@ class TestTheStamp:
         out = embed_review_evidence(LLD, "APPROVED", "2026-09-25", 1)
 
         assert "nonsense-model" not in out
-        assert "Approved (gemini-4-argon-high, 2026-09-25)" in out
+        assert "Approved (gemini-3.8-flash-high, 2026-09-25)" in out
 
     def test_the_run_profile_decides_the_default_stamp(self):
         from assemblyzero.workflows.requirements.audit import embed_review_evidence

@@ -66,17 +66,17 @@ class TestTheStandaloneDefaultsAreAgy:
             assert stages[stage]["drafter"] == AGY, stage
             assert stages[stage]["reviewer"] == AGY, stage
 
-    def test_the_default_resolves_to_a_permitted_pro_model(self):
-        from assemblyzero.core.config import AGY_GEMINI_REVIEW_MODELS, FORBIDDEN_MODELS
+    def test_the_default_resolves_to_a_permitted_model(self):
+        """#4178: agy lists no Pro and Argon is forbidden, so 3.8 Flash."""
+        from assemblyzero.core.config import AGY_GEMINI_MODELS, FORBIDDEN_MODELS
         from assemblyzero.core.llm_provider import GeminiProvider, parse_provider_spec
 
         provider, model = parse_provider_spec(AGY)
         model_id = GeminiProvider.MODEL_MAP[model]
 
         assert provider == "gemini"
-        assert model_id in AGY_GEMINI_REVIEW_MODELS  # #4178: Argon has no "pro"
-        assert "flash" not in model_id
-        assert model_id not in FORBIDDEN_MODELS
+        assert model_id in AGY_GEMINI_MODELS
+        assert not any(entry in model_id for entry in FORBIDDEN_MODELS)
 
     def test_an_override_to_claude_still_parses(self):
         from tools.run_requirements_workflow import parse_args
