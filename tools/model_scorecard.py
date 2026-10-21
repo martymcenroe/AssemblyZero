@@ -25,8 +25,12 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     # Gemini models: only the ids the pipeline sends, never one on
     # config.FORBIDDEN_MODELS (#3700). agy runs them on the subscription,
     # so a token costs nothing per call.
-    "gemini-3.1-pro-high": {"input": 0.0, "output": 0.0},
-    "gemini-3.1-pro-low": {"input": 0.0, "output": 0.0},
+    "gemini-4-argon-high": {"input": 0.0, "output": 0.0},
+    "gemini-4-argon-medium": {"input": 0.0, "output": 0.0},
+    "gemini-4-argon-low": {"input": 0.0, "output": 0.0},
+    "gemini-3.8-flash-high": {"input": 0.0, "output": 0.0},
+    "gemini-3.8-flash-medium": {"input": 0.0, "output": 0.0},
+    "gemini-3.8-flash-low": {"input": 0.0, "output": 0.0},
     # Claude models (Anthropic API)
     "claude:opus": {"input": 15.00, "output": 75.00},
     "claude:sonnet": {"input": 3.00, "output": 15.00},

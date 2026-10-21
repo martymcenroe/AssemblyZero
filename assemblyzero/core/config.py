@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Primary review model - highest reasoning tier available
 # Issue #773 made this Claude Opus via the Max subscription. ADR 0234 (2026-09-24): Gemini in agy validates, so the reviewer id is the Gemini model the agy transport accepts.
-REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.1-pro-high")
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-4-argon-high")
 
 # Acceptable fallback models
 REVIEWER_MODEL_FALLBACKS: list[str] = []  # no Claude fallback for the reviewer seat (ADR 0234)
@@ -29,10 +29,23 @@ FORBIDDEN_MODELS = [
     "gemini-3-pro",
 ]
 
-# The Gemini ids GeminiProvider may send: the Pro models `agy models` lists
-# (catalog read 2026-10-06, #3710). Every GeminiProvider.MODEL_MAP value must
-# be one of these; update this when agy's catalog changes.
-AGY_GEMINI_MODELS = frozenset({"gemini-3.1-pro-high", "gemini-3.1-pro-low"})
+# The Gemini ids GeminiProvider may send: the Gemini models `agy models` lists
+# (catalog read 2026-10-21, #4178; recorded in tests/fixtures/agy_models.txt).
+# Every GeminiProvider.MODEL_MAP value must be one of these; when agy's catalog
+# changes, re-record the fixture and update this.
+#
+# The review tier is the strongest Gemini agy offers. agy dropped the
+# gemini-3.1-pro ids by 2026-10-21, and Gemini 4 Argon is what it lists in
+# their place, so the Pro-line aliases resolve here.
+AGY_GEMINI_REVIEW_MODELS = frozenset(
+    {"gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low"}
+)
+# Flash is for callers that ask for it by name, such as cheap summaries (#4178).
+# No review gate's default resolves to it.
+AGY_GEMINI_FLASH_MODELS = frozenset(
+    {"gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low"}
+)
+AGY_GEMINI_MODELS = AGY_GEMINI_REVIEW_MODELS | AGY_GEMINI_FLASH_MODELS
 
 # =============================================================================
 # Claude Model (REQ-2: Claude 4.6)

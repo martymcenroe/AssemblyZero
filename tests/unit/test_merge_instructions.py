@@ -25,7 +25,14 @@ FORBIDDEN = (
     "[skip ci]",
     "--body ",
     "echo ",
+    "gh pr close",  # woke the retired Auto Review (#4189)
+    "gh pr reopen",
 )
+
+RUNBOOK = FILES[1]
+
+# A closed set: the words that mark a mention of Auto Review as history (#4189).
+RETIRED_CONTEXT = ("retired", "skipped", "Earlier versions", "#3663")
 
 
 def bash_blocks(text: str) -> list[str]:
@@ -59,6 +66,29 @@ def test_the_check_finds_a_hand_merge():
 
 def test_a_quoted_block_is_not_a_command():
     assert offenders("```text\necho quoted from a workflow\n```\n") == []
+
+
+def decision_tree(text: str) -> str:
+    """The fenced block under the runbook's "Diagnostic Decision Tree" heading."""
+    after = text.split("## Diagnostic Decision Tree", 1)[1]
+    return after.split("```", 2)[1]
+
+
+def test_runbook_mentions_auto_review_only_as_retired():
+    """#4189 test 1: #3663 retired Auto Review, so every line naming it is history."""
+    lines = RUNBOOK.read_text(encoding="utf-8").splitlines()
+    live = [
+        line for line in lines
+        if "Auto Review" in line and not any(word in line for word in RETIRED_CONTEXT)
+    ]
+    assert live == []
+
+
+def test_runbook_tree_has_the_no_review_branch():
+    """#4189 test 2: a skipped Auto Review with no review has its own branch."""
+    tree = decision_tree(RUNBOOK.read_text(encoding="utf-8"))
+    assert "REVIEW_REQUIRED" in tree
+    assert "No Review At All" in tree
 
 
 def test_claude_md_keeps_the_archival_override():

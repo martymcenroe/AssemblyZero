@@ -114,7 +114,7 @@ class TestTheProbeUsesAGeminiModel:
             result = preflight.preflight_for_specs("claude:sonnet", "gemini:3.1-pro")
 
         assert result.passed
-        assert built == ["gemini-3.1-pro-high"]
+        assert built == ["gemini-4-argon-high"]
 
     def test_a_spec_without_a_known_name_still_gets_a_gemini_model(self):
         assert preflight.gemini_model_for("gemini:something-new").startswith("gemini-")

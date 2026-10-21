@@ -502,8 +502,10 @@ class TestTheRequestedModelIsChosenNotSpelled:
             resolve_adversarial_model,
         )
 
+        from assemblyzero.core.config import AGY_GEMINI_REVIEW_MODELS
+
         model_id = resolve_adversarial_model()
-        assert "pro" in model_id
+        assert model_id in AGY_GEMINI_REVIEW_MODELS  # #4178: Argon has no "pro"
         assert "flash" not in model_id
         assert "preview" not in model_id, (
             "a path that fails open should not run on a dated preview"

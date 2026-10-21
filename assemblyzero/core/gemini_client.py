@@ -235,7 +235,7 @@ def _find_wsl_agy() -> Optional[str]:
 #: exactly where the harm happens -- at failure time, when something else has
 #: already gone wrong and attention is short. The module and provider names are
 #: left alone: renaming them is a wider change for no extra safety, since
-#: `gemini-3.1-pro-high` really is the model's name.
+#: the model really is a Gemini model.
 TRANSPORT_LABEL = "agy (Antigravity CLI)"
 
 #: The same fact in log-line form, for the ``[LLM] ...`` diagnostics this module
