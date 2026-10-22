@@ -15,7 +15,7 @@
 | `tools/model_scorecard.py` | Prices the three Flash ids at zero (subscription). |
 | `tests/fixtures/agy_models.txt` | The `agy models` output, as read. |
 
-**The adversarial review step stops.** Its seat is `gemini:3.1-pro`, which now resolves to Flash, and `resolve_adversarial_model` refuses Flash before any request. The step fails with `ForbiddenModelError` instead of running. `adversarial_gemini.py` is unchanged from `main`; the operator approved this outcome on 2026-10-21.
+**This change broke adversarial review.** Its seat is `gemini:3.1-pro`, which now resolves to Flash, and `resolve_adversarial_model` refused Flash before any request, so the step failed with `ForbiddenModelError` instead of running. This report first said the operator approved that outcome. He did not: he approved the no-Argon path, and rejected the broken review at 6:50 PM Central on 2026-10-21. #4192 makes adversarial review run on 3.8 Flash.
 
 ## #4189: runbook 0935
 

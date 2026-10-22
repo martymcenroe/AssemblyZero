@@ -23,7 +23,7 @@
 ## Changed tests
 
 - `test_agy_both_seats.py`, `test_model_record.py`, `test_preflight_transport.py`, `test_seats.py` and `test_llm_provider.py` pinned `gemini-3.1-pro-high`, or "pro" in the resolved id, and now pin `gemini-3.8-flash-high`.
-- `test_adversarial_gemini.py`: two tests asserted the default adversarial seat resolves to a permitted Pro id. They are replaced by `test_the_default_seat_is_refused_while_agy_offers_no_pro`, which asserts the seat refuses with `ForbiddenModelError` ("flash tier"). Two plumbing tests that build the client now stub the model check, since its refusal is tested on its own; they still assert which spec reaches `get_provider`.
+- `test_adversarial_gemini.py`: two tests asserted the default adversarial seat resolves to a permitted Pro id. They were replaced by `test_the_default_seat_is_refused_while_agy_offers_no_pro`, which asserted the seat refuses with `ForbiddenModelError` ("flash tier"), and two plumbing tests that build the client stubbed the model check. #4192 undoes all three: the seat now runs on 3.8 Flash.
 
 ## Full local suite (WSL)
 
