@@ -505,6 +505,11 @@ class GeminiClient:
                     encoding="utf-8",
                     errors="replace",
                     cwd=tmp_cwd,
+                    # #4195: off Windows, kill_process_tree signals the process
+                    # GROUP. In the caller's group, a timeout killed the caller
+                    # and every sibling with SIGKILL; in a session of its own,
+                    # the group is agy and its descendants only.
+                    start_new_session=os.name != "nt",
                 )
                 try:
                     stdout, stderr = proc.communicate(
