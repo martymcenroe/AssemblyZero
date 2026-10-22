@@ -9,4 +9,6 @@ A real-process test, skipped on Windows. A fake `agy` (`sleep 30`) is called thr
 
 ## Suites
 
-`tests/unit/test_gemini_call_bounds.py`: 14 passed. `ruff check` on the test file: clean. Full suite: run after the commit; its result is recorded on #4195's closing comment.
+`tests/unit/test_gemini_call_bounds.py`: 14 passed. `ruff check` on the test file: clean.
+
+Full suite, 2026-10-22, with `origin/main` merged in: 21 failed, 11713 passed, 66 skipped. The same full suite on an untouched `origin/main` worktree: 26 failed. Every one of the branch's 21 failures is among main's 26 (compared by test id), so this change adds none. One of them, `tests/unit/test_checkpoint_carries_no_enums.py::test_the_unit_tier_runs_the_serializer_strict`, passes alone on both and fails only inside the full run: it depends on whether another test imported langgraph first.
