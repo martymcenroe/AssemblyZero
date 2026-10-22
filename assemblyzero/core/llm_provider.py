@@ -271,6 +271,41 @@ def log_llm_call(result: LLMCallResult) -> None:
         parts.append(f"class={result.failure_class}")
 
     print("    " + " ".join(parts))
+    _ledger_line(result)
+
+
+#: The providers whose calls this module records in the model-call ledger
+#: (#4199), and the transport each is. The Gemini seat's lines are written per
+#: agy process by GeminiClient, so recording them here would count each twice;
+#: the mock provider calls no model.
+_LEDGER_TRANSPORTS = {"claude": "claude", "anthropic": "anthropic-api"}
+
+
+def _ledger_line(result: LLMCallResult) -> None:
+    """One model-call ledger line for a Claude CLI or Anthropic API call (#4199)."""
+    transport = _LEDGER_TRANSPORTS.get(result.provider)
+    if transport is None:
+        return
+    from assemblyzero.core import model_call_ledger
+
+    usage = {
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "cache_read_input_tokens": result.cache_read_tokens,
+        "cache_creation_input_tokens": result.cache_creation_tokens,
+    }
+    if not any(usage.values()):
+        usage = None
+    if result.success:
+        outcome = "ok"
+    elif "timeout" in (result.failure_class or ""):
+        outcome = "timeout"
+    else:
+        outcome = "failed"
+    model_call_ledger.record(
+        "assemblyzero.llm_provider", transport, result.model_used, usage,
+        result.duration_ms / 1000.0, outcome, result.error_message,
+    )
 
 
 def _load_anthropic_api_key() -> Optional[str]:
