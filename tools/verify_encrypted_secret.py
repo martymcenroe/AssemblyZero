@@ -35,7 +35,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-GPG_TIMEOUT_S = 180
+# No limit on the passphrase wait: the operator answers pinentry in his own
+# time, and a timeout would kill the run under him (#4204).
+GPG_TIMEOUT_S = None
 
 # RSA-2048 PEMs land around 1700 bytes; RSA-4096 around 3300. A generous
 # 1500-4000 range catches both with margin for line-ending variance.
