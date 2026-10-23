@@ -54,7 +54,12 @@ from typing import Iterator
 DEFAULT_PAT_PATH: Path = Path.home() / ".secrets" / "classic-pat.gpg"
 DEFAULT_CERBERUS_PEM_PATH: Path = Path.home() / ".secrets" / "cerberus-pem.gpg"
 DEFAULT_PR_SENTINEL_APP_PATH: Path = Path.home() / ".secrets" / "pr-sentinel-app.gpg"
-GPG_TIMEOUT_S: int = 180
+# No limit on the passphrase wait (#4204). gpg waits inside pinentry for the
+# operator, and a timeout killed his run under him after three minutes. A
+# prompt that never reached him fails at once (PinentryUnavailable, #4135);
+# anything else he ends himself with Ctrl-C. The law: no timeouts that
+# override the human.
+GPG_TIMEOUT_S: int | None = None
 MAX_GPG_ATTEMPTS: int = 5
 
 # Human names for each secret this module decrypts (#1853). The operator holds
@@ -206,9 +211,8 @@ def classic_pat_session(
             The error message includes the one-time-setup command.
         RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
             Carries gpg's last stderr so the caller can diagnose.
-        subprocess.TimeoutExpired: If pinentry doesn't respond within
-            GPG_TIMEOUT_S on a single attempt -- propagates rather than
-            retrying, since a hung pinentry won't unhang.
+        PinentryUnavailable: If gpg could not show its prompt at all.
+            The wait for the passphrase itself has no time limit (#4204).
     """
     if not pat_path.exists():
         raise FileNotFoundError(
@@ -303,8 +307,7 @@ def cerberus_pem_session(
     Raises:
         FileNotFoundError: If the encrypted PEM file does not exist.
         RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
-        subprocess.TimeoutExpired: Same hung-pinentry handling as
-            classic_pat_session.
+        PinentryUnavailable: As for classic_pat_session; no time limit.
 
     Implementation note: the body intentionally duplicates
     classic_pat_session's structure rather than sharing a helper.
@@ -480,8 +483,7 @@ def gpg_secret_session(
     Raises:
         FileNotFoundError: If the encrypted file does not exist.
         RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
-        subprocess.TimeoutExpired: Same hung-pinentry handling as
-            classic_pat_session.
+        PinentryUnavailable: As for classic_pat_session; no time limit.
     """
     if not path.exists():
         raise FileNotFoundError(f"{secret_name} not found at {path}.")
