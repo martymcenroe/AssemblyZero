@@ -236,3 +236,21 @@ class TestTheRunbook:
     def test_it_states_the_audition_cost(self):
         text = self.RUNBOOK.read_text(encoding="utf-8")
         assert "One profile file and one roll." in text
+
+    def test_it_says_what_fresh_deletes(self):
+        """#4222 T1: --fresh closes PRs and deletes branches on origin; the runbook once said
+        its effects were archived and never deleted."""
+        text = self.RUNBOOK.read_text(encoding="utf-8")
+        assert "never deleted" not in text
+        assert "closes the issue's open PRs" in text
+        assert "deletes its pipeline branches locally and on origin" in text
+
+    def test_the_audition_copy_is_the_file_the_command_rolls(self):
+        """#4222 T2: the prose's copy and the command's --models path name the same file, and
+        it is never the target's models.toml, which every later roll would read."""
+        text = self.RUNBOOK.read_text(encoding="utf-8")
+        command = next(line for line in text.splitlines()
+                       if line.startswith("poetry run python tools/speedrun_roll.py") and ".toml" in line)
+        rolled = command.split("--models ", 1)[1].split()[0].rsplit("/", 1)[1]
+        assert rolled == "new-model.toml"
+        assert f"Copy `assemblyzero/profiles/gemini.toml` to `boostgauge/.assemblyzero/{rolled}`" in text
