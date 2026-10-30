@@ -66,3 +66,27 @@ Eight rows were fixed by PR #4159 (#4150): lines 296, 345, 353, 1344, 1377, 1442
 | Any other exception outside the graph's try (1489) | ERROR line with type, and the traceback | `alert_operator` with type and message; the record is closed | exits 1 | `alert_operator` |
 
 The loud-failure baseline held no entry for this module after PR #4159; no `# fail-open:` tag was in it or is added. `main`'s handler carries `# noqa: BLE001`.
+
+## `tools/run_implementation_spec_workflow.py` (#4098): 10 sites
+
+### The handler
+
+`main()` runs the start-up channel check, then `_run(args)` inside `except Exception`. The handler prints `[spec] ERROR: <cause>` on stderr, adds the traceback when the exception is not the tool's own `RunFailed`, calls `alert.alert_operator` with what, where, cause, consequence, the resolved repository and the issue, and returns 1.
+
+### What each site does now
+
+- **The target repository.** Git timing out or missing raises (293). A working directory in no repository raises with git's stderr and says to pass `--repo`, instead of becoming the target (296). The AssemblyZero-root refusal raises, so it alerts (335). A `--repo` that does not exist raises (738).
+- **The LLD.** `resolve_lld_path` raises when discovery finds no LLD or `--lld` names no file. `run_workflow` calls it before the resume contract is consumed, so a missing LLD no longer starts the workflow or creates a lineage directory (414).
+- **The resume contract.** `check_and_consume`'s lines are collected through its `log` parameter, still printed as they come, and a refusal raises carrying them (635).
+- **The run.** A node's error is printed on stderr as it streams. At the end, an error the HALT node handled (it sets `workflow_status` to "halted") returns 1 without a second alert; one that reached the end without HALT raises, so it alerts (683). `run_workflow` no longer catches the graph's exceptions, so they reach `main` with their type and traceback (696). The cost telemetry import is no longer guarded, so a missing module fails the run instead of dropping the record (557).
+- **Arguments.** A non-positive issue raises (727).
+
+### Compliance with standard 0034
+
+| Failure path | Loud | Logged with details | Stops | Alerts |
+|---|---|---|---|---|
+| A `RunFailed` (293, 296, 335, 414, 635, 727, 738, and 683 without HALT) | `[spec] ERROR:` on stderr | `alert_operator`: what, where, cause with git's stderr, the path, or the contract's lines, consequence, repo, issue | exits 1; for 414 and 635, before any state, lineage or model call | `alert_operator` |
+| A node error routed to HALT (683) | `[ERROR]` on stderr as it streams, and the result block's ERROR line | the HALT node's state snapshot and recovery plan | exits 1 | the HALT node, once |
+| An exception from the graph or after it (696, 557) | ERROR line with type, and the traceback | `alert_operator` with type and message | exits 1 | `alert_operator` |
+
+The module's one swallowed handler (`run_workflow`) is gone; no `# fail-open:` tag was in it or is added. `main`'s handler carries `# noqa: BLE001`.

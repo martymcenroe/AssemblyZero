@@ -37,4 +37,19 @@ Every test file that imports the module: `test_agy_both_seats.py`, `test_alert_c
 
 `tools/audit_loud_failure.py --check`: 0 new. `tools/audit_fail_open.py --check`: no new fail-open. `ruff check`: the new test file is clean; the module has 18 findings against 19 at HEAD, none new.
 
+## `tests/unit/test_run_implementation_spec_workflow_loud_failure.py` (15)
+
+One or more tests per ledger line (293, 296, 335, 414, 557, 635, 683, 696, 727, 738), through `main()` with a throwaway git target and a stand-in for `create_implementation_spec_graph`. `git` is stood in only for the timeout (293); `check_and_consume` only for the refusal (635) and, in the no-LLD test, to prove it is never reached; the telemetry module is made unimportable through `sys.modules` for 557. A working directory outside any repository is real (296). The pins: a finished spec succeeds without an alert, cost telemetry is emitted, and the module carries no `# fail-open:` tag.
+
+- Against the unchanged module: `12 failed, 3 passed`. The 12 site tests failed for the intended reasons: exit 0 where a failure happened, the failure on stdout and not stderr, or no alert. The 3 pins passed.
+- On this branch: 15 passed.
+
+No existing test asserted the retired behaviour, so none changed. `test_main_rejects_invalid_issue` still holds: `main` returns 1.
+
+### Neighbouring suites
+
+Every test file that imports the module: `test_implementation_spec_workflow.py`, `test_agy_both_seats.py`, `test_alert_channel_at_start.py`, `test_implement_from_lld_cli.py`, `test_orchestrator_lineage.py`, `test_profile_bench.py`, `test_seats.py` and `test_the_law_gemini_in_both_seats.py`: 355 passed.
+
+`tools/audit_loud_failure.py --check`: 0 new; 4 stale, this module's handler and module 1's three. `tools/audit_fail_open.py --check`: no new fail-open. `ruff check`: the new test file is clean; the module has 2 findings against 4 at HEAD, none new.
+
 The full unit tier runs in the parent session.
