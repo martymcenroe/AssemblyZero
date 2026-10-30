@@ -402,15 +402,11 @@ def test_t060(draft_with_open_questions, caplog):
         parse_warnings=[]
     )
 
-    # TDD: Act
-    updated_draft, warnings = update_draft(draft, verdict_result)
-
-    # TDD: Assert
-    # Draft should be unchanged (question not found)
-    assert "This question does not exist" not in updated_draft
-    # Should have a warning
-    assert len(warnings) >= 1
-    assert any("not find" in w.lower() or "could not" in w.lower() for w in warnings)
+    # TDD: Act / Assert
+    # #3585: the resolution would be lost from the approved draft, so it
+    # raises naming the question (was a warning the caller only printed).
+    with pytest.raises(ValueError, match="This question does not exist in the draft"):
+        update_draft(draft, verdict_result)
 
 
 def test_t090(draft_with_open_questions, approved_verdict_with_resolutions):
@@ -545,13 +541,10 @@ def test_060(draft_with_open_questions):
         parse_warnings=[]
     )
 
-    # TDD: Act
-    # Should not throw an error
-    updated_draft, warnings = update_draft(draft, verdict_result)
-
-    # TDD: Assert
-    # Warning should be generated
-    assert len(warnings) >= 1
+    # TDD: Act / Assert
+    # #3585: raises naming the question (was "no error thrown" and a warning)
+    with pytest.raises(ValueError, match="Nonexistent question"):
+        update_draft(draft, verdict_result)
 
 
 def test_090(draft_with_open_questions, approved_verdict_with_suggestions):
@@ -729,9 +722,9 @@ def test_empty_draft():
         raw_verdict="",
         parse_warnings=[]
     )
-    updated_draft, warnings = update_draft("", verdict_result)
-    assert updated_draft == ""
-    assert len(warnings) >= 1
+    # #3585: raises (was a warning beside an empty "updated" draft)
+    with pytest.raises(ValueError, match="empty draft"):
+        update_draft("", verdict_result)
 
 
 def test_flexible_question_matching(draft_with_open_questions):
@@ -889,9 +882,9 @@ Changes.
         parse_warnings=[]
     )
 
-    updated_draft, warnings = update_draft(draft_no_oq, verdict_result)
-    # Should have warning about no Open Questions section
-    assert any("Open Questions" in w for w in warnings)
+    # #3585: raises naming the resolution it could not record (was a warning)
+    with pytest.raises(ValueError, match="no Open Questions section"):
+        update_draft(draft_no_oq, verdict_result)
 
 
 def test_exact_match_resolution(draft_with_open_questions, approved_verdict_with_resolutions):
@@ -957,10 +950,11 @@ def test_long_question_text_warning():
         parse_warnings=[]
     )
 
-    updated_draft, warnings = update_draft(draft, verdict_result)
-    # Should have truncated warning
-    assert len(warnings) >= 1
-    assert any("..." in w for w in warnings)
+    # #3585: an unmatched question raises, quoting it whole (was a truncated
+    # warning the caller only printed)
+    with pytest.raises(ValueError, match="no question in the draft") as raised:
+        update_draft(draft, verdict_result)
+    assert very_long_question in str(raised.value)
 
 
 def test_keyword_match_resolution():

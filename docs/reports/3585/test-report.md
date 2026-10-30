@@ -226,3 +226,11 @@ The 6 files involved then gave 154 passed.
 **Changed tests (`test_best_of_n.py`):** a crashing gate raises and alerts; a non-numeric count raises.
 
 **Neighbouring suites:** 34 passed (`test_best_of_n.py` and the new file); 28 passed across the draft node's tests.
+
+## parsers/draft_updater.py
+
+**New: `tests/unit/test_draft_updater_loud_failure.py` (6).** Before the fix: 4 failed, 2 passed.
+
+**Changed tests (`test_issue_257.py`):** five tests that expected warnings expect the ValueError.
+
+**Neighbouring suites:** 149 passed across `test_issue_257.py`, the new file and `test_requirements_nodes.py`.

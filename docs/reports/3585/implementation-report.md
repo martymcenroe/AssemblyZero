@@ -194,3 +194,9 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 - **A gate that crashes on a candidate alerts and re-raises** (130, 131); it counted as one failure and the candidate could still win.
 - **A candidate count that is not a number raises naming it** (179, 180); it silently meant one candidate. A number is still clamped into 1..5.
 - **Every candidate unusable** stays `None` for the draft node to halt on (156, compliant).
+
+### parsers/draft_updater.py (4 ledger rows, all fixed)
+
+- **A resolution that cannot reach the approved draft raises naming it**: an empty draft (35), no Open Questions section (84), no matching question (105), a suggestions heading whose section cannot be read (271, which was an AttributeError). Each used to be a warning the review node only printed.
+- **Idempotency is kept.** A question already marked resolved, and a question the verdict quotes struck through, are recognised before the raise; the existing #257 tests found both cases.
+- **The review node still swallows these** (`nodes/review.py` `_update_draft_with_verdict`, a broad handler in the nodes half).
