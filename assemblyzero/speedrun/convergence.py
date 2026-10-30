@@ -84,18 +84,20 @@ def current_run_tag() -> str:
 
 def _append(repo_root: Path | str, record: dict) -> bool:
     """Append one record. True once it is on disk; alerts and raises otherwise."""
-    path = records_path(repo_root)
+    path: Path | None = None
     try:
+        path = records_path(repo_root)
         line = json.dumps(record) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line)
     except (OSError, TypeError, ValueError) as exc:
+        store = path if path is not None else f"under {str(repo_root)!r}"
         alert.alert_operator(
             what="append to the convergence record",
             where="assemblyzero/speedrun/convergence.py _append",
             cause=(
-                f"{type(exc).__name__}: {exc} (store {path}, event "
+                f"{type(exc).__name__}: {exc} (store {store}, event "
                 f"{record.get('event', '')}, stage {record.get('stage', '')}, "
                 f"node {record.get('node', '')})"
             ),

@@ -59,6 +59,16 @@ def test_90_a_record_that_cannot_be_written_alerts_and_raises(tmp_path, operator
     assert "node.enter" in alert["cause"]
 
 
+def test_90_a_root_the_store_path_cannot_be_built_from_alerts_and_raises(operator_alerts):
+    """The store path itself can fail (a NUL byte in the root); that is inside
+    the alerted region too."""
+    with pytest.raises(ValueError):
+        record_node_enter("\0not a path", "lld", "N1_draft", 2, 9)
+
+    assert len(operator_alerts) == 1
+    assert "not a path" in operator_alerts[0]["cause"]
+
+
 @pytest.mark.parametrize(
     "write",
     [

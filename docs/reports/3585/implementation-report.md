@@ -61,7 +61,7 @@ Caller: `workflows/requirements/nodes/analyze_codebase.py` has no handler around
 
 ### speedrun/convergence.py (5 sites) and the one consumer line in factory_report.py (802)
 
-- **A record that cannot be appended alerts and raises** (90, 91). `_append` returned False, which every caller ignored, so the factory report fell back to the banner for that run. It now alerts with the store path, the event, stage and node, and the cause, then raises. `record_stage_enter`, `record_node_enter` and `record_terminal` return True only once the line is on disk.
+- **A record that cannot be appended alerts and raises** (90, 91). `_append` returned False, which every caller ignored, so the factory report fell back to the banner for that run. It now alerts with the store path, the event, stage and node, and the cause, then raises. `record_stage_enter`, `record_node_enter` and `record_terminal` return True only once the line is on disk. A follow-up commit moves the store-path computation inside the alerted region: a root the path cannot be built from (a NUL byte) raised unalerted in the first version.
 - **A line that is not a record alerts and raises** (185, 186, 195). `read_records` counted such a line, and its one consumer, `factory_report.apply_records` (802), threw the count away, so the report stated numbers from a store it had not fully read. It now alerts and raises `ValueError` naming the store and the line. The count only ever carried those lines, so it is gone: `read_records` returns the list of records, and `apply_records` takes the list.
 - An absent store is still the quiet `[]`.
 - The two `# fail-open:` tags are gone.

@@ -54,7 +54,7 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 ## speedrun/convergence.py
 
-**New: `tests/unit/test_convergence_loud_failure.py` (12).** Site tests for 90 (three event kinds), 91, 185, 186 and 195 (two shapes), the `802` consumer test, and three kept-behaviour tests: a clean store, an absent store and a written record.
+**New: `tests/unit/test_convergence_loud_failure.py` (13).** Site tests for 90 (three event kinds, and a root the store path cannot be built from), 91, 185, 186 and 195 (two shapes), the `802` consumer test, and three kept-behaviour tests: a clean store, an absent store and a written record. The store-path test came with the follow-up commit; it failed against the first version (the path was built outside the alerted region) and passes after.
 
 **Before the fix, measured** by putting HEAD's `convergence.py` and `factory_report.py` back: 11 failed, 1 passed (`test_a_written_record_returns_true`). Two of the eleven, `test_a_clean_store_reads_with_no_alert` and `test_a_missing_store_is_a_quiet_empty_answer`, fail only on the return shape: the old reader returned `(records, count)`.
 
