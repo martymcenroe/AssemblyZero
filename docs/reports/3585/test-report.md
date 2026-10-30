@@ -137,3 +137,13 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** in `test_requirements_nodes.py`, `TestLoadInputRetryLogic`'s two retry tests script the provenance lookup's answer. Their call lists ran out there, and the swallowed StopIteration had read as "unknown/unknown".
 
 **Neighbouring suites:** the first run across 17 files gave 430 passed and 2 failed: the two tests above. After the change, the two affected files gave 107 passed.
+
+## nodes/validate_test_plan.py
+
+**New: `tests/unit/test_validate_test_plan_loud_failure.py` (5).**
+
+**Before the fix, measured:** 4 failed, 1 passed. Every site test failed. The one that passed pins kept behaviour: a failing draft is preserved and loops back.
+
+**Changed tests:** `test_validate_test_plan_node.py::TestNodeRoutesToDraftOnFail::test_node_routes_to_draft_on_fail` gives its failing draft an audit_dir.
+
+**Neighbouring suites:** 17 files gave 316 passed, 1 skipped and 1 failed: the test above. After the change, its file and the new one gave 19 passed.
