@@ -45,4 +45,16 @@ No caller in `assemblyzero/` or `tools/` calls `run_verification_gate`; `utils/_
 
 ### utils/lld_path_enforcer.py (1 site, won't do)
 
-- **No Section 2.1 stays an empty spec** (97). The ledger asks for a raise. On a real implementation run the content passed in is the implementation spec (`load_lld` stores it under `lld_content`), whose files table is `## 2. Files to Implement`; it has no Section 2.1 by design. The implementation node adds every path of that table to the allowed set itself. A raise would halt every implementation run, so the empty answer is the contract. The docstring now says so, and a test pins it.
+- **No Section 2.1 stays an empty spec** (97, won't do). The ledger asks for a raise. On a real implementation run the content passed in is the implementation spec (`load_lld` stores it under `lld_content`), whose files table is `## 2. Files to Implement`; it has no Section 2.1 by design. The implementation node adds every path of that table to the allowed set itself. A raise would halt every implementation run, so the empty answer is the contract. The docstring now says so, and a test pins it.
+
+### utils/codebase_reader.py (7 sites)
+
+The reader builds the codebase context the requirements drafter works from. A file it selected that could not be read used to come back empty and was dropped from the batch, so the draft was built on a partial context with nothing said.
+
+- **A file that cannot be stat'd, resolved or read raises** (152, 171, 201) `CodebaseReadError` naming the file and the cause. `read_files_within_budget` stops on it instead of dropping the file.
+- **A symlink that escapes the repo raises** (164), naming the link and where it resolves, and none of the content. It was a WARNING and an empty result.
+- **A text file that is not valid in its encoding raises** (198). Binary extensions are still skipped before the read; a file that reaches the read was taken to be text.
+- **A `pyproject.toml` or `package.json` that does not parse raises** (340, 369), naming the file. It read as `{}`, and a broken `pyproject.toml` silently fell through to `package.json`.
+- Kept quiet, by contract and in the docstrings: a file that does not exist, is not a regular file, has a binary extension or matches a sensitive pattern, and a repo with no config file.
+
+Caller: `workflows/requirements/nodes/analyze_codebase.py` has no handler around these calls, so the raise leaves the node uncaught; it is not routed to HALT. Baseline: the two `parse_project_metadata` handler entries leave.

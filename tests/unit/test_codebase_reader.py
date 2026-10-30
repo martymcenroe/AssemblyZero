@@ -18,6 +18,7 @@ import pytest
 from pathlib import Path
 
 from assemblyzero.utils.codebase_reader import (
+    CodebaseReadError,
     is_sensitive_file,
     parse_project_metadata,
     read_file_with_budget,
@@ -514,22 +515,23 @@ class TestParseProjectMetadataMissing:
         assert metadata == {}
 
     def test_corrupted_pyproject(self, tmp_path):
-        """Corrupted pyproject.toml should return empty dict, not crash."""
+        """#3585: a corrupted pyproject.toml raises naming the file; it read
+        as a repo that declares no metadata."""
         (tmp_path / "pyproject.toml").write_text(
             "this is not valid TOML {{[[[",
             encoding="utf-8",
         )
-        metadata = parse_project_metadata(tmp_path)
-        assert isinstance(metadata, dict)
+        with pytest.raises(CodebaseReadError, match="pyproject.toml"):
+            parse_project_metadata(tmp_path)
 
     def test_corrupted_package_json(self, tmp_path):
-        """Corrupted package.json should return empty dict, not crash."""
+        """#3585: a corrupted package.json raises naming the file."""
         (tmp_path / "package.json").write_text(
             "{not valid json!!!}",
             encoding="utf-8",
         )
-        metadata = parse_project_metadata(tmp_path)
-        assert isinstance(metadata, dict)
+        with pytest.raises(CodebaseReadError, match="package.json"):
+            parse_project_metadata(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -734,10 +736,10 @@ class TestSymlinkOutsideRepoBlocked:
         except OSError:
             pytest.skip("Cannot create symlinks on this system")
 
-        result = read_file_with_budget(link, repo_root=repo)
-        assert result["content"] == ""
-        assert result["token_estimate"] == 0
-        assert "TOP SECRET DATA" not in result["content"]
+        # #3585: refused loudly, naming the paths and none of the content.
+        with pytest.raises(CodebaseReadError) as excinfo:
+            read_file_with_budget(link, repo_root=repo)
+        assert "TOP SECRET DATA" not in str(excinfo.value)
 
     @pytest.mark.skipif(
         sys.platform == "win32" and not os.environ.get("CI"),
@@ -766,7 +768,8 @@ class TestSymlinkOutsideRepoBlocked:
         reason="Symlink creation may require admin privileges on Windows",
     )
     def test_symlink_outside_repo_in_batch(self, tmp_path):
-        """Symlink outside repo should be excluded from batch reads."""
+        """#3585: a symlink outside the repo stops the batch read, loudly,
+        rather than leave a context that silently lacks the file."""
         outside = tmp_path / "outside"
         outside.mkdir()
         secret = outside / "secret.txt"
@@ -784,12 +787,11 @@ class TestSymlinkOutsideRepoBlocked:
         except OSError:
             pytest.skip("Cannot create symlinks on this system")
 
-        results = read_files_within_budget(
-            [normal, link], total_budget=15000, repo_root=repo
-        )
-        all_content = " ".join(r["content"] for r in results)
-        assert "CLASSIFIED INFO" not in all_content
-        assert "Normal content" in all_content
+        with pytest.raises(CodebaseReadError) as excinfo:
+            read_files_within_budget(
+                [normal, link], total_budget=15000, repo_root=repo
+            )
+        assert "CLASSIFIED INFO" not in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
@@ -921,13 +923,13 @@ class TestReadFileWithBudgetDirectoryInput:
 class TestReadFileWithBudgetDecodeError:
     """read_file_with_budget should handle UnicodeDecodeError for non-text files."""
 
-    def test_non_utf8_file_returns_empty(self, tmp_path):
-        """A file with invalid UTF-8 bytes (no binary extension) returns empty."""
+    def test_non_utf8_file_raises(self, tmp_path):
+        """#3585: a file with invalid UTF-8 bytes (no binary extension) was
+        taken to be text and could not be read, so it raises."""
         f = tmp_path / "data.dat"
         f.write_bytes(b"\x80\x81\x82\x83\x84\x85" * 100)
-        result = read_file_with_budget(f, max_tokens=2000)
-        assert result["content"] == ""
-        assert result["token_estimate"] == 0
+        with pytest.raises(CodebaseReadError):
+            read_file_with_budget(f, max_tokens=2000)
 
 
 class TestIsSensitiveFileCredentialsFilename:
@@ -949,8 +951,8 @@ class TestIsSensitiveFileCredentialsFilename:
 class TestReadFileOSError:
     """read_file_with_budget handles OSError during file existence check."""
 
-    def test_oserror_on_exists_returns_empty(self, tmp_path, monkeypatch):
-        """If os raises OSError on exists(), return empty."""
+    def test_oserror_on_exists_raises(self, tmp_path, monkeypatch):
+        """#3585: if os raises OSError on exists(), the read raises."""
         f = tmp_path / "test.py"
         f.write_text("content", encoding="utf-8")
 
@@ -962,24 +964,25 @@ class TestReadFileOSError:
             return original_exists(self)
 
         monkeypatch.setattr(Path, "exists", mock_exists)
-        result = read_file_with_budget(f, max_tokens=2000)
-        assert result["content"] == ""
+        with pytest.raises(CodebaseReadError):
+            read_file_with_budget(f, max_tokens=2000)
 
 
 class TestReadFileWithBudgetSymlinkBoundary:
     """read_file_with_budget blocks files outside repo_root boundary."""
 
-    def test_file_outside_repo_root_returns_empty(self, tmp_path):
-        """A file outside repo_root is blocked even without symlinks."""
+    def test_file_outside_repo_root_raises(self, tmp_path):
+        """A file outside repo_root is blocked even without symlinks; #3585:
+        loudly, with both paths named and none of the content."""
         repo = tmp_path / "repo"
         repo.mkdir()
         outside = tmp_path / "outside"
         outside.mkdir()
         secret = outside / "secret.txt"
         secret.write_text("top secret", encoding="utf-8")
-        result = read_file_with_budget(secret, max_tokens=2000, repo_root=repo)
-        assert result["content"] == ""
-        assert result["token_estimate"] == 0
+        with pytest.raises(CodebaseReadError) as excinfo:
+            read_file_with_budget(secret, max_tokens=2000, repo_root=repo)
+        assert "top secret" not in str(excinfo.value)
 
     def test_file_inside_repo_root_is_allowed(self, tmp_path):
         """A file within repo_root is allowed."""
@@ -994,8 +997,8 @@ class TestReadFileWithBudgetSymlinkBoundary:
 class TestReadFileWithBudgetOSErrorOnRead:
     """read_file_with_budget handles OSError during file reading."""
 
-    def test_oserror_on_read_text_returns_empty(self, tmp_path, monkeypatch):
-        """If read_text raises OSError, return empty."""
+    def test_oserror_on_read_text_raises(self, tmp_path, monkeypatch):
+        """#3585: if read_text raises OSError, the read raises."""
         f = tmp_path / "test.py"
         f.write_text("content", encoding="utf-8")
 
@@ -1007,15 +1010,15 @@ class TestReadFileWithBudgetOSErrorOnRead:
             return original_read(self, **kwargs)
 
         monkeypatch.setattr(Path, "read_text", mock_read)
-        result = read_file_with_budget(f, max_tokens=2000)
-        assert result["content"] == ""
+        with pytest.raises(CodebaseReadError):
+            read_file_with_budget(f, max_tokens=2000)
 
 
 class TestReadFileWithBudgetResolveOSError:
     """read_file_with_budget handles OSError during path resolution."""
 
-    def test_oserror_on_resolve_returns_empty(self, tmp_path, monkeypatch):
-        """If resolve() raises OSError, return empty."""
+    def test_oserror_on_resolve_raises(self, tmp_path, monkeypatch):
+        """#3585: if resolve() raises OSError, the read raises."""
         f = tmp_path / "test.py"
         f.write_text("content", encoding="utf-8")
 
@@ -1027,5 +1030,5 @@ class TestReadFileWithBudgetResolveOSError:
             return original_resolve(self, **kwargs)
 
         monkeypatch.setattr(Path, "resolve", mock_resolve)
-        result = read_file_with_budget(f, max_tokens=2000)
-        assert result["content"] == ""
+        with pytest.raises(CodebaseReadError):
+            read_file_with_budget(f, max_tokens=2000)

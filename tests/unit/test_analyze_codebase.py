@@ -29,6 +29,7 @@ from assemblyzero.workflows.requirements.nodes.analyze_codebase import (
     _search_for_file,
 )
 from assemblyzero.utils.codebase_reader import (
+    CodebaseReadError,
     is_sensitive_file,
     read_file_with_budget,
 )
@@ -825,12 +826,11 @@ class TestSymlinkOutsideRepoBlocked:
         except OSError:
             pytest.skip("Cannot create symlinks on this system")
 
-        # Read with repo_root enforcement
-        result = read_file_with_budget(link, repo_root=repo)
-        assert result["content"] == "", (
-            "Symlink outside repo should return empty content"
-        )
-        assert result["token_estimate"] == 0
+        # Read with repo_root enforcement. #3585: refused loudly, naming the
+        # paths and none of the content.
+        with pytest.raises(CodebaseReadError) as excinfo:
+            read_file_with_budget(link, repo_root=repo)
+        assert "TOP SECRET DATA" not in str(excinfo.value)
 
     @pytest.mark.skipif(
         sys.platform == "win32" and not os.environ.get("CI"),

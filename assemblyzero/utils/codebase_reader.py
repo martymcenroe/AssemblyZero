@@ -41,6 +41,17 @@ BINARY_EXTENSIONS: set[str] = {
 }
 
 
+class CodebaseReadError(RuntimeError):
+    """A file the reader was asked to read exists but could not be read.
+
+    Raised, never returned as empty content (ADR 0236, #3585). The codebase
+    context a requirements run drafts from must not silently lack a file it
+    selected: a stat, resolve, decode or read failure, a symlink that escapes the
+    repo, and a project config that does not parse each raise this, naming the
+    file and the cause.
+    """
+
+
 class FileReadResult(TypedDict):
     """Result of reading a single file with budget tracking."""
 
@@ -113,8 +124,9 @@ def read_file_with_budget(
 
     Uses approximate token counting (chars / 4).
 
-    Returns FileReadResult with empty content and token_estimate=0
-    if file is binary, missing, unreadable, or matches SENSITIVE_PATTERNS.
+    Returns FileReadResult with empty content and token_estimate=0 when the
+    file does not exist, is not a regular file, has a binary extension, or
+    matches SENSITIVE_PATTERNS. Those are answers: there is no text to read.
 
     Args:
         file_path: Path to the file to read.
@@ -126,7 +138,8 @@ def read_file_with_budget(
         FileReadResult with file content and metadata.
 
     Raises:
-        No exceptions — all errors caught and logged.
+        CodebaseReadError: the file exists but cannot be stat'd, resolved,
+            decoded or read, or it resolves outside ``repo_root``.
     """
     empty_result = FileReadResult(
         path=str(file_path),
@@ -150,27 +163,23 @@ def read_file_with_budget(
             logger.debug("Not a regular file: %s", file_path)
             return empty_result
     except OSError as e:
-        logger.debug("Error checking file %s: %s", file_path, e)
-        return empty_result
+        raise CodebaseReadError(
+            f"cannot stat {file_path}: {type(e).__name__}: {e}"
+        ) from e
 
     # Resolve symlinks and check boundary
     try:
         resolved = file_path.resolve()
-        if repo_root is not None:
-            repo_resolved = repo_root.resolve()
-            try:
-                resolved.relative_to(repo_resolved)
-            except ValueError:
-                logger.warning(
-                    "Symlink escape detected: %s resolves to %s (outside %s)",
-                    file_path,
-                    resolved,
-                    repo_resolved,
-                )
-                return empty_result
+        repo_resolved = repo_root.resolve() if repo_root is not None else None
     except OSError as e:
-        logger.debug("Error resolving path %s: %s", file_path, e)
-        return empty_result
+        raise CodebaseReadError(
+            f"cannot resolve {file_path}: {type(e).__name__}: {e}"
+        ) from e
+    if repo_resolved is not None and not resolved.is_relative_to(repo_resolved):
+        raise CodebaseReadError(
+            f"symlink escape: {file_path} resolves to {resolved}, outside the "
+            f"repo {repo_resolved}; refusing to read it"
+        )
 
     # Check binary extensions
     if file_path.suffix.lower() in BINARY_EXTENSIONS:
@@ -195,12 +204,12 @@ def read_file_with_budget(
             truncated=truncated,
             token_estimate=token_estimate,
         )
-    except UnicodeDecodeError:
-        logger.debug("Binary or non-text file (decode error): %s", file_path)
-        return empty_result
-    except OSError as e:
-        logger.debug("Error reading file %s: %s", file_path, e)
-        return empty_result
+    except (UnicodeDecodeError, OSError) as e:
+        # A binary extension never reaches here; this file was taken to be
+        # text, so a decode failure is a failure to read it.
+        raise CodebaseReadError(
+            f"cannot read {file_path} as {encoding}: {type(e).__name__}: {e}"
+        ) from e
 
 
 def read_files_within_budget(
@@ -222,7 +231,11 @@ def read_files_within_budget(
 
     Returns:
         List of FileReadResult for files that were actually read
-        (excluding skipped/empty files).
+        (excluding missing, binary, sensitive and empty files).
+
+    Raises:
+        CodebaseReadError: a listed file exists but cannot be read; the batch
+            stops rather than return a context that silently lacks it.
     """
     results: list[FileReadResult] = []
     tokens_used = 0
@@ -263,8 +276,9 @@ def read_files_within_budget(
 def parse_project_metadata(repo_path: Path) -> dict[str, str]:
     """Parse pyproject.toml or package.json to extract project metadata.
 
-    Tries pyproject.toml first (using tomllib), falls back to package.json.
-    Returns empty dict if neither exists or parsing fails.
+    Tries pyproject.toml first (using tomllib), falls back to package.json
+    only when there is no pyproject.toml. Returns an empty dict when neither
+    exists.
 
     Args:
         repo_path: Path to the repository root.
@@ -272,6 +286,11 @@ def parse_project_metadata(repo_path: Path) -> dict[str, str]:
     Returns:
         Dict with keys: 'name', 'version', 'description', 'dependencies'
         where 'dependencies' is a comma-separated string of package names.
+
+    Raises:
+        CodebaseReadError: a config file exists but cannot be read or parsed.
+            It used to read as "no metadata", which the drafter cannot tell
+            from a repo that declares none.
     """
     # Try pyproject.toml first
     pyproject_path = repo_path / "pyproject.toml"
@@ -338,7 +357,9 @@ def parse_project_metadata(repo_path: Path) -> dict[str, str]:
             return result
 
         except Exception as e:
-            logger.debug("Error parsing pyproject.toml: %s", e)
+            raise CodebaseReadError(
+                f"cannot parse {pyproject_path}: {type(e).__name__}: {e}"
+            ) from e
 
     # Fall back to package.json
     package_json_path = repo_path / "package.json"
@@ -367,6 +388,8 @@ def parse_project_metadata(repo_path: Path) -> dict[str, str]:
             return result
 
         except Exception as e:
-            logger.debug("Error parsing package.json: %s", e)
+            raise CodebaseReadError(
+                f"cannot parse {package_json_path}: {type(e).__name__}: {e}"
+            ) from e
 
     return {}

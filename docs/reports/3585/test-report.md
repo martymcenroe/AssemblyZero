@@ -41,3 +41,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** none.
 
 **Neighbouring suites:** 57 passed across `test_lld_path_enforcer.py`, `test_file_write_validator.py`, `test_freeze_tests_symmetry_break.py`, `test_path_advisory.py` and the new file.
+
+## utils/codebase_reader.py
+
+**New: `tests/unit/test_codebase_reader_loud_failure.py` (11).** Eight site tests, plus three that pin the quiet answers: a missing file, a binary or sensitive file, and a repo with no config file. The site tests match the exception by name, so against the old module they fail on "did not raise".
+
+**Before the fix, measured** against the unchanged module: 8 failed ("did not raise CodebaseReadError"), 3 passed (the kept-behaviour tests).
+
+**Changed tests, each asserting the raise in place of the empty result:** in `test_codebase_reader.py`, `test_corrupted_pyproject`, `test_corrupted_package_json`, `test_symlink_outside_repo_returns_empty`, `test_symlink_outside_repo_in_batch`, `test_non_utf8_file_returns_empty` (now `test_non_utf8_file_raises`), `test_oserror_on_exists_returns_empty` (now `..._raises`), `test_file_outside_repo_root_returns_empty` (now `..._raises`), `test_oserror_on_read_text_returns_empty` (now `..._raises`), `test_oserror_on_resolve_returns_empty` (now `..._raises`); in `test_analyze_codebase.py`, `TestSymlinkOutsideRepoBlocked::test_symlink_outside_repo_returns_empty`.
+
+**Neighbouring suites:** 184 passed across `test_codebase_reader.py`, `test_analyze_codebase.py` and the new file; 80 passed across `test_issue_2684.py`, `test_requirements_graph_halts.py`, `test_cache_semi_static.py`, `test_base_api_surface.py`, `test_base_symbols_in_api_check.py`, `test_interface_surface.py` and `test_symbol_gather_reports_unreadable.py`.
