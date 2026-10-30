@@ -164,6 +164,17 @@ Baseline: no entries in either. The fail-open audit examines one more site (the 
 
 Baseline: no entries in the loud-failure baseline. The handler stays in the old fail-open audit's baseline, which still counts a handler that falls through to `return None` without calling `alert_operator`; the prescription here is the ERROR line, not an alert per rate limit.
 
+### stage_watchdog.py (#3796, 1 site)
+
+The watchdog prints a progress line for a running stage and never kills it; bounding a call is the provider's job. A stage at six times its nominal was a stdout line, repeated every tick, seen only by someone at the terminal.
+
+- **A stall alerts the operator** (139). The first STALLED tick calls `alert_operator` with the stage, the elapsed time, the ratio and the nominal, and says the stage keeps running. Nothing here can stop it, so the alert is the whole response. It is sent once per stage run; later ticks print as before.
+- **An alert that cannot be delivered is raised when the stage ends.** `alert_operator` writes the undelivered record to stderr and raises `AlertDeliveryError`; the watchdog's thread ends on it, and `__exit__` raises it in the stage's own thread, unless the stage is already raising its own error.
+- SLOW stays a louder line, not a failure. A stage with no nominal, or one waiting on the operator, gets no verdict and no alert, as before.
+- **Callers.** `orchestrator/graph.py`, `tools/run_implement_from_lld.py` and `tools/run_requirements_workflow.py` wrap a stage in the watchdog with no handler of their own; an undelivered alert ends the stage there. `run_requirements_workflow.py`'s broad handler prints it and exits 1 (its own ledger row).
+
+Baseline: no entries in either. The fail-open audit examines nine more sites.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

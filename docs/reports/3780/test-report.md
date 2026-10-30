@@ -128,6 +128,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 359 passed across every test file that imports `assemblyzero.core.errors`, `test_llm_provider.py` (the Anthropic provider) and the two audits' own tests.
 
+## stage_watchdog.py
+
+**New: `tests/unit/test_stage_watchdog_loud_failure.py` (5)**: two for the site (a stall alerts once; an undelivered alert is raised when the stage ends), plus three that pin kept behaviour (SLOW, no nominal and an operator wait do not alert). The SLOW test backdates the watchdog's start, so the ratio does not depend on timing.
+
+**Before the fix, measured** with HEAD's `stage_watchdog.py` put back in place for the run: 2 failed, 3 passed (the three that pin kept behaviour).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 164 passed and 3 failed across every test file that imports the module and the two audits' own tests. The 3 failures are not this change: `test_stage_watchdog.py::TestProgrammingErrorsAreNotRetried` fails the same way with HEAD's `stage_watchdog.py` in place. Those tests drive `GeminiClient.invoke` and assert its behaviour before faa39781 (#3777), which made a fault in the call raise instead of returning "Programming error"; they were not among that commit's changed tests.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.
