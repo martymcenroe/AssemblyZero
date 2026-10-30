@@ -121,3 +121,12 @@ Callers: `orchestrator/stages.py` `run_visual_stage` already turns a `ValueError
 - **Giving up is an ERROR on stderr and in the log** (220). When `with_retry` stops (retries exhausted, or a failure not worth retrying) it still returns the last failed `LLMCallResult`, which is the declared contract every caller routes to HALT. What changed is how it says so: the halt line went to stdout and the log record was INFO. It now also writes `ERROR [RETRY] <call> failed after N attempt(s) [<class>]: <cause>; <reason>` to stderr and logs it at ERROR.
 
 Callers: `workflows/testing/nodes/review_test_plan.py` and `revise_test_plan.py` return the failure as `error_message`; their routing to HALT is the testing package's.
+
+### utils/process.py (2 sites)
+
+`kill_process_tree` ends a timed-out model call and everything it spawned, so the drain after it does not block on a grandchild holding the pipes (the #1874 hang).
+
+- **A `taskkill` that fails raises** (33). Its exit code was never read. Now 0 and 128 ("not found") are quiet; any other code raises `ProcessTreeKillError` with the code and stderr.
+- **A kill the OS refuses, or a `taskkill` that times out, raises** (41). Every `OSError` and the timeout were swallowed as "already dead". Now only `ProcessLookupError` is quiet; the rest raise `ProcessTreeKillError` naming the pid and the cause, after an ERROR line on stderr and in the log.
+
+Callers: `core/llm_provider.py` (`_kill_process_tree`, on the idle and wall timeouts and the storm probe) and `core/gemini_client.py` (the agy timeout). Neither catches it: a tree that survived its kill now ends the call loudly instead of reporting a clean timeout.

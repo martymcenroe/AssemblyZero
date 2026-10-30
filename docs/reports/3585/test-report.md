@@ -116,3 +116,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** none.
 
 **Neighbouring suites:** 85 passed across the new file, `test_utils_retry.py`, `test_retry_gate_wiring.py` and `test_retry_gate.py`; 23 passed across `test_gemini_retry_boundary.py`, `test_json_verdict_review_test_plan.py` and `test_review_test_plan_structured_output.py`.
+
+## utils/process.py
+
+**New: `tests/unit/test_process_loud_failure.py` (6).** Site tests for 33 (a failing `taskkill`) and 41 (a `taskkill` timeout, an OS refusal), plus three that pin the quiet answers: `taskkill` exit 0, `taskkill` exit 128 ("not found"), and `ProcessLookupError`.
+
+**Before the fix, measured** against the unchanged module: 3 failed, 3 passed (the kept-behaviour tests).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 97 passed across the new file, `test_gemini_call_bounds.py`, `test_gemini_client.py`, `test_gemini_client_loud_failure.py`, `test_llm_idle_timeout.py` and `test_one_claude_cli_transport.py`.
