@@ -1,8 +1,8 @@
-# Implementation Report: the requirements workflow's graph and nodes under standard 0034 (#3585 step 5)
+# Implementation Report: the requirements workflow under standard 0034 (#3585 step 5)
 
-The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, covers the graph of `assemblyzero/workflows/requirements/` and the nodes assigned to it, in order of harm: one commit per module, each site fixed and tested against ledger 0908. The support modules are on `3585-requirements-support`. When the two branches meet, both carry this file and its sibling, and each keeps its own sections.
+The rule is ADR 0236 and standard 0034. This package covers `assemblyzero/workflows/requirements/` in two halves, cut as two branches and assembled on `3585-requirements-landing`. The first half, `3585-requirements-nodes`, covers the graph and the nodes assigned to it, in order of harm. The second, `3585-requirements-support`, takes the support modules that the nodes call. Each half is one commit per module, each site fixed and tested against ledger 0908, and each keeps its own sections below.
 
-## Modules
+## The graph and nodes (`3585-requirements-nodes`)
 
 ### nodes/finalize.py (20 ledger findings: 18 fixed here, 2 by #3767; and 1 compliant row, pinned)
 
@@ -123,7 +123,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 - **The record of the fixes, if it cannot be written,** is said at ERROR and raised by `_save_fixes_to_lineage`, and the node halts (108). It was dropped without a word.
 - **The gate registry:** `lld.input_precondition` covers the two new halt sites.
 
-## Loud-failure compliance (standard 0034)
+## Loud-failure compliance (standard 0034): the graph and nodes
 
 | Site (file:line) | Loud | Logged | Stops | Alerts |
 |---|---|---|---|---|
@@ -147,3 +147,18 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 
 - `assemblyzero/workflows/orchestrator/stages.py:719` reads `final_verdict` and `review_verdict` from the requirements sub-graph. Neither is a key of `RequirementsWorkflowState`, and finalize sets neither, so the verdict is always empty. With the lld gate enabled, an APPROVED LLD would be classed blocked.
 - `finalize.py` `_commit_and_push_files` checks the durable copy only when the driver returns a PR URL. A landing that returns a commit and no URL leaves `final_lld_path` naming the removed worktree copy.
+
+## The support modules (`3585-requirements-support`)
+
+### nodes/validate_mechanical.py (14 ledger rows: 13 fixed, 1 compliant)
+
+N1.5 sits in `nodes/`, but it was assigned to the support half.
+
+- **A title the check cannot read blocks the draft** (571, 584). No H1, or an H1 with no issue number, is an ERROR naming the title the drafter must write; it was a warning, and the draft passed as if its issue had been checked. The dead `int()` handler on the title number is gone (548): group 1 is digits.
+- **The base probe answers or raises** (1080, 1082). `_exists_on_base` asks `git ls-tree`, which answers on a base that resolves: an entry when the base ships the path, nothing when it does not. Git that cannot be run, a base that does not resolve and a directory that is not a repository raise `GitOperationError` with the rc and stderr; each used to read as "not shipped". An empty base branch is still a quiet "not shipped", since the run declared none.
+- **A search or sentinel that crashes raises** (1056, 1513), after an ERROR line naming the file.
+- **A lineage record that cannot be written stops the run** (1583, 1617, 1653, 1694, 1766). The five writes share `_save_errors_to_lineage`, which logs ERROR with issue, repo, draft and folder and re-raises. No lineage folder in the state is still quiet: the answer-key replay passes none.
+- **A telemetry record that cannot be written alerts and raises** (1825).
+- **Compliant, pinned** (1775): a blocked draft goes back to the drafter, and to HALT at the cap.
+- **What the graph now receives.** N1.5 can raise where it returned. Nothing in the graph catches it; `tools/run_requirements_workflow.py` prints `ERROR:` and exits 1, without an alert.
+- **The mock drafter.** Its canned LLD (`assemblyzero/core/llm_provider.py`, `MockProvider.DEFAULT_RESPONSES["lld"]`) is titled `# Mock Feature: rehearsal LLD`, with no issue number, so a `--mock` LLD run is now blocked at N1.5 until the mock titles its LLD with the issue.

@@ -1,6 +1,6 @@
-# Test Report: the requirements workflow's graph and nodes under standard 0034 (#3585 step 5)
+# Test Report: the requirements workflow under standard 0034 (#3585 step 5)
 
-Each fixed site has a test that fails before its fix and passes after, run first against the unchanged module. Filled in module by module on `3585-requirements-nodes`.
+Each fixed site has a test that fails before its fix and passes after, run first against the unchanged module. Filled in module by module on two branches and assembled on `3585-requirements-landing`: the graph and nodes on `3585-requirements-nodes`, then the support modules on `3585-requirements-support`, each keeping its own sections below.
 
 ## nodes/finalize.py
 
@@ -157,3 +157,17 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** none.
 
 **Neighbouring suites:** 14 files gave 321 passed and 1 skipped.
+
+## nodes/validate_mechanical.py
+
+**New: `tests/unit/test_validate_mechanical_loud_failure.py` (24).** Each site test is named for its ledger line; the rest pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 15 failed, 9 passed. Every site test failed. The nine that passed pin a good draft passing, an empty similar-file search, a path the base ships and one it does not, no base branch asking git nothing, a lineage record landing, no lineage folder staying quiet, the compliant blocked route (1775) and a passing draft recording nothing.
+
+**Changed tests, each asserting the new behaviour:**
+- `test_validate_mechanical.py`: `test_missing_number_returns_block_error` and `test_no_h1_returns_block_error` expect ERROR; they expected WARNING.
+- `test_prompt_telemetry.py`: `test_telemetry_failure_alerts_and_stops_the_run` expects the raise and one alert; it expected the verdict to come back.
+
+**Neighbouring suites:** 442 passed and 1 skipped across 21 files that run mechanical validation, with only the three tests above failing before they were changed; the three changed files and the new one then gave 136 passed.
+
+**Known failure:** `test_lld_mock_completes.py::TestMockFinishesAnLLDRun::test_a_mock_lld_run_reaches_finalize_and_writes_the_lld` fails: the mock drafter's LLD title carries no issue number, so N1.5 blocks it. It passes at the base commit. The remedy is the mock's title in `llm_provider.py`.
