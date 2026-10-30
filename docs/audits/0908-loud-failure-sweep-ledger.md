@@ -576,11 +576,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/alert.py:212` | log | raise | compliant | none |
 | `assemblyzero/core/provider_storm.py:147` | probe raises | storm | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/stage_watchdog.py:139` | stalled | stdout | loud, alerts | ERROR + alert |
-| `assemblyzero/core/preflight.py:64` | unknown alias | default | logged, stops | raise |
-| `assemblyzero/core/preflight.py:83` | no agy | failed | loud, alerts | ERROR |
-| `assemblyzero/core/preflight.py:94` | probe | failed | loud, alerts | ERROR |
-| `assemblyzero/core/preflight.py:95` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/preflight.py:102` | probe empty | failed | loud, alerts | ERROR |
+| `assemblyzero/core/preflight.py:64` | unknown alias | default | logged, stops | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:83` | no agy | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:94` | probe | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:95` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:102` | probe empty | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
 | `assemblyzero/core/retry.py:66` | non-retryable | stdout, raise | loud | stderr |
 | `assemblyzero/core/retry.py:73` | timeout | stdout, raise | loud | stderr |
 | `assemblyzero/core/retry.py:95` | exhausted | raise | loud | log |

@@ -1,5 +1,5 @@
 {
-  "count": 296,
+  "count": 294,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -132,18 +132,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 42
-    },
-    "assemblyzero/core/preflight.py::check_gemini_transport::fail_open_tag::1": {
-      "detail": "# fail-open: not a fall-through -- the failure is returned as a failed",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 95
-    },
-    "assemblyzero/core/preflight.py::check_gemini_transport::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 94
     },
     "assemblyzero/core/run_record.py::RunRecord._restore_streams::fail_open_tag::1": {
       "detail": "# fail-open: a handle that will not close is already useless;",

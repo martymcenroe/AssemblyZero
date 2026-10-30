@@ -116,8 +116,11 @@ class TestTheProbeUsesAGeminiModel:
         assert result.passed
         assert built == ["gemini-3.8-flash-high"]
 
-    def test_a_spec_without_a_known_name_still_gets_a_gemini_model(self):
-        assert preflight.gemini_model_for("gemini:something-new").startswith("gemini-")
+    def test_a_spec_without_a_known_name_raises(self):
+        """#3786: it used to get the default model, so the probe passed on a
+        model the run would never call."""
+        with pytest.raises(ValueError, match="Unknown Gemini model 'something-new'"):
+            preflight.gemini_model_for("gemini:something-new")
         assert preflight.gemini_model_for("claude:opus") == preflight.DEFAULT_PROBE_MODEL
 
 

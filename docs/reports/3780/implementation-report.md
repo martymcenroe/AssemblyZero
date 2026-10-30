@@ -129,6 +129,17 @@ The capacity gate decides whether `tools/orchestrate.py` may start a run. Every 
 
 Baseline: no entries leave, since the module had no broad handler or tag; rewriting it moved three `tools/new_repo.py` line numbers that the merge of `main` had left stale. The fail-open audit lost 3 findings (`_load_state`, `_save_state`, `_claude_capacity._dt`).
 
+### preflight.py (#3786, 5 sites)
+
+The Gemini transport check runs at requirements N1 and spec N2 before anything is drafted. A failed check is still a failed `PreflightResult`, its declared contract: both nodes return its warning as `error_message`, both graphs route that to HALT, and HALT alerts. What was missing is the loud line where it fails.
+
+- **Every failed check is loud** (83, 94, 102). A new `_failed` writes `ERROR [PREFLIGHT]` to stderr and the log, naming the model, the step that failed and that the workflow halts before it drafts, and returns the failed result with the same warning text as before.
+- **A fault in the probe raises** (94, 95). The broad handler and its tag are gone. The probe now catches only what the transport raises when it cannot be used (`OSError`, `SubprocessError`, and `GeminiClient`'s `RuntimeError` for a `wsl.exe` that cannot run or a reply agy broke), plus `GeminiClient`'s `ValueError` for a refused model id. Anything else is a bug, and it used to look like an agy outage.
+- **An unknown Gemini alias raises** (64). `gemini_model_for` used to probe the default model, so the preflight passed on a model the run would never call. It now looks the alias up the way `GeminiProvider` does, lower-cased, and raises with the same message. Seat resolution lets an unknown alias through, so `preflight_for_specs` is where it is first met: it turns the raise into a loud failed check, so the run halts through HALT, and remembers nothing, since no probe ran.
+- **Callers.** `generate_draft` (requirements) and `generate_spec` (implementation spec) call `preflight_for_specs` outside any handler. A fault the probe now raises leaves the node, and `tools/run_requirements_workflow.py`'s broad handler prints it and exits 1 without an alert (its own ledger row, `tools/`).
+
+Baseline: two entries leave (the tag and the handler). The fail-open audit lost 1 finding.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

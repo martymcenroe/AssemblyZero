@@ -88,6 +88,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 428 passed and 1 failed across `test_capacity_gate.py`, `test_capacity_loud_failure.py`, `test_capacity_fidelity.py`, `test_capacity_stage_retry.py`, the Claude CLI provider tests (`test_llm_provider.py`, `test_llm_provider_loud_failure.py`, `test_529_hardening.py`, `test_one_claude_cli_transport.py`, `test_llm_idle_timeout.py`, `test_llm_provider_json_schema.py`, `test_nested_claude_env.py`, `test_model_call_guard.py`, `test_claude_spend_lock_refusal.py`), the orchestrator entry tests (`test_alert_channel_at_start.py`, `test_stage_verdict_is_explicit.py`) and the two audits' own tests. The one failure was the fail-open baseline going stale by the three fixed handlers; after `--write-baseline` the audits' tests pass.
 
+## preflight.py
+
+**New: `tests/unit/test_preflight_loud_failure.py` (10)**: eight for the five sites (two each for 64, 94 and 102, one for the tag), plus `test_a_known_alias_a_full_id_and_no_gemini_spec_are_answers` and `test_a_passing_probe_is_quiet`, which pin kept behaviour. The file overrides `tests/unit/conftest.py`'s `_bypass_gemini_preflight`, so the real check runs against a fake client.
+
+**Before the fix, measured** with HEAD's `preflight.py` put back in place for the run: 8 failed, 2 passed (the two that pin kept behaviour).
+
+**Changed test:** `test_preflight_transport.py::test_a_spec_without_a_known_name_raises` (was `test_a_spec_without_a_known_name_still_gets_a_gemini_model`).
+
+**Neighbouring suites:** 1434 passed, 1 skipped and 1 failed across every unit and integration test file that names the preflight, `generate_draft` or `generate_spec`, plus the two audits' own tests. The failure was `test_no_fixed_site_left_in_the_baseline`, before `--write-baseline`; after it the audits' tests pass.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.
