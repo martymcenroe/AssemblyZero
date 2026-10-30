@@ -47,6 +47,20 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 - **`validate_draft_structure`** blocks an empty draft (1186).
 - **The gate registry:** the generate_draft sites are renumbered, and `lld.drafter_failed` covers the new preconditions.
 
+### nodes/analyze_codebase.py (9 ledger findings: 8 fixed here, 1 by #3864; 1 compliant row)
+
+- **N0b halts on anything it cannot read**, before N0c spends a model call:
+  - no repo path (107), or a repo path that is not a directory (112);
+  - a listing that fails (361, 375) or a search that fails (502); the three helpers raise where they passed, and the node halts on the raise;
+  - a selected key file or related file that cannot be read (191, 268);
+  - a Tiphys extraction that raises (285). The broad handler is gone; `interface_surface` raises since #3779.
+- **Designed caps stay quiet or are named.**
+  - A file left out to fit the token budget is named in the log.
+  - A sensitive, binary or empty file is skipped quietly.
+  - A repo with no Python files has an empty surface.
+- **#3864 already halts an arc that cannot be cut** (153); it is pinned here.
+- **The gate registry:** `lld.arc_unreadable` covers N0b's seven new halt sites.
+
 ## Loud-failure compliance (standard 0034)
 
 | Site (file:line) | Loud | Logged | Stops | Alerts |
@@ -55,6 +69,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 | `finalize.py` `_finalize_repair_budget` | the ValueError's traceback | names the bad value | raises out of the node | not alerted at the site: the orchestrator's `except Exception` in `run_lld_stage` records a failed stage without an alert (outside this branch) |
 | `finalize.py` `validate_lld_final` | the ValueError's traceback | says the content is empty | raises; its one caller halts on an empty draft first | through that caller's HALT |
 | `graph.py` `route_from_human_gate_draft`, `route_from_human_gate_verdict` | the gate's own ERROR line | the gate's message | an error routes to HALT | HALT calls `alert_operator` |
+| `analyze_codebase.py` `analyze_codebase`, `_unread_selected`, `_select_key_files`, `_search_for_file` | ERROR line on stderr and in the log, via `_loud` | names the repo, the file or listing, and the cause | `error_message`, which `route_after_analyze_codebase` sends to HALT before N0c | HALT calls `alert_operator` |
 | `generate_draft.py` `generate_draft`, `_generate_best_of_n`, `build_revision_context` | ERROR line on stderr and in the log, via `_loud` | names the path, size, spec, files and cause | `error_message`, which `route_after_generate_draft` sends to HALT; a failed candidate alone does not stop the round, by design | HALT calls `alert_operator` |
 
 ## New defects found, not fixed here

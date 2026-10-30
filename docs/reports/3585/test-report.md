@@ -59,4 +59,18 @@ The other seven pin a well-formed issue URL, an idea that is present and one nev
 - `test_requirements_nodes.py`: a missing audit_dir halts. Two other tests gained an audit_dir.
 - `test_lld_edit_script_revision.py`, `test_lld_mock_completes.py` and `test_diff_aware_review.py`: each state now has a target directory or an audit_dir that exists.
 
-**Neighbouring suites:** the first run across 45 files gave 22 failures. Each was a test asserting retired behaviour: a missing audit_dir or target repository tolerated. After those tests were changed, and after the seat-handling change, the run across 47 files gave 987 passed and 1 skipped.
+**Neighbouring suites (generate_draft):** the first run across 45 files gave 22 failures. Each was a test asserting retired behaviour: a missing audit_dir or target repository tolerated. After those tests were changed, and after the seat-handling change, the run across 47 files gave 987 passed and 1 skipped.
+
+## nodes/analyze_codebase.py
+
+**New: `tests/unit/test_analyze_codebase_loud_failure.py` (19).**
+
+**Before the fix, measured:** 14 failed, 5 passed. Every site test failed except 153, which #3864's router already halts. The other four that passed pin kept behaviour:
+- an empty key file is skipped quietly;
+- a related binary file is skipped quietly;
+- a repo with no Python has an empty surface;
+- a file outside the repo is skipped (460).
+
+**Changed tests:** `test_analyze_codebase.py`. The no-repo-path and missing-repo classes now expect the halt and an ERROR in the log, where they expected an empty context and a warning.
+
+**Neighbouring suites:** 494 passed across 21 files: the analysis tests, the interface surface, the requirements graph, the mock runs, the CLI and the gate registry.

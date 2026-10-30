@@ -169,8 +169,13 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "lld.arc_unreadable", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "LLD analysis cannot read the arc",
-        _s(f"{_RQ}/nodes/analyze_codebase.py::analyze_codebase::return", 0),
+        _s(f"{_RQ}/nodes/analyze_codebase.py::analyze_codebase::return", 0, 1, 2, 3, 4, 5, 6, 7),
         created_by="#2684",
+        notes=(
+            "#3585: also every other thing N0b cannot read: no repo path, a "
+            "repo that is not a directory, a listing or search that fails, a "
+            "selected file that cannot be read, and a failed interface extraction"
+        ),
     ),
     Gate(
         "lld.requirements_unverified", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
