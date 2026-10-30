@@ -63,3 +63,13 @@ Each site is the ledger row in `docs/audits/0908-loud-failure-sweep-ledger.md` n
 - **A git error read as absence (54, 63).** `exists_on_base` used `git cat-file -e`, which exits non-zero both for a missing path and for a ref git cannot read. It now asks `git ls-tree --full-tree`, which exits 0 with no output for a missing path and fails only for a git error, which raises. `read_from_base` returns `""` only for a path the base does not ship, and raises on any other failed `git show`.
 - **`BaseTreeError`** is a `RuntimeError`, not an `OSError`, so no caller reads a git failure as a missing file.
 - **Callers.** `analyze_codebase` catches it and halts (below). `validate_completeness.py` does not catch it yet; a git failure there now raises out of N3 rather than reading as absent.
+
+### `workflows/implementation_spec/nodes/analyze_codebase.py` (23 sites, 1 compliant)
+
+- **The node halts.** Every failure below reaches the node as `BaseTreeError` or the new `CodebaseReadError`, and the node returns an `error_message` of the form `[N1] analyze_codebase for issue #N: ...`, with an ERROR line on stderr. `route_after_analyze` already sends it to HALT, which alerts. The repo_root guard (110) was already compliant.
+- **The plan's own files (118, 183, 196, 216, 261, 310).** An empty plan, a Modify or Delete target that is missing, not a file, unreadable or unparseable, and an unknown change type each used to pass with a WARNING on stdout and no content. They now halt, at the first file that fails. A file that does not parse is reported by interface_surface, which raises since #3779.
+- **An Add whose directory does not exist yet** is still not a failure: the implementation creates it. The note is no longer a WARNING, and the `warnings` list is gone.
+- **The context files (567, 627, 676, 734, 782, 831, 843, 871, 914).** A pattern file, CLAUDE.md, README, pyproject or planned file that exists and cannot be read or parsed raises naming it; it used to be dropped. An absent one still contributes nothing.
+- **The base sweep (947, 959, 988, 1024, 1037, 1044, 1054).** A failed `git ls-tree` raises; the 200-file caps are gone; a file git cannot show raises (through `read_from_base`); a base file that does not parse raises, where it used to be regex-scraped.
+- **The symbol gather (1127).** `gather_symbols` still names every file that did not parse; the node halts on the list, and `_extract_symbols_from_files` raises instead of returning a shorter list.
+- **`core/gate_registry.py`.** The new `_halt` return is a halt site, added to the existing `spec.input_precondition` row. No row is added, so the ratchet is unchanged.

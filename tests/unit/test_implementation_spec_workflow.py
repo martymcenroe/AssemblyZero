@@ -839,9 +839,14 @@ class TestAnalyzeCodebase:
         assert result["error_message"] == ""
         assert "assemblyzero/workflows/test/graph.py" in result["current_state_snapshots"]
 
-    def test_040_file_not_found_graceful(self, tmp_path):
-        """Scenario 040: Missing file produces warning, not error."""
+    def test_040_file_not_found_halts(self, tmp_path):
+        """Scenario 040: a missing Modify target halts (#3585).
+
+        It used to produce a WARNING on stdout and pass, so the spec was
+        drafted for a file nobody could read.
+        """
         from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import analyze_codebase
+        from assemblyzero.workflows.implementation_spec.graph import route_after_analyze
 
         state = {
             "files_to_modify": [{
@@ -852,17 +857,18 @@ class TestAnalyzeCodebase:
         }
 
         result = analyze_codebase(state)
-        assert result["error_message"] == ""
+        assert "nonexistent/file.py" in result["error_message"]
+        assert route_after_analyze(result) == "HALT"
         assert "nonexistent/file.py" not in result.get("current_state_snapshots", {})
 
-    def test_empty_files_list(self, tmp_path):
-        """No files → empty results."""
+    def test_empty_files_list_halts(self, tmp_path):
+        """No files → a halt (#3585); an empty plan used to pass with a WARNING."""
         from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import analyze_codebase
 
         result = analyze_codebase({
             "files_to_modify": [], "lld_content": "", "repo_root": str(tmp_path),
         })
-        assert result["error_message"] == ""
+        assert "no files to modify" in result["error_message"]
         assert result["current_state_snapshots"] == {}
 
     def test_add_file_verifies_parent(self, tmp_path):

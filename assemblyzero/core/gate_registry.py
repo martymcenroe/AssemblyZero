@@ -276,7 +276,14 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "No issue number provided",
         _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 0, 1, 2)
         + _s(f"{_IS}/nodes/analyze_codebase.py::analyze_codebase::return", 0)
+        + _s(f"{_IS}/nodes/analyze_codebase.py::_halt::return", 0)
         + _s(f"{_IS}/nodes/human_gate.py::human_gate::return", 0),
+        notes=(
+            "#3585: N1's _halt is every failure the node used to print as a "
+            "WARNING and pass: an empty plan, a Modify or Delete target missing, "
+            "not a file, unreadable or unparseable, an unknown change type, a "
+            "context file that cannot be read, and a base git cannot answer"
+        ),
     ),
     Gate(
         "spec.lld_not_usable", "spec", JUDGES_UPSTREAM, ACTION_HALT,

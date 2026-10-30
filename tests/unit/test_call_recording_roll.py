@@ -65,9 +65,11 @@ LLD = """# LLD-999: Add a greeting
 
 ## 2. Files Changed
 
-| file | change |
-|---|---|
-| `src/greet.py` | Add |
+### 2.1 Files Changed
+
+| file | change | description |
+|---|---|---|
+| `src/greet.py` | Add | the greeting |
 
 ## 10. Test Plan
 

@@ -66,3 +66,15 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
   - `test_import_checker_base.py`, `test_import_check_names_the_real_module.py` and `test_call_recording_roll.py`: their fixtures push the base branch to a bare origin.
 - **Neighbouring suites:** `test_spec_base_aware`, `test_import_checker_base`, `test_import_check_names_the_real_module`, `test_spec_calls_existing_code`, `test_failopen_tags_3767`, `test_import_checker_env`, `test_base_api_surface`, `test_base_symbols_in_api_check`, `test_call_recording_roll`, `test_resume_after_ceiling_halt`, `test_stage_verdict_is_explicit`, `test_first_party_mid_build`, `test_mock_roll` and `test_implementation_spec_workflow` (207 passed): all pass.
 - **Audits:** `audit_loud_failure.py --check` PASS at 280; `audit_fail_open.py --check` PASS, no new fail-open.
+
+## `nodes/analyze_codebase.py`
+
+- **Added:** `tests/unit/test_spec_analyze_codebase_loud_failure.py`, 40 tests, named `test_spec_...` because the requirements workflow has a module of the same name. Before the fix: 30 failed, 10 passed. Two of the 10, for lines 988 and 1044, had been fixed by the `base_tree.py` commit; with `base_tree.py` put back at `552149a1` both fail. After: 40 passed.
+- **Changed**, each of which asserted retired behaviour:
+  - `test_implementation_spec_workflow.py`: `test_040_file_not_found_graceful` is now `test_040_file_not_found_halts`, and `test_empty_files_list` is now `test_empty_files_list_halts`;
+  - `test_cache_semi_static.py`: the plan carries one Add, since an empty plan halts;
+  - `test_symbol_gather_reports_unreadable.py`: the line says the stage halts, not that the file was excluded, and the node test reads `_analyze`;
+  - `test_base_api_surface.py` and `test_base_symbols_in_api_check.py`: a ref git cannot read raises `BaseTreeError`;
+  - `test_call_recording_roll.py`: the LLD's Files Changed table parses, so the roll no longer runs with an empty plan.
+- **Neighbouring suites:** every unit test file that imports the spec workflow ran: 1,014 passed and 8 failed, the 8 being the roll, gate-registry and section-ten tests changed or answered above. After the loop was restructured, the 17 files closest to the node ran again: 501 passed.
+- **Audits:** `audit_loud_failure.py --check` PASS at 280; `audit_fail_open.py --check` PASS, no new fail-open. The fail-open baseline has 11 stale `analyze_codebase` entries, for the parent's regeneration.
