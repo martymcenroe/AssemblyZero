@@ -34,3 +34,14 @@ These drive `implement_code` itself, with `generate_file_with_retry` stood in fo
 - T3: `tests/stray.test.ts`, outside every framework's directory, halts N4 naming it with "belongs to no framework", prints an ERROR line on stderr, and routes to HALT (on `4ac9c81a`: no error).
 - The red phase's prior-attempt registration for the Vitest leg gives `[web/tests/replay.test.ts]` alone (on `4ac9c81a`: `tests/test_issue_7.py` came first).
 - Against the unchanged source: 4 failed, 1 passed. On the fix: 5 passed.
+
+## #3065: `tests/unit/test_json_runner_reads_stdout.py` (9)
+
+`base_runner.run_command` is stood in for with a `CompletedProcess` carrying separate stdout and stderr.
+
+- `_run_subprocess` returns the streams apart (on `4ac9c81a`: one joined string and the code).
+- A Jest report and a Vitest report with an `npm WARN` line on stderr parse to 3 passed, 1 failed, 4 total, and the warning is still in `raw_output`; a Playwright report likewise parses to 2 passed, 1 failed (on `4ac9c81a`: the fallback's `(0, 1, 1)` and `(0, 1)`).
+- A `{rootDir: web}` log line ahead of the report, and a JSON log line that is not the report, are passed over (on `4ac9c81a`: the fallback).
+- pytest still reads both streams (kept behaviour, passed there).
+- Two tests were added after the run against `4ac9c81a`, with the brace-matched search: an object that carries the key and does not parse raises naming the key, and a brace inside a JSON string does not end the object.
+- Against the unchanged source (7 then): 6 failed, 1 passed. On the fix: 9 passed.

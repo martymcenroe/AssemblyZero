@@ -132,7 +132,8 @@ class TestJestRunnerRunTests:
     @patch.object(JestRunner, "_run_subprocess")
     def test_t230_invokes_correct_command(self, mock_subprocess, jest_runner):
         """T230: JestRunner.run_tests invokes correct command."""
-        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', 0)
+        # #3065: _run_subprocess returns (stdout, stderr, exit_code)
+        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', "", 0)
         jest_runner.run_tests(test_paths=["tests/utils.test.ts"])
 
         args, _ = mock_subprocess.call_args
@@ -145,7 +146,7 @@ class TestJestRunnerRunTests:
     @patch.object(JestRunner, "_run_subprocess")
     def test_vitest_invokes_correct_command(self, mock_subprocess, vitest_runner):
         """Vitest runner uses vitest run --reporter=json."""
-        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', 0)
+        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', "", 0)
         vitest_runner.run_tests()
 
         args, _ = mock_subprocess.call_args

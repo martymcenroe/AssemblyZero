@@ -4,6 +4,7 @@ Issue #381: Defines the interface all test runners must implement.
 """
 
 from assemblyzero.utils.shell import run_command
+import json
 import logging
 import os
 import subprocess
@@ -18,6 +19,72 @@ logger = logging.getLogger(__name__)
 
 # Default subprocess timeout in seconds
 DEFAULT_TIMEOUT = 300
+
+
+def combined_output(stdout: str, stderr: str) -> str:
+    """Both streams, stdout first, as a reader of the run's output sees them."""
+    return stdout + ("\n" + stderr if stderr else "")
+
+
+def _object_end(text: str, start: int) -> int:
+    """The index of the `}` that closes the `{` at `start`, reading JSON
+    strings as strings; -1 when it never closes."""
+    depth = 0
+    in_string = escaped = False
+    for index in range(start, len(text)):
+        character = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def first_json_object(text: str, required_key: str) -> dict | None:
+    """The first JSON object in `text` whose top level carries `required_key`
+    (#3065).
+
+    Each `{` is matched to the `}` that closes it, so text after the report
+    (npx's warnings, when the streams were joined) cannot reach the parse,
+    and a brace in a log line ahead of it (`Using config {rootDir: web}`) is
+    passed over: an object is decoded only when it opens as JSON does and
+    names the key. A JSON log line that is not the report is passed over
+    whole, so nothing nested inside it is mistaken for the report.
+
+    None when no object in `text` carries the key: there is no report. An
+    object that carries the key and does not parse raises ValueError -- that
+    is the report, broken.
+    """
+    marker = f'"{required_key}"'
+    index = text.find("{")
+    while index != -1:
+        end = _object_end(text, index)
+        if end == -1:
+            index = text.find("{", index + 1)
+            continue
+        span = text[index:end + 1]
+        if span[1:].lstrip()[:1] in ('"', "}") and marker in span:
+            try:
+                value = json.loads(span)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"the JSON object carrying {marker} does not parse: {e}"
+                ) from e
+            if isinstance(value, dict) and required_key in value:
+                return value
+        index = text.find("{", end + 1)
+    return None
 
 
 class BaseTestRunner(ABC):
@@ -107,8 +174,13 @@ class BaseTestRunner(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def parse_results(self, raw_output: str, exit_code: int) -> TestRunResult:
-        """Parse runner-specific output into unified TestRunResult."""
+    def parse_results(
+        self, raw_output: str, exit_code: int, stderr: str = "",
+    ) -> TestRunResult:
+        """Parse runner-specific output into unified TestRunResult.
+
+        `raw_output` is the stream the runner parses, and `stderr` the other
+        one, kept for the reader (#3065)."""
         raise NotImplementedError
 
     @abstractmethod
@@ -141,10 +213,17 @@ class BaseTestRunner(ABC):
         command: list[str],
         timeout: int = DEFAULT_TIMEOUT,
         cwd: str | None = None,
-    ) -> tuple[str, int]:
-        """Run a subprocess command and return (stdout, exit_code).
+    ) -> tuple[str, str, int]:
+        """Run a subprocess command and return (stdout, stderr, exit_code).
 
-        Handles timeout and other subprocess errors gracefully.
+        #3065: the streams come back apart, so a runner that asked for a
+        machine-readable report on stdout parses stdout alone; `npx` writes
+        to stderr as a matter of routine, and a warning appended after the
+        report broke every JSON parse. A runner that reads human output
+        joins them (`combined_output`).
+
+        A timeout, a missing command or an OS error comes back as exit code
+        -1 with its cause in place of stderr, as it did.
         """
         working_dir = cwd or self.project_root
         if self.config.get("working_directory"):
@@ -161,16 +240,13 @@ class BaseTestRunner(ABC):
                 timeout=timeout,
                 cwd=working_dir,
             )
-            output = result.stdout
-            if result.stderr:
-                output += "\n" + result.stderr
-            return output, result.returncode
+            return result.stdout or "", result.stderr or "", result.returncode
         except subprocess.TimeoutExpired:
             logger.error("Command timed out after %ds: %s", timeout, " ".join(command))
-            return f"Command timed out after {timeout}s", -1
+            return "", f"Command timed out after {timeout}s", -1
         except FileNotFoundError as e:
             logger.error("Command not found: %s", e)
-            return f"Command not found: {e}", -1
+            return "", f"Command not found: {e}", -1
         except OSError as e:
             logger.error("OS error running command: %s", e)
-            return f"OS error: {e}", -1
+            return "", f"OS error: {e}", -1

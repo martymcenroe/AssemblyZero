@@ -15,7 +15,11 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
     TestRunResult,
 )
-from assemblyzero.workflows.testing.runners.base_runner import BaseTestRunner
+from assemblyzero.workflows.testing.runners.base_runner import (
+    BaseTestRunner,
+    combined_output,
+    first_json_object,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +75,9 @@ class JestRunner(BaseTestRunner):
                 typecheck_command = ["npx", "tsc", "--noEmit"]
                 
             if typecheck_command:
-                raw_out, code = self._run_subprocess(typecheck_command)
+                out, err, code = self._run_subprocess(typecheck_command)
                 if code != 0:
-                    return self._fallback_result(raw_out, code)
+                    return self._fallback_result(combined_output(out, err), code)
 
             command = ["npx", "vitest", "run", "--reporter=json"]
         else:
@@ -85,10 +89,12 @@ class JestRunner(BaseTestRunner):
         if test_paths:
             command.extend(test_paths)
 
-        raw_output, exit_code = self._run_subprocess(command)
-        return self.parse_results(raw_output, exit_code)
+        stdout, stderr, exit_code = self._run_subprocess(command)
+        return self.parse_results(stdout, exit_code, stderr)
 
-    def parse_results(self, raw_output: str, exit_code: int) -> TestRunResult:
+    def parse_results(
+        self, raw_output: str, exit_code: int, stderr: str = "",
+    ) -> TestRunResult:
         """Parse Jest/Vitest JSON output into unified TestRunResult.
 
         Jest JSON format:
@@ -100,22 +106,24 @@ class JestRunner(BaseTestRunner):
             "numTotalTests": int,
             "coverageMap": {...} (optional)
         }
+
+        #3065: the report is read from `raw_output`, the run's stdout, as the
+        first JSON object that carries `numPassedTests`, the count it reads
+        first; `stderr` (npx's warnings) is kept in the result's `raw_output`
+        for the reader and never parsed.
         """
         passed = 0
         failed = 0
         skipped = 0
         errors = 0
         coverage_percent = 0.0
+        shown = combined_output(raw_output, stderr)
 
         try:
-            # Jest may output non-JSON before the JSON blob
-            json_start = raw_output.find("{")
-            if json_start == -1:
-                logger.warning("No JSON found in Jest/Vitest output")
-                return self._fallback_result(raw_output, exit_code)
-
-            json_str = raw_output[json_start:]
-            report = json.loads(json_str)
+            report = first_json_object(raw_output, "numPassedTests")
+            if report is None:
+                logger.warning("No JSON report found in Jest/Vitest output")
+                return self._fallback_result(shown, exit_code)
 
             passed = report.get("numPassedTests", 0)
             failed = report.get("numFailedTests", 0)
@@ -125,9 +133,9 @@ class JestRunner(BaseTestRunner):
             if "coverageMap" in report and report["coverageMap"]:
                 coverage_percent = self._extract_coverage(report["coverageMap"])
 
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
             logger.warning("Failed to parse Jest/Vitest JSON output: %s", e)
-            return self._fallback_result(raw_output, exit_code)
+            return self._fallback_result(shown, exit_code)
 
         total = passed + failed + skipped + errors
 
@@ -139,7 +147,7 @@ class JestRunner(BaseTestRunner):
             "total": total,
             "coverage_percent": coverage_percent,
             "coverage_type": CoverageType.LINE,
-            "raw_output": raw_output,
+            "raw_output": shown,
             "exit_code": exit_code,
             "framework": self.config["framework"],
         }
