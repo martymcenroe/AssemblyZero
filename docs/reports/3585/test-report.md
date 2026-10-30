@@ -218,3 +218,11 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** `test_form_gate.py`'s unreadable-issue test expects the refusal and an alert; `test_scope_coverage.py`'s scope-crash test expects the refusal; `tests/unit/conftest.py` gains the offline-preflight fixture.
 
 **Neighbouring suites:** 117 passed across the form-gate, scope and discrimination files; 349 passed and 3 skipped across the 13 launcher files that the refusal had broken (53 failures without the fixture) and five related files.
+
+## best_of_n.py
+
+**New: `tests/unit/test_best_of_n_loud_failure.py` (12, with parameters).** Before the fix: 6 failed, 6 passed (the kept and compliant rows).
+
+**Changed tests (`test_best_of_n.py`):** a crashing gate raises and alerts; a non-numeric count raises.
+
+**Neighbouring suites:** 34 passed (`test_best_of_n.py` and the new file); 28 passed across the draft node's tests.

@@ -109,6 +109,10 @@ def score_candidate(
     The validators are injected rather than imported here so this module
     stays free of the node import cycle and so a test can drive it without
     standing up a workflow. Production passes the real ones.
+
+    A gate that crashes did not judge the candidate, so it cannot be scored:
+    the crash alerts the operator and re-raises (#3585). It used to count as
+    one failure, so a candidate that broke a validator could still win.
     """
     score = CandidateScore(index=index, draft=draft)
     if not (draft or "").strip():
@@ -127,13 +131,19 @@ def score_candidate(
     for gate_name, gate in (("mechanical", mechanical), ("test-plan", test_plan)):
         try:
             result = gate(probe) or {}
-        except Exception as exc:  # noqa: BLE001
-            # fail-open: a gate that CRASHES on a candidate must not kill the
-            # roll, but the candidate is not thereby good. The crash is
-            # recorded as a failure of that gate, so a candidate that breaks
-            # a validator can never win by breaking it.
-            score.failures[gate_name] = [f"gate raised {type(exc).__name__}: {exc}"]
-            continue
+        except Exception as exc:
+            from assemblyzero.core import alert
+
+            issue = state.get("issue_number")
+            alert.alert_operator(
+                what=f"score best-of-N candidate {index} with the {gate_name} gate",
+                where="assemblyzero.workflows.requirements.best_of_n.score_candidate (N1 draft)",
+                cause=f"{type(exc).__name__}: {exc}",
+                consequence="the draft node stops; no candidate is chosen",
+                repo=str(state.get("target_repo") or ""),
+                issue=issue if isinstance(issue, int) else None,
+            )
+            raise
         errors = [
             str(item)
             for key in ("validation_errors", "test_plan_errors")
@@ -173,17 +183,19 @@ def render_score_table(scores: list[CandidateScore], winner_index: int) -> str:
 
 
 def clamp_candidates(requested: Any) -> int:
-    """A candidate count that cannot surprise the operator's wallet."""
+    """A candidate count that cannot surprise the operator's wallet.
+
+    A number is clamped into ``SERIAL..MAX_CANDIDATES``. A value that is not a
+    number raises naming it (#3585): it used to mean one candidate without a
+    word, so a mistyped flag ran a different experiment from the one asked.
+    """
     try:
         value = int(requested)
-    except (TypeError, ValueError):
-        # fail-open: toward the SERIAL path, which is the pre-#2573
-        # behaviour and spends the fewest tokens. An unparseable candidate
-        # count is a config typo, and the safe reading of a typo is "do the
-        # cheap thing", never "do it five times". Falling closed here would
-        # halt a roll over a malformed flag; falling open the other way
-        # would let one spend the operator's quota.
-        return SERIAL
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"the draft candidate count {requested!r} is not a whole number "
+            f"(config_draft_candidates, --draft-candidates)"
+        ) from exc
     if value < SERIAL:
         return SERIAL
     return min(value, MAX_CANDIDATES)

@@ -83,16 +83,15 @@ class TestScoring:
         assert score.unusable
         assert score.clears is False
 
-    def test_a_gate_that_crashes_counts_against_the_candidate(self):
-        """A candidate cannot win by breaking a validator."""
+    def test_a_gate_that_crashes_stops_the_scoring(self, operator_alerts):
+        """A candidate cannot win by breaking a validator; since #3585 the
+        crash alerts and raises, because the candidate was never judged."""
         def exploding(state):
             raise RuntimeError("boom")
 
-        score = score_candidate(
-            1, DRAFT, {}, mechanical=exploding, test_plan=_empty_gate
-        )
-        assert score.clears is False
-        assert "gate raised RuntimeError" in score.failures["mechanical"][0]
+        with pytest.raises(RuntimeError, match="boom"):
+            score_candidate(1, DRAFT, {}, mechanical=exploding, test_plan=_empty_gate)
+        assert len(operator_alerts) == 1
 
     def test_candidates_are_scored_in_isolation(self):
         """Leaking accumulated validation state between candidates would
@@ -201,8 +200,12 @@ class TestTheAcceptanceFixture:
 class TestClamping:
     def test_the_default_is_the_serial_path(self):
         assert clamp_candidates(1) == SERIAL
-        assert clamp_candidates(None) == SERIAL
-        assert clamp_candidates("nonsense") == SERIAL
+
+    def test_a_count_that_is_not_a_number_raises(self):
+        """#3585: it used to mean one candidate without a word."""
+        for bad in (None, "nonsense"):
+            with pytest.raises(ValueError, match="draft candidate count"):
+                clamp_candidates(bad)
 
     def test_zero_and_negative_fall_back_to_serial(self):
         assert clamp_candidates(0) == SERIAL

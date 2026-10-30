@@ -188,3 +188,9 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 - **A form check that could not run refuses the launch.** An issue that cannot be fetched (149), an empty body (153), and a crash in the discrimination (162) or scope (169, 170) extension each write an ERROR line, alert the operator and refuse; the loop stops at the first. They used to print "could not be checked" (or nothing, for a crashed extension) and proceed (193). The findings keep the operator's 2026-08-12 ruling: only a malformed decision table refuses.
 - **The extensions refuse rather than re-raise.** The preflight's contract is `(text, refuse)` and the launcher returns 91 on it; a raise would reach the operator as a traceback instead of a refusal.
 - **The unit suite reads no issue from GitHub.** `tests/unit/conftest.py` gains an autouse fixture that hands the launcher's form and contract preflights a prose issue when they are given the real reader, as the box-health bypass does for memory. Without it, 53 launcher tests were refused, since a test repo has no GitHub remote.
+
+### best_of_n.py (5 ledger rows: 4 fixed, 1 compliant)
+
+- **A gate that crashes on a candidate alerts and re-raises** (130, 131); it counted as one failure and the candidate could still win.
+- **A candidate count that is not a number raises naming it** (179, 180); it silently meant one candidate. A number is still clamped into 1..5.
+- **Every candidate unusable** stays `None` for the draft node to halt on (156, compliant).
