@@ -59,6 +59,9 @@ from assemblyzero.workflows.implementation_spec.nodes.retry_prompt_builder impor
     RetryContext,
     build_retry_prompt,
 )
+from assemblyzero.workflows.implementation_spec.revision_pinning import (
+    PinningMergeError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -620,12 +623,16 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             # #2532: pin what passed. Edits touching content the verdict
             # did not name are refused mechanically; the locked spans
             # carry forward byte-verbatim.
-            pinned, events = _apply_pinning(
-                state, existing_draft, patched,
-                response=edit_result.response or "",
-                review_feedback=review_feedback,
-                completeness_issues=completeness_issues,
-            )
+            try:
+                pinned, events = _apply_pinning(
+                    state, existing_draft, patched,
+                    response=edit_result.response or "",
+                    review_feedback=review_feedback,
+                    completeness_issues=completeness_issues,
+                )
+            except PinningMergeError as e:
+                # #3585: re-prompting cannot mend the merge; halt.
+                return _halt(issue_number, f"pinning cannot hold this revision: {e}")
             pinning_events.extend(events)
             if pinned == existing_draft:
                 refusals = [
@@ -719,12 +726,15 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         # The UNLOCK line is read from the RAW response, because the
         # preamble strip above would eat it.
         if is_revision and existing_draft and spec_content.strip():
-            spec_content, events = _apply_pinning(
-                state, existing_draft, spec_content,
-                response=result.response or "",
-                review_feedback=review_feedback,
-                completeness_issues=completeness_issues,
-            )
+            try:
+                spec_content, events = _apply_pinning(
+                    state, existing_draft, spec_content,
+                    response=result.response or "",
+                    review_feedback=review_feedback,
+                    completeness_issues=completeness_issues,
+                )
+            except PinningMergeError as e:
+                return _halt(issue_number, f"pinning cannot hold this revision: {e}")
             pinning_events.extend(events)
 
     # -------------------------------------------------------------------------

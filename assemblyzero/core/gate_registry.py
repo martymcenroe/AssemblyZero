@@ -487,10 +487,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     ),
     Gate(
         "spec.conservation_gate", "spec", JUDGES_MODEL_OUTPUT, ACTION_REVISE,
-        "the walked merge",
-        _s(f"{_IS}/revision_pinning.py::_conservation_override::conservation", 0, 1, 2),
+        "the revision removed",
+        _s(f"{_IS}/revision_pinning.py::_conservation_override::conservation", 0),
         created_by="#2559",
-        notes="emits the revision unenforced or the previous draft; never halts",
+        notes=(
+            "emits the previous draft when the revision removed unnamed tests; "
+            "never halts. #3585: the two merge-malfunction cases (tests lost "
+            "that both inputs hold, tests multiplied beyond both) raise "
+            "PinningMergeError, and N2 halts through its _halt site "
+            "(spec.drafter_failed); they were sites 0 and 1 here, emitting the "
+            "revision unenforced"
+        ),
     ),
     # ---- impl: the testing workflow --------------------------------------
     Gate(

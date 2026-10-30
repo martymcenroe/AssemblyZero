@@ -121,3 +121,10 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 - **A lineage file that cannot be read (102)** raises `LineageReadError` naming it. It used to read as empty, so the run was skipped and its paid work replaced by an older seed or a fresh draw.
 - **A verdict that cannot be read or is empty (140)** raises, where it was dropped from the review history and blinded the stagnation check.
 - **Kept:** no prior run, a run with no verdict, and an empty newest draft still mean nothing to resume onto.
+
+### `workflows/implementation_spec/revision_pinning.py` (2 sites)
+
+- **A pinning merge that malfunctions (571, 583)** raises `PinningMergeError`: a merge that lost tests both inputs hold, or holds more copies of a test than either input. It used to emit the revision unenforced, so the round went through without pinning.
+- **N2 halts on it**, at both places it pins a revision; no draft is saved.
+- **Kept:** a revision that itself removed unnamed tests is still refused entire, emitting the previous draft.
+- **`core/gate_registry.py`.** `spec.conservation_gate` names only that remaining site, with `emits` changed to its message; the ratchet does not move.

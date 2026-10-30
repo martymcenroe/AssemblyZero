@@ -130,3 +130,10 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
 - **Added:** `tests/unit/test_lineage_seed_loud_failure.py`, 7 tests. Before the fix: 4 failed, 3 passed. After: 7 passed.
 - **Neighbouring suites:** 4 files, 59 passed.
 - **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
+
+## `revision_pinning.py`
+
+- **Added:** `tests/unit/test_revision_pinning_loud_failure.py`, 5 tests, one of them through N2. Before the fix, with both changed modules put back: 3 failed, 2 passed. After: 5 passed.
+- **Changed:** the two `test_pinning_conservation.py` tests that expected the revision emitted unenforced now expect `PinningMergeError`.
+- **Neighbouring suites:** 14 files, 251 passed after the change.
+- **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.

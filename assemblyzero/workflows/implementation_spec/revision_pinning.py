@@ -25,8 +25,11 @@ This module makes that impossible mechanically:
   the moment it happens instead of one round later.
 * **The conservation gate** (#2559): the merge never emits a document that
   lost a test definition the previous draft held and no verdict named —
-  on violation it emits the revision unenforced or the previous draft
-  entire, loudly, never the stitched result.
+  when the revision itself removed them, it emits the previous draft entire,
+  loudly, never the stitched result. When the MERGE malfunctioned (it lost
+  tests both inputs hold, or minted duplicates neither holds), it raises
+  ``PinningMergeError`` and the drafter node halts (#3585); it used to emit
+  the revision unenforced, the gate passing a round it could not judge.
 * **Demanded additions** (#2560): when the round's completeness failures
   demand new tests, a locked region introducing one passes — a demand to
   add has no line to cite, so the named-content exemptions cannot cover it.
@@ -40,6 +43,16 @@ from __future__ import annotations
 import difflib
 import re
 from dataclasses import dataclass
+
+
+class PinningMergeError(RuntimeError):
+    """The pinning merge malfunctioned, so no revision can be held to it (#3585).
+
+    Raised for a walked merge that lost tests both inputs hold (a differ
+    misalignment) or that holds more copies of a test than either input.
+    Neither is the drafter's doing, and emitting the revision unenforced, the
+    old response, let the round pass without pinning.
+    """
 
 # ---------------------------------------------------------------------------
 # What the verdict names
@@ -222,10 +235,10 @@ class PinningResult:
     #: Regions passed through as demanded additions (#2560) — a completeness
     #: failure demanded new tests, and the region introduces one.
     additions: tuple[str, ...] = ()
-    #: Non-empty when the conservation gate overrode the merge (#2559):
-    #: the walked output lost tests no verdict named, so ``text`` is the
-    #: revision unenforced (differ misalignment) or the previous draft
-    #: entire (the revision itself removed them).
+    #: Non-empty when the conservation gate overrode the merge (#2559): the
+    #: revision itself removed tests no verdict named, so ``text`` is the
+    #: previous draft entire. A merge malfunction raises PinningMergeError
+    #: instead (#3585); it used to set this and emit the revision unenforced.
     conservation_event: str = ""
     unlock_reason: str = ""
 
@@ -418,10 +431,15 @@ def enforce_pinning(
     some named line, so the elisions passed through and 18 test definitions
     vanished with no refusal and no regression event. So the way out is
     gated: if the walked output lost any test definition the previous draft
-    held and no verdict named, the merge has malfunctioned — emit the
-    revision unenforced when it still holds those tests (differ
-    misalignment), or the previous draft entire when it does not (the
-    revision itself removed them). Never the stitched result.
+    held and no verdict named, emit the previous draft entire when the
+    revision lacks those tests too (the revision itself removed them). When
+    the revision still holds them, the merge itself malfunctioned (differ
+    misalignment) and this raises (#3585). Never the stitched result.
+
+    Raises:
+        PinningMergeError: the walked merge lost tests both inputs hold, or
+            multiplied a test beyond both inputs (#3585). Both used to emit
+            the revision unenforced.
     """
     prev_lines = previous.splitlines()
     rev_lines = revised.splitlines()
@@ -519,21 +537,24 @@ def _conservation_override(
     from the walked output and no current verdict named it — neither as a
     token nor by flagging any of its definition lines. Tier one: the
     revision still holds every lost test (differ misalignment — a moved
-    block the walk mispaired), emit the revision unenforced. Tier two: the
-    revision lost them too (an eliding rewrite — run-issue331-111729's
-    iteration 6 carried [UNCHANGED] placeholders where 18 definitions had
-    been), emit the previous draft entire; abstaining to the revision
-    there would lose exactly what the gate exists to keep.
+    block the walk mispaired): the merge malfunctioned, and this raises
+    (#3585). Tier two: the revision lost them too (an eliding rewrite —
+    run-issue331-111729's iteration 6 carried [UNCHANGED] placeholders where
+    18 definitions had been), emit the previous draft entire; abstaining to
+    the revision there would lose exactly what the gate exists to keep.
 
     The merge can also MANUFACTURE duplicates — run-issue331-111729's
     iteration 2 restored a superseded test listing alongside the
     revision's moved copy, and the duplicate definitions later broke six
     edit-script SEARCH blocks as ambiguous. A name occurring more times in
     the walked output than in EITHER input was minted by the merge, never
-    authored: emit the revision unenforced. (A count the revision itself
+    authored: this raises too (#3585). (A count the revision itself
     carries is authored content — the fleet's spec template legitimately
     lists a test in both its change-instruction and test-mapping sections
     — and is not the merge's to judge.)
+
+    Both raises used to return the revision unenforced, which let the round
+    through without pinning: a gate that could not run, read as a pass.
     """
     prev_lines = previous.splitlines()
     walked_names = _test_def_names(walked)
@@ -564,26 +585,19 @@ def _conservation_override(
             if count > max(prev_counts.get(name, 0), rev_counts.get(name, 0))
         )
         if multiplied:
-            return PinningResult(
-                text=revised,
-                regressions=regressions,
-                conservation_event=(
-                    f"the walked merge multiplied {len(multiplied)} test "
-                    f"definition(s) beyond both inputs "
-                    f"({', '.join(multiplied)}) -- emitting the revision "
-                    f"unenforced instead of the stitched result"
-                ),
+            raise PinningMergeError(
+                f"the walked merge multiplied {len(multiplied)} test "
+                f"definition(s) beyond both inputs ({', '.join(multiplied)}), "
+                f"so the revision cannot be held to its pinning; it is not "
+                f"emitted unenforced (#3585)"
             )
         return None
     if all(name in _test_def_names(revised) for name in lost):
-        return PinningResult(
-            text=revised,
-            regressions=regressions,
-            conservation_event=(
-                f"the walked merge lost {len(lost)} test(s) present in "
-                f"both inputs ({', '.join(lost)}) -- emitting the revision "
-                f"unenforced instead of the stitched result"
-            ),
+        raise PinningMergeError(
+            f"the walked merge lost {len(lost)} test(s) present in both "
+            f"inputs ({', '.join(lost)}), a differ misalignment, so the "
+            f"revision cannot be held to its pinning; it is not emitted "
+            f"unenforced (#3585)"
         )
     return PinningResult(
         text=previous,

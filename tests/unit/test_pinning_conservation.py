@@ -27,7 +27,7 @@ from assemblyzero.workflows.implementation_spec.nodes.validate_completeness impo
     validate_completeness,
 )
 from assemblyzero.workflows.implementation_spec.revision_pinning import (
-    PinningResult,
+    PinningMergeError,
     _conservation_override,
     _is_expansion,
     demands_additions,
@@ -161,24 +161,22 @@ class TestTheConservationGate:
         assert result.conservation_event == ""
         assert "test_req_10_bezel" not in result.text
 
-    def test_the_misalignment_tier_emits_the_revision(self):
+    def test_the_misalignment_tier_raises(self):
         """Tier one, at the gate's own seam: the walked output lost a test
         the revision still holds — differ misalignment, not drafter
-        deletion — so the revision is emitted unenforced."""
+        deletion. #3585: the merge malfunctioned, so this raises and N2
+        halts; it used to emit the revision unenforced."""
         walked_missing_one = PREVIOUS.replace(
             "\ndef test_req_9_screws():\n    assert screw_count() == 4\n",
             "\n",
         )
         flags = named_line_flags(PREVIOUS, named_tokens(VERDICT))
-        override = _conservation_override(
-            PREVIOUS, PREVIOUS, walked_missing_one,
-            current_tokens=named_tokens(VERDICT),
-            current_flags=flags,
-        )
-        assert isinstance(override, PinningResult)
-        assert "emitting the revision unenforced" in override.conservation_event
-        assert override.text == PREVIOUS
-        assert "test_req_9_screws" in override.text
+        with pytest.raises(PinningMergeError, match="test_req_9_screws"):
+            _conservation_override(
+                PREVIOUS, PREVIOUS, walked_missing_one,
+                current_tokens=named_tokens(VERDICT),
+                current_flags=flags,
+            )
 
     def test_a_clean_walk_returns_no_override(self):
         flags = named_line_flags(PREVIOUS, named_tokens(VERDICT))
@@ -188,25 +186,25 @@ class TestTheConservationGate:
             current_flags=flags,
         ) is None
 
-    def test_a_merge_minted_duplicate_emits_the_revision(self):
+    def test_a_merge_minted_duplicate_raises(self):
         """The iteration-2 event: the walk restored a superseded copy
         alongside the revision's moved one. A count beyond BOTH inputs was
-        minted by the merge, never authored."""
+        minted by the merge, never authored. #3585: this raises and N2 halts;
+        it used to emit the revision unenforced."""
         duplicated_walk = PREVIOUS.replace(
             "## 10. Test Mapping",
             "```python\ndef test_req_9_screws():\n"
             "    assert screw_count() == 4\n```\n\n## 10. Test Mapping",
         )
         flags = named_line_flags(PREVIOUS, named_tokens(VERDICT))
-        override = _conservation_override(
-            PREVIOUS, PREVIOUS, duplicated_walk,
-            current_tokens=named_tokens(VERDICT),
-            current_flags=flags,
-        )
-        assert isinstance(override, PinningResult)
-        assert "multiplied" in override.conservation_event
-        assert "test_req_9_screws" in override.conservation_event
-        assert override.text == PREVIOUS
+        with pytest.raises(PinningMergeError) as caught:
+            _conservation_override(
+                PREVIOUS, PREVIOUS, duplicated_walk,
+                current_tokens=named_tokens(VERDICT),
+                current_flags=flags,
+            )
+        assert "multiplied" in str(caught.value)
+        assert "test_req_9_screws" in str(caught.value)
 
     def test_an_authored_dual_listing_is_not_the_merges_to_judge(self):
         """The fleet's spec template legitimately lists a test in both its
