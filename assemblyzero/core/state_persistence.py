@@ -20,6 +20,12 @@ def save_state_snapshot(
 ) -> Path:
     """Save workflow state to a JSON file.
 
+    A value JSON cannot hold is written as its ``str()``. #3797 judged this
+    and kept it: the snapshot is HALT's record and is written before HALT
+    alerts, so raising here would cost the halt its recovery plan and its
+    alert; and nothing reads the snapshot back as state (the resume contract
+    only hashes the file). A snapshot that cannot be written still raises.
+
     Args:
         workflow: Workflow name (requirements, implementation_spec, testing, orchestrator).
         issue_number: The issue number being processed.
@@ -63,7 +69,11 @@ def load_state_snapshot(workflow: str, issue_number: int) -> dict | None:
         issue_number: The issue number.
 
     Returns:
-        The saved state dict, or None if not found or corrupt.
+        The saved state dict, or None when no snapshot was written.
+
+    Raises:
+        RuntimeError: the snapshot exists and cannot be read or parsed
+            (#3797). It used to read as "no snapshot".
     """
     filename = f"{workflow}-{issue_number}.json"
     state_path = STATE_DIR / filename
@@ -74,5 +84,7 @@ def load_state_snapshot(workflow: str, issue_number: int) -> dict | None:
     try:
         with open(state_path, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
+    except (json.JSONDecodeError, OSError) as exc:
+        raise RuntimeError(
+            f"cannot read the state snapshot {state_path}: {type(exc).__name__}: {exc}"
+        ) from exc

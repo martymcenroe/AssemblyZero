@@ -1,5 +1,5 @@
 {
-  "count": 317,
+  "count": 294,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -61,18 +61,6 @@
       "kind": "fail_open_tag",
       "line": 1283
     },
-    "assemblyzero/core/gemini_client.py::GeminiClient.invoke::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 598
-    },
-    "assemblyzero/core/gemini_client.py::_find_wsl_agy.run::fail_open_tag::1": {
-      "detail": "# fail-open: None becomes \"agy not found\", which the preflight and",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 200
-    },
     "assemblyzero/core/halt_evidence.py::_preserved_tail::fail_open_tag::1": {
       "detail": "# fail-open: one corrupt record in the preservation log",
       "issue": 3581,
@@ -90,48 +78,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 44
-    },
-    "assemblyzero/core/interface_surface.py::build_interface_map::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 492
-    },
-    "assemblyzero/core/interface_surface.py::build_interface_map_for_paths::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 552
-    },
-    "assemblyzero/core/llm_provider.py::AnthropicProvider.invoke::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 1387
-    },
-    "assemblyzero/core/llm_provider.py::ClaudeCLIProvider.invoke::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 1145
-    },
-    "assemblyzero/core/llm_provider.py::GeminiProvider.invoke::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 1756
-    },
-    "assemblyzero/core/llm_provider.py::_recorded::fail_open_tag::1": {
-      "detail": "# fail-open: if the recorder cannot be reached, the run proceeds on the",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 2010
-    },
-    "assemblyzero/core/llm_provider.py::_recorded::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 2009
     },
     "assemblyzero/core/model_record.py::_resolved_id::fail_open_tag::1": {
       "detail": "# fail-open: a spec the registry cannot resolve (a scripted or",
@@ -186,42 +132,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 42
-    },
-    "assemblyzero/core/preflight.py::check_gemini_transport::fail_open_tag::1": {
-      "detail": "# fail-open: not a fall-through -- the failure is returned as a failed",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 95
-    },
-    "assemblyzero/core/preflight.py::check_gemini_transport::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 94
-    },
-    "assemblyzero/core/provider_storm.py::diagnose::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 147
-    },
-    "assemblyzero/core/resume_contract.py::_sha256_file::fail_open_tag::1": {
-      "detail": "# fail-open: None IS the signal -- an unreadable file hashes as",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 54
-    },
-    "assemblyzero/core/resume_contract.py::check_and_consume::fail_open_tag::1": {
-      "detail": "# fail-open: a verified contract that could not be deleted only",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 224
-    },
-    "assemblyzero/core/resume_contract.py::load_resume_contract::fail_open_tag::1": {
-      "detail": "# fail-open: an unreadable or corrupt contract reads as no",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 127
     },
     "assemblyzero/core/run_record.py::RunRecord._restore_streams::fail_open_tag::1": {
       "detail": "# fail-open: a handle that will not close is already useless;",
@@ -283,59 +193,11 @@
       "kind": "fail_open_tag",
       "line": 104
     },
-    "assemblyzero/core/seats.py::_lock_on::fail_open_tag::1": {
-      "detail": "# fail-open: this is the closed side; an unreadable lock counts as on, so seats stop",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 173
-    },
-    "assemblyzero/core/seats.py::_present::fail_open_tag::1": {
-      "detail": "# fail-open: unreadable is not proof of absence; kept, and the lock check fails closed on it",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 149
-    },
-    "assemblyzero/core/seats.py::current_profile_name::fail_open_tag::1": {
-      "detail": "# fail-open: a profile that cannot be read here was already reported",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 777
-    },
-    "assemblyzero/core/seats.py::current_profile_name::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 776
-    },
-    "assemblyzero/core/seats.py::lock_until::fail_open_tag::1": {
-      "detail": "# fail-open: None means no lift time, so the lock binds; this is the closed side",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 191
-    },
-    "assemblyzero/core/seats.py::other_side_claude_home::fail_open_tag::1": {
-      "detail": "# fail-open: no /proc/version means not Linux, so not WSL: there is no other side",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 128
-    },
     "assemblyzero/core/section_utils.py::drafter_authored::fail_open_tag::1": {
       "detail": "# fail-open: only in shape -- with no stripper available the caller",
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 147
-    },
-    "assemblyzero/core/settlement.py::_rel_posix::fail_open_tag::1": {
-      "detail": "# fail-open: a path outside the repo (a symlinked doc tree) keeps its",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 177
-    },
-    "assemblyzero/core/settlement.py::sha256_path::fail_open_tag::1": {
-      "detail": "# fail-open: only in shape -- None is reported by `verify` as a named",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 112
     },
     "assemblyzero/hooks/cascade_action.py::handle_cascade_detection::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1199,19 +1061,19 @@
       "detail": "# fail-open: None is \"no measurement\", and no measurement is what",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 223
+      "line": 222
     },
     "assemblyzero/workflows/testing/checkpoints.py::read_measurement::fail_open_tag::2": {
       "detail": "# fail-open: same direction as the handler above -- a note that does",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 239
+      "line": 238
     },
     "assemblyzero/workflows/testing/checkpoints.py::record_measurement::fail_open_tag::1": {
       "detail": "# fail-open: the note is a hint for a LATER resume, not this run's",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 194
+      "line": 193
     },
     "assemblyzero/workflows/testing/graph.py::_wrap_with_checkpoint.wrapped::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1655,25 +1517,25 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3581
+      "line": 3606
     },
     "tools/new_repo.py::_create_repo::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3590
+      "line": 3615
     },
     "tools/new_repo.py::run_post_create_hooks::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2732
+      "line": 2754
     },
     "tools/orchestrate.py::main::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 360
+      "line": 365
     },
     "tools/replay_run.py::replay_spec_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1697,7 +1559,7 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 170
+      "line": 175
     },
     "tools/run_requirements_workflow.py::checkpoint_exists::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

@@ -671,10 +671,11 @@ class TestAnthropicProvider:
         assert abs(cost - expected) < 1e-10
 
     def test_cost_calculation_unknown_model(self):
-        """Cost is 0.0 for unknown/passthrough models."""
+        """#3780: an unpriced model raises; it used to cost 0.0, so --budget
+        never counted it."""
         provider = AnthropicProvider(model="claude-opus-4-7-20260415")
-        cost = provider._calculate_cost(input_tokens=1000, output_tokens=500)
-        assert cost == 0.0
+        with pytest.raises(ValueError, match="no price for claude-opus-4-7-20260415"):
+            provider._calculate_cost(input_tokens=1000, output_tokens=500)
 
 
 class TestFallbackProvider:
@@ -1770,22 +1771,23 @@ class TestExtractTextFromStreamEvents:
             == "canonical-result"
         )
 
-    def test_falls_back_to_raw_stdout_when_no_extractable_event(self):
+    def test_no_extractable_event_gives_nothing_not_raw_stdout(self):
+        """#3780: the raw stdout used to come back as the model's answer."""
         from assemblyzero.core.llm_provider import _extract_text_from_stream_events
         events = [
             {"type": "system", "subtype": "init"},
             {"type": "rate_limit_event"},
         ]
         result = _extract_text_from_stream_events(events, raw_stdout="raw-fallback")
-        assert result == "raw-fallback"
+        assert result == ""
 
-    def test_non_list_falls_back_to_raw_stdout(self):
+    def test_non_list_gives_nothing_not_raw_stdout(self):
         from assemblyzero.core.llm_provider import _extract_text_from_stream_events
         # Defensive: only lists carry the streaming-events shape.
         result = _extract_text_from_stream_events(
             "not a list", raw_stdout="raw-fallback"
         )
-        assert result == "raw-fallback"
+        assert result == ""
 
     def test_smoke_build_iter05_repro(self):
         """Verbatim shape from Chiron iter05's 091-response-...md."""

@@ -483,58 +483,58 @@ A file is marked read only after every line of it has been read. Each finding is
 
 | Site | What fails | What the code does now | Violates | Fix |
 |---|---|---|---|---|
-| `assemblyzero/core/llm_provider.py:291` | .env read | None | loud, logged, alerts | raise |
-| `assemblyzero/core/llm_provider.py:412` | idle timeout not int | default | loud, stops, alerts | raise |
-| `assemblyzero/core/llm_provider.py:418` | idle timeout <=0 | default | loud, stops, alerts | raise |
-| `assemblyzero/core/llm_provider.py:487` | stdin write | pass | all | record |
-| `assemblyzero/core/llm_provider.py:505` | bad stream line | continue | loud, logged, stops | count |
-| `assemblyzero/core/llm_provider.py:510` | stdout read | pass | all | record |
-| `assemblyzero/core/llm_provider.py:517` | stderr read | pass | loud, logged | record |
-| `assemblyzero/core/llm_provider.py:553` | reader alive | unchecked | stops, logged | check |
-| `assemblyzero/core/llm_provider.py:723` | probe no cli | False | loud, logged, alerts | raise |
-| `assemblyzero/core/llm_provider.py:757` | probe spawn | False | loud, logged, alerts | raise |
+| `assemblyzero/core/llm_provider.py:291` | .env read | None | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:412` | idle timeout not int | default | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:418` | idle timeout <=0 | default | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:487` | stdin write | pass | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:505` | bad stream line | continue | loud, logged, stops | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:510` | stdout read | pass | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:517` | stderr read | pass | loud, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:553` | reader alive | unchecked | stops, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:723` | probe no cli | False | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:757` | probe spawn | False | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:765` | probe timeout | False | compliant | none |
-| `assemblyzero/core/llm_provider.py:769` | drain | pass | loud, logged | ERROR |
-| `assemblyzero/core/llm_provider.py:772` | communicate | False | loud, logged, alerts | raise |
-| `assemblyzero/core/llm_provider.py:826` | no cli | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:953` | timeout | failed result | loud, alerts | stderr |
-| `assemblyzero/core/llm_provider.py:1016` | nonzero | failed result | loud, alerts | stderr |
-| `assemblyzero/core/llm_provider.py:1029` | capacity | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1085` | odd json | success | loud, stops, alerts | fail |
-| `assemblyzero/core/llm_provider.py:1103` | empty result | success | all | fail |
-| `assemblyzero/core/llm_provider.py:1113` | non-json | success | all | fail |
-| `assemblyzero/core/llm_provider.py:1145` | invoke | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1248` | unpriced | 0.0 | loud, logged | raise |
-| `assemblyzero/core/llm_provider.py:1372` | no key | failed result | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1387` | api exc | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1555` | breaker | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1596` | primary | fallback | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1609` | fallback | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1617` | both | stdout | loud, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:1729` | contract | False | logged | direct |
-| `assemblyzero/core/llm_provider.py:1756` | gemini invoke | failed result | loud, logged, alerts | ERROR |
-| `assemblyzero/core/llm_provider.py:2009` | recording wrap | bare | all | raise |
-| `assemblyzero/core/llm_provider.py:2010` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/verdict_schema.py:196` | missing rationale | "" | loud, logged, stops | reject |
+| `assemblyzero/core/llm_provider.py:769` | drain | pass | loud, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:772` | communicate | False | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:826` | no cli | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:953` | timeout | failed result | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1016` | nonzero | failed result | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1029` | capacity | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1085` | odd json | success | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1103` | empty result | success | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1113` | non-json | success | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1145` | invoke | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1248` | unpriced | 0.0 | loud, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1372` | no key | failed result | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1387` | api exc | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1555` | breaker | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1596` | primary | fallback | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1609` | fallback | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1617` | both | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1729` | contract | False | logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1756` | gemini invoke | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:2009` | recording wrap | bare | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:2010` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/verdict_schema.py:196` | missing rationale | "" | loud, logged, stops | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
 | `assemblyzero/core/verdict_schema.py:199` | parse | None | compliant | none |
-| `assemblyzero/core/verdict_schema.py:208` | missing rationale | "" | loud, logged, stops | reject |
+| `assemblyzero/core/verdict_schema.py:208` | missing rationale | "" | loud, logged, stops | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
 | `assemblyzero/core/verdict_schema.py:211` | parse | None | compliant | none |
 | `assemblyzero/core/verdict_schema.py:511` | verdict count | None | compliant | none |
-| `assemblyzero/core/verdict_schema.py:651` | empty doc | False | all | raise |
-| `assemblyzero/core/verdict_schema.py:703` | missing verdict | False | logged | raise |
-| `assemblyzero/core/verdict_schema.py:716` | structured parse | heuristic | loud, logged | raise |
-| `assemblyzero/core/gemini_client.py:174` | windows agy | None | logged | ERROR |
-| `assemblyzero/core/gemini_client.py:199` | wsl.exe | None cached | loud, logged, alerts | raise |
-| `assemblyzero/core/gemini_client.py:200` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/gemini_client.py:208` | printenv | None | logged | ERROR |
-| `assemblyzero/core/gemini_client.py:454` | no agy | retried | stops | fail fast |
-| `assemblyzero/core/gemini_client.py:514` | drain | pass | loud, logged | ERROR |
-| `assemblyzero/core/gemini_client.py:520` | spawn | retried | loud, alerts | ERROR |
-| `assemblyzero/core/gemini_client.py:598` | attempt | retry, no log | loud, alerts | ERROR |
-| `assemblyzero/core/gemini_client.py:601` | programming error | failed result | all | re-raise |
-| `assemblyzero/core/gemini_client.py:660` | retry | no log | loud | log |
-| `assemblyzero/core/gemini_client.py:671` | exhausted | no log | loud, alerts | ERROR |
-| `assemblyzero/core/gemini_client.py:730` | metadata | unknown | logged | raise |
+| `assemblyzero/core/verdict_schema.py:651` | empty doc | False | all | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
+| `assemblyzero/core/verdict_schema.py:703` | missing verdict | False | logged | FIXED in the core batch (#3802): a verdict without its rationale is not schema-valid; empty input raises; test_<line> in test_verdict_schema_loud_failure.py |
+| `assemblyzero/core/verdict_schema.py:716` | structured parse | heuristic | loud, logged | WON'T FIX (#3802): not a failure path. current_verdict holds rendered feedback by design (#506), so the line comparison is the comparison; raising would end stagnation detection. Pinned by test_716_* in test_verdict_schema_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:174` | windows agy | None | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:199` | wsl.exe | None cached | loud, logged, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:200` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:208` | printenv | None | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:454` | no agy | retried | stops | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:514` | drain | pass | loud, logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:520` | spawn | retried | loud, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:598` | attempt | retry, no log | loud, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:601` | programming error | failed result | all | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:660` | retry | no log | loud | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:671` | exhausted | no log | loud, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
+| `assemblyzero/core/gemini_client.py:730` | metadata | unknown | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
 | `assemblyzero/core/call_recording.py:153` | write | False | all | raise |
 | `assemblyzero/core/call_recording.py:154` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/call_recording.py:179` | corrupt line | count | loud, logged | ERROR |
@@ -545,23 +545,23 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/call_recording.py:353` | replay overrun | failed result | loud, alerts | ERROR |
 | `assemblyzero/core/call_recording.py:372` | divergence | failed result | loud, alerts | ERROR |
 | `assemblyzero/core/call_recording.py:388` | missing success | True | logged, stops | refuse |
-| `assemblyzero/core/errors.py:365` | retry-after | None | logged | ERROR |
+| `assemblyzero/core/errors.py:365` | retry-after | None | logged | FIXED in the core batch (#3774): a retry-after header that is not a number of seconds is an ERROR line naming its value, and the rate limit is still raised with no hint; test_<line> in test_errors_loud_failure.py |
 | `assemblyzero/core/recovery_plan.py:72` | unknown workflow | string | compliant | none |
 | `assemblyzero/core/recovery_plan.py:144` | halt summary | stdout | loud | FIXED in #3581 core batch 1 (#3724): stderr |
-| `assemblyzero/core/settlement.py:111` | hash | None | loud, logged, alerts | ERROR |
-| `assemblyzero/core/settlement.py:112` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/settlement.py:176` | outside root | abs key | logged | raise |
-| `assemblyzero/core/settlement.py:177` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/settlement.py:259` | hash | None | all | raise |
-| `assemblyzero/core/capacity.py:74` | not object | {} | all | raise |
-| `assemblyzero/core/capacity.py:75` | read | {} | all | raise |
-| `assemblyzero/core/capacity.py:89` | write | pass | all | raise |
+| `assemblyzero/core/settlement.py:111` | hash | None | loud, logged, alerts | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:112` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:176` | outside root | abs key | logged | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:177` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:259` | hash | None | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/capacity.py:74` | not object | {} | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:75` | read | {} | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:89` | write | pass | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
 | `assemblyzero/core/capacity.py:113` | reset ts | fall through | compliant | none |
 | `assemblyzero/core/capacity.py:121` | iso ts | fall through | compliant | none |
-| `assemblyzero/core/capacity.py:212` | stored ts | None | all | raise |
-| `assemblyzero/core/capacity.py:223` | no ts | available | logged, stops | raise |
-| `assemblyzero/core/capacity.py:237` | unchecked | available | logged, stops | unchecked |
-| `assemblyzero/core/capacity.py:264` | unknown provider | available | loud, logged, stops | raise |
+| `assemblyzero/core/capacity.py:212` | stored ts | None | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:223` | no ts | available | logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:237` | unchecked | available | logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:264` | unknown provider | available | loud, logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
 | `assemblyzero/core/operator_notify.py:183` | non-windows | reason | loud, alerts | ERROR |
 | `assemblyzero/core/operator_notify.py:199` | toast spawn | reason | loud, logged, alerts | raise |
 | `assemblyzero/core/operator_notify.py:200` | tag | records the fall-through as a decision | all | remove |
@@ -574,20 +574,20 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/alert.py:170` | delivery | raise | compliant | none |
 | `assemblyzero/core/alert.py:190` | ses | raise | compliant | none |
 | `assemblyzero/core/alert.py:212` | log | raise | compliant | none |
-| `assemblyzero/core/provider_storm.py:147` | probe raises | storm | loud, logged, alerts | ERROR |
-| `assemblyzero/core/stage_watchdog.py:139` | stalled | stdout | loud, alerts | ERROR + alert |
-| `assemblyzero/core/preflight.py:64` | unknown alias | default | logged, stops | raise |
-| `assemblyzero/core/preflight.py:83` | no agy | failed | loud, alerts | ERROR |
-| `assemblyzero/core/preflight.py:94` | probe | failed | loud, alerts | ERROR |
-| `assemblyzero/core/preflight.py:95` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/preflight.py:102` | probe empty | failed | loud, alerts | ERROR |
-| `assemblyzero/core/retry.py:66` | non-retryable | stdout, raise | loud | stderr |
-| `assemblyzero/core/retry.py:73` | timeout | stdout, raise | loud | stderr |
-| `assemblyzero/core/retry.py:95` | exhausted | raise | loud | log |
+| `assemblyzero/core/provider_storm.py:147` | probe raises | storm | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/stage_watchdog.py:139` | stalled | stdout | loud, alerts | FIXED in the core batch (#3796): the first STALLED tick alerts the operator once per stage run, and an alert that cannot be delivered is raised when the stage ends; test_<line> in test_stage_watchdog_loud_failure.py |
+| `assemblyzero/core/preflight.py:64` | unknown alias | default | logged, stops | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:83` | no agy | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:94` | probe | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:95` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/preflight.py:102` | probe empty | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
+| `assemblyzero/core/retry.py:66` | non-retryable | stdout, raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
+| `assemblyzero/core/retry.py:73` | timeout | stdout, raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
+| `assemblyzero/core/retry.py:95` | exhausted | raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
 | `assemblyzero/core/utf8_console.py:76` | tier 1 | tier 2 | compliant | none |
 | `assemblyzero/core/utf8_console.py:83` | both tiers | False | loud, logged | ERROR |
-| `assemblyzero/core/state_persistence.py:42` | serialize | str() | loud, logged, stops | raise |
-| `assemblyzero/core/state_persistence.py:77` | snapshot | None | all | raise |
+| `assemblyzero/core/state_persistence.py:42` | serialize | str() | loud, logged, stops | WON'T DO (#3797): the snapshot is HALT's record and is written before HALT alerts, so a raise here would cost the halt its recovery plan and its alert; nothing reads the snapshot back as state (load_state_snapshot has no caller, and the resume contract only hashes the file), so a value's str() is how the record holds what JSON cannot; the docstring says so, pinned by test_42_* in test_state_persistence_loud_failure.py |
+| `assemblyzero/core/state_persistence.py:77` | snapshot | None | all | FIXED in the core batch (#3797): a snapshot that exists and cannot be read or parsed raises naming it; an absent one is still None; test_<line> in test_state_persistence_loud_failure.py |
 | `assemblyzero/core/operator_wait.py:41` | isatty | False | logged | ERROR |
 | `assemblyzero/core/operator_wait.py:42` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/retry_mode.py:40` | malformed | REGENERATED | compliant | none |
@@ -595,36 +595,36 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/gate_registry.py:1241` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/gate_registry.py:1453` | malformed site key | continue | all | raise |
 | `assemblyzero/core/gate_registry.py:1454` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/seats.py:128` | /proc/version | None | all | platform check, raise |
-| `assemblyzero/core/seats.py:149` | is_dir | True | loud, logged, alerts | log ERROR |
-| `assemblyzero/core/seats.py:173` | lock read | True | loud, logged, alerts | log ERROR |
-| `assemblyzero/core/seats.py:191` | until parse | None | loud, logged, alerts | log ERROR |
+| `assemblyzero/core/seats.py:128` | /proc/version | None | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:149` | is_dir | True | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:173` | lock read | True | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:191` | until parse | None | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
 | `assemblyzero/core/seats.py:564` | mock override | dropped | compliant | none |
-| `assemblyzero/core/seats.py:776` | active_profile | DEFAULT_PROFILE | all | raise |
-| `assemblyzero/core/seats.py:777` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/seats.py:776` | active_profile | DEFAULT_PROFILE | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
+| `assemblyzero/core/seats.py:777` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
 | `assemblyzero/core/fail_open_audit.py:595` | unparse | label | all | raise |
 | `assemblyzero/core/fail_open_audit.py:596` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/fail_open_audit.py:699` | read/parse | files_unparseable, [] | all | raise |
 | `assemblyzero/core/fail_open_audit.py:700` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/fail_open_audit.py:739` | missing subdir | continue | all | raise |
-| `assemblyzero/core/validation/test_plan_validator.py:136` | section 3 missing | WARNING, [] | loud, logged | ERROR |
-| `assemblyzero/core/validation/test_plan_validator.py:225` | section 10 missing | WARNING, [] | loud, logged | ERROR + violation |
-| `assemblyzero/core/validation/test_plan_validator.py:237` | no table | zero scenarios | loud, logged | ERROR |
-| `assemblyzero/core/validation/test_plan_validator.py:248` | malformed row | dropped | loud, logged, stops | violation |
-| `assemblyzero/core/validation/test_plan_validator.py:262` | bad id | dropped | loud, logged, stops | violation |
-| `assemblyzero/core/interface_surface.py:107` | parse target | first 50 lines | all | raise |
-| `assemblyzero/core/interface_surface.py:267` | walk | WARNING, [] | loud, stops, alerts | raise |
+| `assemblyzero/core/validation/test_plan_validator.py:136` | section 3 missing | WARNING, [] | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:225` | section 10 missing | WARNING, [] | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:237` | no table | zero scenarios | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:248` | malformed row | dropped | loud, logged, stops | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/validation/test_plan_validator.py:262` | bad id | dropped | loud, logged, stops | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:107` | parse target | first 50 lines | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:267` | walk | WARNING, [] | loud, stops, alerts | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/interface_surface.py:295` | out-of-repo token | skip | compliant | none |
-| `assemblyzero/core/interface_surface.py:319` | import expansion | [] | all | raise |
-| `assemblyzero/core/interface_surface.py:394` | read file | WARNING, drop | loud, stops, alerts | raise |
-| `assemblyzero/core/interface_surface.py:402` | budget | drop | loud, logged | name dropped |
-| `assemblyzero/core/interface_surface.py:408` | not under root | bare name | loud, logged | raise |
-| `assemblyzero/core/interface_surface.py:445` | root not dir | {} | all | raise |
-| `assemblyzero/core/interface_surface.py:449` | empty | {} | loud, logged | log count |
-| `assemblyzero/core/interface_surface.py:472` | resolve | continue | all | raise |
-| `assemblyzero/core/interface_surface.py:492` | extraction | WARNING, {} | all | raise |
-| `assemblyzero/core/interface_surface.py:518` | root not dir | {} | all | raise |
-| `assemblyzero/core/interface_surface.py:552` | revision extraction | WARNING, {} | all | raise |
+| `assemblyzero/core/interface_surface.py:319` | import expansion | [] | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:394` | read file | WARNING, drop | loud, stops, alerts | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:402` | budget | drop | loud, logged | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:408` | not under root | bare name | loud, logged | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:445` | root not dir | {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:449` | empty | {} | loud, logged | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:472` | resolve | continue | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:492` | extraction | WARNING, {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:518` | root not dir | {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
+| `assemblyzero/core/interface_surface.py:552` | revision extraction | WARNING, {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/run_record.py:77` | tee write | pass | all | ERROR |
 | `assemblyzero/core/run_record.py:78` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/run_record.py:87` | flush | pass | all | ERROR |
@@ -674,16 +674,16 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/scripted_provider.py:136` | no response | "" success | all | raise |
 | `assemblyzero/core/scripted_provider.py:241` | unmatched | failed result | loud, alerts | ERROR |
 | `assemblyzero/core/scripted_provider.py:260` | scripted fail | failure | compliant | none |
-| `assemblyzero/core/retry_gate.py:209` | unknown class | full budget | loud, logged, stops | raise |
+| `assemblyzero/core/retry_gate.py:209` | unknown class | full budget | loud, logged, stops | FIXED in the core batch (#3790): an unknown failure class raises naming it and the four known, before fail-fast; test_<line> in test_retry_gate_loud_failure.py |
 | `assemblyzero/core/loud_failure_check.py:173` | source | raises | compliant | none |
-| `assemblyzero/core/resume_contract.py:53` | hash | None | loud, logged | ERROR |
-| `assemblyzero/core/resume_contract.py:54` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/resume_contract.py:126` | contract read | None, resume unverified | all | raise |
-| `assemblyzero/core/resume_contract.py:127` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/resume_contract.py:148` | unhashable | missing | logged | real cause |
-| `assemblyzero/core/resume_contract.py:196` | world changed | print, False | loud, alerts | ERROR + alert |
-| `assemblyzero/core/resume_contract.py:223` | delete contract | WARN stdout | loud, alerts | ERROR |
-| `assemblyzero/core/resume_contract.py:224` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/resume_contract.py:53` | hash | None | loud, logged | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:54` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:126` | contract read | None, resume unverified | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:127` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:148` | unhashable | missing | logged | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:196` | world changed | print, False | loud, alerts | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:223` | delete contract | WARN stdout | loud, alerts | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
+| `assemblyzero/core/resume_contract.py:224` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
 | `assemblyzero/core/tdd_path_tracking.py:124` | delete scaffold | WARNING | loud, stops, alerts | raise |
 | `assemblyzero/core/merge_driver.py:69` | no file | reason | compliant | none |
 | `assemblyzero/core/merge_driver.py:160` | start | raise | compliant | none |
