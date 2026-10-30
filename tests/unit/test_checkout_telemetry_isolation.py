@@ -98,9 +98,90 @@ def test_t1_the_session_guard_watches_the_paths_a_real_run_writes():
             Path("data") / "speedrun" / "telemetry" / convergence.RECORDS_FILENAME,
             prompt_telemetry.TELEMETRY_REL / prompt_telemetry.FAILURES_FILENAME,
             hallucination_log.JSONL_RELATIVE_PATH,
+            _cascade_default_as_written(),
         )
     }
     assert set(GUARDED_FILES) == real
+
+
+# -- #4249: the cascade config's default path -------------------------------
+
+
+def _cascade_default_as_written() -> Path:
+    """``_DEFAULT_CONFIG_PATH`` as the module defines it, before the redirect.
+
+    The autouse fixture has replaced the attribute by the time a test runs, so
+    the module is loaded afresh, under another name, to read the constant.
+    """
+    import importlib.util
+
+    from assemblyzero.hooks import cascade_patterns
+
+    spec = importlib.util.spec_from_file_location(
+        "_cascade_patterns_as_written", cascade_patterns.__file__
+    )
+    fresh = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fresh)
+    return fresh._DEFAULT_CONFIG_PATH
+
+
+def _stat(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
+def test_4249_t1_patterns_loaded_with_no_path_come_from_tmp(tmp_path):
+    """T1: a test that loads patterns with no path reads its own directory's
+    config, and the checkout's tracked copy keeps its size and mtime.
+
+    Fails before #4249: the default path was relative to the working
+    directory, so the load read the checkout's copy (no patterns) instead of
+    the one this test placed.
+    """
+    import json
+
+    from assemblyzero.hooks import cascade_patterns
+
+    checkout_copy = CHECKOUT / _cascade_default_as_written()
+    before = _stat(checkout_copy)
+    mine = tmp_path / SINK / "data" / "unleashed" / "cascade_block_patterns.json"
+    mine.parent.mkdir(parents=True)
+    mine.write_text(json.dumps({"enabled": True, "patterns": [{
+        "id": "CP-4249", "category": "scope_expansion", "regex": "t4249",
+        "description": "this test's own pattern", "risk_weight": 0.5,
+    }]}), encoding="utf-8")
+
+    loaded = cascade_patterns.load_user_patterns()
+
+    assert [p["id"] for p in loaded] == ["CP-4249"]
+    assert _stat(checkout_copy) == before
+
+
+def test_4249_t2_the_session_guard_watches_the_checkouts_cascade_config():
+    """T2: the guarded paths include the tracked config, at the path the
+    module reads it from."""
+    assert CHECKOUT / _cascade_default_as_written() in GUARDED_FILES
+
+
+def test_4249_loading_and_detecting_write_no_config(tmp_path):
+    """Kept behaviour, pinned: nothing in the cascade code writes the config.
+
+    #4249 said loading patterns with no path wrote a default config. It does
+    not: ``load_user_patterns`` reads only, and the 4:37 PM modification time
+    it cited was the worktree's creation by ``git worktree add``. With the
+    default path pointed here, a writer added later would leave a file here.
+    """
+    from assemblyzero.hooks import cascade_patterns
+    from assemblyzero.hooks.cascade_detector import detect_cascade_risk
+
+    checkout_copy = CHECKOUT / _cascade_default_as_written()
+    before = _stat(checkout_copy)
+
+    assert cascade_patterns.load_user_patterns() == []
+    detect_cascade_risk("Should I continue with the next issue?")
+
+    assert not (tmp_path / SINK / "data" / "unleashed").exists()
+    assert _stat(checkout_copy) == before
 
 
 # -- #4202: a relative root is the directory the run started in --------------

@@ -1,4 +1,4 @@
-"""No test writes into the checkout's telemetry logs (#4161).
+"""No test writes into the checkout's telemetry logs (#4161) or reads its cascade config (#4249).
 
 Three writers append to logs under the repository's own ``data/``, and every
 report built from those logs reads them as real runs:
@@ -21,6 +21,17 @@ anywhere else it is that directory, and a run started from another
 repository's checkout left its prompt-failure log there, rows reading
 ``"repo": "."``. So the guarded roots are two: the checkout, and the directory
 the run started in.
+
+A fourth path is guarded beside the logs (#4249):
+``data/unleashed/cascade_block_patterns.json``, the cascade detector's user
+config, which ``assemblyzero.hooks.cascade_patterns`` reads at a path relative
+to the working directory. It is tracked, and nothing in the code writes it;
+#4249 took a worktree's creation time for a test's write. What the redirect
+fixes is the read: a test that loaded patterns with no path read whatever the
+checkout's copy held, which an operator may edit, so it now reads a per-test
+path where no config exists unless the test puts one. The session guard
+watches the checkout's copy, so the first test that ever writes it fails the
+run that does.
 
 Two pieces here, matching the home-state guard:
 
@@ -52,13 +63,18 @@ TELEMETRY_FILES: tuple[Path, ...] = (
     Path("data") / "telemetry" / "hallucination-log.jsonl",
 )
 
+#: The cascade detector's default user config, relative to the working
+#: directory (``cascade_patterns._DEFAULT_CONFIG_PATH``, #4249).
+CASCADE_CONFIG = Path("data") / "unleashed" / "cascade_block_patterns.json"
+
 #: What a real run writes under the checkout's ``data/``, or under the start
-#: directory's, and a test must not. One entry when the two roots coincide.
+#: directory's, and a test must not, plus the tracked cascade config no test
+#: may change. One entry when the two roots coincide.
 GUARDED_FILES: tuple[Path, ...] = tuple(
     dict.fromkeys(
         root / relative
         for root in (CHECKOUT, START_DIR)
-        for relative in TELEMETRY_FILES
+        for relative in (*TELEMETRY_FILES, CASCADE_CONFIG)
     )
 )
 
@@ -88,6 +104,11 @@ def redirect(monkeypatch, sink: Path) -> None:
     telemetry package and the completeness node, so each of those bindings is
     replaced too. A test that patches one of these itself still wins: its
     monkeypatch runs after this one.
+
+    The cascade config's default path (#4249) always points at the working
+    directory, so it moves unconditionally: a test that loads patterns with no
+    path reads ``sink``'s copy, absent unless the test writes one. A test that
+    passes its own path is untouched.
     """
     import importlib
 
@@ -123,3 +144,7 @@ def redirect(monkeypatch, sink: Path) -> None:
         monkeypatch.setattr(
             module, "record_hallucination_event", record_hallucination_event
         )
+
+    from assemblyzero.hooks import cascade_patterns
+
+    monkeypatch.setattr(cascade_patterns, "_DEFAULT_CONFIG_PATH", sink / CASCADE_CONFIG)
