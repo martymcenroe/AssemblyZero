@@ -163,12 +163,14 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "No issue number specified",
         _s(f"{_RQ}/nodes/load_input.py::_load_brief::return", 0, 1, 2)
         + _s(f"{_RQ}/nodes/load_input.py::_load_issue::return", 0, 1, 2, 3)
-        + _s(f"{_RQ}/nodes/validate_test_plan.py::validate_test_plan_node::return", 1, 2),
+        + _s(f"{_RQ}/nodes/validate_test_plan.py::validate_test_plan_node::return", 1, 2)
+        + _s(f"{_RQ}/nodes/ponder.py::ponder_stibbons_node::return", 0, 1),
         notes=(
             "the brief or issue the run was pointed at is missing or "
             "unreadable; #3585: also an issue with no body, a repo whose "
-            "origin remote cannot be read for the provenance, and a failing "
-            "test-plan draft with no audit_dir to preserve it in"
+            "origin remote cannot be read for the provenance, a failing "
+            "test-plan draft with no audit_dir to preserve it in, and Ponder's "
+            "fixed draft or fix record that cannot be written"
         ),
     ),
     Gate(

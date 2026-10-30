@@ -117,6 +117,12 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
   - Both used to be skipped as best-effort.
 - **The gate registry:** `lld.input_precondition` covers the new halt site.
 
+### nodes/ponder.py (2 ledger findings fixed; 1 compliant row)
+
+- **A fixed draft that cannot be written back halts**, naming the path (73). The disk and the state used to diverge behind a warning.
+- **The record of the fixes, if it cannot be written,** is said at ERROR and raised by `_save_fixes_to_lineage`, and the node halts (108). It was dropped without a word.
+- **The gate registry:** `lld.input_precondition` covers the two new halt sites.
+
 ## Loud-failure compliance (standard 0034)
 
 | Site (file:line) | Loud | Logged | Stops | Alerts |
@@ -128,6 +134,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 | `analyze_requirements.py` `analyze_requirements` (333, 561, 643, 727, 763) | the halt message, printed, then HALT's alert record on stderr | names the issue, the seat, the pairings and the cause | `requirements_unverified` or `error_message`, which `route_after_analyze_requirements` sends to HALT | HALT calls `alert_operator` |
 | `analyze_requirements.py` `_provider_storm_active` (371) | ERROR line on stderr and in the log | the exception | re-raised out of the node | not alerted at the site (the orchestrator's catch, outside this branch) |
 | `analyze_requirements.py` telemetry and filing beside a conflict (814, 825) | `alert_operator`'s ERROR line | names the repo, the issue and the cause | the conflict halt stands | `alert_operator` at the site |
+| `ponder.py` `ponder_stibbons_node`, `_save_fixes_to_lineage` | ERROR line on stderr and in the log | names the path and the cause | `error_message`, which `route_after_ponder` (#3864) sends to HALT | HALT calls `alert_operator` |
 | `validate_test_plan.py` telemetry (139), failed-draft write (163) | `alert_operator`'s ERROR line | names the issue, the repo or the file, and the cause | re-raised out of the node | `alert_operator` at the site |
 | `validate_test_plan.py` no audit_dir (154) | ERROR line on stderr and in the log | names the iteration | `error_message`, which `route_after_validate_test_plan` sends to HALT | HALT calls `alert_operator` |
 | `load_input.py` `_load_issue`, `_get_repo_name` | ERROR line on stderr and in the log, via `_loud` | names the issue, the repo, git's exit code and stderr | `error_message`, which `route_after_load_input` sends to HALT | HALT calls `alert_operator` |

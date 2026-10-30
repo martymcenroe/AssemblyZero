@@ -147,3 +147,13 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** `test_validate_test_plan_node.py::TestNodeRoutesToDraftOnFail::test_node_routes_to_draft_on_fail` gives its failing draft an audit_dir.
 
 **Neighbouring suites:** 17 files gave 316 passed, 1 skipped and 1 failed: the test above. After the change, its file and the new one gave 19 passed.
+
+## nodes/ponder.py
+
+**New: `tests/unit/test_ponder_loud_failure.py` (6).**
+
+**Before the fix, measured:** 3 failed, 3 passed. Every site test failed. The 3 that passed pin kept behaviour: no draft skips to N1.5 (35, compliant), a fixed draft is written back, and a fix record is written.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 14 files gave 321 passed and 1 skipped.
