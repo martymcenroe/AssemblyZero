@@ -98,6 +98,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 1434 passed, 1 skipped and 1 failed across every unit and integration test file that names the preflight, `generate_draft` or `generate_spec`, plus the two audits' own tests. The failure was `test_no_fixed_site_left_in_the_baseline`, before `--write-baseline`; after it the audits' tests pass.
 
+## retry.py
+
+**New: `tests/unit/test_retry_loud_failure.py` (4)**: one per site, plus `test_a_retry_that_recovers_writes_no_error_line`, which pins that a recovered retry is not a failure.
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 3 failed, 1 passed (the one that pins kept behaviour).
+
+**Changed tests:** none; no existing test read the stdout lines.
+
+**Neighbouring suites:** 91 passed across `test_retry.py`, the new file and the two audits' own tests.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.

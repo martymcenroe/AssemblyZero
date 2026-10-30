@@ -140,6 +140,16 @@ The Gemini transport check runs at requirements N1 and spec N2 before anything i
 
 Baseline: two entries leave (the tag and the handler). The fail-open audit lost 1 finding.
 
+### retry.py (#3789, 3 sites)
+
+`with_retry` already raised every failure to its caller. What it did not do is say so where the operator looks.
+
+- **Every giving up is an ERROR line on stderr and the log** (66, 73, 95), naming the call, the error and why it is not tried again: not retryable, a timeout already retried once, or every attempt spent (with the count). The first two used to be stdout lines; running out of attempts said nothing. The error is still raised, and the caller owns what stops and the alert.
+- A retry that is about to sleep and try again is not a failure, and stays a stdout line.
+- **Callers.** None in `assemblyzero/` or `tools/`: the workflows retry through `assemblyzero/utils/retry.py`'s `with_retry`, a different function. Only `tests/unit/test_retry.py` imports this one.
+
+Baseline: no entries in either, before or after.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

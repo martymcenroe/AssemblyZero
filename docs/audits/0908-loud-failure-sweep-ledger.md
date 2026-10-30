@@ -581,9 +581,9 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/preflight.py:94` | probe | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
 | `assemblyzero/core/preflight.py:95` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
 | `assemblyzero/core/preflight.py:102` | probe empty | failed | loud, alerts | FIXED in the core batch (#3786): a failed check is loud at ERROR with its model and still halts through HALT, which alerts; a fault in the probe raises; an unknown alias raises and fails the preflight; test_<line> in test_preflight_loud_failure.py |
-| `assemblyzero/core/retry.py:66` | non-retryable | stdout, raise | loud | stderr |
-| `assemblyzero/core/retry.py:73` | timeout | stdout, raise | loud | stderr |
-| `assemblyzero/core/retry.py:95` | exhausted | raise | loud | log |
+| `assemblyzero/core/retry.py:66` | non-retryable | stdout, raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
+| `assemblyzero/core/retry.py:73` | timeout | stdout, raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
+| `assemblyzero/core/retry.py:95` | exhausted | raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
 | `assemblyzero/core/utf8_console.py:76` | tier 1 | tier 2 | compliant | none |
 | `assemblyzero/core/utf8_console.py:83` | both tiers | False | loud, logged | ERROR |
 | `assemblyzero/core/state_persistence.py:42` | serialize | str() | loud, logged, stops | raise |
