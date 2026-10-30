@@ -48,8 +48,8 @@ def pytest_configure(config):
 
 
 def pytest_sessionstart(session):
-    """Remember the operator's home state (#3531) and the checkout's telemetry
-    logs (#4161) before any test runs."""
+    """Remember the operator's home state (#3531) and the telemetry logs of the
+    checkout and the start directory (#4161, #4202) before any test runs."""
     from tests.checkout_telemetry_guard import GUARDED_FILES
     from tests.home_state_guard import snapshot
 
@@ -83,7 +83,8 @@ def pytest_sessionfinish(session, exitstatus):
             "_checkout_telemetry_before",
             (GUARDED_FILES,),
             (
-                "FAIL: the suite wrote into the checkout's telemetry logs (#4161). "
+                "FAIL: the suite wrote into the telemetry logs of the checkout or "
+                "of the directory it started in (#4161, #4202). "
                 "Redirect the writer through tests/checkout_telemetry_guard.redirect:"
             ),
         ),
@@ -197,11 +198,12 @@ def home_state_stays_out_of_home(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def checkout_telemetry_stays_out_of_the_checkout(tmp_path, monkeypatch):
     """Every test's stage records, prompt failures and hallucination checks
-    land under its own tmp_path, never in the checkout's data/ (#4161).
+    land under its own tmp_path, never in the checkout's data/ (#4161) or the
+    data/ of the directory pytest started in (#4202).
 
     Autouse and unconditional, for the reason `home_state_stays_out_of_home`
-    gives. Only a write aimed at the checkout moves; a test that sends one to
-    its own tmp_path still finds it there.
+    gives. Only a write aimed at the checkout or the start directory moves; a
+    test that sends one to its own tmp_path still finds it there.
     """
     from tests.checkout_telemetry_guard import redirect
 
