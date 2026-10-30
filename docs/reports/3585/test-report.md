@@ -170,4 +170,21 @@ The 6 files involved then gave 154 passed.
 
 **Neighbouring suites:** 442 passed and 1 skipped across 21 files that run mechanical validation, with only the three tests above failing before they were changed; the three changed files and the new one then gave 136 passed.
 
-**Known failure:** `test_lld_mock_completes.py::TestMockFinishesAnLLDRun::test_a_mock_lld_run_reaches_finalize_and_writes_the_lld` fails: the mock drafter's LLD title carries no issue number, so N1.5 blocks it. It passes at the base commit. The remedy is the mock's title in `llm_provider.py`.
+**Known failures from the mock drafter's title** (each passes at the base commit; the run prints "Could not extract issue number from title"; the remedy is the mock's title in `llm_provider.py`):
+- `test_lld_mock_completes.py::TestMockFinishesAnLLDRun::test_a_mock_lld_run_reaches_finalize_and_writes_the_lld`;
+- `test_lld_writes_only_worktree.py::TestAMockRunLeavesTheCheckoutClean`, five tests;
+- `test_lld_mock_is_offline.py::TestMockIsOffline`, three tests.
+
+## audit.py
+
+**New: `tests/unit/test_requirements_audit_loud_failure.py` (25).**
+
+**Before the fix, measured** against the unchanged module: 15 failed, 10 passed. Every site test failed; the ten pin kept behaviour and the compliant row (816).
+
+**Changed tests, each asserting the new behaviour:**
+- `test_lld_cache_pruning.py`: seven tests key a deleted repo's slice by its path (`_dead_key`), since `_repo_key` now raises for a path with no repository behind it.
+- `test_lld_cache_repo_isolation.py`, `test_lld_tracking.py`, `test_requirements_audit.py`: a corrupt, empty, non-object or unreadable cache raises and alerts; a missing or outside context file raises; a nonexistent repo raises from `get_repo_structure`.
+- `test_move_lineage.py`: a missing lineage dir and a failed move alert and raise.
+- `test_lld_edit_script_revision.py`: the fixture creates the target repo it names.
+
+**Neighbouring suites:** 158 passed across the six changed files; 1473 passed across 58 files whose nodes call these functions, with three of the mock-title failures above and two pre-existing failures in `test_extract_and_discard.py` (KeyError 'test_plan_status'), which fail identically with the base `audit.py` and `validate_mechanical.py` swapped in.

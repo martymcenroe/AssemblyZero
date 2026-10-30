@@ -162,3 +162,13 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 - **Compliant, pinned** (1775): a blocked draft goes back to the drafter, and to HALT at the cap.
 - **What the graph now receives.** N1.5 can raise where it returned. Nothing in the graph catches it; `tools/run_requirements_workflow.py` prints `ERROR:` and exits 1, without an alert.
 - **The mock drafter.** Its canned LLD (`assemblyzero/core/llm_provider.py`, `MockProvider.DEFAULT_RESPONSES["lld"]`) is titled `# Mock Feature: rehearsal LLD`, with no issue number, so a `--mock` LLD run is now blocked at N1.5 until the mock titles its LLD with the issue.
+
+### audit.py (14 ledger rows: 13 fixed, 1 compliant)
+
+- **The repository structure is read or the node stops** (133, 150, 179). A repo that does not exist raises; a directory that cannot be listed is an ERROR line naming it, then re-raises. Both used to become placeholder text in the drafter's prompt, or a silently missing subtree. An empty repo is still described as one.
+- **The lineage move alerts and raises** (333, 359) when the directory is missing or the move fails.
+- **A context file the operator named is used or the node stops** (539, 558): outside the repo or missing raises ValueError saying which; unreadable is an ERROR line and re-raises.
+- **The approval cache is read or nothing is written** (613, 646, 680, 683, 697). A file that cannot be read, is not a JSON object, or has a malformed `repos` field alerts and raises `LLDStatusCacheError`; since every save reads first, a broken file is no longer overwritten with an empty cache. The main-worktree lookup tells git's "not a git repository" (an answer) from a git failure (raised with rc and stderr), and the cache key no longer falls back to an unresolved path.
+- **The review row is embedded or the finalize raises** (1183).
+- **Compliant, pinned** (816).
+- **Who now receives the raises.** N0 `load_input`, N1 `generate_draft`, `finalize`, the implementation-spec and testing nodes that list the repo or move lineage, the orchestrator's settlement read, `speedrun/restore.py` and `tools/speedrun_roll.py`. The orchestrator's settlement write (`stages.py` line 229) still swallows a cache failure in a broad handler; the cache read alerts the operator before that.

@@ -92,8 +92,10 @@ def lld_state(tmp_path, draft_003):
     """A revision state: an existing draft plus a reviewer verdict."""
     audit = tmp_path / "audit"
     audit.mkdir()
-    # #3585: the revision's Tiphys refresh reads the target repo and halts
-    # when it cannot, so the target is a real (empty) directory.
+    # #3585: the target repo exists, as a real (empty) directory. The
+    # revision's Tiphys refresh reads it and halts when it cannot, and a
+    # missing one now raises when the drafter asks for its structure; it
+    # used to hand the prompt a placeholder.
     (tmp_path / "repo").mkdir()
     return {
         "workflow_type": "lld",
