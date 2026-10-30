@@ -139,3 +139,13 @@ Callers: `core/llm_provider.py` (`_kill_process_tree`, on the idle and wall time
 ### telemetry/cost.py (1 site)
 
 - **An unpriced model has no estimate, not a free one** (73). `estimate_cost` returned 0.0 with a WARNING, so the call record of an unpriced model read exactly like a call that cost nothing. It now returns None, the ledger's second option ("return None that callers must handle"). The record field `cost_usd_estimate` is already `Optional[float]`, the one caller (`InstrumentedCall.__exit__`) stores the value as given, and a sum that meets None raises instead of counting it as zero.
+
+### utils/speedrun.py (3 sites)
+
+The speed-run record is opt-in (`--speedrun`), and when it is on it is the durable cross-attempt record.
+
+- **A lap split that cannot be written alerts and raises** (144), naming the file, the issue and the attempt. It was a WARNING.
+- **A run-log entry that cannot be appended alerts and raises** (320). It was a WARNING.
+- **A malformed run-log line alerts and raises** `ValueError` naming the log and the line (335). It was skipped with a WARNING, so the summary counted fewer attempts than the log holds.
+
+Callers: the runners' `_finalize_speedrun` (`tools/run_requirements_workflow.py`, `tools/run_implement_from_lld.py`) and `tools/speedrun_summarize.py` do not catch.

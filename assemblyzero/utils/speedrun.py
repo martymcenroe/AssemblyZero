@@ -46,6 +46,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from assemblyzero.core import alert
+
 logger = logging.getLogger(__name__)
 
 
@@ -142,7 +144,19 @@ class LapSplitWriter:
                 json.dumps(payload, indent=2) + "\n", encoding="utf-8",
             )
         except OSError as e:
-            logger.warning("Failed to write lap splits: %s", e)
+            # #3585: a lost split is a lost record of the attempt; it used to
+            # be a WARNING and the run went on.
+            alert.alert_operator(
+                what="write the speed-run lap split",
+                where="assemblyzero/utils/speedrun.py LapSplitWriter._write",
+                cause=f"{type(e).__name__}: {e} ({self.output_path})",
+                consequence=(
+                    f"attempt {self.attempt}'s lap splits are not on disk; the "
+                    f"write is raised"
+                ),
+                issue=self.issue,
+            )
+            raise
 
 
 def _next_attempt_number(speedrun_dir: Path, issue: int) -> int:
@@ -318,20 +332,47 @@ class RunLogger:
             with self.log_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
         except OSError as e:
-            logger.warning("Failed to append run-log entry: %s", e)
+            # #3585: the log is the durable cross-attempt record; a lost entry
+            # used to be a WARNING.
+            alert.alert_operator(
+                what="append the speed-run run-log entry",
+                where="assemblyzero/utils/speedrun.py RunLogger.complete_run",
+                cause=f"{type(e).__name__}: {e} ({self.log_path})",
+                consequence=(
+                    f"attempt {attempt} ({outcome}) is missing from the run "
+                    f"log; the write is raised"
+                ),
+                issue=issue,
+            )
+            raise
 
     def read_all(self) -> list[dict[str, Any]]:
-        """Read all entries from the log. Returns [] if log doesn't exist."""
+        """Read all entries from the log. Returns [] if log doesn't exist.
+
+        A line that is not JSON alerts the operator and raises ``ValueError``
+        naming the log and the line (#3585): skipping it made the summary
+        count fewer attempts than the log holds.
+        """
         if not self.log_path.exists():
             return []
         entries = []
         with self.log_path.open("r", encoding="utf-8") as f:
-            for line in f:
+            for lineno, line in enumerate(f, start=1):
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     entries.append(json.loads(line))
                 except json.JSONDecodeError as e:
-                    logger.warning("Skipping malformed run-log line: %s", e)
+                    message = f"{self.log_path}:{lineno}: not JSON ({e})"
+                    alert.alert_operator(
+                        what="read the speed-run run log",
+                        where="assemblyzero/utils/speedrun.py RunLogger.read_all",
+                        cause=message,
+                        consequence=(
+                            "no attempt summary is built from a log with a "
+                            "corrupt line; repair or remove it"
+                        ),
+                    )
+                    raise ValueError(message) from e
         return entries

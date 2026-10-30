@@ -146,3 +146,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** in `test_cost_estimator.py`, `TestUnknownModel`'s four tests (0.0 and a WARNING) are three that expect None: `test_unknown_model_has_no_estimate`, `test_gemini_model_has_no_estimate`, `test_gpt_model_has_no_estimate`. The warning test is gone with the warning.
 
 **Neighbouring suites:** 50 passed across the new file, `test_cost_estimator.py` and `test_llm_instrumentation.py`.
+
+## utils/speedrun.py
+
+**New: `tests/unit/test_utils_speedrun_loud_failure.py` (5).** Site tests for 144, 320 and 335, plus an absent run log and a written attempt, which pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 3 failed, 2 passed (the kept-behaviour tests).
+
+**Changed test:** `test_speedrun.py::test_run_logger_skips_malformed_lines` is now `test_run_logger_refuses_malformed_lines`.
+
+**Neighbouring suites:** 35 passed across the new file, `test_speedrun.py` and `test_model_record.py`.
