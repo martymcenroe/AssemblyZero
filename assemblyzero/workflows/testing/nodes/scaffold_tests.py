@@ -38,6 +38,12 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
     FrameworkConfig,
 )
+from assemblyzero.workflows.testing.framework_ownership import (
+    RunFramework,
+    TestFileOwnershipError,
+    run_frameworks,
+)
+from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import DETERMINISTIC_FAILURE
 from assemblyzero.workflows.testing.runner_registry import get_runner, resolve_framework
 
 
@@ -1286,12 +1292,69 @@ def _scaffold_non_python_tests(
 # =============================================================================
 
 
+def _halt_scaffold_framework(label: str, cause: str) -> dict[str, Any]:
+    """N2's halt when one framework of the run cannot be scaffolded (#4244).
+
+    Routed to HALT by `route_after_scaffold`, and HALT alerts the operator.
+    Deterministic: the same tree and the same plan fail the same way again.
+    """
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [N2] the {label} tests cannot be "
+        f"scaffolded: {cause}. N2 stops here: every framework of the run is "
+        f"scaffolded, or the run does not go on (#4244)."
+    )
+    print(f"ERROR [N2] {message}", file=sys.stderr)
+    return {"error_message": message}
+
+
+def _scaffold_every_framework(
+    state: TestingWorkflowState, frameworks: list[RunFramework],
+) -> dict[str, Any]:
+    """N2 for a run with more than one framework (#4244): each framework's
+    scaffold, by its own scaffolder, in the order N0 wrote them.
+
+    `generated_tests` stays the Python scaffold when pytest is one of them,
+    because the pytest validator reads that key (#789); every other
+    framework's scaffold is read from disk by its own validator. A framework
+    whose scaffold cannot be built halts N2 naming it.
+    """
+    test_files: list[str] = []
+    generated: str | None = None
+    file_counter = state.get("file_counter", 0)
+    for run in frameworks:
+        try:
+            if run.framework == TestFramework.PYTEST:
+                result = _scaffold_python_tests(state)
+            else:
+                result = _scaffold_non_python_tests(
+                    state, {**run.config, "framework": run.framework}
+                )
+        except (ValueError, OSError) as e:
+            return _halt_scaffold_framework(run.label, f"{type(e).__name__}: {e}")
+        if result.get("error_message"):
+            return result
+        test_files.extend(result.get("test_files", []))
+        file_counter = result.get("file_counter", file_counter)
+        content = result.get("generated_tests", result.get("test_file_content"))
+        if run.framework == TestFramework.PYTEST or generated is None:
+            generated = content
+    return {
+        "test_files": test_files,
+        "generated_tests": generated or "",  # Issue #789: validate_tests_mechanical reads this
+        "file_counter": file_counter,
+        "error_message": "",
+    }
+
+
 def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     """N2: Generate executable test stubs.
 
     Issue #381: Now supports multi-framework scaffolding. If framework_config
     is present in state and specifies a non-pytest framework, delegates to
     TypeScript scaffolding. Otherwise, uses existing pytest scaffolding.
+
+    #4244: a run with more than one framework (`framework_configs`, #4236)
+    gets every framework's scaffold; it used to get the first's alone.
 
     Args:
         state: Current workflow state.
@@ -1318,6 +1381,14 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
             gate_log(f"[N2] {len(existing_test_files)} test files already exist — skipping scaffold")
             return {}
 
+    # #4244: every framework of the run, when there is more than one.
+    try:
+        frameworks = run_frameworks(state)
+    except TestFileOwnershipError as e:
+        return _halt_scaffold_framework("run's", str(e))
+    if len(frameworks) > 1:
+        return _scaffold_every_framework(state, frameworks)
+
     # Issue #381: Framework-aware scaffolding
     framework_config = state.get("framework_config")
 
@@ -1331,8 +1402,12 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
             state, {**framework_config, "framework": framework}
         )
 
-    # Default: existing pytest scaffolding (unchanged)
+    return _scaffold_python_tests(state)
 
+
+def _scaffold_python_tests(state: TestingWorkflowState) -> dict[str, Any]:
+    """The pytest scaffold: the spec's own Section 10 functions, verbatim
+    (#2316), or generated from scenario metadata when it ships none."""
     # Get data from state
     issue_number = state.get("issue_number", 0)
     test_scenarios = state.get("test_scenarios", [])

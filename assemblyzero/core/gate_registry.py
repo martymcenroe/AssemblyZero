@@ -593,7 +593,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.scaffold_import_unresolved", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "Scaffold cannot build the red-phase imports",
-        _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 1),
+        # `_scaffold_python_tests` since #4244 moved the pytest scaffold out
+        # of `scaffold_tests` so a run of several frameworks can call it.
+        _s(f"{_TS}/nodes/scaffold_tests.py::_scaffold_python_tests::return", 1),
         created_by="#4148 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
         notes="a name the Section 10 bodies use is defined in two planned files, or "
               "in none; it used to be imported from the first Add file, which "
@@ -602,7 +604,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.no_test_files", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "No test",
-        _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 0)
+        _s(f"{_TS}/nodes/scaffold_tests.py::_scaffold_python_tests::return", 0)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_pytest_single::return", 0, 1)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 0)
         + _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 0)
@@ -613,6 +615,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
             "was retired. #4236 added the multi-framework phases' own guard, "
             "the same message, in verify_red_phase and verify_green_phase"
         ),
+    ),
+    Gate(
+        "impl.scaffold_framework_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "tests cannot be",
+        _s(f"{_TS}/nodes/scaffold_tests.py::_halt_scaffold_framework::return", 0),
+        decided_in=f"{_TS}/nodes/scaffold_tests.py::scaffold_tests",
+        created_by="#4244 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="one framework of the run cannot be scaffolded: its runner cannot "
+              "start, its template raises, or its scaffold would land where no "
+              "framework of the run runs it (#4243). N2 used to scaffold the first "
+              "framework alone, so a second framework's red phase had nothing to run",
     ),
     Gate(
         "impl.framework_unresolved", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
