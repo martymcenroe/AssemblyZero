@@ -45,7 +45,7 @@ from assemblyzero.core.projects_root import PROJECTS, spellings
 # The capture group is the repo name only. We deliberately exclude "." from the
 # character class because real repo directory names don't contain dots, and
 # admitting "." causes "Projects/CLAUDE.md" -> "CLAUDE.md" false positives.
-# #3648: a name followed by ".<ext>" is a file directly under Projects
+# #4231: a name followed by ".<ext>" is a file directly under Projects
 # (CLAUDE.md, a .log), never a repository, so it is not captured at all.
 _NOT_A_FILE = r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9])"  # the first branch stops backtracking to "CLAUD"
 _ROOT = spellings(PROJECTS)
@@ -72,7 +72,7 @@ _REPO_DENYLIST = {
 # Hard timeout for any git subprocess call (seconds). Network ops should never block /onboard.
 _GIT_TIMEOUT = 30
 
-# #3648: derived, never spelled. The Projects root is the parent of this
+# #4231: derived, never spelled. The Projects root is the parent of this
 # repository's root, on Windows and on Ubuntu alike. The old spelled Windows
 # root is a relative path on Linux that never exists, so every repository was
 # skipped and the check printed a silent false clean. #3609 moved the
@@ -141,7 +141,7 @@ def extract_repo_names(text: str) -> list[str]:
         if stripped != name and (PROJECTS_ROOT / stripped).is_dir():
             candidate = stripped
         else:
-            # #3648: a repository the handoff names that is not here is
+            # #4231: a repository the handoff names that is not here is
             # reported as missing by check_repo_drift, never dropped: dropping
             # it is how a missing root read as "no drift". File names never
             # reach this point; the patterns do not capture them.

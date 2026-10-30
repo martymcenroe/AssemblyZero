@@ -113,7 +113,7 @@ class ClaudeSpendLocked(ProfileError):
 
 
 def other_side_claude_home() -> Path | None:
-    """The other side's ``~/.claude`` on a machine that runs both Windows and WSL (#3647).
+    """The other side's ``~/.claude`` on a machine that runs both Windows and WSL (#4230).
 
     Under WSL it is the Windows home, ``/mnt/c/Users/<user>/.claude``; on Windows it
     is the Ubuntu home over ``//wsl.localhost/Ubuntu/home/<user>/.claude``. The user
@@ -132,7 +132,7 @@ def other_side_claude_home() -> Path | None:
 
 def claude_homes() -> list[Path]:
     """Every ``~/.claude`` the spend lock lives in: the running home, then the other
-    side's when it exists (#3647). The one derivation; the lock tool uses it too.
+    side's when it exists (#4230). The one derivation; the lock tool uses it too.
 
     An other-side home that cannot be read is kept, so the lock check fails closed on it.
     """
@@ -179,7 +179,7 @@ def _lock_on(path: Path) -> bool:
 def lock_until(text: str) -> datetime | None:
     """When a lock lifts itself, from its `until: <ISO time>` line, or None: it binds until lifted by hand.
 
-    #3646: the operator throws the lock as his weekly quota runs out and it used
+    #4229: the operator throws the lock as his weekly quota runs out and it used
     to bind past the reset. `claude_spend_lock.py --lock --until` writes the line.
     An `until:` line that cannot be read is treated as no lift time, so the lock
     binds: an unreadable promise to lift is not a lift.
@@ -198,7 +198,7 @@ UNTIL_PREFIX = "until:"
 
 
 def spend_locked(lock: Path | None = None) -> bool:
-    """True when a lock thrown on either side is on (#3647); with ``lock``, that path only."""
+    """True when a lock thrown on either side is on (#4230); with ``lock``, that path only."""
     return spend_lock_found(lock) is not None
 
 

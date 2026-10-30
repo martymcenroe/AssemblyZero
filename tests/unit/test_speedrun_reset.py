@@ -182,7 +182,7 @@ class TestWorktreeSweepPreservesWork:
 
     def test_successful_removal_never_prunes(self, tmp_path):
         """
-        #3649: a successful `git worktree remove` already drops the
+        #4232: a successful `git worktree remove` already drops the
         registration, and a repo-wide prune would drop the other side's
         live worktrees on a Windows + WSL machine.
         """
