@@ -40,11 +40,15 @@ Usage:
 
 `with_retry` ALWAYS returns an `LLMCallResult` — the caller's existing
 `if result.success: ...` branch handles both first-try success and
-retry-exhaustion failure paths uniformly.
+retry-exhaustion failure paths uniformly. The failed result is the declared
+contract, and a caller routes it to HALT; when `with_retry` gives up it also
+writes an ERROR line to stderr and the log naming the call and the cause
+(ADR 0236, #3585).
 """
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -220,10 +224,16 @@ def with_retry(
             print(retry_gate.halt_line(
                 description, decision, get_cumulative_cost(),
             ))
-            logger.info(
-                "%s halted after %d attempt(s) [%s]: %s",
-                description, attempt + 1, failure_class, decision.reason,
+            # #3585: giving up is the failure the caller routes to HALT, so it
+            # is an ERROR on stderr and in the log, naming the call, the
+            # attempts, the class and the cause -- not an INFO record.
+            message = (
+                f"{description} failed after {attempt + 1} attempt(s) "
+                f"[{failure_class}]: {result.error_message or 'no error message'}; "
+                f"{decision.reason}; the failed result goes to the caller"
             )
+            logger.error("[RETRY] %s", message)
+            print(f"ERROR [RETRY] {message}", file=sys.stderr, flush=True)
             return result
 
         # Compute sleep duration. Server-provided retry_after wins; else

@@ -106,3 +106,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** none; every existing declaration already carries both keys.
 
 **Neighbouring suites:** 127 passed across the new file, `test_contract_fidelity.py`, `test_gate_opens_browser.py`, `test_visual_gate_decompose.py`, `test_visual_gate_loop.py`, `test_visual_gate_guardrails.py`, `test_visual_gate_stage.py` and `test_visual_gate_live_resume.py`; `test_assertion_manifest.py` 29 passed.
+
+## utils/retry.py
+
+**New: `tests/unit/test_utils_retry_loud_failure.py` (5).** Two site tests (a failure not worth retrying, and retries exhausted), plus a quiet success and the failed result still returned, not raised (two cases), which pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 2 failed, 3 passed (the kept-behaviour tests).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 85 passed across the new file, `test_utils_retry.py`, `test_retry_gate_wiring.py` and `test_retry_gate.py`; 23 passed across `test_gemini_retry_boundary.py`, `test_json_verdict_review_test_plan.py` and `test_review_test_plan_structured_output.py`.

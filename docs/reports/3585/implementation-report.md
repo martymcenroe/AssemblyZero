@@ -115,3 +115,9 @@ Defect found, not fixed: a cold import of `assemblyzero.workflows.telemetry` (or
 - No declaration file is still no gate (`None`).
 
 Callers: `orchestrator/stages.py` `run_visual_stage` already turns a `ValueError` into a failed, non-transient stage result. `implementation_spec/nodes/compile_manifest.py` `_contract_text` catches `Exception`, prints, and compiles without the contract (a `# fail-open:` site of its own). `requirements/contract_fidelity.py` `resolve_contract` lets it out.
+
+### utils/retry.py (1 site)
+
+- **Giving up is an ERROR on stderr and in the log** (220). When `with_retry` stops (retries exhausted, or a failure not worth retrying) it still returns the last failed `LLMCallResult`, which is the declared contract every caller routes to HALT. What changed is how it says so: the halt line went to stdout and the log record was INFO. It now also writes `ERROR [RETRY] <call> failed after N attempt(s) [<class>]: <cause>; <reason>` to stderr and logs it at ERROR.
+
+Callers: `workflows/testing/nodes/review_test_plan.py` and `revise_test_plan.py` return the failure as `error_message`; their routing to HALT is the testing package's.
