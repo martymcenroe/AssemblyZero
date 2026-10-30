@@ -65,11 +65,19 @@ def strip_emoji(text: str | None) -> str:
 
     Returns:
         Sanitized text with emojis removed and common symbols replaced.
+
+    Raises:
+        TypeError: ``text`` is neither a string nor None (#3799). It used to
+            be returned as ``str()`` of itself, unstripped, so a bytes
+            response became ``"b'...'"`` and was passed on as the answer.
     """
     if text is None:
         return ""
     if not isinstance(text, str):
-        return str(text)
+        raise TypeError(
+            f"strip_emoji sanitizes text, and was given a {type(text).__name__}: "
+            f"{text!r:.120}"
+        )
 
     # Step 1: Semantic replacements (longest match first — variation selectors)
     for emoji, replacement in _SEMANTIC_MAP:
