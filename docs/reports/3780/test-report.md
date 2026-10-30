@@ -24,6 +24,8 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Changed test:** `test_llm_instrumentation.py::test_missing_usage_metadata` now expects the raise. It is joined by `test_a_named_model_with_no_usage_has_no_counts`, which keeps the absent-counts case.
 
+**Changed later (found by the batch after it, 2026-10-30):** `test_stage_watchdog.py::TestProgrammingErrorsAreNotRetried` still asserted the retired shape, a "Programming error" failed call and a raised `RuntimeError` being retried, and its 3 tests failed on this branch. They now assert the new one: `test_type_error_propagates_without_retry_or_sleep` and `test_attribute_error_also_propagates_at_once` (one attempt, no sleep), and `test_a_transport_failure_still_retries`, where `_invoke_via_cli` returns a failed result, the only way a transport failure arrives now.
+
 **Neighbouring suites:** 266 passed across the agy transport, sandbox, call-bound, client, headline, scorecard, call-guard, instrumentation, preflight, scout and structured-output tests.
 
 ## verdict_schema.py

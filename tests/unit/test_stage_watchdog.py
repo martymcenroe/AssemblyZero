@@ -9,6 +9,8 @@ call signature burned 9 attempts and 84 seconds of backoff before reporting
 import time
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.core.stage_watchdog import (
     SLOW_RATIO,
     STAGE_NOMINAL_SECONDS,
@@ -106,45 +108,56 @@ class TestProgrammingErrorsAreNotRetried:
             model="gemini-3.1-pro-high",
         )
 
-    def test_type_error_fails_immediately_without_sleeping(self, tmp_path):
+    # #3777 (ADR 0236): `_invoke_via_cli` reports every transport failure as
+    # `(False, "", reason)`, so an exception out of it is a fault in this
+    # code. It propagates on the first attempt: never retried, never slept
+    # on, and never dressed as a "Programming error" failed call, which a
+    # caller could read as weather.
+
+    def test_type_error_propagates_without_retry_or_sleep(self, tmp_path):
         client = self._client(tmp_path)
+        calls = []
 
         def boom(*args, **kwargs):
+            calls.append(1)
             raise TypeError("got an unexpected keyword argument 'timeout_seconds'")
 
         with patch.object(client, "_invoke_via_cli", side_effect=boom), \
-             patch("assemblyzero.core.gemini_client.time.sleep") as slept:
-            result = client.invoke("system", "content")
+             patch("assemblyzero.core.gemini_client.time.sleep") as slept, \
+             pytest.raises(TypeError, match="timeout_seconds"):
+            client.invoke("system", "content")
 
-        assert result.success is False
-        assert "Programming error" in result.error_message
-        assert "TypeError" in result.error_message
-        assert result.attempts == 1, "must not retry a defect in our own code"
+        assert calls == [1], "must not retry a defect in our own code"
         slept.assert_not_called()
 
-    def test_attribute_error_is_also_immediate(self, tmp_path):
+    def test_attribute_error_also_propagates_at_once(self, tmp_path):
         client = self._client(tmp_path)
+        calls = []
 
         def boom(*args, **kwargs):
+            calls.append(1)
             raise AttributeError("'LLMCallResult' object has no attribute 'content'")
 
-        with patch.object(client, "_invoke_via_cli", side_effect=boom):
-            result = client.invoke("system", "content")
+        with patch.object(client, "_invoke_via_cli", side_effect=boom), \
+             pytest.raises(AttributeError):
+            client.invoke("system", "content")
 
-        assert result.success is False
-        assert result.attempts == 1
+        assert calls == [1]
 
-    def test_ordinary_runtime_error_still_retries(self, tmp_path):
-        """The narrowing must not disable the retry path it lives in."""
+    def test_a_transport_failure_still_retries(self, tmp_path):
+        """Raising faults must not disable the retry path transport failures use."""
         client = self._client(tmp_path)
         calls = []
 
         def flaky(*args, **kwargs):
             calls.append(1)
-            raise RuntimeError("503 capacity exhausted")
+            return False, "", "503 capacity exhausted"
 
         with patch.object(client, "_invoke_via_cli", side_effect=flaky), \
              patch("assemblyzero.core.gemini_client.time.sleep"):
-            client.invoke("system", "content")
+            result = client.invoke("system", "content")
+
+        assert result.success is False
+        assert len(calls) > 1, "a transport failure is retried"
 
         assert len(calls) > 1, "transient failures must still be retried"
