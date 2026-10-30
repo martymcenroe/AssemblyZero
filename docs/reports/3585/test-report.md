@@ -27,6 +27,10 @@ The other seven pin a well-formed issue URL, an idea that is present and one nev
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new and 1 stale, the deleted tag. `audit_fail_open.py --check` reports no new fail-open. Ruff on `finalize.py` finds the same 17 issues as at HEAD.
 
+**The mock issue run (its own commit):** three tests in `TestAMockRunFilesNothing`.
+- **Against the finalize then on the branch:** 2 failed, 1 passed. The failures are that `gh` and `subprocess.run` were called under mock mode, and that a full mock `finalize()` called them. The one that passed is that a real run still files.
+- **After the change:** the 15 files that run the issue workflow, its CLI, the mock runs and the gate registry gave 481 passed.
+
 ## graph.py
 
 **New: `tests/unit/test_requirements_graph_loud_failure.py` (30).** One test per ledger line, then:

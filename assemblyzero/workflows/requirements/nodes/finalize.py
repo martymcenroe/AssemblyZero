@@ -150,7 +150,9 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns:
         Updated state with issue_url, filed_issue_number; or error_message,
-        which routes to HALT (#3585), naming the repo and what failed.
+        which routes to HALT (#3585), naming the repo and what failed. A mock
+        run files nothing: it never calls gh, says what it would have filed,
+        and records that in the lineage, with no issue URL or number.
     """
     target_repo = Path(state.get("target_repo", "."))
     current_draft = state.get("current_draft", "")
@@ -171,6 +173,22 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
             f"title line ({len(current_draft)} characters, from "
             f"{state.get('current_draft_path') or 'current_draft'})"
         )}
+
+    # #3585: a mock run is a rehearsal and files no real issue. It used to
+    # run `gh issue create` like a real run, so `--type issue --mock` filed
+    # one on GitHub. The outward step stops here, as the LLD landing does
+    # (#2288); the draft and its lineage are still written.
+    if state.get("config_mock_mode"):
+        print(
+            f"    [mock] would file issue '{title}' in {target_repo} "
+            f"({len(body)} characters of body); gh not called, nothing filed."
+        )
+        file_num = next_file_number(audit_dir)
+        save_audit_file(
+            audit_dir, file_num, "final.md",
+            f"# Issue NOT filed (mock run)\n\nWould file: {title}\n\n---\n\n{current_draft}",
+        )
+        return {"issue_url": "", "filed_issue_number": 0, "error_message": ""}
 
     # File issue using gh CLI
     try:
@@ -902,9 +920,13 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
     if not state.get("error_message"):
         state = _commit_and_push_files(state)
 
-    # Cleanup source idea after successful issue creation
+    # Cleanup source idea after successful issue creation. #3585: a mock run
+    # filed nothing, so its idea stays where it is.
     if workflow_type == "issue" and not state.get("error_message"):
-        _cleanup_source_idea(state)
+        if state.get("config_mock_mode"):
+            print("    [mock] source idea not moved to ideas/done/: nothing was filed.")
+        else:
+            _cleanup_source_idea(state)
 
     # Issue #513: Log workflow completion with first-pass tracking. #3585:
     # last, so a landing or an idea move that fails is never logged complete.

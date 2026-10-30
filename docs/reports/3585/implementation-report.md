@@ -27,6 +27,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
   - The exhausted repair budget (487) was already routed by #3864 and is now said at ERROR.
 - **`validate_lld_final` fails on empty content.** It returned no errors, which is a pass. It lives in `finalize.py`, not in `verdict_schema.py`.
 - **The gate registry.** `lld.finalize.issue_creation` now covers `_finalize_issue`'s two new halt sites.
+- **A mock issue run files nothing** (found by another agent, its own commit). `_finalize_issue` ran `gh issue create` whatever `config_mock_mode` said, so `--type issue --mock` filed a real GitHub issue. A mock run now never reaches the subprocess layer. It prints the issue it would have filed, records "NOT filed (mock run)" in the lineage, returns no URL or number, and leaves the source idea where it is.
 
 ### graph.py (9 ledger rows: 7 fixed by #3864, 2 compliant, all pinned)
 

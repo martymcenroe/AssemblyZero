@@ -176,6 +176,55 @@ class TestFinalizeIssue:
         _said_error(capsys)
 
 
+class TestAMockRunFilesNothing:
+    """`--type issue --mock` used to run `gh issue create` and file a real
+    issue (#3585). A mock run never reaches the subprocess layer."""
+
+    def test_a_mock_issue_run_never_calls_gh(self, tmp_path, capsys):
+        state = _issue_state(tmp_path, config_mock_mode=True)
+
+        with patch.object(fz, "run_command") as gh, \
+             patch("subprocess.run") as subprocess_run, \
+             patch("subprocess.Popen") as popen:
+            out = fz._finalize_issue(state)
+
+        gh.assert_not_called()
+        subprocess_run.assert_not_called()
+        popen.assert_not_called()
+        assert out["error_message"] == ""
+        assert out["issue_url"] == ""
+        assert out["filed_issue_number"] == 0
+        printed = capsys.readouterr().out
+        assert "[mock] would file issue 'Add a widget'" in printed
+        [record] = list(Path(state["audit_dir"]).glob("*-final.md"))
+        assert "NOT filed (mock run)" in record.read_text(encoding="utf-8")
+
+    def test_a_mock_issue_run_through_finalize_files_and_moves_nothing(self, tmp_path):
+        idea = tmp_path / "ideas" / "active" / "widget.md"
+        idea.parent.mkdir(parents=True)
+        idea.write_text("an idea\n", encoding="utf-8")
+        state = _issue_state(tmp_path, config_mock_mode=True, source_idea=str(idea))
+
+        with patch.object(fz, "run_command") as gh, \
+             patch("subprocess.run") as subprocess_run, \
+             patch.object(fz, "log_workflow_execution"):
+            out = fz.finalize(state)
+
+        gh.assert_not_called()
+        subprocess_run.assert_not_called()
+        assert out["error_message"] == ""
+        assert idea.is_file(), "a rehearsal leaves the idea where it is"
+
+    def test_kept_a_real_run_still_files(self, tmp_path):
+        state = _issue_state(tmp_path, config_mock_mode=False)
+
+        with patch.object(fz, "run_command", return_value=_gh(stdout="https://github.com/o/r/issues/57\n")) as gh:
+            out = fz._finalize_issue(state)
+
+        gh.assert_called_once()
+        assert out["filed_issue_number"] == 57
+
+
 class TestCleanupSourceIdea:
     def test_673_a_declared_idea_that_is_gone_halts_naming_it(self, tmp_path, capsys):
         missing = tmp_path / "ideas" / "active" / "widget.md"
