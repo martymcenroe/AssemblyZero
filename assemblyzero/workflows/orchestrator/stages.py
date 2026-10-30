@@ -1632,7 +1632,10 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             add_cmd = ["git"]
             if target_repo:
                 add_cmd += ["-C", target_repo]
-            add_cmd += ["worktree", "add", str(worktree_path), "-b", branch_name]
+            add_cmd += [
+                "worktree", "add", "--relative-paths", str(worktree_path),
+                "-b", branch_name,
+            ]
             # #1960: name the base explicitly. `worktree add -b X <path>` with
             # no commit-ish branches from whatever the target repo happens to
             # be checked out on, so the content a roll starts from was decided
@@ -1789,7 +1792,10 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 add_cmd = ["git"]
                 if target_repo:
                     add_cmd += ["-C", target_repo]
-                add_cmd += ["worktree", "add", str(worktree_path), branch_name]
+                add_cmd += [
+                    "worktree", "add", "--relative-paths", str(worktree_path),
+                    branch_name,
+                ]
 
             run_command(
                 add_cmd,
