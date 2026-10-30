@@ -107,3 +107,11 @@ The log is the baseline every invented-API detection is measured against.
 Caller that still swallows the raise: `workflows/implementation_spec/nodes/validate_completeness.py` wraps `_record_hallucination_telemetry` in `except Exception` and prints a WARNING, so the gate's verdict is unchanged; the operator has been alerted first.
 
 Defect found, not fixed: a cold import of `assemblyzero.workflows.telemetry` (or of `hallucination_log`) fails with a circular import: `hallucination_log` imports `workflows.requirements.audit` at module level, which reaches `validate_completeness`, which imports the half-initialised telemetry package. A run imports the graphs first, so it never meets this; the new test file imports `validate_completeness` first for the same reason.
+
+### visual_gate/config.py (2 sites)
+
+- **A declared gate with no `renderer_cmd` is refused at load** (77). It got an empty command, which failed only at render time. Absent and empty both raise `ValueError` naming the key and the file.
+- **A declared gate with no `separation_floor` is refused at load** (79). It got 0, which silently turned the palette-floor guardrail off, so a Modify that should have been refused passed. An explicit 0 is the repo's declared choice and still loads.
+- No declaration file is still no gate (`None`).
+
+Callers: `orchestrator/stages.py` `run_visual_stage` already turns a `ValueError` into a failed, non-transient stage result. `implementation_spec/nodes/compile_manifest.py` `_contract_text` catches `Exception`, prints, and compiles without the contract (a `# fail-open:` site of its own). `requirements/contract_fidelity.py` `resolve_contract` lets it out.

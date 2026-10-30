@@ -96,3 +96,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** in `test_hallucination_telemetry.py`, `test_missing_audit_dir_skips_that_sink_without_error` is now `test_missing_audit_dir_alerts_and_raises_after_the_other_sink`, and `test_sink_failure_is_swallowed` is now `test_sink_failure_alerts_and_raises`.
 
 **Neighbouring suites:** 235 passed across the new file, `test_hallucination_telemetry.py`, `test_checkout_telemetry_isolation.py` and `test_implementation_spec_workflow.py`.
+
+## visual_gate/config.py
+
+**New: `tests/unit/test_visual_gate_config_loud_failure.py` (6).** Site tests for 77 (absent and empty) and 79, plus an explicit zero floor, a full declaration and no declaration, which pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 3 failed, 3 passed (the kept-behaviour tests).
+
+**Changed tests:** none; every existing declaration already carries both keys.
+
+**Neighbouring suites:** 127 passed across the new file, `test_contract_fidelity.py`, `test_gate_opens_browser.py`, `test_visual_gate_decompose.py`, `test_visual_gate_loop.py`, `test_visual_gate_guardrails.py`, `test_visual_gate_stage.py` and `test_visual_gate_live_resume.py`; `test_assertion_manifest.py` 29 passed.
