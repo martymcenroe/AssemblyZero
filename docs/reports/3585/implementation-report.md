@@ -135,3 +135,7 @@ Callers: `core/llm_provider.py` (`_kill_process_tree`, on the idle and wall time
 
 - **The timeout alerts before it exits** (74). The timer printed a banner to stderr and called `os._exit(42)`, never reaching `alert_operator`, so a run that died on its wall clock told nobody away from the console. The handler is now `WorkflowTimeout._expire`: banner, then `alert_operator` with the limit, the workflow and the issue, then `os._exit(42)` in a `finally`, so the process still exits when the alert cannot be delivered.
 - `WorkflowTimeout` takes optional `issue` and `workflow` keywords for the alert. The three runners do not pass them yet (they are not in this branch), so the alert says "workflow unnamed" until they do.
+
+### telemetry/cost.py (1 site)
+
+- **An unpriced model has no estimate, not a free one** (73). `estimate_cost` returned 0.0 with a WARNING, so the call record of an unpriced model read exactly like a call that cost nothing. It now returns None, the ledger's second option ("return None that callers must handle"). The record field `cost_usd_estimate` is already `Optional[float]`, the one caller (`InstrumentedCall.__exit__`) stores the value as given, and a sum that meets None raises instead of counting it as zero.

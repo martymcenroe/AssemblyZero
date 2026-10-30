@@ -136,3 +136,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** none.
 
 **Neighbouring suites:** 15 passed across the new file and `test_workflow_timeout.py`.
+
+## telemetry/cost.py
+
+**New: `tests/unit/test_telemetry_cost_loud_failure.py` (6).** Site tests for 73 (two unpriced models, a sum that meets one, the instrumented record carrying None), plus a priced model and a priced model with no tokens, which pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 4 failed, 2 passed (the kept-behaviour tests).
+
+**Changed tests:** in `test_cost_estimator.py`, `TestUnknownModel`'s four tests (0.0 and a WARNING) are three that expect None: `test_unknown_model_has_no_estimate`, `test_gemini_model_has_no_estimate`, `test_gpt_model_has_no_estimate`. The warning test is gone with the warning.
+
+**Neighbouring suites:** 50 passed across the new file, `test_cost_estimator.py` and `test_llm_instrumentation.py`.

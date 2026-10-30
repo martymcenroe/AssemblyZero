@@ -3,9 +3,6 @@
 Issue #774: Tests for cost lookup, edge cases, model normalization.
 """
 
-import logging
-
-
 from assemblyzero.telemetry.cost import (
     MODEL_ALIASES,
     TOKEN_COSTS,
@@ -94,31 +91,21 @@ class TestKnownModelCost:
 
 
 class TestUnknownModel:
-    """T090: estimate_cost for unknown model returns 0.0 and logs warning."""
+    """T090, revised by #3585: an unpriced model has no estimate (None).
 
-    def test_unknown_model_returns_zero(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            result = estimate_cost("unknown-model-xyz", 100, 100)
+    It used to return 0.0 with a WARNING, which read in the call record exactly
+    like a call that cost nothing.
+    """
 
-        assert result == 0.0
-        assert "unknown-model-xyz" in caplog.text
+    def test_unknown_model_has_no_estimate(self):
+        assert estimate_cost("unknown-model-xyz", 100, 100) is None
 
-    def test_gemini_model_returns_zero(self, caplog):
-        """Gemini cost deferred — should return 0.0."""
-        with caplog.at_level(logging.WARNING):
-            result = estimate_cost("gemini-2.5-pro-preview-05-06", 1000, 500)
-        assert result == 0.0
+    def test_gemini_model_has_no_estimate(self):
+        """Gemini cost deferred, so no estimate rather than a free call."""
+        assert estimate_cost("gemini-2.5-pro-preview-05-06", 1000, 500) is None
 
-    def test_gpt_model_returns_zero(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            result = estimate_cost("gpt-4", 1000, 500)
-        assert result == 0.0
-
-    def test_warning_message_contains_model_name(self, caplog):
-        model_name = "my-custom-unknown-model"
-        with caplog.at_level(logging.WARNING):
-            estimate_cost(model_name, 100, 100)
-        assert model_name in caplog.text
+    def test_gpt_model_has_no_estimate(self):
+        assert estimate_cost("gpt-4", 1000, 500) is None
 
 
 # ── T100: Model ID normalization ─────────────────────────────────────
