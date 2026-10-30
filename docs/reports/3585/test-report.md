@@ -234,3 +234,11 @@ The 6 files involved then gave 154 passed.
 **Changed tests (`test_issue_257.py`):** five tests that expected warnings expect the ValueError.
 
 **Neighbouring suites:** 149 passed across `test_issue_257.py`, the new file and `test_requirements_nodes.py`.
+
+## verdict_summarizer.py
+
+**New: `tests/unit/test_verdict_summarizer_loud_failure.py` (10).** Before the fix: 7 failed, 3 passed (a JSON verdict with its issues, feedback with no verdict line, an empty entry).
+
+**Changed tests:** `test_verdict_summarizer.py`'s malformed-JSON test expects the ValueError and an ERROR line.
+
+**Neighbouring suites:** 44 passed with `test_feedback_window.py`.

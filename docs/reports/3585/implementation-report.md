@@ -200,3 +200,8 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 - **A resolution that cannot reach the approved draft raises naming it**: an empty draft (35), no Open Questions section (84), no matching question (105), a suggestions heading whose section cannot be read (271, which was an AttributeError). Each used to be a warning the review node only printed.
 - **Idempotency is kept.** A question already marked resolved, and a question the verdict quotes struck through, are recognised before the raise; the existing #257 tests found both cases.
 - **The review node still swallows these** (`nodes/review.py` `_update_draft_with_verdict`, a broad handler in the nodes half).
+
+### verdict_summarizer.py (4 ledger rows: 3 fixed, 1 fixed in part)
+
+- **A JSON verdict is read strictly** (64, 66, 105): text starting with `{` that is not JSON is an ERROR line and a ValueError; a JSON verdict without a `blocking_issues` list, or with an item lacking `description`, raises. They used to be read as prose or as "0 issues".
+- **The status comes from an explicit verdict line** (109), so "NOT APPROVED" is no longer APPROVED. An entry with no verdict line stays UNKNOWN: the review node stores actionable feedback, usually a bullet list, in the history, so raising there would stop every revision. That half of the ledger's fix is a won't-do, pinned.
