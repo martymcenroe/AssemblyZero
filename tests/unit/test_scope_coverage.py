@@ -229,7 +229,9 @@ class TestItLooksAtTheTableThatIsActuallyThere:
         verdict = next(
             line for line in rendered.splitlines() if line.startswith("RESULT:")
         )
-        assert "VACUOUS on tables" in verdict
+        # #3585: the verdict is NOT CHECKED and names the unexamined tables.
+        assert verdict.startswith("RESULT: NOT CHECKED")
+        assert "decision tables (1 present, none of the checked kind)" in verdict
         assert "Decision tables: 0 found" not in rendered
         assert "bezel" not in "\n".join(str(v) for v in report.violations)
 

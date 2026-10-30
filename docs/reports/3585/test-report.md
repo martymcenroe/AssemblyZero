@@ -250,3 +250,11 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** `test_requirements_git_operations.py` and `test_issue_162.py` answer the new `git rev-parse` call; the no-SHA test expects the raise.
 
 **Neighbouring suites:** 225 passed across ten files.
+
+## ownership_check.py and the form verdict
+
+**New: `tests/unit/test_ownership_check_loud_failure.py` (4).** Before the fix: 3 failed, 1 passed (a fully tagged table).
+
+**Changed tests:** seven assertions of `RESULT: PASS` on vacuous runs, in `test_ownership_check.py`, `test_check_requirements_form.py` and `test_scope_coverage.py`, now assert `RESULT: NOT CHECKED` and the parts it names.
+
+**Neighbouring suites:** 309 passed across ten files.

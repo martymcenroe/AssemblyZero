@@ -212,3 +212,8 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 - **A reused LLD branch must descend from the arc** (180), checked with `git merge-base --is-ancestor` before any worktree is created. The two `worktree add` argument lists are unchanged.
 - **The commit SHA is read from git** (265, 395) with `git rev-parse --short HEAD`, and raises when it cannot be; the summary-line parse returned "(root-commit)" for a first commit and "" when it did not parse.
 - **The origin URL lookup** stays best-effort (330, compliant).
+
+### ownership_check.py (3 ledger rows, all fixed) and the form verdict
+
+- **An untagged owner row in a joinable table is a violation** (459); its criteria were skipped as "already reported" when nothing had reported them.
+- **A form check that examined nothing of a part renders NOT CHECKED** (611, 627, and `form_check.py:821`): no variable table, owners named only in prose, no requirements section, or no table of the checked kind. `FormReport.not_checked` names each part, and the verdict line lists them. `FormReport.ok` still means "no violations", because the preflight and the tools read it that way; `tools/check_requirements_form.py` therefore still exits 0 on NOT CHECKED, which is reported for the parent.
