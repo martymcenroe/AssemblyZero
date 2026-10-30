@@ -26,3 +26,17 @@ The other seven pin a well-formed issue URL, an idea that is present and one nev
 **Neighbouring suites:** 562 passed across 29 files: every file that imports finalize, the mock runs, the graph tests and the gate registry. After the last edits, the 10 affected files ran again: 274 passed.
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new and 1 stale, the deleted tag. `audit_fail_open.py --check` reports no new fail-open. Ruff on `finalize.py` finds the same 17 issues as at HEAD.
+
+## graph.py
+
+**New: `tests/unit/test_requirements_graph_loud_failure.py` (30).** One test per ledger line, then:
+- every router given an error, which must halt;
+- every node of the compiled graph, which must have a HALT edge.
+
+**Before the fix, measured:** 8 failed, 22 passed.
+- The 8 failures are the two human-gate routers, which went on to `next_node` with an error set.
+- The 22 that passed are the ledger rows: #3864 had already routed seven of them, and two were compliant.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 424 passed and 1 skipped across 18 files that build or route the requirements graph.

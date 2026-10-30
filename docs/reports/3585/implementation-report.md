@@ -4,7 +4,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 
 ## Modules
 
-### nodes/finalize.py (20 ledger rows: 17 fixed here, 2 fixed by #3767, 1 compliant)
+### nodes/finalize.py (20 ledger findings: 18 fixed here, 2 by #3767; and 1 compliant row, pinned)
 
 - **Every failure is said and halts.** Each one goes through one helper, which writes an ERROR line to stderr and to the log and sets `error_message`. `route_after_finalize` sends that to HALT (#3864), and HALT alerts.
 - **Nothing outward happens after a precondition fails.**
@@ -28,6 +28,11 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 - **`validate_lld_final` fails on empty content.** It returned no errors, which is a pass. It lives in `finalize.py`, not in `verdict_schema.py`.
 - **The gate registry.** `lld.finalize.issue_creation` now covers `_finalize_issue`'s two new halt sites.
 
+### graph.py (9 ledger rows: 7 fixed by #3864, 2 compliant, all pinned)
+
+- **#3864 had already routed every ledger row to HALT.** Each is now pinned by a test named for its ledger line.
+- **The two human-gate routers read only `next_node`.** A gate that stopped with an error and named a successor went on to that successor, or ended the run at END. Both routers now check `error_message` first and halt. The N4 revise cap in `human_gate.py` depends on this.
+
 ## Loud-failure compliance (standard 0034)
 
 | Site (file:line) | Loud | Logged | Stops | Alerts |
@@ -35,6 +40,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 | `finalize.py` `_finalize_issue`, `_save_lld_file`, `_commit_and_push_files`, `_cleanup_source_idea`, the lineage move in `finalize` | ERROR line on stderr and in the log, via `_fail` | the message names the repo, the issue, the path or URL, and the cause | `error_message`, which `route_after_finalize` sends to HALT | HALT calls `alert_operator` |
 | `finalize.py` `_finalize_repair_budget` | the ValueError's traceback | names the bad value | raises out of the node | not alerted at the site: the orchestrator's `except Exception` in `run_lld_stage` records a failed stage without an alert (outside this branch) |
 | `finalize.py` `validate_lld_final` | the ValueError's traceback | says the content is empty | raises; its one caller halts on an empty draft first | through that caller's HALT |
+| `graph.py` `route_from_human_gate_draft`, `route_from_human_gate_verdict` | the gate's own ERROR line | the gate's message | an error routes to HALT | HALT calls `alert_operator` |
 
 ## New defects found, not fixed here
 
