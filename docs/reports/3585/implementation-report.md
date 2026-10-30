@@ -205,3 +205,10 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 
 - **A JSON verdict is read strictly** (64, 66, 105): text starting with `{` that is not JSON is an ERROR line and a ValueError; a JSON verdict without a `blocking_issues` list, or with an item lacking `description`, raises. They used to be read as prose or as "0 issues".
 - **The status comes from an explicit verdict line** (109), so "NOT APPROVED" is no longer APPROVED. An entry with no verdict line stays UNKNOWN: the review node stores actionable feedback, usually a bullet list, in the history, so raising there would stop every revision. That half of the ledger's fix is a won't-do, pinned.
+
+### git_operations.py (5 ledger rows: 4 fixed, 1 compliant)
+
+- **The arc is fetched or the cut stops** (116). A fetch failure raises with git's stderr; no `origin`, and an origin without the branch, still fall back to the local base (#2684).
+- **A reused LLD branch must descend from the arc** (180), checked with `git merge-base --is-ancestor` before any worktree is created. The two `worktree add` argument lists are unchanged.
+- **The commit SHA is read from git** (265, 395) with `git rev-parse --short HEAD`, and raises when it cannot be; the summary-line parse returned "(root-commit)" for a first commit and "" when it did not parse.
+- **The origin URL lookup** stays best-effort (330, compliant).

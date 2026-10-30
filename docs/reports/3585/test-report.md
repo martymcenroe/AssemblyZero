@@ -242,3 +242,11 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** `test_verdict_summarizer.py`'s malformed-JSON test expects the ValueError and an ERROR line.
 
 **Neighbouring suites:** 44 passed with `test_feedback_window.py`.
+
+## git_operations.py
+
+**New: `tests/unit/test_git_operations_loud_failure.py` (11).** Before the fix: 6 failed, 5 passed (no origin, an origin without the branch, an origin with it, a reused branch on the arc, and the compliant 330).
+
+**Changed tests:** `test_requirements_git_operations.py` and `test_issue_162.py` answer the new `git rev-parse` call; the no-SHA test expects the raise.
+
+**Neighbouring suites:** 225 passed across ten files.
