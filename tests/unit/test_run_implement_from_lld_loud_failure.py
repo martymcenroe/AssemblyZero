@@ -55,6 +55,9 @@ def _isolate_home(tmp_path, monkeypatch):
         testing_audit, "WORKFLOW_AUDIT_FILE", tmp_path / "workflow-audit.jsonl"
     )
     monkeypatch.delenv("ASSEMBLYZERO_WORKFLOW_DB", raising=False)
+    # main sets this in os.environ for an --auto run; recorded here, it is
+    # restored when the test ends instead of leaking into the next one.
+    monkeypatch.setenv("ASSEMBLYZERO_AUTO_MODE", "1")
 
 
 @pytest.fixture(autouse=True)
