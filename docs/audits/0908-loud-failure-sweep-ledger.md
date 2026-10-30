@@ -553,15 +553,15 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/settlement.py:176` | outside root | abs key | logged | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
 | `assemblyzero/core/settlement.py:177` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
 | `assemblyzero/core/settlement.py:259` | hash | None | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
-| `assemblyzero/core/capacity.py:74` | not object | {} | all | raise |
-| `assemblyzero/core/capacity.py:75` | read | {} | all | raise |
-| `assemblyzero/core/capacity.py:89` | write | pass | all | raise |
+| `assemblyzero/core/capacity.py:74` | not object | {} | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:75` | read | {} | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:89` | write | pass | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
 | `assemblyzero/core/capacity.py:113` | reset ts | fall through | compliant | none |
 | `assemblyzero/core/capacity.py:121` | iso ts | fall through | compliant | none |
-| `assemblyzero/core/capacity.py:212` | stored ts | None | all | raise |
-| `assemblyzero/core/capacity.py:223` | no ts | available | logged, stops | raise |
-| `assemblyzero/core/capacity.py:237` | unchecked | available | logged, stops | unchecked |
-| `assemblyzero/core/capacity.py:264` | unknown provider | available | loud, logged, stops | raise |
+| `assemblyzero/core/capacity.py:212` | stored ts | None | all | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:223` | no ts | available | logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:237` | unchecked | available | logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
+| `assemblyzero/core/capacity.py:264` | unknown provider | available | loud, logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
 | `assemblyzero/core/operator_notify.py:183` | non-windows | reason | loud, alerts | ERROR |
 | `assemblyzero/core/operator_notify.py:199` | toast spawn | reason | loud, logged, alerts | raise |
 | `assemblyzero/core/operator_notify.py:200` | tag | records the fall-through as a decision | all | remove |

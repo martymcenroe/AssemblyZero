@@ -78,6 +78,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 216 passed across every test that imports the module, plus the two audits' own tests.
 
+## capacity.py
+
+**New: `tests/unit/test_capacity_loud_failure.py` (12)**: nine for the seven sites (two each for 75 and 89), plus three that pin kept behaviour (a missing state file is no record and quiet, a record with a null reset time binds for the cooldown, an unchecked provider is not listed as exhausted).
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 9 failed, 3 passed (the three that pin kept behaviour). Each failure was the missing raise, or Gemini reported as available.
+
+**Changed test:** `test_capacity_gate.py::test_corrupt_state_file_raises` (was `test_corrupt_state_file_does_not_block_work`).
+
+**Neighbouring suites:** 428 passed and 1 failed across `test_capacity_gate.py`, `test_capacity_loud_failure.py`, `test_capacity_fidelity.py`, `test_capacity_stage_retry.py`, the Claude CLI provider tests (`test_llm_provider.py`, `test_llm_provider_loud_failure.py`, `test_529_hardening.py`, `test_one_claude_cli_transport.py`, `test_llm_idle_timeout.py`, `test_llm_provider_json_schema.py`, `test_nested_claude_env.py`, `test_model_call_guard.py`, `test_claude_spend_lock_refusal.py`), the orchestrator entry tests (`test_alert_channel_at_start.py`, `test_stage_verdict_is_explicit.py`) and the two audits' own tests. The one failure was the fail-open baseline going stale by the three fixed handlers; after `--write-baseline` the audits' tests pass.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.

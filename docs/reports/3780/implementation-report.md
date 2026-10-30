@@ -116,6 +116,19 @@ Settlement decides whether a launch may reuse an artifact instead of drafting it
 
 Baseline: both tags leave. The fail-open audit lost 2 findings.
 
+### capacity.py (#3773, 7 sites)
+
+The capacity gate decides whether `tools/orchestrate.py` may start a run. Every failure in it used to read as "available", so a recorded exhaustion could be ignored and the run spent the healthy provider's quota finding out.
+
+- **A state file that cannot be read, or is not a JSON object, raises** (74, 75). It used to read as "nothing recorded". The new `CapacityStateError` names the file and the cause and says how to clear it. A missing file is still no record, and quiet.
+- **A write that fails raises** (89). It used to pass, so an exhaustion was never remembered and the next run started blind. `CapacityStateError` is a `RuntimeError`, not an `OSError`, so `ClaudeCLIProvider.invoke` does not read it as "claude -p could not be run".
+- **A stored time that is not an ISO time raises** (212), and so does a record with no time at all (223). Both used to read as "available". A record whose reset time is null still expires after `UNKNOWN_RESET_COOLDOWN`: `record_exhaustion` writes null when the provider named no reset time, by design.
+- **Gemini is reported as not checked** (237). Nothing on this machine records Gemini's quota; agy holds it. `ProviderCapacity` gains `checked`, and Gemini's status is `checked=False`, `available=False`, and its summary says the transport preflight checks it with a real call before every workflow's first draft. `blocked_providers` lists only what is known to be exhausted, so Gemini blocks nothing here, and is no longer called available.
+- **An unknown provider raises** (264). It used to be reported as available.
+- **Callers.** In `llm_provider.py`, `record_exhaustion` and `clear_exhaustion` run inside `ClaudeCLIProvider.invoke`, whose handler re-raises anything that is not a transport error, so a broken state file now ends the call with `CapacityStateError` where it used to pass. `tools/orchestrate.py` calls `blocked_providers` with no handler: a broken state file ends the run before it starts with a traceback and exit 1, but no alert (outside `core/`, its own ledger row).
+
+Baseline: no entries leave, since the module had no broad handler or tag; rewriting it moved three `tools/new_repo.py` line numbers that the merge of `main` had left stale. The fail-open audit lost 3 findings (`_load_state`, `_save_state`, `_claude_capacity._dt`).
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

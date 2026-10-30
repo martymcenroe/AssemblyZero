@@ -1529,19 +1529,19 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3581
+      "line": 3606
     },
     "tools/new_repo.py::_create_repo::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3590
+      "line": 3615
     },
     "tools/new_repo.py::run_post_create_hooks::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2732
+      "line": 2754
     },
     "tools/orchestrate.py::main::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

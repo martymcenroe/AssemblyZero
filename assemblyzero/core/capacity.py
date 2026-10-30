@@ -15,6 +15,13 @@ The ``claude`` CLI exposes no usage or quota subcommand, and the numbers in
 Claude Code's ``/usage`` belong to the harness, not to anything a pipeline can
 read. So the Claude side cannot poll — it learns from a failure and remembers
 it, exactly the way the Gemini side already works.
+
+#3773 (ADR 0236): the gate never reads a failure as "available". A state file
+that exists and cannot be read, or holds a record that cannot be understood,
+raises ``CapacityStateError`` naming the file; so does a write that fails,
+which used to leave the next run starting blind. Gemini's quota is held by
+agy and not recorded here, so its status says "not checked" rather than
+"available"; an unknown provider raises.
 """
 
 from __future__ import annotations
@@ -34,19 +41,45 @@ from assemblyzero.core.config import CAPACITY_STATE_FILE
 # so an hour is a conservative retry point, not a guess at the real reset.
 UNKNOWN_RESET_COOLDOWN = timedelta(hours=1)
 
+#: The providers this module knows. Only Claude's state is recorded here.
+KNOWN_PROVIDERS = ("claude", "gemini")
+
+#: Why Gemini is not checked here, and what checks it instead.
+GEMINI_UNCHECKED = (
+    "agy holds Gemini's quota and nothing records it on this machine; the "
+    "transport preflight checks Gemini with a real call before the first "
+    "draft of every workflow that uses it (#3506)"
+)
+
+
+class CapacityStateError(RuntimeError):
+    """The capacity state file cannot be read, understood or written (#3773).
+
+    Deliberately not an ``OSError``: ``ClaudeCLIProvider.invoke`` turns an
+    ``OSError`` into a failed call saying the CLI could not be run, and a
+    broken state file is not that.
+    """
+
 
 @dataclass
 class ProviderCapacity:
-    """One provider's known capacity state."""
+    """One provider's known capacity state.
+
+    ``checked`` is False for a provider this module does not track (Gemini).
+    Such a status is not ``available``: nothing here knows that it is.
+    """
 
     provider: str
     available: bool
     resets_at: Optional[datetime] = None
     exhausted_at: Optional[datetime] = None
     detail: str = ""
+    checked: bool = True
 
     def wait_summary(self, now: Optional[datetime] = None) -> str:
         """Human phrasing of the wait, for an operator staring at a console."""
+        if not self.checked:
+            return f"{self.provider}: not checked here ({self.detail})"
         if self.available:
             return f"{self.provider}: available"
         if not self.resets_at:
@@ -65,20 +98,39 @@ class ProviderCapacity:
 
 
 def _load_state(state_file: Optional[Path] = None) -> dict:
+    """The recorded state, or ``{}`` when no file was ever written.
+
+    Absence is an answer: nothing has been recorded. A file that exists and
+    cannot be read, or that is not a JSON object, raises (#3773). It used to
+    read as "nothing recorded", so a recorded exhaustion was ignored and the
+    run started anyway, spending the healthy provider's quota to find out.
+    """
     path = state_file or CAPACITY_STATE_FILE
     if not path.exists():
         return {}
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        # An unreadable capacity file must never block work — the whole
-        # point of this module is to prevent wasted runs, not create them.
-        return {}
+    except (json.JSONDecodeError, OSError) as exc:
+        raise CapacityStateError(
+            f"cannot read the capacity state {path}: {type(exc).__name__}: {exc}; "
+            f"fix it, or remove it to forget every recorded exhaustion"
+        ) from exc
+    if not isinstance(data, dict):
+        raise CapacityStateError(
+            f"the capacity state {path} is not a JSON object (it holds "
+            f"{type(data).__name__}); fix it, or remove it to forget every "
+            f"recorded exhaustion"
+        )
+    return data
 
 
 def _save_state(state: dict, state_file: Optional[Path] = None) -> None:
+    """Write the state atomically, or raise naming the file (#3773).
+
+    A failed write used to pass: an exhaustion was then never remembered, and
+    the next run started blind, which is the waste this module exists to stop.
+    """
     path = state_file or CAPACITY_STATE_FILE
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,8 +138,10 @@ def _save_state(state: dict, state_file: Optional[Path] = None) -> None:
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump(state, handle, indent=2)
         tmp.replace(path)
-    except OSError:
-        pass
+    except OSError as exc:
+        raise CapacityStateError(
+            f"cannot write the capacity state {path}: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def parse_reset_time(message: str, now: Optional[datetime] = None) -> Optional[datetime]:
@@ -198,19 +252,30 @@ def _claude_capacity(
     state_file: Optional[Path] = None, now: Optional[datetime] = None
 ) -> ProviderCapacity:
     now = now or datetime.now(timezone.utc)
+    path = state_file or CAPACITY_STATE_FILE
     entry = _load_state(state_file).get("claude")
     if not entry:
         return ProviderCapacity(provider="claude", available=True)
 
     def _dt(key: str) -> Optional[datetime]:
+        """The stored time, or None when the record holds none.
+
+        ``resets_at`` is stored as null when the provider's message named no
+        reset time; that is a record, not a failure. A value that is there
+        and is not an ISO time raises (#3773): it used to read as absent,
+        and a record with neither time read as "available".
+        """
         raw = entry.get(key)
         if not raw:
             return None
         try:
             parsed = datetime.fromisoformat(raw)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-        except (ValueError, TypeError):
-            return None
+        except (ValueError, TypeError) as exc:
+            raise CapacityStateError(
+                f"the claude record in {path} has {key}={raw!r}, which is not "
+                f"an ISO time: {type(exc).__name__}: {exc}"
+            ) from exc
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
     exhausted_at = _dt("exhausted_at")
     resets_at = _dt("resets_at")
@@ -220,7 +285,15 @@ def _claude_capacity(
     effective_reset = resets_at or (
         (exhausted_at + UNKNOWN_RESET_COOLDOWN) if exhausted_at else None
     )
-    if effective_reset is None or now >= effective_reset:
+    if effective_reset is None:
+        # #3773: record_exhaustion always writes exhausted_at, so a record
+        # with neither time was not written by it; it used to read as
+        # "available".
+        raise CapacityStateError(
+            f"the claude record in {path} has no exhaustion time and no reset "
+            f"time, so when it lifts cannot be told: {entry!r}"
+        )
+    if now >= effective_reset:
         return ProviderCapacity(provider="claude", available=True)
 
     return ProviderCapacity(
@@ -233,8 +306,15 @@ def _claude_capacity(
 
 
 def _gemini_capacity(now: Optional[datetime] = None) -> ProviderCapacity:
-    """Gemini's state is not tracked locally (handled by agy)."""
-    return ProviderCapacity(provider="gemini", available=True)
+    """Gemini's state is not tracked locally (handled by agy).
+
+    #3773: so it is reported as not checked, never as available. Nothing on
+    this machine knows Gemini's quota; the transport preflight finds out with
+    a real call, and halts the workflow when the call fails.
+    """
+    return ProviderCapacity(
+        provider="gemini", available=False, checked=False, detail=GEMINI_UNCHECKED,
+    )
 
 
 def check_capacity(
@@ -250,18 +330,28 @@ def check_capacity(
         now: Override for the clock (tests).
 
     Returns:
-        Mapping of provider name to its ProviderCapacity.
+        Mapping of provider name to its ProviderCapacity. Gemini's is not
+        checked (``checked=False``).
+
+    Raises:
+        ValueError: a provider this module does not know (#3773); it used to
+            be reported as available.
+        CapacityStateError: the state file cannot be read or understood.
     """
-    names = providers or ["claude", "gemini"]
+    names = providers or list(KNOWN_PROVIDERS)
+    unknown = [name for name in names if name not in KNOWN_PROVIDERS]
+    if unknown:
+        raise ValueError(
+            f"no capacity check for provider(s) {', '.join(map(repr, unknown))}; "
+            f"known: {', '.join(KNOWN_PROVIDERS)}"
+        )
     now = now or datetime.now(timezone.utc)
     statuses: dict[str, ProviderCapacity] = {}
     for name in names:
         if name == "claude":
             statuses[name] = _claude_capacity(state_file=state_file, now=now)
-        elif name == "gemini":
-            statuses[name] = _gemini_capacity(now=now)
         else:
-            statuses[name] = ProviderCapacity(provider=name, available=True)
+            statuses[name] = _gemini_capacity(now=now)
     return statuses
 
 
@@ -270,9 +360,14 @@ def blocked_providers(
     state_file: Optional[Path] = None,
     now: Optional[datetime] = None,
 ) -> list[ProviderCapacity]:
-    """Just the providers that cannot serve a run right now."""
+    """Just the providers known to be exhausted right now.
+
+    A provider that is not checked here is not in the list: nothing here
+    knows it is exhausted, and it is not called available either. Gemini is
+    the one such provider, and the transport preflight checks it (#3773).
+    """
     return [
         status
         for status in check_capacity(providers, state_file=state_file, now=now).values()
-        if not status.available
+        if status.checked and not status.available
     ]
