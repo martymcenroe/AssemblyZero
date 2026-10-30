@@ -128,3 +128,8 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 - **N2 halts on it**, at both places it pins a revision; no draft is saved.
 - **Kept:** a revision that itself removed unnamed tests is still refused entire, emitting the previous draft.
 - **`core/gate_registry.py`.** `spec.conservation_gate` names only that remaining site, with `emits` changed to its message; the ratchet does not move.
+
+### `workflows/implementation_spec/nodes/retry_prompt_builder.py` (1 site, 2 compliant, 1 not changed)
+
+- **A token estimate that fails (232)** logs an ERROR naming the exception and re-raises; it returned -1, which a caller could read as a count.
+- **The tier-two fallback (174) is not changed.** Tier 2 prunes to save tokens; when the LLD has no section for the file, tier 1 sends the whole LLD, which loses nothing, and the result says it fell back.

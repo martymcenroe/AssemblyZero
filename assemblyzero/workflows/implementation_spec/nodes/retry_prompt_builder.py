@@ -158,6 +158,11 @@ def _build_tier2_prompt(ctx: RetryContext) -> str:
     Includes only the relevant file spec section, error, and truncated
     previous attempt snippet. Falls back to tier 1 if section extraction fails.
 
+    The fallback is kept under #3585 (ADR 0236) by design, not swallowed:
+    tier 2 is a token-saving prune, and tier 1 sends the WHOLE LLD, a superset
+    of what tier 2 would have sent, so the retry loses nothing. The result
+    reports it (tier 1, "[fallback]" in context_sections_included).
+
     Args:
         ctx: Full RetryContext; previous_attempt_snippet must not be None.
 
@@ -222,16 +227,24 @@ def _estimate_tokens(text: str) -> int:
         text: String to estimate.
 
     Returns:
-        Integer token count estimate. Returns -1 if encoding fails.
+        Integer token count estimate; 0 for empty text.
+
+    Raises:
+        Whatever tiktoken raises, after an ERROR log naming it (#3585). It
+        used to log a WARNING with no cause and return -1, an in-band number
+        a caller could read as a count.
     """
     if not text:
         return 0
     try:
         enc = tiktoken.get_encoding("cl100k_base")
         return len(enc.encode(text))
-    except Exception:
-        logger.warning("tiktoken encoding failed; returning -1 sentinel")
-        return -1
+    except Exception as exc:
+        logger.error(
+            "tiktoken could not estimate the retry prompt's tokens: %s: %s",
+            type(exc).__name__, exc,
+        )
+        raise
 
 
 def _strip_completed_sections(lld_content: str, completed_files: list[str]) -> str:

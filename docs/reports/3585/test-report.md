@@ -137,3 +137,10 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
 - **Changed:** the two `test_pinning_conservation.py` tests that expected the revision emitted unenforced now expect `PinningMergeError`.
 - **Neighbouring suites:** 14 files, 251 passed after the change.
 - **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
+
+## `nodes/retry_prompt_builder.py`
+
+- **Added:** `tests/unit/test_retry_prompt_builder_loud_failure.py`, 5 tests. Before the fix: 1 failed, 4 passed. After: 5 passed.
+- **Changed:** `test_retry_prompt_builder.py`'s sentinel test now expects the raise.
+- **Neighbouring suites:** 3 files, 65 passed.
+- **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.

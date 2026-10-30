@@ -467,14 +467,14 @@ class TestEstimateTokens:
         result = _estimate_tokens("some text here")
         assert isinstance(result, int)
 
-    def test_tiktoken_failure_returns_sentinel(self) -> None:
-        """Returns -1 if tiktoken encoding fails."""
+    def test_tiktoken_failure_raises(self) -> None:
+        """A tiktoken failure is raised after an ERROR log (#3585); it used to
+        return a -1 sentinel a caller could read as a count."""
         with patch(
             "assemblyzero.workflows.implementation_spec.nodes.retry_prompt_builder.tiktoken.get_encoding",
             side_effect=Exception("tiktoken error"),
-        ):
-            result = _estimate_tokens("Hello world")
-        assert result == -1
+        ), pytest.raises(Exception, match="tiktoken error"):
+            _estimate_tokens("Hello world")
 
     def test_single_word(self) -> None:
         """Single word returns a small positive token count."""
