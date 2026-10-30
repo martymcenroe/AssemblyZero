@@ -188,3 +188,13 @@ The 6 files involved then gave 154 passed.
 - `test_lld_edit_script_revision.py`: the fixture creates the target repo it names.
 
 **Neighbouring suites:** 158 passed across the six changed files; 1473 passed across 58 files whose nodes call these functions, with three of the mock-title failures above and two pre-existing failures in `test_extract_and_discard.py` (KeyError 'test_plan_status'), which fail identically with the base `audit.py` and `validate_mechanical.py` swapped in.
+
+## contract_fidelity.py
+
+**New: `tests/unit/test_contract_fidelity_loud_failure.py` (16).**
+
+**Before the fix, measured** with the base module swapped in: 12 failed, 4 passed. The four pin a repo with no contract, an issue the declaration does not cover, an empty findings list, and findings that report without refusing.
+
+**Changed tests, each asserting the new behaviour (`test_contract_fidelity.py`):** an unparseable answer and a missing findings list raise; a fetch failure refuses with an alert; the "never refuses" test is renamed for what it asserts, an audit that reached a verdict.
+
+**Neighbouring suites:** 102 passed across `test_contract_fidelity.py`, the new file and `test_seats.py`.

@@ -677,15 +677,16 @@ class TestTheReviewIsFailClosed:
         assert "provider storm" in "\n".join(review.lines())
 
     def test_unparseable_json_is_not_a_clean_bill(self, brief, monkeypatch):
+        """#3585: it raises, quoting the answer, rather than coming back NOT
+        REACHED for a preflight that used to let the roll proceed."""
         _provider(monkeypatch, _result(True, "not json"))
-        review = review_fidelity(brief)
-        assert not review.reached
-        assert "NOT REACHED" in "\n".join(review.lines())
+        with pytest.raises(ValueError, match="not JSON"):
+            review_fidelity(brief)
 
     def test_a_missing_findings_key_is_not_a_clean_bill(self, brief, monkeypatch):
         _provider(monkeypatch, _ok({"verdict": "fine"}))
-        review = review_fidelity(brief)
-        assert not review.reached
+        with pytest.raises(ValueError, match="no findings list"):
+            review_fidelity(brief)
 
     def test_an_unassembled_brief_never_reaches_the_model(self, tmp_path):
         review = review_fidelity(build_brief(tmp_path, 331, TITLE_331, BODY_331))
@@ -714,7 +715,9 @@ def _fetch(title, body):
 
 
 class TestItRunsAtLauncherPreflight:
-    def test_it_never_refuses(self, contract_repo, monkeypatch):
+    def test_an_audit_that_reached_a_verdict_does_not_refuse(self, contract_repo, monkeypatch):
+        """Findings are report-only; only an audit that did not run refuses
+        (#3585)."""
         _provider(monkeypatch, _ok({"findings": []}))
         _text, refuse = check_contract_fidelity_at_preflight(
             contract_repo, [331], _fetch(TITLE_331, BODY_331)
@@ -745,11 +748,15 @@ class TestItRunsAtLauncherPreflight:
         assert FIDELITY_MARKER in text
         assert "anti-aliasing" in text
 
-    def test_a_read_failure_is_reported_not_swallowed(self, contract_repo):
+    def test_a_read_failure_is_reported_not_swallowed(self, contract_repo, operator_alerts):
+        """#3585: and it refuses, with an alert; it used to let the roll go
+        on unaudited."""
         def fetch(_r, _i):
             raise RuntimeError("no such issue")
         text, refuse = check_contract_fidelity_at_preflight(
             contract_repo, [331], fetch
         )
-        assert "could not be read" in text
-        assert refuse is False
+        assert "could not run" in text
+        assert "no such issue" in text
+        assert refuse is True
+        assert len(operator_alerts) == 1

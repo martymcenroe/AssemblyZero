@@ -125,16 +125,27 @@ The review half then adjudicates with the contract in hand -- the thing no
 current stage does. Report-only, for the reasons #2227 and #2387 give, and only
 for repos that declare a binding contract for the issue being rolled; every
 other repo pays nothing and sees one line saying so.
+
+## Report-only covers findings, never an audit that did not run (#3585)
+
+ADR 0236: a gate that cannot run makes everything after it dependent. A
+declared contract that is missing or unreadable, an issue that cannot be
+fetched, a brief with no table or no section to audit, and a reviewer that
+cannot be resolved or answers nothing usable each raise or come back NOT
+REACHED, and the preflight alerts the operator and refuses. A finding is still
+reported and never refuses.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from assemblyzero.visual_gate.config import gate_applies, load_gate_config
+from assemblyzero.core import alert
+from assemblyzero.visual_gate.config import CONFIG_REL, gate_applies, load_gate_config
 from assemblyzero.workflows.implementation_spec.assertion_manifest import (
     is_criteria_table,
 )
@@ -144,6 +155,8 @@ from assemblyzero.workflows.requirements.scope_coverage import (
     scope_sentence_elements,
     title_elements,
 )
+
+logger = logging.getLogger(__name__)
 
 LABEL = "Contract fidelity (#2646)"
 
@@ -368,12 +381,22 @@ def resolve_contract(repo_root: Path | str, issue: int) -> Path | None:
     Read through `load_gate_config` rather than a convention of this module's
     own: the repo already declares which document binds it, and a second
     answer would disagree with the visual gate that renders against the first.
+
+    None means the repo declares no contract for this issue, which is an
+    answer. A declared contract that is not a file on disk raises (#3585): it
+    used to read as "declares no binding contract", so the audit was skipped
+    as not applicable for exactly the repo that asked for it.
     """
     config = load_gate_config(repo_root)
     if not gate_applies(config, issue) or not config.contract:
         return None
     path = Path(repo_root) / config.contract
-    return path if path.is_file() else None
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"{Path(repo_root) / CONFIG_REL} declares the binding contract "
+            f"{config.contract} for issue #{issue}, and {path} is not a file"
+        )
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -748,7 +771,14 @@ class FidelityBrief:
     #: #2651: (section, law, rows referencing the section). A law with no
     #: referencing row is undischarged and says so in the prompt.
     laws: list[tuple[str, str, list[str]]] = field(default_factory=list)
+    #: Why the brief does not apply: the repo declares no contract for the
+    #: issue. A contract that cannot be read raises instead (#3585).
     error: str = ""
+
+    @property
+    def declared(self) -> bool:
+        """The repo declares a binding contract for this issue."""
+        return bool(self.contract_path)
 
     @property
     def ready(self) -> bool:
@@ -845,7 +875,13 @@ class FidelityBrief:
 
 
 def build_brief(repo_root: Path | str, issue: int, title: str, body: str) -> FidelityBrief:
-    """Assemble the reviewer's brief. Pure apart from reading the contract."""
+    """Assemble the reviewer's brief. Pure apart from reading the contract.
+
+    Raises:
+        FileNotFoundError: the declared contract is not on disk (#3585).
+        OSError: the declared contract cannot be read, naming it (#3585). It
+            used to set ``error``, and the launch went on unaudited.
+    """
     brief = FidelityBrief()
 
     contract_path = resolve_contract(repo_root, issue)
@@ -862,13 +898,11 @@ def build_brief(repo_root: Path | str, issue: int, title: str, body: str) -> Fid
     try:
         text = contract_path.read_text(encoding="utf-8-sig")
     except OSError as exc:
-        # fail-open: the ROLL continues, because this check is report-only and
-        # an unreadable file must not brick a launch. The VERDICT does not:
-        # `error` is set and `ready` stays False, so `disclosure` prints NOT
-        # CHECKED and `review_fidelity` refuses to call the model at all.
-        # "Was not audited" and "was audited and passed" never render the same.
-        brief.error = f"the declared contract could not be read: {exc}"
-        return brief
+        logger.error(
+            "[contract fidelity] cannot read the binding contract %s for "
+            "issue #%s: %s: %s", contract_path, issue, type(exc).__name__, exc,
+        )
+        raise
 
     sections = parse_contract(text)
     brief.sections = sections_in_play(title, body, sections)
@@ -1005,17 +1039,20 @@ def review_fidelity(
 ) -> FidelityReview:
     """Ask the reviewer to adjudicate, with the contract in hand.
 
-    Fails CLOSED in reporting, per #2474's ruling and standard 0028: a review
-    that cannot reach a verdict is recorded as NOT REACHED, never as clean.
-    It does not block the roll -- this check is report-only -- but "was not
-    audited" and "was audited and passed" never render the same.
+    Fails CLOSED, per #2474's ruling and standard 0028. A brief that is not
+    ready, or a model call that fails or answers nothing, comes back NOT
+    REACHED with its reason, and the call failure is an ERROR line (#3585);
+    ``check_contract_fidelity_at_preflight`` refuses on either. A reviewer
+    that cannot be resolved, and an answer that is not JSON or carries no
+    findings list, raise with the spec or the answer's opening (#3585). Only
+    the findings themselves are report-only.
 
     #3563: ``drafter_spec`` defaults to the active profile's
     `requirements.contract_fidelity` seat.
     """
     review = FidelityReview(brief=brief)
     if not brief.ready:
-        review.reason = brief.error or "the brief could not be assembled"
+        review.reason = brief.error or brief.disclosure()
         return review
 
     from assemblyzero.core.llm_provider import GeminiProvider, get_provider
@@ -1028,12 +1065,10 @@ def review_fidelity(
             drafter_spec, effort = seat.spec, seat.effort
         provider = get_provider(drafter_spec, effort=effort)
     except ValueError as exc:
-        # fail-open: the roll proceeds -- a bad provider spec is not this
-        # check's to halt on, and #2474 already halts the requirements gate
-        # for it. `reached` stays False, so the audit reports NOT REACHED
-        # rather than clean.
-        review.reason = f"invalid provider '{drafter_spec}': {exc}"
-        return review
+        raise ValueError(
+            f"the contract-fidelity reviewer {drafter_spec!r} (seat {SEAT}) "
+            f"cannot be resolved: {exc}"
+        ) from exc
 
     schema_kwargs: dict = {}
     if isinstance(provider, GeminiProvider):
@@ -1053,26 +1088,47 @@ def review_fidelity(
         review.reason = (
             getattr(result, "error_message", "") or "the provider returned no response"
         )
+        logger.error(
+            "[contract fidelity] the reviewer %s reached no verdict on %s: %s",
+            drafter_spec, brief.contract_path, review.reason,
+        )
         return review
 
+    excerpt = str(result.response)[:300]
     try:
         parsed = json.loads(result.response)
     except (TypeError, ValueError) as exc:
-        # fail-open: an unparseable answer does not halt the roll. It does not
-        # pass either -- `reached` stays False and the reason is printed, per
-        # standard 0028: a read that cannot be trusted never becomes a
-        # degraded value dressed as a verdict.
-        review.reason = f"the reviewer's answer was not JSON: {exc}"
-        return review
+        raise ValueError(
+            f"the contract-fidelity reviewer {drafter_spec}'s answer was not "
+            f"JSON ({type(exc).__name__}: {exc}); it began: {excerpt!r}"
+        ) from exc
 
     findings = parsed.get("findings") if isinstance(parsed, dict) else None
     if not isinstance(findings, list):
-        review.reason = "the reviewer's answer carried no findings list"
-        return review
+        raise ValueError(  # noqa: TRY004 - a malformed answer, as the JSON failure above
+            f"the contract-fidelity reviewer {drafter_spec}'s answer carried "
+            f"no findings list; it began: {excerpt!r}"
+        )
 
     review.reached = True
     review.findings = [f for f in findings if isinstance(f, dict)]
     return review
+
+
+def _refusal_alert(repo_root, issue: int, cause: str, drafter_spec: str | None) -> dict:
+    """The alert record for a contract audit that did not run (#3585)."""
+    return {
+        "what": f"audit issue #{issue}'s decision table against its binding contract",
+        "where": (
+            "assemblyzero.workflows.requirements.contract_fidelity."
+            "check_contract_fidelity_at_preflight (launcher preflight)"
+        ),
+        "cause": cause,
+        "consequence": "the preflight refuses the roll; nothing is spent",
+        "repo": str(repo_root),
+        "issue": issue,
+        "spec": drafter_spec or "",
+    }
 
 
 def check_contract_fidelity_at_preflight(
@@ -1080,30 +1136,51 @@ def check_contract_fidelity_at_preflight(
 ) -> tuple[str, bool]:
     """The whole preflight step: (text to print, whether to refuse).
 
-    Never refuses. Report-only for the reason #2227 and #2387 give -- and with
-    a further one of its own: this is the first check in the stack that spends
-    a model call at preflight, and it only runs for a repo that declares a
-    binding contract for the issue being rolled. Every other repo pays nothing
-    and sees one line saying so.
+    Findings never refuse. They are report-only for the reason #2227 and #2387
+    give -- and with a further one of its own: this is the first check in the
+    stack that spends a model call at preflight, and it only runs for a repo
+    that declares a binding contract for the issue being rolled. Every other
+    repo pays nothing and sees one line saying so.
+
+    An audit that did not run refuses (#3585): an issue that cannot be
+    fetched, a declared contract that is missing or unreadable, a brief with
+    no table or no section to audit, a reviewer that cannot be resolved,
+    fails or answers nothing usable. It alerts the operator with the issue
+    and the cause, and the loop stops there: no partial report goes on to the
+    issues after it. These used to print a line and let the roll proceed, so
+    "not audited" launched exactly like "audited and clean".
     """
     lines = [f"{LABEL} -- reads the contract the issue cites:"]
     ran = False
+
+    def refusal(issue: int, line: str) -> tuple[str, bool]:
+        lines.append(f"  #{issue}: {line}")
+        lines.append(
+            "  REFUSED: the contract audit did not run, so this roll would "
+            "launch unaudited. Fix the cause above and launch again."
+        )
+        return "\n".join(lines), True
+
     for issue in issues or []:
         try:
             title, body = fetch(repo_root, issue)
-        except Exception as exc:  # noqa: BLE001
-            # fail-open: a read failure is not a verdict, and the form check
-            # above has already reported the same failure for the same issue.
-            lines.append(f"  #{issue}: could not be read ({exc}).")
-            continue
-        brief = build_brief(repo_root, issue, title, body)
-        if not brief.ready and "declares no binding contract" in brief.error:
-            lines.append(f"  #{issue}: {brief.disclosure()}")
-            continue
-        ran = True
-        review = review_fidelity(brief, drafter_spec=drafter_spec)
+            brief = build_brief(repo_root, issue, title, body)
+            if not brief.declared:
+                lines.append(f"  #{issue}: {brief.disclosure()}")
+                continue
+            ran = True
+            review = review_fidelity(brief, drafter_spec=drafter_spec)
+        except Exception as exc:  # noqa: BLE001 - alerted and refused, never swallowed
+            cause = f"{type(exc).__name__}: {exc}"
+            alert.alert_operator(**_refusal_alert(repo_root, issue, cause, drafter_spec))
+            return refusal(issue, f"contract fidelity could not run ({cause}).")
         lines.append(f"  #{issue}: " + review.lines()[0])
         lines.extend("    " + line for line in review.lines()[1:])
+        if not review.reached:
+            alert.alert_operator(
+                **_refusal_alert(repo_root, issue, review.reason, drafter_spec)
+            )
+            return refusal(issue, "the audit was NOT REACHED.")
 
     if ran:
         lines += [
