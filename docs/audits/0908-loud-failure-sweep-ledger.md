@@ -674,7 +674,7 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/scripted_provider.py:136` | no response | "" success | all | raise |
 | `assemblyzero/core/scripted_provider.py:241` | unmatched | failed result | loud, alerts | ERROR |
 | `assemblyzero/core/scripted_provider.py:260` | scripted fail | failure | compliant | none |
-| `assemblyzero/core/retry_gate.py:209` | unknown class | full budget | loud, logged, stops | raise |
+| `assemblyzero/core/retry_gate.py:209` | unknown class | full budget | loud, logged, stops | FIXED in the core batch (#3790): an unknown failure class raises naming it and the four known, before fail-fast; test_<line> in test_retry_gate_loud_failure.py |
 | `assemblyzero/core/loud_failure_check.py:173` | source | raises | compliant | none |
 | `assemblyzero/core/resume_contract.py:53` | hash | None | loud, logged | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
 | `assemblyzero/core/resume_contract.py:54` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |

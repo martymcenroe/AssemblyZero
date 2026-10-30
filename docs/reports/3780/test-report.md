@@ -108,6 +108,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 91 passed across `test_retry.py`, the new file and the two audits' own tests.
 
+## retry_gate.py
+
+**New: `tests/unit/test_retry_gate_loud_failure.py` (8)**: two for the site (with and without fail-fast), plus two that pin kept behaviour: every class `classify_failure` returns is accepted (parametrized over five messages) and a transient failure keeps the caller's budget.
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 2 failed, 6 passed (the kept-behaviour tests).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 876 passed, 5 skipped and 1 failed across every unit and integration test file that names `retry_gate`, `should_retry`, `utils/retry.py` or either orchestrator, plus the two audits' own tests. The failure, `tests/integration/test_orchestrator_graph.py::TestOrchestrateFullPipeline::test_full_pipeline_success`, is not this change: it fails the same way with HEAD's `retry_gate.py` in place. Its `mock_all_stages` fixture has no runner for the `visual` stage that 8b3cb594 (#2518) added to `STAGE_ORDER`, so the graph loops until LangGraph's recursion limit.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.

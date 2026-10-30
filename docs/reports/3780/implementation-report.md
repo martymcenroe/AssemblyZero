@@ -150,6 +150,13 @@ Baseline: two entries leave (the tag and the handler). The fail-open audit lost 
 
 Baseline: no entries in either, before or after.
 
+### retry_gate.py (#3790, 1 site)
+
+- **An unknown failure class raises** (209), naming it and the four the gate knows. `should_retry` looked it up with `dict.get`, found nothing, and gave it the caller's whole budget, the same answer as a transient failure. The check runs before fail-fast, which answers "no retry" for every class and would otherwise hide one that is not a class.
+- **Callers.** All three pass a class the gate knows: `orchestrator/graph.py` and `testing/nodes/implementation/orchestrator.py` pass `classify_failure`'s answer, and `utils/retry.py` passes `LLMCallResult.failure_class`, which every provider sets from `classify_failure` or as `"permanent"`, or `classify_failure`'s answer when it is empty. A raise would be a bug in a new caller, and it propagates.
+
+Baseline: no entries in either. The fail-open audit examines one more site (the new raise).
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:
