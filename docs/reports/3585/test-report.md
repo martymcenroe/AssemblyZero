@@ -198,3 +198,13 @@ The 6 files involved then gave 154 passed.
 **Changed tests, each asserting the new behaviour (`test_contract_fidelity.py`):** an unparseable answer and a missing findings list raise; a fetch failure refuses with an alert; the "never refuses" test is renamed for what it asserts, an audit that reached a verdict.
 
 **Neighbouring suites:** 102 passed across `test_contract_fidelity.py`, the new file and `test_seats.py`.
+
+## precheck.py (fixed in `tools/check_requirements.py`)
+
+**New: `tests/unit/test_precheck_loud_failure.py` (12).** Each test drives the tool's `main` through one failure.
+
+**Before the fix, measured** with the base tool swapped in: 10 failed, 2 passed (a conflict and a clean verdict, which alert nobody).
+
+**Changed tests:** none; exit codes and output are unchanged.
+
+**Neighbouring suites:** 123 passed across `test_check_requirements.py`, `test_check_requirements_form.py` and the new file.
