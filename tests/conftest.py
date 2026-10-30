@@ -1,5 +1,6 @@
 """Pytest configuration for test suite."""
 
+import functools
 import importlib
 import os
 import sys
@@ -37,6 +38,12 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "timeout(seconds): set a timeout for the test (requires pytest-timeout plugin)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "real_agy_lookup: the suite's no-agy stand-in is not applied (#4253): the test "
+        "exercises the agy lookup itself and replaces every machine input it reads, or "
+        "it is an opt-in live probe that calls the machine's real agy",
     )
 
 
@@ -238,6 +245,45 @@ def agy_discovery_stays_off_the_machine(monkeypatch):
     from assemblyzero.core import gemini_client
 
     monkeypatch.setattr(gemini_client, "_ON_WINDOWS", False)
+
+
+def _no_linux_agy() -> None:
+    """The Linux agy lookup on a machine without agy, as on CI (#4253): None."""
+
+
+@functools.lru_cache(maxsize=1)
+def _no_wsl_agy() -> None:
+    """The WSL agy lookup on a machine without agy, as on CI (#4253): None.
+
+    Cached like the real one, so a test module whose fixture clears the real
+    lookup's cache (``_find_wsl_agy.cache_clear()``) can clear this one too.
+    """
+
+
+@pytest.fixture(autouse=True)
+def no_agy_from_the_machine(request, monkeypatch):
+    """A test sees agy only when it supplies one (#4253).
+
+    The operator's machines have agy (``~/.local/bin/agy`` on Ubuntu, inside
+    WSL on Windows) and CI has none. A test whose GeminiClient found the
+    machine's agy reached code CI never reaches: PR #4252's three watchdog
+    tests passed in two full local tiers and failed on CI, because since
+    #3777 a client with no agy fails before the call they replace. This is
+    the class #4160 closed for the ``AZ_`` environment.
+
+    Both lookups find nothing in every tier. A test that needs agy present
+    gives its client a stand-in path (``client._agy_cli = "/stand-in/agy"``).
+    A test of the lookup itself carries ``@pytest.mark.real_agy_lookup`` and
+    replaces every input the lookup reads: the home directory, ``which``,
+    ``os.access`` and ``subprocess.run``. The one other user of the marker is
+    an opt-in live probe, which is meant to call the machine's real agy.
+    """
+    if request.node.get_closest_marker("real_agy_lookup"):
+        return
+    from assemblyzero.core import gemini_client
+
+    monkeypatch.setattr(gemini_client, "_find_linux_agy", _no_linux_agy)
+    monkeypatch.setattr(gemini_client, "_find_wsl_agy", _no_wsl_agy)
 
 
 @pytest.fixture(autouse=True)

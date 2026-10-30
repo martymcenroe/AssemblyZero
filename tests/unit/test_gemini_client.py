@@ -334,6 +334,7 @@ def test_strip_ansi_removes_codes_and_normalizes_newlines():
     assert _strip_ansi("plain") == "plain"
 
 
+@pytest.mark.real_agy_lookup  # #4253: tests the lookup; every input is patched
 def test_find_agy_cli_uses_path():
     # Off Windows only: on Windows agy is found inside WSL (#3623,
     # tests/unit/test_agy_wsl_transport.py).
@@ -344,6 +345,7 @@ def test_find_agy_cli_uses_path():
     assert client._agy_cli == "/usr/bin/agy"
 
 
+@pytest.mark.real_agy_lookup  # #4253
 def test_linux_agy_prefers_local_bin_over_path(tmp_path, monkeypatch):
     """#4233: ~/.local/bin/agy is found even when PATH lacks it (a non-login shell)."""
     from assemblyzero.core import gemini_client as gc
@@ -358,6 +360,7 @@ def test_linux_agy_prefers_local_bin_over_path(tmp_path, monkeypatch):
     assert gc._find_linux_agy() == str(agy)
 
 
+@pytest.mark.real_agy_lookup  # #4253
 def test_linux_agy_never_takes_a_windows_build(tmp_path, monkeypatch):
     from assemblyzero.core import gemini_client as gc
 

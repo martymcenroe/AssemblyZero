@@ -26,6 +26,8 @@ from assemblyzero.workflows.testing.nodes.adversarial_node import (
 @pytest.mark.integration
 @pytest.mark.adversarial
 @pytest.mark.expensive
+# #4253: every tier runs as a machine with no agy; this probe exists to call the real one.
+@pytest.mark.real_agy_lookup
 @pytest.mark.skipif(
     os.environ.get("AZ_LIVE_ADVERSARIAL_PROBE") != "1",
     reason="live agy call; set AZ_LIVE_ADVERSARIAL_PROBE=1 to run",

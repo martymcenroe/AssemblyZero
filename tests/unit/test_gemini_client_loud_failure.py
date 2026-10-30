@@ -37,6 +37,7 @@ def no_waiting(monkeypatch):
     monkeypatch.setattr(gemini_client.time, "sleep", lambda s: None)
 
 
+@pytest.mark.real_agy_lookup  # #4253: these test the lookup itself
 class TestFindingAgy:
     def test_174_a_windows_agy_on_path_is_refused_out_loud(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(gemini_client.Path, "home", classmethod(lambda cls: tmp_path))
