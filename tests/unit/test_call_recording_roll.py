@@ -75,7 +75,7 @@ LLD = """# LLD-999: Add a greeting
 
 | id | scenario | expects |
 |---|---|---|
-| S1 | greet("world") (REQ-1) | returns "hello, world" |
+| S1 | REQ-1: greet("world") | returns "hello, world" |
 """
 # #3585: N3 joins criteria to tests on REQ tags and halts on an untagged
 # table, so the scenario carries its requirement and the spec's test cites it.
@@ -96,7 +96,7 @@ Implements REQ-1.
 
 ```python
 def test_S1_greet_world():
-    \"\"\"REQ-1\"\"\"
+    \"\"\"REQ-1: greet("world") returns "hello, world".\"\"\"
     from greet import greet
     assert greet("world") == "hello, world"
 ```

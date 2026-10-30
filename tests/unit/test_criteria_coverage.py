@@ -177,10 +177,12 @@ class TestCriterionExtraction:
         )
         assert lld_criteria(lld) == []
 
-    def test_an_lld_with_no_table_is_not_applicable(self):
+    def test_an_lld_with_no_table_cannot_be_checked(self):
+        """#3585: it used to be "not applicable", and ok, so the gate passed."""
         report = criteria_coverage("```python\ndef test_x(): pass\n```", "# LLD\n\nProse only.\n")
         assert not report.ran
-        assert "not applicable" in format_report(report).lower()
+        assert not report.ok
+        assert "cannot be checked" in format_report(report).lower()
 
 
 class TestSpecTestExtraction:
@@ -267,7 +269,9 @@ class TestTheOutcomeFallbackIsGone:
         assert "010" in report.reason
         assert "020" in report.reason
         assert "REQ tag" in report.reason
-        assert "not applicable" in format_report(report).lower()
+        # #3585: an abstention is a check that cannot run, never a pass.
+        assert "cannot be checked" in format_report(report).lower()
+        assert not report.ok
 
     def test_substring_prose_no_longer_counts_as_coverage(self):
         """The removal's point. These test docstrings contain each criterion's
