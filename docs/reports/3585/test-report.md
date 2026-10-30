@@ -86,3 +86,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** in `test_prompt_telemetry.py`, `test_empty_details_are_not_recorded` is now `test_empty_details_are_recorded_under_their_own_fingerprint`, `test_a_malformed_line_does_not_break_the_report` is now `test_a_malformed_line_stops_the_report`, and `test_a_write_failure_is_logged_and_swallowed` is now `test_a_write_failure_alerts_and_raises`.
 
 **Neighbouring suites:** 180 passed across `test_prompt_telemetry.py`, `test_checkout_telemetry_isolation.py`, `test_check_requirements.py`, `test_factory_report.py`, `test_n0c_unarticulated_conflict.py`, `test_requirements_gate_reproduces.py` and `test_spec_convergence_telemetry.py` before the three changes (the three were the only failures); 66 passed across the new file, `test_prompt_telemetry.py`, `test_spec_convergence_telemetry.py` and `test_checkout_telemetry_isolation.py` after.
+
+## workflows/telemetry/hallucination_log.py
+
+**New: `tests/unit/test_hallucination_log_loud_failure.py` (6).** Site tests for 105, 114 and 123, both sinks failing, and two kept-behaviour tests: a sink given as None, and both sinks written.
+
+**Before the fix, measured** against the unchanged module: 4 failed, 2 passed (the kept-behaviour tests).
+
+**Changed tests:** in `test_hallucination_telemetry.py`, `test_missing_audit_dir_skips_that_sink_without_error` is now `test_missing_audit_dir_alerts_and_raises_after_the_other_sink`, and `test_sink_failure_is_swallowed` is now `test_sink_failure_alerts_and_raises`.
+
+**Neighbouring suites:** 235 passed across the new file, `test_hallucination_telemetry.py`, `test_checkout_telemetry_isolation.py` and `test_implementation_spec_workflow.py`.

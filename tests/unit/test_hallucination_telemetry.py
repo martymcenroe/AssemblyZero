@@ -143,20 +143,28 @@ class TestRecordEvent:
         events = _read_jsonl(tmp_path)
         assert len(events) == 2
 
-    def test_missing_audit_dir_skips_that_sink_without_error(self, tmp_path):
-        record_hallucination_event(
-            self._event(), tmp_path / "does-not-exist", tmp_path
-        )
+    def test_missing_audit_dir_alerts_and_raises_after_the_other_sink(
+        self, tmp_path, operator_alerts
+    ):
+        """#3585: an audit directory that was given but does not exist is a
+        failure, not a sink to skip; the JSONL sink is still written."""
+        with pytest.raises(FileNotFoundError):
+            record_hallucination_event(
+                self._event(), tmp_path / "does-not-exist", tmp_path
+            )
         assert len(_read_jsonl(tmp_path)) == 1
+        assert len(operator_alerts) == 1
 
-    def test_sink_failure_is_swallowed(self, tmp_path, capsys):
-        """A broken sink degrades to a warning — never an exception."""
+    def test_sink_failure_alerts_and_raises(self, tmp_path, operator_alerts):
+        """#3585: a broken sink alerts and raises; it used to print a WARNING
+        and be swallowed. The other sink is still written."""
         # data/ as a FILE makes the JSONL sink's mkdir raise.
         (tmp_path / "data").write_text("in the way", encoding="utf-8")
         audit = tmp_path / "audit"
         audit.mkdir()
-        record_hallucination_event(self._event(), audit, tmp_path)
-        assert "WARNING" in capsys.readouterr().out
+        with pytest.raises(OSError):
+            record_hallucination_event(self._event(), audit, tmp_path)
+        assert len(operator_alerts) == 1
         # The other sink still wrote.
         assert len(list(audit.glob(f"*-{AUDIT_SUFFIX}"))) == 1
 

@@ -95,3 +95,15 @@ The store is where the rate of drafter validation failures is computed; each of 
 - **A line that is not a JSON object alerts and raises** (188), naming the line. It was skipped uncounted.
 
 Callers that still swallow the raise: the three requirements nodes that record (`analyze_requirements.py`, `validate_mechanical.py`, `validate_test_plan.py`) and `orchestrator/stages.py` `_record_spec_convergence_failure` catch `Exception` and print or warn, so the halt they record is unchanged; the operator has been alerted first. The two readers, `factory_report.build_report` and `tools/prompt_failure_report.py`, let it out.
+
+### workflows/telemetry/hallucination_log.py (3 sites)
+
+The log is the baseline every invented-API detection is measured against.
+
+- **An audit directory that was given but does not exist alerts and raises** `FileNotFoundError` (105). It was skipped silently. `None` still means "no such sink for this run".
+- **A sink write that fails alerts and raises** (114, 123), naming the sink, the path and the cause. Each printed a WARNING to stdout and went on.
+- Both sinks are always attempted; each failure alerts; the first is raised.
+
+Caller that still swallows the raise: `workflows/implementation_spec/nodes/validate_completeness.py` wraps `_record_hallucination_telemetry` in `except Exception` and prints a WARNING, so the gate's verdict is unchanged; the operator has been alerted first.
+
+Defect found, not fixed: a cold import of `assemblyzero.workflows.telemetry` (or of `hallucination_log`) fails with a circular import: `hallucination_log` imports `workflows.requirements.audit` at module level, which reaches `validate_completeness`, which imports the half-initialised telemetry package. A run imports the graphs first, so it never meets this; the new test file imports `validate_completeness` first for the same reason.
