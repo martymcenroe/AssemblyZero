@@ -354,24 +354,32 @@ class TestTheCompletenessCheck:
         )
         assert check["passed"]
 
-    def test_an_absent_lld_is_not_applicable_rather_than_a_failure(self):
-        """#1870's convention: nothing to check is not evidence, but it is also
-        not a failure -- a spec must not be blocked because the LLD did not
-        reach this node."""
-        check = check_criteria_have_tests("```python\ndef test_x(): pass\n```", "")
-        assert check["passed"]
-        assert "not applicable" in check["details"].lower()
+    def test_an_absent_lld_cannot_be_checked(self):
+        """#3585 (ADR 0236): a check that cannot run is not a pass. An LLD
+        that did not reach N3 is a pipeline fault, and N3 halts on it; it used
+        to pass as "not applicable"."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            CompletenessCannotCheck,
+        )
+
+        with pytest.raises(CompletenessCannotCheck, match="no LLD content"):
+            check_criteria_have_tests("```python\ndef test_x(): pass\n```", "")
 
     def test_the_node_runs_the_check(self):
         """The check must actually be wired in, not merely defined -- a check
-        nothing calls is the quietest way for this to regress."""
+        nothing calls is the quietest way for this to regress.
+
+        #3585: the node runs its checks through `_run_checks`, so that is the
+        function read, and the node is read for the call to it.
+        """
+        import importlib
         import inspect
 
-        from assemblyzero.workflows.implementation_spec.nodes import (
-            validate_completeness as node,
+        vc = importlib.import_module(
+            "assemblyzero.workflows.implementation_spec.nodes.validate_completeness"
         )
-
-        source = inspect.getsource(node)
+        assert "_run_checks(" in inspect.getsource(vc.validate_completeness)
+        source = inspect.getsource(vc._run_checks)
         assert "check_criteria_have_tests(" in source, (
             "validate_completeness defines the check but never calls it"
         )

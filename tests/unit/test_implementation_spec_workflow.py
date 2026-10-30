@@ -145,8 +145,28 @@ def _build_complete_spec():
         lines.append(f"class Widget{i}:\n")
         lines.append("    pass\n")
 
+    # #3585: N3 fails a spec with no Section 10, so a complete spec has one,
+    # with a test for TAGGED_LLD's one criterion.
+    lines.append(SECTION_TEN)
+
     return "\n".join(lines)
 
+
+#: Section 10 with one runnable test citing REQ-1.
+SECTION_TEN = (
+    "\n## 10. Test Mapping\n\n```python\nimport math\n\n\n"
+    'def test_the_feature():\n    """REQ-1"""\n'
+    "    assert math.isclose(1 + 1, 2)\n```\n"
+)
+
+#: #3585: N3 halts without an LLD whose pass criteria it can read.
+TAGGED_LLD = textwrap.dedent("""\
+    # LLD
+
+    | ID | Scenario | Pass Criteria |
+    |----|----------|---------------|
+    | 010 | the feature (REQ-1) | works |
+""")
 
 SAMPLE_SPEC_COMPLETE = _build_complete_spec()
 SAMPLE_SPEC_INCOMPLETE = "# Implementation Spec\n\nToo short to pass validation."
@@ -1082,10 +1102,16 @@ class TestValidateCompleteness:
             validate_completeness,
         )
 
+        # #3585: Section 10 and the LLD it cites are present, because N3
+        # fails a spec with no Section 10 (a fact) and halts without the LLD.
+        # Section 10's one fence leaves both proxies failing: the Modify file
+        # is never mentioned, and one fence is under the threshold of three.
         base_state["spec_draft"] = (
             "# Implementation Spec\n\n## Overview\n\nChanges.\n\n"
             + ("filler content\n" * 20)
+            + SECTION_TEN
         )
+        base_state["lld_content"] = TAGGED_LLD
         files = [{
             "path": "assemblyzero/workflows/test/graph.py",
             "change_type": "Modify", "description": "Update graph",
@@ -1133,9 +1159,12 @@ class TestValidateCompleteness:
             + ("filler content\n" * 20)
         )
         base_state["files_to_modify"] = []
+        base_state["lld_content"] = TAGGED_LLD
 
         result = validate_completeness(base_state)
 
+        # #3585: the checks ran; a halt would make the assertions vacuous.
+        assert "completeness_cannot_check" not in result
         assert result["validation_passed"] is False
         assert result["completeness_issues"]
 
@@ -1156,6 +1185,7 @@ class TestValidateCompleteness:
         )
 
         base_state["spec_draft"] = sample_spec_complete
+        base_state["lld_content"] = TAGGED_LLD
         base_state["files_to_modify"] = [{
             "path": "assemblyzero/workflows/test/graph.py",
             "change_type": "Modify", "description": "Update graph",
@@ -1464,19 +1494,22 @@ class TestImportResolvesExtendedSourceLayouts:
         (tmp_path / "my-pkg-root" / "foo" / "bar.py").write_text("")
         assert _import_resolves("foo.bar", tmp_path, set()) is True
 
-    def test_malformed_pyproject_falls_back_silently(self, tmp_path):
-        """Malformed pyproject doesn't raise; static prefixes still work."""
+    def test_malformed_pyproject_cannot_be_read_past(self, tmp_path):
+        """#3585: a malformed pyproject raises, naming the file. It used to be
+        read as declaring no source roots, so a declared src layout went
+        unseen."""
         from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            CompletenessCannotCheck,
             _import_resolves,
         )
         (tmp_path / "pyproject.toml").write_text(
             "this is not [valid toml",
             encoding="utf-8",
         )
-        # Static "src" prefix still resolves
         (tmp_path / "src" / "foo").mkdir(parents=True)
         (tmp_path / "src" / "foo" / "bar.py").write_text("")
-        assert _import_resolves("foo.bar", tmp_path, set()) is True
+        with pytest.raises(CompletenessCannotCheck, match="pyproject.toml"):
+            _import_resolves("foo.bar", tmp_path, set())
 
     def test_missing_pyproject_doesnt_break_static_prefixes(self, tmp_path):
         from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
@@ -1887,6 +1920,7 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
             }],
             "pattern_references": [],
             "repo_root": str(tmp_path),
+            "lld_content": TAGGED_LLD,
             "review_iteration": 0,
             "prior_completeness_breakdown": [],
         }
@@ -1919,6 +1953,7 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
             }],
             "pattern_references": [],
             "repo_root": str(tmp_path),
+            "lld_content": TAGGED_LLD,
             "review_iteration": 1,
             "prior_completeness_breakdown": prior,
         }
@@ -1952,23 +1987,19 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
         state = {
             "spec_draft": "# Implementation Spec\n\n## Overview\n\n"
                           "This spec does nothing structural; no Modify, "
-                          "no Add. " + ("filler " * 20),
+                          "no Add. " + ("filler " * 20) + SECTION_TEN,
             "files_to_modify": [],
             "pattern_references": [],
             "repo_root": str(tmp_path),
+            "lld_content": TAGGED_LLD,
             "review_iteration": 1,
             "prior_completeness_breakdown": prior,
         }
         result = validate_completeness(state)
-        # Even if validation_passed varies (it depends on other checks),
-        # the contract is: prior_breakdown is only appended on failure.
-        breakdown = result.get("prior_completeness_breakdown", [])
-        if result["validation_passed"]:
-            assert breakdown == prior
-        else:
-            # On failure the new entry is appended; original prior still present
-            assert breakdown[0] == prior[0]
-            assert len(breakdown) == 2
+        # #3585: this spec passes, so the contract is asserted rather than
+        # branched on: prior_breakdown is only appended on failure.
+        assert result["validation_passed"] is True, result["completeness_issues"]
+        assert result.get("prior_completeness_breakdown", []) == prior
 
 
 class TestPromptProjectContext:
@@ -2816,6 +2847,7 @@ class TestEdgeCases:
         )
 
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
+        base_state["lld_content"] = TAGGED_LLD
         base_state["files_to_modify"] = []
         base_state["pattern_references"] = []
 
@@ -3224,12 +3256,17 @@ class TestCheckApiSymbolsExist:
     # Edge cases
     # ------------------------------------------------------------------
 
-    def test_empty_gathered_symbols_skips_check(self):
-        """No gathered symbols → check skips (nothing to compare against)."""
+    def test_empty_gathered_symbols_cannot_judge_a_call_that_needs_them(self):
+        """#3585: no gathered symbols no longer skips. A call the table is
+        needed for, with no repo to say whether the repo has Python of its
+        own, cannot be judged: the check raises instead of passing."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            CompletenessCannotCheck,
+        )
+
         spec = "```python\nfoo.model_dump()\n```\n"
-        result = self._check(spec, [])
-        assert result["passed"] is True
-        assert "skipped" in result["details"].lower()
+        with pytest.raises(CompletenessCannotCheck, match="gathered no symbols"):
+            self._check(spec, [])
 
     def test_no_code_fences_passes(self):
         """Spec with no code fences → no calls to check → passes."""
@@ -3446,8 +3483,11 @@ class TestApiSymbolCheckInValidateCompleteness:
         base_state["pattern_references"] = []
         # gathered_symbols set to non-empty — create_graph is real
         base_state["gathered_symbols"] = ["create_graph"]
+        base_state["lld_content"] = TAGGED_LLD
 
         result = validate_completeness(base_state)
+        # #3585: the checks ran; a halt would make the assertion vacuous.
+        assert "completeness_cannot_check" not in result
         # The sample_spec_complete doesn't call any hallucinated APIs on
         # target-repo objects, so this check should not be the cause of failure
         # (other checks may fail; we only verify the symbol check ran)

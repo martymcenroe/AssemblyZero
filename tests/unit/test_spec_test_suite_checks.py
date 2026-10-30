@@ -16,9 +16,13 @@ so revision pinning opens exactly the lines the drafter has to rewrite
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+    CompletenessCannotCheck,
     _declared_dependencies,
     check_spec_test_fixtures_resolvable,
     check_spec_test_functions_have_assertions,
@@ -274,12 +278,14 @@ class TestFixtureControls:
         result = check_spec_test_fixtures_resolvable(_section_10(body), str(tmp_path), "")
         assert result["passed"] is True, result["details"]
 
-    def test_an_unparseable_block_abstains(self, tmp_path: Path) -> None:
+    def test_an_unparseable_block_fails_and_names_the_error(self, tmp_path: Path) -> None:
+        """#3585: the block is emitted verbatim, so a syntax error in it is
+        the draft's defect; it used to pass as "not applicable"."""
         result = check_spec_test_fixtures_resolvable(
             _section_10("def test_a(:\n    pass\n"), str(tmp_path), ""
         )
-        assert result["passed"] is True
-        assert "not applicable" in result["details"]
+        assert result["passed"] is False
+        assert "SyntaxError" in result["details"]
 
     def test_no_functions_is_not_applicable(self, tmp_path: Path) -> None:
         result = check_spec_test_fixtures_resolvable(
@@ -321,21 +327,23 @@ class TestDeclaredDependencies:
             '[dependency-groups]\ntest = ["pytest-mock"]\n'
         )
 
-    def test_empty_declares_nothing_and_unparseable_says_so(self) -> None:
-        """None, not an empty set, so the report can say "could not be parsed"
-        rather than "declares none" -- the fail-open ruling on the site."""
+    def test_empty_declares_nothing_and_unparseable_raises(self) -> None:
+        """#3585: text that is not TOML raises, and the caller names the file.
+        It used to return None and the check went on."""
         assert _declared_dependencies("") == set()
-        assert _declared_dependencies("not = [toml") is None
+        with pytest.raises(tomllib.TOMLDecodeError):
+            _declared_dependencies("not = [toml")
 
-    def test_an_unparseable_pyproject_is_named_in_the_report(self, tmp_path: Path) -> None:
+    def test_an_unparseable_pyproject_stops_the_check(self, tmp_path: Path) -> None:
+        """#3585: the repo's own pyproject is broken, which no revision of
+        the spec can fix, so the check cannot run and N3 halts."""
         (tmp_path / "pyproject.toml").write_text("not = [toml", encoding="utf-8")
         body = "def test_a(mocker):\n    assert mocker\n"
-        result = check_spec_test_fixtures_resolvable(_section_10(body), str(tmp_path), "")
-        assert result["passed"] is False
-        assert "could not be parsed" in result["details"]
+        with pytest.raises(CompletenessCannotCheck, match="not valid TOML"):
+            check_spec_test_fixtures_resolvable(_section_10(body), str(tmp_path), "")
 
     def test_a_missing_pyproject_is_named_in_the_report(self, tmp_path: Path) -> None:
         body = "def test_a(mocker):\n    assert mocker\n"
         result = check_spec_test_fixtures_resolvable(_section_10(body), str(tmp_path), "")
         assert result["passed"] is False
-        assert "no pyproject could be read" in result["details"]
+        assert "the checkout has no pyproject.toml" in result["details"]

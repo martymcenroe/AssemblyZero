@@ -110,23 +110,22 @@ class TestTheArtifactThatShowedTheProblem:
         assert "1 executable test function" in result["details"]
 
 
-class TestNotApplicableStaysPossibleAndVisible:
-    def test_no_section_ten_means_the_check_did_not_run(self):
-        """A spec with no test section is `criteria_have_tests`'s finding. This
-        one says it did not run rather than inventing a pass -- losing that
-        distinction is exactly what run 12 did."""
-        result = check_section_ten_carries_test_functions(HEAD + TAIL)
-        assert result["passed"] is True
-        assert "did not run" in result["details"]
+class TestNoSectionTenFails:
+    """#3585 (ADR 0236): a spec with no Section 10 used to pass as "did not
+    run", leaving the finding to `criteria_have_tests`, which does not ask
+    where the tests are. A draft with no test section carries no suite for
+    the implementation stage to read, and the drafter can add one."""
 
-    def test_the_did_not_run_case_is_counted_as_not_applicable(self):
-        """The node counts a check as not-applicable by looking for that phrase
-        in its details (#1870), so the wording is load-bearing: without it the
-        summary would read this as a verified pass."""
+    def test_no_section_ten_fails_the_check(self):
         result = check_section_ten_carries_test_functions(HEAD + TAIL)
-        assert "not applicable" in result["details"].lower() or "did not run" in (
-            result["details"].lower()
-        )
+        assert result["passed"] is False
+        assert "no Section 10 heading" in result["details"]
+
+    def test_the_complaint_is_read_as_a_demand_to_add(self):
+        """No line exists to cite, so pinning must read the complaint as an
+        addition demand, or it refuses the section the drafter adds."""
+        details = check_section_ten_carries_test_functions(HEAD + TAIL)["details"]
+        assert demands_additions([details])
 
 
 class TestTheComplaintCanBeActedOn:

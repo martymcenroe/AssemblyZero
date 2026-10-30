@@ -297,10 +297,10 @@ class TestTraceability:
         assert result["passed"] is False
         assert "MORE than one" in result["details"]
 
-    def test_an_unparseable_fence_abstains_and_says_so(self):
-        """#2526: unknown is not guilty. The broken fence is the api-symbols
-        check's finding (#2392); this check does not judge what it could not
-        read, and it says how much that was."""
+    def test_an_unparseable_python_fence_fails_and_names_its_lines(self):
+        """#3585: a fence tagged Python that does not parse fails the diff,
+        naming its lines and the error, because its tests went unjudged. It
+        used to abstain and pass."""
         spec = (
             "# Spec\n\n```python\ndef test_axis_tip():\n"
             "    # manifest: N1.1\n    assert True\n```\n\n"
@@ -309,9 +309,25 @@ class TestTraceability:
             "    # manifest: N1.2\n    assert True\n```\n"
         )
         result = check_manifest_traceability(spec, ROWS)
+        assert result["passed"] is False
+        # The broken fence opens on line 9 and closes on line 11.
+        assert "lines 9-11" in result["details"]
+        assert "SyntaxError" in result["details"]
+
+    def test_an_unparseable_untagged_fence_abstains_and_says_so(self):
+        """#2526: unknown is not guilty. An untagged fence claimed no Python;
+        this check does not judge what it could not read, and says how much
+        that was."""
+        spec = (
+            "# Spec\n\n```python\ndef test_axis_tip():\n"
+            "    # manifest: N1.1\n    assert True\n```\n\n"
+            "```\ndef broken(:\n```\n\n"
+            "```python\ndef test_axis_offside():\n"
+            "    # manifest: N1.2\n    assert True\n```\n"
+        )
+        result = check_manifest_traceability(spec, ROWS)
         assert result["passed"] is True, result["details"]
         assert "not judged" in result["details"]
-        assert "abstained" in result["details"]
 
     def test_no_manifest_means_not_applicable(self):
         result = check_manifest_traceability("# Spec\n", [])

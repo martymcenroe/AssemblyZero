@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
     validate_completeness,
 )
@@ -427,6 +429,13 @@ class TestIsExpansion:
         assert not _is_expansion(["a", "b"], ["a", "z"])
 
 
+#: #3585: an LLD whose pass criteria N3 can read.
+TAGGED_LLD = (
+    "# LLD\n\n| ID | Scenario | Pass Criteria |\n|----|----------|---------------|\n"
+    "| 010 | the change (REQ-1) | works |\n"
+)
+
+
 class TestTheHaltsSurvivalClaim:
     """#2561: 'shown to the drafter and survived a revision' asserts the
     drafter's output reached the check intact — provable only against a
@@ -444,13 +453,19 @@ class TestTheHaltsSurvivalClaim:
         "kept (#2559)"
     )
 
+    @pytest.fixture(autouse=True)
+    def _target_repo(self, tmp_path):
+        # #3585: N3 halts without a repo root or an LLD whose criteria it can
+        # read, so the cap is tested with both.
+        self.repo = str(tmp_path)
+
     def _state(self, iteration=3, shown=(), breakdown=(), pinning_events=()):
         return {
             "spec_draft": "# Spec\n\n" + ("body line\n" * 40),
             "files_to_modify": [],
             "pattern_references": [],
-            "repo_root": "",
-            "lld_content": "",
+            "repo_root": self.repo,
+            "lld_content": TAGGED_LLD,
             "review_iteration": iteration,
             "max_iterations": 3,
             "checks_shown_to_drafter": list(shown),
