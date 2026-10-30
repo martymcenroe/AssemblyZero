@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-shot: upgrade boostgauge's auto-reviewer.yml to the NEW caller format.
 
-Superseded for any other repository by `upgrade_auto_reviewer_caller.py --repo` (#3641);
+Superseded for any other repository by `upgrade_auto_reviewer_caller.py --repo` (#4227);
 kept as the record of what ran for boostgauge.
 
 Bug: `deploy_auto_reviewer_workflow.py`'s CALLER_WORKFLOW constant deploys

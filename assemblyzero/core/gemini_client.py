@@ -160,7 +160,7 @@ _ON_WINDOWS = os.name == "nt"
 
 
 def _find_linux_agy() -> Optional[str]:
-    """agy on Linux: ``~/.local/bin/agy`` first, then PATH, never a Windows build (#3651).
+    """agy on Linux: ``~/.local/bin/agy`` first, then PATH, never a Windows build (#4233).
 
     agy installs into ``~/.local/bin``, which a non-login shell and a process
     started with ``wsl.exe --exec`` do not have on PATH. A PATH answer under
