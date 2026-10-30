@@ -162,9 +162,13 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "lld.input_precondition", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "No issue number specified",
         _s(f"{_RQ}/nodes/load_input.py::_load_brief::return", 0, 1, 2)
-        + _s(f"{_RQ}/nodes/load_input.py::_load_issue::return", 0, 1)
+        + _s(f"{_RQ}/nodes/load_input.py::_load_issue::return", 0, 1, 2, 3)
         + _s(f"{_RQ}/nodes/validate_test_plan.py::validate_test_plan_node::return", 1),
-        notes="the brief or issue the run was pointed at is missing or unreadable",
+        notes=(
+            "the brief or issue the run was pointed at is missing or "
+            "unreadable; #3585: also an issue with no body, and a repo whose "
+            "origin remote cannot be read for the provenance"
+        ),
     ),
     Gate(
         "lld.arc_unreadable", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,

@@ -127,3 +127,13 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** none.
 
 **Neighbouring suites:** 18 files gave 447 passed and 1 skipped. They cover the interactive gates, the graph, the open-questions loop, the mock runs and the gate registry.
+
+## nodes/load_input.py
+
+**New: `tests/unit/test_load_input_loud_failure.py` (9).**
+
+**Before the fix, measured:** 7 failed, 2 passed. Every site test failed, and so did the mock-run test, since the mock looked up the remote. The 2 that passed pin kept behaviour: an issue with a body loads, and a GitHub remote names the repo.
+
+**Changed tests:** in `test_requirements_nodes.py`, `TestLoadInputRetryLogic`'s two retry tests script the provenance lookup's answer. Their call lists ran out there, and the swallowed StopIteration had read as "unknown/unknown".
+
+**Neighbouring suites:** the first run across 17 files gave 430 passed and 2 failed: the two tests above. After the change, the two affected files gave 107 passed.

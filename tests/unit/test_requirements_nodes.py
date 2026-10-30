@@ -1721,11 +1721,14 @@ class TestLoadInputRetryLogic:
         from assemblyzero.workflows.requirements.nodes.load_input import load_input
         from assemblyzero.workflows.requirements.state import create_initial_state
 
-        # First two calls return empty, third succeeds
+        # First two calls return empty, third succeeds. #3585: the fourth is
+        # the provenance lookup, which halts N0 when git cannot answer (the
+        # list ran out there and was swallowed as "unknown/unknown").
         mock_run.side_effect = [
             Mock(returncode=0, stdout=""),
             Mock(returncode=0, stdout=""),
             Mock(returncode=0, stdout='{"title": "Test", "body": "Body"}'),
+            Mock(returncode=0, stdout="https://github.com/o/r.git\n", stderr=""),
         ]
 
         state = create_initial_state(
@@ -1748,10 +1751,12 @@ class TestLoadInputRetryLogic:
         from assemblyzero.workflows.requirements.nodes.load_input import load_input
         from assemblyzero.workflows.requirements.state import create_initial_state
 
-        # First call times out, second succeeds
+        # First call times out, second succeeds; #3585: the third is the
+        # provenance lookup.
         mock_run.side_effect = [
             subprocess.TimeoutExpired("gh", 30),
             Mock(returncode=0, stdout='{"title": "Test", "body": "Body"}'),
+            Mock(returncode=0, stdout="https://github.com/o/r.git\n", stderr=""),
         ]
 
         state = create_initial_state(
