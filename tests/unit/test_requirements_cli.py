@@ -369,38 +369,36 @@ class TestExtractBriefTitle:
 
         assert title == "(no title)"
 
-    def test_handles_missing_file(self, tmp_path):
-        """Test handles missing file gracefully."""
-        from tools.run_requirements_workflow import extract_brief_title
+    def test_a_missing_file_raises_naming_it(self, tmp_path):
+        """#4100 (ledger 0908, line 175): an unreadable brief is a failure,
+        not an untitled one."""
+        from tools.run_requirements_workflow import RunFailed, extract_brief_title
 
         missing = tmp_path / "nonexistent.md"
 
-        title = extract_brief_title(missing)
-
-        assert title == "(no title)"
+        with pytest.raises(RunFailed, match="nonexistent.md"):
+            extract_brief_title(missing)
 
 
 class TestSelectBriefFile:
     """Tests for select_brief_file function."""
 
-    def test_returns_none_when_no_ideas_dir(self, tmp_path):
-        """Test returns None when ideas/active/ doesn't exist."""
-        from tools.run_requirements_workflow import select_brief_file
+    def test_raises_when_no_ideas_dir(self, tmp_path):
+        """#4100 (ledger 0908, line 192): None is only the operator quitting."""
+        from tools.run_requirements_workflow import RunFailed, select_brief_file
 
-        result = select_brief_file(tmp_path)
+        with pytest.raises(RunFailed, match="no ideas/active/ directory"):
+            select_brief_file(tmp_path)
 
-        assert result is None
-
-    def test_returns_none_when_no_briefs(self, tmp_path):
-        """Test returns None when no brief files found."""
-        from tools.run_requirements_workflow import select_brief_file
+    def test_raises_when_no_briefs(self, tmp_path):
+        """#4100 (ledger 0908, line 199)."""
+        from tools.run_requirements_workflow import RunFailed, select_brief_file
 
         ideas_dir = tmp_path / "ideas" / "active"
         ideas_dir.mkdir(parents=True)
 
-        result = select_brief_file(tmp_path)
-
-        assert result is None
+        with pytest.raises(RunFailed, match="no brief files"):
+            select_brief_file(tmp_path)
 
     @patch.dict("os.environ", {"ASSEMBLYZERO_TEST_MODE": "1"})
     def test_auto_selects_first_in_test_mode(self, tmp_path):
@@ -447,9 +445,9 @@ class TestSelectGitHubIssue:
     """Tests for select_github_issue function."""
 
     @patch("subprocess.run")
-    def test_returns_none_on_gh_failure(self, mock_run, tmp_path):
-        """Test returns None when gh CLI fails."""
-        from tools.run_requirements_workflow import select_github_issue
+    def test_raises_on_gh_failure(self, mock_run, tmp_path):
+        """#4100 (ledger 0908, line 259): None is only the operator quitting."""
+        from tools.run_requirements_workflow import RunFailed, select_github_issue
 
         mock_run.return_value = Mock(
             returncode=1,
@@ -457,46 +455,43 @@ class TestSelectGitHubIssue:
             stderr="gh: not logged in",
         )
 
-        result = select_github_issue(tmp_path)
-
-        assert result is None
+        with pytest.raises(RunFailed, match="gh: not logged in"):
+            select_github_issue(tmp_path)
 
     @patch("subprocess.run")
-    def test_returns_none_on_timeout(self, mock_run, tmp_path):
-        """Test returns None on gh CLI timeout."""
+    def test_raises_on_timeout(self, mock_run, tmp_path):
+        """#4100 (ledger 0908, line 264)."""
         import subprocess
-        from tools.run_requirements_workflow import select_github_issue
+        from tools.run_requirements_workflow import RunFailed, select_github_issue
 
         mock_run.side_effect = subprocess.TimeoutExpired("gh", 30)
 
-        result = select_github_issue(tmp_path)
-
-        assert result is None
+        with pytest.raises(RunFailed, match="timed out"):
+            select_github_issue(tmp_path)
 
     @patch("subprocess.run")
-    def test_returns_none_when_gh_not_found(self, mock_run, tmp_path):
-        """Test returns None when gh CLI not installed."""
-        from tools.run_requirements_workflow import select_github_issue
+    def test_raises_when_gh_not_found(self, mock_run, tmp_path):
+        """#4100 (ledger 0908, line 267)."""
+        from tools.run_requirements_workflow import RunFailed, select_github_issue
 
         mock_run.side_effect = FileNotFoundError("gh not found")
 
-        result = select_github_issue(tmp_path)
-
-        assert result is None
+        with pytest.raises(RunFailed, match="gh CLI not found"):
+            select_github_issue(tmp_path)
 
     @patch("subprocess.run")
-    def test_returns_none_when_no_issues(self, mock_run, tmp_path):
-        """Test returns None when no open issues."""
-        from tools.run_requirements_workflow import select_github_issue
+    def test_raises_when_no_issues(self, mock_run, tmp_path):
+        """#4100 (ledger 0908, line 1668): an empty list is nothing to
+        select, not a cancel."""
+        from tools.run_requirements_workflow import RunFailed, select_github_issue
 
         mock_run.return_value = Mock(
             returncode=0,
             stdout="[]",
         )
 
-        result = select_github_issue(tmp_path)
-
-        assert result is None
+        with pytest.raises(RunFailed, match="no open issues"):
+            select_github_issue(tmp_path)
 
     @patch("subprocess.run")
     @patch.dict("os.environ", {"ASSEMBLYZERO_TEST_MODE": "1"})
@@ -598,8 +593,10 @@ class TestAllAndResumeFlags:
 
         assert args.resume == "my-brief.md"
 
-    def test_all_only_for_issue_workflow(self, capsys):
-        """Verify --all is only allowed for issue workflow."""
+    def test_all_only_for_issue_workflow(self, capsys, operator_alerts):
+        """Verify --all is only allowed for issue workflow.
+
+        #4100 (ledger 0908, line 1612): the refusal is on stderr and alerts."""
         from tools.run_requirements_workflow import main
         import sys
 
@@ -614,10 +611,13 @@ class TestAllAndResumeFlags:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "only supported for issue workflow" in captured.out
+        assert "only supported for issue workflow" in captured.err
+        assert len(operator_alerts) == 1
 
-    def test_resume_only_for_issue_workflow(self, capsys):
-        """Verify --resume is only allowed for issue workflow."""
+    def test_resume_only_for_issue_workflow(self, capsys, operator_alerts):
+        """Verify --resume is only allowed for issue workflow.
+
+        #4100 (ledger 0908, line 1616): the refusal is on stderr and alerts."""
         from tools.run_requirements_workflow import main
         import sys
 
@@ -631,7 +631,8 @@ class TestAllAndResumeFlags:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "only supported for issue workflow" in captured.out
+        assert "only supported for issue workflow" in captured.err
+        assert len(operator_alerts) == 1
 
 
 class TestAllArgumentsUsed:
@@ -1158,10 +1159,12 @@ class TestMainWithPreGenerationCheck:
     @patch("tools.run_requirements_workflow.run_single_workflow")
     @patch("tools.run_requirements_workflow.resolve_roots")
     def test_main_refuses_a_real_lld_run_without_the_merge_driver(
-        self, mock_roots, mock_run, mock_check, tmp_path, monkeypatch, capsys
+        self, mock_roots, mock_run, mock_check, tmp_path, monkeypatch, capsys,
+        operator_alerts,
     ):
         """#3704: the refusal comes before the check and before any model
-        call, and says what to set."""
+        call, and says what to set. #4100 (ledger 0908, line 1687): on
+        stderr, with an alert."""
         from tools.run_requirements_workflow import main
         import sys
 
@@ -1176,7 +1179,9 @@ class TestMainWithPreGenerationCheck:
             sys.argv = original_argv
 
         assert result == 1
-        assert "AZ_MERGE_DRIVER is not set" in capsys.readouterr().out
+        assert "AZ_MERGE_DRIVER is not set" in capsys.readouterr().err
+        assert len(operator_alerts) == 1
+        assert "AZ_MERGE_DRIVER is not set" in operator_alerts[0]["cause"]
         mock_check.assert_not_called()
         mock_run.assert_not_called()
 
