@@ -149,10 +149,14 @@ def test_record_failures_writes_one_per_detail(tmp_path):
     assert len(read_failures(tmp_path)) == 3
 
 
-def test_empty_details_are_not_recorded(tmp_path):
-    assert record_failure(tmp_path, stage="lld", check="mechanical", detail="") is None
-    assert record_failure(tmp_path, stage="lld", check="mechanical", detail="   ") is None
-    assert read_failures(tmp_path) == []
+def test_empty_details_are_recorded_under_their_own_fingerprint(tmp_path):
+    """#3585: a validation failure with no detail is still a failure; it used
+    to be dropped, which made the rate lower than it was."""
+    record_failure(tmp_path, stage="lld", check="mechanical", detail="")
+    record_failure(tmp_path, stage="lld", check="mechanical", detail="   ")
+    assert [r["fingerprint"] for r in read_failures(tmp_path)] == [
+        "lld:mechanical:empty-detail", "lld:mechanical:empty-detail",
+    ]
 
 
 # --- "detail_raw round-trips the original message unmodified" ------------
@@ -229,7 +233,9 @@ def test_since_filters_older_records(tmp_path):
     assert len(read_failures(tmp_path)) == 2
 
 
-def test_a_malformed_line_does_not_break_the_report(tmp_path):
+def test_a_malformed_line_stops_the_report(tmp_path, operator_alerts):
+    """#3585: a skipped line made the report count fewer failures than the
+    store holds. It now alerts and raises, naming the line."""
     path = telemetry_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -237,27 +243,26 @@ def test_a_malformed_line_does_not_break_the_report(tmp_path):
         + "{ this is not json\n",
         encoding="utf-8",
     )
-    assert len(read_failures(tmp_path)) == 1
+    with pytest.raises(ValueError, match=":2:"):
+        read_failures(tmp_path)
+    assert len(operator_alerts) == 1
 
 
-# --- "a write failure is loud and does not change the roll's outcome" ----
+# --- "a write failure is loud" ---------------------------------------------
 
 
-def test_a_write_failure_is_logged_and_swallowed(tmp_path):
-    # A file where the telemetry directory must go: mkdir raises, and the roll
-    # must not care.
+def test_a_write_failure_alerts_and_raises(tmp_path, operator_alerts):
+    """#3585: it used to be printed and swallowed. The callers in the
+    workflows still catch it so the halt they record is unchanged, but the
+    operator has been alerted."""
     blocker = tmp_path / "data" / "speedrun"
     blocker.parent.mkdir(parents=True)
     blocker.write_text("not a directory\n", encoding="utf-8")
 
-    logged: list[str] = []
-    result = record_failure(
-        tmp_path, stage="lld", check="mechanical", detail=OBSERVED, log=logged.append
-    )
+    with pytest.raises(OSError):
+        record_failure(tmp_path, stage="lld", check="mechanical", detail=OBSERVED)
 
-    assert result is None
-    assert logged, "a silent telemetry failure is worse than none"
-    assert "could not record" in logged[0]
+    assert len(operator_alerts) == 1
 
 
 def test_reading_a_missing_file_is_empty_not_an_error(tmp_path):

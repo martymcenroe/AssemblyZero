@@ -84,3 +84,14 @@ Baseline: three entries leave (`_append`'s handler and tag, `read_records`'s tag
 Defect found, not fixed (outside the ledger rows): the requirements workflow's state has no `repo_root` key (it carries `target_repo`), and no requirements node sets one. So `_record_entry` returns at its first check on every LLD node, and the LLD stage writes no `node.enter` records at all.
 
 Baseline: five entries leave (`narrated._wrapped`'s handler; `_record_entry`'s handler and tag; `_set_call_context`'s handler and tag).
+
+### speedrun/prompt_telemetry.py (4 sites)
+
+The store is where the rate of drafter validation failures is computed; each of these made the rate read lower than it was.
+
+- **A failure with an empty detail is counted** (130), under the fingerprint `<stage>:<check>:empty-detail`, with the raw text kept. It returned None and wrote nothing.
+- **A write that fails alerts and raises** (152), naming the store, the fingerprint and the cause. It printed through `log=print` and returned None. The `log` parameter only carried that message and is gone; `record_failure` always returns the record.
+- **A store that exists but cannot be read alerts and raises** (180). An absent store is still `[]`, now by an existence check.
+- **A line that is not a JSON object alerts and raises** (188), naming the line. It was skipped uncounted.
+
+Callers that still swallow the raise: the three requirements nodes that record (`analyze_requirements.py`, `validate_mechanical.py`, `validate_test_plan.py`) and `orchestrator/stages.py` `_record_spec_convergence_failure` catch `Exception` and print or warn, so the halt they record is unchanged; the operator has been alerted first. The two readers, `factory_report.build_report` and `tools/prompt_failure_report.py`, let it out.

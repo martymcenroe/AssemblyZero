@@ -75,4 +75,14 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 - `test_convergence_record.py::test_a_node_still_runs_when_the_record_cannot_be_written` is now `test_a_node_does_not_run_when_the_record_cannot_be_written`;
 - `test_node_modules_supply_nodes.py::test_narrated_names_the_wrapped_module` wrapped a node with an empty atlas; it now gives the node an entry.
 
-**Neighbouring suites:** 131 passed across the new file, `test_narration.py`, `test_narration_gates_off.py`, `test_node_modules_supply_nodes.py`, `test_convergence_record.py`, `test_testing_atlas.py`, `test_graph_atlas.py`, `test_tutorial_mode.py`, `test_quiz_mode.py` and `test_halt_legibility.py`; 249 passed across `test_implementation_spec_workflow.py`, `test_requirements_graph_halts.py` and `test_finalize_repair_routing.py`, which build the graphs.
+**Neighbouring suites (narration):** 131 passed across the new file, `test_narration.py`, `test_narration_gates_off.py`, `test_node_modules_supply_nodes.py`, `test_convergence_record.py`, `test_testing_atlas.py`, `test_graph_atlas.py`, `test_tutorial_mode.py`, `test_quiz_mode.py` and `test_halt_legibility.py`; 249 passed across `test_implementation_spec_workflow.py`, `test_requirements_graph_halts.py` and `test_finalize_repair_routing.py`, which build the graphs.
+
+## speedrun/prompt_telemetry.py
+
+**New: `tests/unit/test_prompt_telemetry_loud_failure.py` (7).** Site tests for 130, 152, 180 and 188 (two shapes), plus an absent store and a written failure, which pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 5 failed, 2 passed (the two kept-behaviour tests).
+
+**Changed tests:** in `test_prompt_telemetry.py`, `test_empty_details_are_not_recorded` is now `test_empty_details_are_recorded_under_their_own_fingerprint`, `test_a_malformed_line_does_not_break_the_report` is now `test_a_malformed_line_stops_the_report`, and `test_a_write_failure_is_logged_and_swallowed` is now `test_a_write_failure_alerts_and_raises`.
+
+**Neighbouring suites:** 180 passed across `test_prompt_telemetry.py`, `test_checkout_telemetry_isolation.py`, `test_check_requirements.py`, `test_factory_report.py`, `test_n0c_unarticulated_conflict.py`, `test_requirements_gate_reproduces.py` and `test_spec_convergence_telemetry.py` before the three changes (the three were the only failures); 66 passed across the new file, `test_prompt_telemetry.py`, `test_spec_convergence_telemetry.py` and `test_checkout_telemetry_isolation.py` after.
