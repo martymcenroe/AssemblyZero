@@ -115,3 +115,9 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 
 - **A fragment with no literal (325)** is a `CompileFailure` naming it, and its row contributes nothing partial; it used to be skipped while the row's other fragments compiled.
 - **Abstention (259) is not changed.** The prescription was for the caller to halt on `abstained`, but every LLD carries the Section 2.1 table, so every LLD without a criteria decision table abstains. Halting there would halt every non-visual run.
+
+### `workflows/implementation_spec/lineage_seed.py` (2 sites)
+
+- **A lineage file that cannot be read (102)** raises `LineageReadError` naming it. It used to read as empty, so the run was skipped and its paid work replaced by an older seed or a fresh draw.
+- **A verdict that cannot be read or is empty (140)** raises, where it was dropped from the review history and blinded the stagnation check.
+- **Kept:** no prior run, a run with no verdict, and an empty newest draft still mean nothing to resume onto.

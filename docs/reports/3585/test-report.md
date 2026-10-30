@@ -124,3 +124,9 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
 - **Added:** `tests/unit/test_assertion_manifest_loud_failure.py`, 6 tests, including a pin of the abstention left unchanged. Before the fix: 2 failed, 4 passed. After: 6 passed.
 - **Neighbouring suites:** 9 files, 271 passed.
 - **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
+
+## `lineage_seed.py`
+
+- **Added:** `tests/unit/test_lineage_seed_loud_failure.py`, 7 tests. Before the fix: 4 failed, 3 passed. After: 7 passed.
+- **Neighbouring suites:** 4 files, 59 passed.
+- **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
