@@ -52,8 +52,13 @@ from assemblyzero.workflows.testing.exit_code_router import (
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
     TestFramework,
-    choose_by_test_name,
     source_extensions,
+)
+from assemblyzero.workflows.testing.framework_ownership import (
+    TestFileOwnershipError,
+    inside,
+    owner_of,
+    run_frameworks,
 )
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     DETERMINISTIC_FAILURE,
@@ -1294,52 +1299,6 @@ def _framework_label(framework: TestFramework, config: dict | None) -> str:
     return f"{framework.value} ({directory})"
 
 
-def _directory_depth(directory: str) -> int:
-    return 0 if directory == "." else directory.count(os.sep) + 1
-
-
-def _inside(relative: str, directory: str) -> bool:
-    return directory == "." or relative == directory or relative.startswith(directory + os.sep)
-
-
-def _owner_of(path: str, legs: list[tuple[dict, TestFramework, str]], root: str) -> int:
-    """The index of the one framework that runs `path`: the frameworks whose
-    file type it is, in the deepest directory that holds it, told apart by
-    the file's name when two share it. Raises FrameworkLegError when none or
-    more than one does."""
-    absolute = os.path.normpath(path if os.path.isabs(path) else os.path.join(root, path))
-    if not (absolute == root or absolute.startswith(root + os.sep)):
-        raise FrameworkLegError(
-            f"test file {path} is outside the repository {root}; no framework "
-            f"of this run would run it"
-        )
-    relative = os.path.relpath(absolute, root)
-    candidates = [
-        index for index, (_config, framework, directory) in enumerate(legs)
-        if relative.endswith(source_extensions(framework)) and _inside(relative, directory)
-    ]
-    if candidates:
-        deepest = max(_directory_depth(legs[i][2]) for i in candidates)
-        candidates = [i for i in candidates if _directory_depth(legs[i][2]) == deepest]
-    if len(candidates) > 1:
-        chosen = choose_by_test_name([legs[i][1] for i in candidates], relative)
-        candidates = [i for i in candidates if legs[i][1] in chosen]
-    if len(candidates) == 1:
-        return candidates[0]
-    labels = ", ".join(_framework_label(fw, config) for config, fw, _d in legs)
-    if not candidates:
-        raise FrameworkLegError(
-            f"test file {relative} belongs to no framework of this run "
-            f"({labels}): none runs its file type in a directory that holds "
-            f"it, so nothing would run it"
-        )
-    raise FrameworkLegError(
-        f"test file {relative} belongs to more than one framework of this run "
-        f"({', '.join(_framework_label(legs[i][1], legs[i][0]) for i in candidates)}); "
-        f"the run cannot say which one runs it"
-    )
-
-
 def _framework_legs(state: TestingWorkflowState) -> list[_Leg]:
     """Every framework of the run, with the test files that belong to it (#4236).
 
@@ -1347,40 +1306,30 @@ def _framework_legs(state: TestingWorkflowState) -> list[_Leg]:
     from before #4236) has `framework_config` alone, and that one framework
     runs every test file, exactly as before. With more than one framework,
     each test file belongs to exactly one, or the phase halts: a file no
-    framework owns would never run, and a pass would hide it.
+    framework owns would never run, and a pass would hide it. The rule is
+    `framework_ownership.owner_of`, which N2 and N4 read too (#4243, #4245).
     """
-    configs = state.get("framework_configs")
-    if not configs:
-        framework_config = state.get("framework_config")
-        configs = [framework_config] if framework_config else [{"framework": TestFramework.PYTEST}]
-    configs = [config for config in configs if config]
-    multi = len(configs) > 1
-    described: list[tuple[dict, TestFramework, str]] = []
-    for config in configs:
-        framework = _resolve_framework_enum(config) if "framework" in config else TestFramework.PYTEST
-        if framework is None:
-            if multi:
-                raise FrameworkLegError(
-                    f"framework_configs names {config.get('framework')!r}, "
-                    f"which is not a test framework"
-                )
-            framework = TestFramework.PYTEST  # the single-framework default, unchanged
-        directory = os.path.normpath(config.get("working_directory") or ".")
-        described.append((config, framework, directory))
+    try:
+        described = run_frameworks(state)
+    except TestFileOwnershipError as e:
+        raise FrameworkLegError(str(e)) from e
 
     test_files = [str(f) for f in (state.get("test_files") or [])]
-    if not multi:
-        config, framework, directory = described[0]
-        return [_Leg(config, framework, directory, tuple(test_files))]
+    if len(described) == 1:
+        run = described[0]
+        return [_Leg(run.config, run.framework, run.directory, tuple(test_files))]
 
     repo_root_str = state.get("repo_root", "")
     root = os.path.abspath(repo_root_str) if repo_root_str else str(get_repo_root())
     owned: list[list[str]] = [[] for _ in described]
     for path in test_files:
-        owned[_owner_of(path, described, root)].append(path)
+        try:
+            owned[owner_of(path, described, root)].append(path)
+        except TestFileOwnershipError as e:
+            raise FrameworkLegError(str(e)) from e
     return [
-        _Leg(config, framework, directory, tuple(owned[index]))
-        for index, (config, framework, directory) in enumerate(described)
+        _Leg(run.config, run.framework, run.directory, tuple(owned[index]))
+        for index, run in enumerate(described)
     ]
 
 
@@ -1435,7 +1384,7 @@ def _leg_sources(state: TestingWorkflowState, leg: _Leg, root: str) -> list[str]
     for path in state.get("implementation_files") or []:
         absolute = os.path.normpath(path if os.path.isabs(path) else os.path.join(root, path))
         relative = os.path.relpath(absolute, root)
-        if str(path).endswith(source_extensions(leg.framework)) and _inside(relative, leg.directory):
+        if str(path).endswith(source_extensions(leg.framework)) and inside(relative, leg.directory):
             sources.append(path)
     return sources
 

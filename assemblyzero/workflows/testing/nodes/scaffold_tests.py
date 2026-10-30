@@ -20,6 +20,7 @@ because stub tests always fail regardless of implementation.
 import ast
 import builtins
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
@@ -41,6 +42,8 @@ from assemblyzero.workflows.testing.framework_detector import (
 from assemblyzero.workflows.testing.framework_ownership import (
     RunFramework,
     TestFileOwnershipError,
+    framework_label,
+    owner_of,
     run_frameworks,
 )
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import DETERMINISTIC_FAILURE
@@ -1186,46 +1189,98 @@ def _wrap_text(text: str, width: int) -> list[str]:
     return lines if lines else [""]
 
 
+class ScaffoldPathError(ValueError):
+    """A scaffold would land where no framework of the run runs it (#4243).
+
+    Raised, never written: a scaffold no framework collects fails nothing in
+    the red phase and is graded by nothing in the green one.
+    """
+
+
+#: The directory a JavaScript framework's scaffold goes in, beneath the
+#: framework's own directory (#4243). Vitest's, Jest's and Playwright's
+#: default test patterns all collect it. Their config files are JavaScript
+#: or TypeScript modules the run does not evaluate, so a narrower `include`
+#: or `testDir` a project declares there is not read.
+JS_SCAFFOLD_DIR = "tests"
+
+
+def scaffold_path_for(
+    issue_number: int, repo_root: Path | str, framework_config: dict | None = None,
+) -> Path:
+    """Where N2 writes a framework's scaffold, without touching the disk.
+
+    pytest's is `tests/test_issue_<N>.py` at the root, as it always was. A
+    JavaScript framework's is `<its directory>/tests/issue_<N><ext>` (#4243):
+    it used to be the root's `tests/` whatever the framework's
+    `working_directory`, where Vitest in `web/` never looks.
+    """
+    root = Path(repo_root)
+    framework = resolve_framework(framework_config) if framework_config else None
+    if framework in (TestFramework.PLAYWRIGHT, TestFramework.JEST, TestFramework.VITEST):
+        ext = framework_config.get("test_file_extension") or (
+            ".spec.ts" if framework == TestFramework.PLAYWRIGHT else ".test.ts"
+        )
+        directory = framework_config.get("working_directory") or "."
+        return root / directory / JS_SCAFFOLD_DIR / f"issue_{issue_number}{ext}"
+    return root / "tests" / f"test_issue_{issue_number}.py"
+
+
+def _require_owned_by(
+    path: Path, framework_config: dict, run_configs: list[dict] | None, repo_root: Path,
+) -> None:
+    """Raise ScaffoldPathError unless the run's ownership rule gives `path`
+    to the framework it is the scaffold of (#4243)."""
+    frameworks = run_frameworks({"framework_configs": run_configs or [framework_config]})
+    framework = resolve_framework(framework_config)
+    directory = os.path.normpath(framework_config.get("working_directory") or ".")
+    label = framework_label(framework, directory)
+    try:
+        owner = frameworks[owner_of(str(path), frameworks, str(repo_root))]
+    except TestFileOwnershipError as e:
+        raise ScaffoldPathError(f"the {label} scaffold cannot be placed: {e}") from e
+    if (owner.framework, owner.directory) != (framework, directory):
+        raise ScaffoldPathError(
+            f"the {label} scaffold {path} would be run by {owner.label}, not "
+            f"by {label}"
+        )
+
+
 def determine_test_file_path(
     issue_number: int,
     scenarios: list[TestScenario],
     repo_root: Path,
     framework_config: FrameworkConfig | None = None,
+    run_configs: list[dict] | None = None,
 ) -> Path:
-    """Determine the appropriate path for the test file.
+    """Determine the appropriate path for the test file, and make its directory.
 
     Issue #381: Now supports framework-aware file extensions via
     optional framework_config parameter.
+
+    #4243: a JavaScript framework's scaffold goes in that framework's own
+    directory (`scaffold_path_for`), and the path must be one the run's
+    ownership rule gives to that framework among `run_configs` (the run's
+    `framework_configs`; the framework alone when absent). Raises
+    ScaffoldPathError naming the path and the frameworks when it is not,
+    before any directory is made.
 
     Args:
         issue_number: GitHub issue number.
         scenarios: List of test scenarios.
         repo_root: Repository root path.
         framework_config: Optional framework config for file extension.
+        run_configs: Every framework of the run, as N0 wrote them.
 
     Returns:
         Path for the test file.
     """
-    # Issue #381: Framework-aware path determination
-    if framework_config is not None:
-        framework = framework_config["framework"]
-        ext = framework_config["test_file_extension"]
-        if framework == TestFramework.PLAYWRIGHT:
-            tests_dir = repo_root / "tests"
-            tests_dir.mkdir(parents=True, exist_ok=True)
-            return tests_dir / f"issue_{issue_number}{ext}"
-        elif framework in (TestFramework.JEST, TestFramework.VITEST):
-            tests_dir = repo_root / "tests"
-            tests_dir.mkdir(parents=True, exist_ok=True)
-            return tests_dir / f"issue_{issue_number}{ext}"
-
-    # Default: existing pytest behavior (unchanged)
-    tests_dir = repo_root / "tests"
-    tests_dir.mkdir(parents=True, exist_ok=True)
-
-    # Extract module name from scenarios if possible
-    # For now, use issue number as identifier
-    return tests_dir / f"test_issue_{issue_number}.py"
+    path = scaffold_path_for(issue_number, repo_root, framework_config)
+    framework = resolve_framework(framework_config) if framework_config else None
+    if framework not in (None, TestFramework.PYTEST):
+        _require_owned_by(path, dict(framework_config), run_configs, Path(repo_root))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 # =============================================================================
@@ -1249,9 +1304,11 @@ def _scaffold_non_python_tests(
     # Generate TypeScript test content
     content = generate_ts_test_file_content(scenarios, framework_config, issue_number)
 
-    # Determine file path
+    # Determine file path: in the framework's own directory, where the run's
+    # ownership rule gives it to this framework (#4243).
     test_file_path = determine_test_file_path(
-        issue_number, scenarios, repo_root, framework_config
+        issue_number, scenarios, repo_root, framework_config,
+        run_configs=state.get("framework_configs") or None,
     )
 
     # Write the file
@@ -1398,9 +1455,14 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     # non-Python path gets the enum back for its `.value` and `get_runner`.
     framework = resolve_framework(framework_config)
     if framework is not None and framework != TestFramework.PYTEST:
-        return _scaffold_non_python_tests(
-            state, {**framework_config, "framework": framework}
-        )
+        try:
+            return _scaffold_non_python_tests(
+                state, {**framework_config, "framework": framework}
+            )
+        except (ValueError, OSError) as e:
+            # #4243: a scaffold no framework would run, or a runner that
+            # cannot start, stops N2 the way it does with several frameworks.
+            return _halt_scaffold_framework(frameworks[0].label, f"{type(e).__name__}: {e}")
 
     return _scaffold_python_tests(state)
 
