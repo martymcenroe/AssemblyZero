@@ -157,6 +157,13 @@ Baseline: no entries in either, before or after.
 
 Baseline: no entries in either. The fail-open audit examines one more site (the new raise).
 
+### errors.py (#3774, 1 site)
+
+- **An unreadable `retry-after` header is an ERROR line** (365), on stderr and the log, naming the value and that the caller's own backoff is used instead. It used to be dropped in silence. The rate limit is still classified as `RateLimitError` and raised with no hint, as before: the header is a hint, and its absence is not what stops anything. A 429 with no header stays quiet; no hint is an answer.
+- **Callers.** `classify_anthropic_error` is the only caller, and `AnthropicProvider` its only user.
+
+Baseline: no entries in the loud-failure baseline. The handler stays in the old fail-open audit's baseline, which still counts a handler that falls through to `return None` without calling `alert_operator`; the prescription here is the ERROR line, not an alert per rate limit.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

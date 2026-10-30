@@ -118,6 +118,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 876 passed, 5 skipped and 1 failed across every unit and integration test file that names `retry_gate`, `should_retry`, `utils/retry.py` or either orchestrator, plus the two audits' own tests. The failure, `tests/integration/test_orchestrator_graph.py::TestOrchestrateFullPipeline::test_full_pipeline_success`, is not this change: it fails the same way with HEAD's `retry_gate.py` in place. Its `mock_all_stages` fixture has no runner for the `visual` stage that 8b3cb594 (#2518) added to `STAGE_ORDER`, so the graph loops until LangGraph's recursion limit.
 
+## errors.py
+
+**New: `tests/unit/test_errors_loud_failure.py` (3)**: the site, through `classify_anthropic_error` with a real `anthropic.RateLimitError`, plus two that pin kept behaviour (a numeric header is read and quiet; no header is no hint and quiet).
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 1 failed, 2 passed (the two that pin kept behaviour).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 359 passed across every test file that imports `assemblyzero.core.errors`, `test_llm_provider.py` (the Anthropic provider) and the two audits' own tests.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.

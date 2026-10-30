@@ -545,7 +545,7 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/call_recording.py:353` | replay overrun | failed result | loud, alerts | ERROR |
 | `assemblyzero/core/call_recording.py:372` | divergence | failed result | loud, alerts | ERROR |
 | `assemblyzero/core/call_recording.py:388` | missing success | True | logged, stops | refuse |
-| `assemblyzero/core/errors.py:365` | retry-after | None | logged | ERROR |
+| `assemblyzero/core/errors.py:365` | retry-after | None | logged | FIXED in the core batch (#3774): a retry-after header that is not a number of seconds is an ERROR line naming its value, and the rate limit is still raised with no hint; test_<line> in test_errors_loud_failure.py |
 | `assemblyzero/core/recovery_plan.py:72` | unknown workflow | string | compliant | none |
 | `assemblyzero/core/recovery_plan.py:144` | halt summary | stdout | loud | FIXED in #3581 core batch 1 (#3724): stderr |
 | `assemblyzero/core/settlement.py:111` | hash | None | loud, logged, alerts | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
