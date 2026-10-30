@@ -70,6 +70,14 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 540 passed, 1 skipped, across every test that imports the validator, the integration parsing chain included.
 
+## settlement.py
+
+**New: `tests/unit/test_settlement_loud_failure.py` (9)**: the five sites, plus three that pin kept behaviour (an absent input is quiet and unsettles, a binding doc inside the repo keeps its relative key, a readable artifact settles with its hash).
+
+**Before the fix, measured** with `settlement.py` stashed: 6 failed, 3 passed (the three that pin kept behaviour).
+
+**Neighbouring suites:** 216 passed across every test that imports the module, plus the two audits' own tests.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.

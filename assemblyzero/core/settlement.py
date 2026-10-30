@@ -53,7 +53,8 @@ the expensive error and the one the guard stack exists to catch. So every
 ambiguity resolves toward unsettled:
 
 * an unreadable or corrupt record is no record;
-* an input that cannot be read is a mismatch, not a match;
+* an input that is absent is a mismatch, not a match; one that exists and
+  cannot be read is a mismatch too, and it alerts the operator (#3795);
 * an input set that gained or lost a member is a mismatch, even if every
   common member still hashes the same -- a new binding design doc changes what
   the artifact should say.
@@ -99,19 +100,33 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(_normalise(text.encode("utf-8"))).hexdigest()
 
 
-def sha256_path(path: Path | str) -> str | None:
-    """The file's content hash, or None when it cannot be read.
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(_normalise(path.read_bytes())).hexdigest()
 
-    None is the signal, never an exception: an unreadable input has to reach
-    the verifier as a named mismatch rather than crashing a stage that was
-    only asking whether it could skip work.
+
+def sha256_path(path: Path | str) -> str | None:
+    """The file's content hash, or None when it is absent or cannot be read.
+
+    Absence is an answer, not a failure: a landed LLD's working copy is
+    deleted when its PR merges, and `verify` reports the missing input by name,
+    which unsettles. A file that exists and cannot be read is a failure
+    (#3795): it alerts the operator with the cause, and None still unsettles,
+    so the stage drafts rather than reuse an artifact nobody could check.
     """
+    target = Path(path)
+    if not target.exists():
+        return None
     try:
-        return hashlib.sha256(_normalise(Path(path).read_bytes())).hexdigest()
-    except OSError:
-        # fail-open: only in shape -- None is reported by `verify` as a named
-        # mismatch, which unsettles. The run continues by DRAFTING, which is
-        # the safe direction and the pre-#2609 behaviour.
+        return _file_sha256(target)
+    except OSError as exc:
+        from assemblyzero.core import alert
+
+        alert.alert_operator(
+            what=f"cannot read {target} to fingerprint it",
+            where="assemblyzero.core.settlement.sha256_path",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="the input counts as changed, so the stage is not reused and drafts again",
+        )
         return None
 
 
@@ -171,14 +186,21 @@ def binding_inputs(repo_root: Path, doc_paths: tuple[str, ...]) -> list[SettledI
 
 
 def _rel_posix(path: Path, root: Path) -> str:
-    try:
-        return path.resolve().relative_to(Path(root).resolve()).as_posix()
-    except ValueError:
-        # fail-open: a path outside the repo (a symlinked doc tree) keeps its
-        # absolute form as its key. The key only has to be STABLE, not
-        # relative -- an absolute key hashes and compares exactly as well, and
-        # refusing here would fail a settlement check over a layout choice.
-        return path.as_posix()
+    """The binding doc's path in the repo, which is its settlement key.
+
+    A doc that resolves outside the repo (a symlinked doc tree) raises
+    (#3795). It used to be keyed by its absolute path, which names one
+    machine's layout: the same doc read from the other side of WSL is a
+    different key, and the settlement silently stops holding.
+    """
+    resolved, base = path.resolve(), Path(root).resolve()
+    if not resolved.is_relative_to(base):
+        raise ValueError(
+            f"binding doc {path} resolves to {resolved}, outside the repo root "
+            f"{base}; a settlement key is a path in the repo, so the doc must "
+            f"live in the repo"
+        )
+    return resolved.relative_to(base).as_posix()
 
 
 def stage_of_artifact_path(path: str, issue: int) -> str | None:
@@ -251,12 +273,17 @@ def build_settlement(
     *,
     verdict: str = "",
 ) -> dict:
-    """The durable record of one artifact having passed its gate."""
+    """The durable record of one artifact having passed its gate.
+
+    An artifact that is absent or cannot be read raises, naming its path
+    (#3795). A record with no artifact hash can never match, so it used to be
+    written and then ignored by every later launch without a word.
+    """
     return {
         "settlement_version": SETTLEMENT_VERSION,
         "stage": stage,
         "artifact_path": str(artifact_path),
-        "artifact_sha256": sha256_path(artifact_path),
+        "artifact_sha256": _file_sha256(Path(artifact_path)),
         "verdict": verdict,
         "settled_at": datetime.now(tz=timezone.utc).isoformat(),
         "inputs": [i.as_dict() for i in inputs],

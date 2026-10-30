@@ -105,6 +105,17 @@ The test plan used to shrink without a word.
 - **A missing Section 10, or one with no scenario rows, is loud and an error** (225, 237). A Section 10 heading that holds no table at all used to be reported as missing; it now says what it is.
 - **No row drops out of a scenario table** (248, 262). Inside a table whose header starts `ID`, `Test ID` or `#`, a row with too few cells or an ID that is neither a number nor a T-number is recorded. `extract_test_scenarios` takes an optional `problems` list; `validate_test_plan` passes one and makes each entry a `parse` error violation, so the plan fails. Other tables in Section 10 (coverage targets and the like) are not scenarios, are not read as such, and raise nothing.
 
+### settlement.py (#3795, 5 sites)
+
+Settlement decides whether a launch may reuse an artifact instead of drafting it again. Every doubt still resolves toward "unsettled", which drafts; what changes is that a failure says so.
+
+- **An input that exists and cannot be read alerts** (111, 112). `sha256_path` still returns None for it, which `verify` reports as a named mismatch, so the stage drafts. It now calls `alert_operator` with the path and the cause. An absent input stays quiet: a landed LLD's working copy is deleted when its PR merges, and absence is an answer.
+- **A binding doc outside the repo raises** (176, 177). It used to be keyed by its absolute path, which names one machine's layout: the same doc read from the other side of WSL is a different key, and the settlement silently stops holding.
+- **An artifact that cannot be hashed is never settled** (259). `build_settlement` reads the artifact directly and raises, naming it. A record with no artifact hash can never match, so it used to be written and then ignored by every later launch.
+- **Caller.** `orchestrator/stages.py::settle_stage` still wraps the call in a broad handler that prints and continues (its own ledger row, orchestrator package), so a settlement that raises costs the next launch a redraw, as before.
+
+Baseline: both tags leave. The fail-open audit lost 2 findings.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

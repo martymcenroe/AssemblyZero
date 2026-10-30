@@ -1,5 +1,5 @@
 {
-  "count": 298,
+  "count": 296,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -210,18 +210,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 147
-    },
-    "assemblyzero/core/settlement.py::_rel_posix::fail_open_tag::1": {
-      "detail": "# fail-open: a path outside the repo (a symlinked doc tree) keeps its",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 177
-    },
-    "assemblyzero/core/settlement.py::sha256_path::fail_open_tag::1": {
-      "detail": "# fail-open: only in shape -- None is reported by `verify` as a named",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 112
     },
     "assemblyzero/hooks/cascade_action.py::handle_cascade_detection::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

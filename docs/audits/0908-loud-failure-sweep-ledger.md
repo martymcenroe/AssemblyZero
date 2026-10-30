@@ -548,11 +548,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/errors.py:365` | retry-after | None | logged | ERROR |
 | `assemblyzero/core/recovery_plan.py:72` | unknown workflow | string | compliant | none |
 | `assemblyzero/core/recovery_plan.py:144` | halt summary | stdout | loud | FIXED in #3581 core batch 1 (#3724): stderr |
-| `assemblyzero/core/settlement.py:111` | hash | None | loud, logged, alerts | ERROR |
-| `assemblyzero/core/settlement.py:112` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/settlement.py:176` | outside root | abs key | logged | raise |
-| `assemblyzero/core/settlement.py:177` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/settlement.py:259` | hash | None | all | raise |
+| `assemblyzero/core/settlement.py:111` | hash | None | loud, logged, alerts | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:112` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:176` | outside root | abs key | logged | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:177` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
+| `assemblyzero/core/settlement.py:259` | hash | None | all | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
 | `assemblyzero/core/capacity.py:74` | not object | {} | all | raise |
 | `assemblyzero/core/capacity.py:75` | read | {} | all | raise |
 | `assemblyzero/core/capacity.py:89` | write | pass | all | raise |
