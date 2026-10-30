@@ -33,6 +33,20 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 - **#3864 had already routed every ledger row to HALT.** Each is now pinned by a test named for its ledger line.
 - **The two human-gate routers read only `next_node`.** A gate that stopped with an error and named a successor went on to that successor, or ended the run at END. Both routers now check `error_message` first and halt. The N4 revise cap in `human_gate.py` depends on this.
 
+### nodes/generate_draft.py (11 ledger findings fixed; 8 compliant rows)
+
+- **Nothing is spent before it can be recorded.** The audit_dir is checked first, before a seat, a template or a model (201, 233, 674). Without it, a draft or every best-of-N candidate was paid for and then not recorded in lineage.
+- **Nothing is cut to fit.**
+  - A prompt over the cap halts, naming its size and the cap (366).
+  - `_truncate_prompt` is deleted (1155, 1160). It dropped sections and then hard-truncated.
+- **Nothing is invented in place of what could not be read.**
+  - A prior draft that cannot be read halts, naming its path and the exception (480). It used to be replaced in the system prompt by "(unable to read previous draft ...)".
+  - A Tiphys refresh that fails raises `InterfaceRefreshError`, and the node halts on it (807). The broad handler that fell back to the stale N0b map is gone; `interface_surface` raises since #3779.
+- **A failed best-of-N candidate is said** with its index, the drafter spec and the cause, and the round goes on (185).
+- **The seat holder** is gone (345, tag deleted). A seat that will not resolve and a provider that cannot be built halt together as "Invalid drafter", before the preflight.
+- **`validate_draft_structure`** blocks an empty draft (1186).
+- **The gate registry:** the generate_draft sites are renumbered, and `lld.drafter_failed` covers the new preconditions.
+
 ## Loud-failure compliance (standard 0034)
 
 | Site (file:line) | Loud | Logged | Stops | Alerts |
@@ -41,6 +55,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 | `finalize.py` `_finalize_repair_budget` | the ValueError's traceback | names the bad value | raises out of the node | not alerted at the site: the orchestrator's `except Exception` in `run_lld_stage` records a failed stage without an alert (outside this branch) |
 | `finalize.py` `validate_lld_final` | the ValueError's traceback | says the content is empty | raises; its one caller halts on an empty draft first | through that caller's HALT |
 | `graph.py` `route_from_human_gate_draft`, `route_from_human_gate_verdict` | the gate's own ERROR line | the gate's message | an error routes to HALT | HALT calls `alert_operator` |
+| `generate_draft.py` `generate_draft`, `_generate_best_of_n`, `build_revision_context` | ERROR line on stderr and in the log, via `_loud` | names the path, size, spec, files and cause | `error_message`, which `route_after_generate_draft` sends to HALT; a failed candidate alone does not stop the round, by design | HALT calls `alert_operator` |
 
 ## New defects found, not fixed here
 

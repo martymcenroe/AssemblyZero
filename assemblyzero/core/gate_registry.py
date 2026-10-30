@@ -189,23 +189,28 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "lld.drafter_failed", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Drafter failed",
-        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 0, 3),
+        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 0, 1, 2, 3, 6, 7, 8),
+        notes=(
+            "#3585: also what the drafter call depends on, each checked before "
+            "it is paid for: the audit_dir, a prompt within the cap, a prior "
+            "draft that can be read, and a Tiphys refresh that worked"
+        ),
     ),
     Gate(
         "lld.preflight", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "[PREFLIGHT] Gemini unavailable",
-        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 1),
+        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 5),
     ),
     Gate(
         "lld.invalid_model_config", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Invalid drafter",
-        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 2)
+        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 4)
         + _s(f"{_RQ}/nodes/review.py::review::return", 1),
     ),
     Gate(
         "lld.budget.cost", "lld", JUDGES_BUDGET, ACTION_HALT,
         "[BUDGET]",
-        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 4)
+        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 9)
         + _s(f"{_RQ}/nodes/review.py::review::return", 3),
     ),
     Gate(
@@ -228,7 +233,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "lld.edit_script_rejected", "lld", JUDGES_BUDGET, ACTION_HALT,
         "SEARCH/REPLACE",
-        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 5, 6, 7, 8),
+        _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 10, 11, 12, 13),
         justified_by="#2723",
         notes=(
             "a revision that was not a usable edit script, or that changed "

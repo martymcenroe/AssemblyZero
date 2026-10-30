@@ -92,6 +92,9 @@ def lld_state(tmp_path, draft_003):
     """A revision state: an existing draft plus a reviewer verdict."""
     audit = tmp_path / "audit"
     audit.mkdir()
+    # #3585: the revision's Tiphys refresh reads the target repo and halts
+    # when it cannot, so the target is a real (empty) directory.
+    (tmp_path / "repo").mkdir()
     return {
         "workflow_type": "lld",
         "assemblyzero_root": str(ROOT),

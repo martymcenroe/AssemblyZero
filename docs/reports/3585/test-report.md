@@ -40,3 +40,23 @@ The other seven pin a well-formed issue URL, an idea that is present and one nev
 **Changed tests:** none.
 
 **Neighbouring suites:** 424 passed and 1 skipped across 18 files that build or route the requirements graph.
+
+## nodes/generate_draft.py
+
+**New: `tests/unit/test_generate_draft_loud_failure.py` (20).**
+
+**Before the fix, measured:** 15 failed, 5 passed. Every site test failed. The 5 that passed pin kept behaviour:
+- a present audit_dir records the draft;
+- a prompt at the cap is sent whole;
+- a readable prior draft rides in the system prompt;
+- a draft naming no Python files uses the N0b map;
+- a draft with no open-questions section passes.
+
+**Changed tests, each asserting the new behaviour:**
+- `test_prompt_size_awareness.py`: its truncator tests became halt tests.
+- `test_interface_surface.py`: one truncation test became a test that nothing is cut.
+- `test_requirements_validation.py`: an empty draft blocks.
+- `test_requirements_nodes.py`: a missing audit_dir halts. Two other tests gained an audit_dir.
+- `test_lld_edit_script_revision.py`, `test_lld_mock_completes.py` and `test_diff_aware_review.py`: each state now has a target directory or an audit_dir that exists.
+
+**Neighbouring suites:** the first run across 45 files gave 22 failures. Each was a test asserting retired behaviour: a missing audit_dir or target repository tolerated. After those tests were changed, and after the seat-handling change, the run across 47 files gave 987 passed and 1 skipped.

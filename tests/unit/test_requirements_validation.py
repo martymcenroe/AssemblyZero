@@ -64,10 +64,11 @@ Just some implementation details.
         result = validate_draft_structure(content)
         assert result is None
 
-    def test_passes_empty_content(self):
-        """Test that empty content passes (edge case)."""
+    def test_empty_content_blocks(self):
+        """#3585: an empty draft cannot be shown to have no open questions; it
+        used to pass."""
         result = validate_draft_structure("")
-        assert result is None
+        assert result is not None and result.startswith("BLOCKED")
 
     def test_validation_ignores_definition_of_done_checkboxes(self):
         """DoD checkboxes should not block validation.

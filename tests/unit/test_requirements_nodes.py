@@ -581,6 +581,10 @@ class TestGenerateDraftNodeAdditional:
             brief_file="brief.md",
         )
         state["brief_content"] = "# Brief"
+        # #3585: N1 checks the audit_dir first; give it one so the template
+        # is what is missing.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = generate_draft(state)
 
@@ -2144,14 +2148,18 @@ class TestGenerateDraftNodeCoverage:
         )
         state["brief_content"] = "# Brief"
         state["config_drafter"] = "invalid:provider"
+        # #3585: N1 checks the audit_dir first.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = generate_draft(state)
 
         assert "invalid" in result.get("error_message", "").lower()
 
     @patch("assemblyzero.workflows.requirements.nodes.generate_draft.get_provider")
-    def test_draft_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
-        """Test draft_path is None when audit_dir doesn't exist."""
+    def test_a_missing_audit_dir_halts_before_the_drafter_runs(self, mock_get_provider, tmp_path):
+        """#3585: an audit_dir that does not exist halts N1. It used to draft
+        and leave current_draft_path empty, recording nothing."""
         from assemblyzero.workflows.requirements.nodes.generate_draft import generate_draft
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -2180,7 +2188,8 @@ class TestGenerateDraftNodeCoverage:
 
         result = generate_draft(state)
 
-        assert result.get("current_draft_path", "") == ""
+        assert "does not exist" in result["error_message"]
+        mock_provider.invoke.assert_not_called()
 
     @patch("assemblyzero.workflows.requirements.nodes.generate_draft.get_provider")
     def test_lld_with_context_content(self, mock_get_provider, tmp_path):
