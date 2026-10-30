@@ -180,6 +180,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 298 passed and 1 failed across every test file that imports `call_recording` or `model_record` (`test_call_recording_isolation.py`, `test_call_recording_roll.py`, `test_model_record.py`, `test_seat_attribution.py`, `test_impl_lands_through_driver.py`, `test_impl_standalone_end_state.py`, `test_lld_mock_completes.py`, `test_lld_mock_is_offline.py`, `test_lld_writes_only_worktree.py`, `test_llm_provider_loud_failure.py`, both new files), every test file that imports the replay (`test_replay_run.py`, `test_github_writes_inert.py`, `test_alert_channel_at_start.py`) and the two audits' own tests. The one failure was `test_no_fixed_site_left_in_the_baseline`, before `--write-baseline`; after it the audits' tests pass (77).
 
+## audit.py
+
+**New: `tests/unit/test_audit_loud_failure.py` (11)**: nine for the five sites (two for 238, three for 267, two for 270), plus two that pin kept behaviour (an empty log is no entries and quiet, and a clean log reads whole).
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 8 failed, 2 passed (the two that pin kept behaviour). The ninth site test, a shard the consolidator removes between the listing and the read, was added after the fix, when the first version still read such a shard as empty; measured with HEAD's `audit.py` put back in place for the run: 9 failed, 2 passed.
+
+**Changed test:** `tests/integration/test_audit_sharding.py::TestTailSkipsLocked::test_a_shard_that_is_not_json_raises` (was `test_graceful_degradation_on_unreadable`, which asserted the partial result).
+
+**Neighbouring suites:** 122 passed and 6 xfailed across `test_audit.py`, the new file, `test_consolidate_logs_large_file.py`, `test_cov_target_resolution.py` and the two audits' own tests, plus 22 passed in `tests/integration/test_audit_sharding.py` (run with `-m integration`). Run before `--write-baseline`, the same unit set had one failure, `test_the_baseline_is_not_stale`: the fail-open baseline still listed the four removed handlers.
+
 ## #4161: the checkout's telemetry logs
 
 **New: `tests/unit/test_checkout_telemetry_isolation.py` (5).** Three T2 tests send one writer's record at the checkout itself and find the checkout's log unchanged and the record under `tmp_path`; one checks that a record sent to a test's own directory stays there; T1 checks that the session guard watches exactly the paths the unredirected writers use.

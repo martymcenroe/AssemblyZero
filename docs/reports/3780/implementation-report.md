@@ -228,6 +228,19 @@ The recording (`calls.jsonl`) is the replay's input, and the launch gate (#2724)
 
 Baseline: three entries leave (both tags and `_append`'s handler). The fail-open audit lost 2 findings.
 
+### audit.py (#3771, 5 sites)
+
+`ReviewAuditLog` writes review decisions to session shards, and `tail` merges them with the consolidated history. Nothing in `assemblyzero/` or `tools/` reads it today: the package exports it, and `tools/view_audit.py`, its one reader, imports two names the module does not define (reported separately). A reader of `tail` takes the list as the whole log, so a short list is a wrong answer, and each skip raises.
+
+- **A timeout finding the repo root keeps its cause** (130). It is chained (`from exc`), and the message names the command, the limit and the directory, and says to pass `repo_root`.
+- **A line that is not a JSON object raises** (238, 267), in the history and in a shard alike, naming the file and the line's number in the file (counted from the top, where `tail` reads only the end of the history). Such lines used to be skipped. A JSON line that is not an object used to crash the sort with an `AttributeError` naming neither.
+- **A file that cannot be read raises its `OSError`** (242, 270), which names it. A history read as `[]` and a shard skipped both used to come back as a log missing their entries. An absent history, and no shards, are still no entries: nothing has been logged, or everything has been consolidated.
+- **A shard removed after it was listed raises** (270). The consolidator moves a shard into the history and deletes it; one deleted between `tail`'s listing and its read has its entries in neither part of what `tail` read. Shards are read without an existence check, since they were listed a moment before, so that race is a `FileNotFoundError`, not an empty shard.
+- `_read_jsonl_safe` is now `_read_jsonl`, since it no longer swallows anything; it reads the history when `tail` is asked for every entry, and every read shares one line parser.
+- **Callers.** None outside the module and the package export. `tools/view_audit.py` fails at import, before it could call `tail`.
+
+Baseline: no entries in the loud-failure baseline, before or after, since the module had no broad handler or tag. The fail-open audit lost 4 findings (the four handlers in the two readers).
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

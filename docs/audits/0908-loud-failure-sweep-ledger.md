@@ -659,11 +659,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/section_utils.py:147` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/section_utils.py:288` | unmapped feedback | "" | compliant | none |
 | `assemblyzero/core/audit.py:126` | git missing | raise | compliant | none |
-| `assemblyzero/core/audit.py:130` | timeout | raise | logged | from e |
-| `assemblyzero/core/audit.py:238` | bad history line | skip | all | raise |
-| `assemblyzero/core/audit.py:242` | history read | [] | all | raise |
-| `assemblyzero/core/audit.py:267` | bad shard line | skip | all | raise |
-| `assemblyzero/core/audit.py:270` | shard read | partial | all | raise |
+| `assemblyzero/core/audit.py:130` | timeout | raise | logged | FIXED in the core batch (#3771): the timeout is chained as the cause, and the message names the command, the limit and where it ran; test_130 in test_audit_loud_failure.py |
+| `assemblyzero/core/audit.py:238` | bad history line | skip | all | FIXED in the core batch (#3771): a line that is not a JSON object raises ValueError naming the file and its line; test_238 in test_audit_loud_failure.py |
+| `assemblyzero/core/audit.py:242` | history read | [] | all | FIXED in the core batch (#3771): a history that cannot be read raises its OSError; an absent one is still no entries; test_242 in test_audit_loud_failure.py |
+| `assemblyzero/core/audit.py:267` | bad shard line | skip | all | FIXED in the core batch (#3771): a line that is not a JSON object raises ValueError naming the file and its line; test_267 in test_audit_loud_failure.py |
+| `assemblyzero/core/audit.py:270` | shard read | partial | all | FIXED in the core batch (#3771): a shard that cannot be read, or that was removed after it was listed, raises its OSError, so no partial log is returned; test_270 in test_audit_loud_failure.py |
 | `assemblyzero/core/halt_evidence.py:43` | hash artifact | None | loud, logged, alerts | ERROR |
 | `assemblyzero/core/halt_evidence.py:44` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/halt_evidence.py:85` | corrupt record | drop | loud, logged, alerts | ERROR |
