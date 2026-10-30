@@ -128,8 +128,10 @@ class TestItStillDeclinesWhenNothingHasIt:
         assert sr._graveyard_leavings_refs(bare) == []
         assert sr._restore_artifact(bare, 1, str(bare / "a.md")) is False
 
-    def test_a_path_outside_the_repo_declines(self, repo):
-        assert sr._restore_artifact(repo, 1, "C:/elsewhere/a.md") is False
+    def test_a_path_outside_the_repo_is_refused(self, repo):
+        """#3585: a caller's mistake, raised; it used to read as "not restorable"."""
+        with pytest.raises(ValueError, match="outside the repo"):
+            sr._restore_artifact(repo, 1, "C:/elsewhere/a.md")
 
 
 class TestTheLldBranchStillWinsFirst:

@@ -184,3 +184,14 @@ Callers: nothing catches the new raises, so a broken credentials file or a buffe
 - **`gh` missing or timing out is an ERROR line** (48), naming the exception type, instead of a bare `pass`. The handler is narrowed to `OSError` and `SubprocessError`.
 - **`gh` is no longer asked for the token.** The call was `gh auth status --show-token`; the username line does not need it.
 - **Not raised and not alerted, deliberately.** "unknown" is the label the docstring declares. Every `emit` calls this, and CI runs the unit tier with no `gh` login and with telemetry on, so a raise would fail every test that emits there, and an alert would land in whichever test emits first. Baseline: the handler entry leaves.
+
+### speedrun/restore.py (4 sites)
+
+`restore_artifact` rebuilds a missing pipeline input from the refs; the implementation run's `find_lld_path` calls it before concluding an LLD is absent.
+
+- **A failing `git for-each-ref` raises** `RestoreError` with the command, the return code and stderr (46, 83). It returned no refs, so the search silently covered fewer of them.
+- **A path outside the repo raises `ValueError`** (140). It was a tagged `return False`; the tag is gone.
+- **A `git show` that fails for any reason but absence raises** `RestoreError` (150). Absence is a closed list of git's own messages: the ref does not exist, or the path is not on it. Those still move the search to the next ref.
+- `False` now means only that no source holds the file.
+
+Callers: `workflows/testing/nodes/load_lld.py` `find_lld_path` catches `Exception` around it and prints a WARN (a `# fail-open:` site of the testing package). `tools/speedrun_roll.py` (`_restore_artifact`, `_graveyard_leavings_refs`) lets it out. Baseline: the tag entry leaves.

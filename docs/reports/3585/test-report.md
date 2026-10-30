@@ -186,3 +186,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** none; `test_telemetry_actor.py::test_fallback_on_error` still holds ("unknown" on `FileNotFoundError`).
 
 **Neighbouring suites:** 45 passed across the new file, `test_telemetry_actor.py`, `test_telemetry_emitter.py` and `test_telemetry_emitter_loud_failure.py`.
+
+## speedrun/restore.py
+
+**New: `tests/unit/test_restore_loud_failure.py` (7).** Site tests for 46, 83, 140 (two) and 150 against a real temporary git repository, plus the quiet "not restorable" (no ref, no path) and a file restored from `HEAD`, which pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 5 failed, 2 passed (the kept-behaviour tests).
+
+**Changed tests:** `test_restore_from_graveyard.py::test_a_path_outside_the_repo_declines` is now `test_a_path_outside_the_repo_is_refused`, and `test_resume_after_failure.py::test_restore_artifact_outside_repo_refuses` expects the `ValueError`; both returned False.
+
+**Neighbouring suites:** 136 passed across the new file, `test_input_rebuild_from_refs.py`, `test_restore_from_graveyard.py`, `test_restore_prefers_durable_and_base.py`, `test_resume_after_ceiling_halt.py`, `test_resume_from_pr_stage.py`, `test_spec_handoff_survives_janitor.py`, `test_speedrun_roll_kill.py`, `test_resume_after_failure.py` and `test_leavings_janitor.py`.
