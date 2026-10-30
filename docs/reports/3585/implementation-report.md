@@ -35,3 +35,10 @@ Compliance: each failure path writes an ERROR line through `alert_operator`, rec
 Caller that still swallows the raise: `workflows/requirements/nodes/validate_mechanical.py` `run_ast_sentinel_on_modify_files` catches `Exception` and logs at DEBUG (its own loud-failure baseline entry). Until it is fixed, a broken file goes from an advisory warning to nothing.
 
 Compliance: the raise carries what and where (the file) and the cause; stopping and alerting fall to the caller, which is in the requirements package.
+
+### utils/lld_verification.py (1 site; 1 compliant row)
+
+- **The path check always runs** (307). `run_verification_gate` validated the LLD path only when a `project_root` was passed; without one the security check was skipped and the gate went on to pass the file. It now always calls `validate_lld_path`, which uses the current directory when no root is given, as its docstring says.
+- The `ValueError` handler at 282 already raises `LLDVerificationError`; the ledger marks it compliant and it is unchanged.
+
+No caller in `assemblyzero/` or `tools/` calls `run_verification_gate`; `utils/__init__.py` re-exports it.
