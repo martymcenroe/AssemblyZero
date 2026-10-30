@@ -96,3 +96,20 @@ The other seven pin a well-formed issue URL, an idea that is present and one nev
 - The third, `test_check_requirements.py::TestConflict::test_report_says_filing_failed_when_it_did`, showed that the standalone pre-check reads "must-resolve filing failed" from the gate's captured stdout. The gate prints that line again, beside the alert.
 
 The 6 files involved then gave 154 passed.
+
+## nodes/review.py
+
+**New: `tests/unit/test_review_loud_failure.py` (18).**
+
+**Before the fix, measured** against the unchanged module, on its first 17 tests: 13 failed, 4 passed. Every site test failed. The 4 that passed pin kept behaviour: a tiered REVISE with no Tier 1 issue is APPROVED, one with an issue is BLOCKED, a self-build needs no target block, and a clean approval goes forward with its verdict saved. The eighteenth, a Tier 1 section without a Tier 2 section read as BLOCKED, was added after the fix to pin the narrowed contract.
+
+**Changed tests, each asserting the new behaviour:**
+- `test_requirements_nodes.py`:
+  - three REVISE responses carry their Tier sections;
+  - two states gain an audit_dir;
+  - `test_reviewer_failure_is_llm_format_error` became `test_reviewer_failure_halts_with_the_providers_cause`.
+- `test_validate_test_plan_node.py::test_review_resets_counter`: a real target and audit_dir.
+- `test_lld_review_reads_template.py`: its scripted provider says its calls succeeded.
+- `test_structured_verdicts.py`: the verdict guesser is read from the parser module, and review's copy is gone.
+
+**Neighbouring suites:** 28 files gave 553 passed, 1 skipped, 4 deselected (e2e) and 2 failed. The 2 are `test_extract_and_discard.py::TestBlockedVerdictExtraction::test_blocked_verdict_stores_summary_not_prose` and `::TestApprovedVerdictExtraction::test_approved_verdict_stores_summary_not_prose`. Both fail identically with HEAD's `review.py` swapped back in, and both test the testing workflow's `review_test_plan`, so they are pre-existing.

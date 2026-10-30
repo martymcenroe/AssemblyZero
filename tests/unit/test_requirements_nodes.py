@@ -433,9 +433,11 @@ class TestReviewNode:
         import json as _json
 
         mock_provider = Mock()
+        # #3585: a REVISE carries its Tier sections, or N3 halts on the
+        # broken reviewer contract.
         mock_provider.invoke.return_value = Mock(
             success=True,
-            response=_json.dumps({"verdict": "REVISE", "rationale": "Missing tests", "feedback_items": ["Missing tests"], "open_questions": []}),
+            response=_json.dumps({"verdict": "REVISE", "rationale": "## Tier 1: BLOCKING Issues\n- [ ] Missing tests\n## Tier 2: HIGH PRIORITY\n", "feedback_items": ["Missing tests"], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -773,6 +775,10 @@ class TestReviewNodeAdditional:
             issue_number=42,
         )
         state["current_draft"] = "# Draft"
+        # #3585: N3 checks the audit_dir first; give it one so the prompt is
+        # what is missing.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = review(state)
 
@@ -1902,18 +1908,19 @@ class TestReviewNodeCoverage:
         )
         state["current_draft"] = "# Draft"
         state["config_reviewer"] = "invalid:provider"
+        # #3585: N3 checks the audit_dir first.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = review(state)
 
         assert "invalid" in result.get("error_message", "").lower()
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
-    def test_reviewer_failure_is_llm_format_error(self, mock_get_provider, tmp_path):
-        """Reviewer failure surfaces as an LLM-format error (#1766).
-
-        Issue #775: review node no longer checks result.success. Empty content
-        from a failed provider falls through to regex fallback -> UNKNOWN -> BLOCKED.
-        """
+    def test_reviewer_failure_halts_with_the_providers_cause(self, mock_get_provider, tmp_path):
+        """#3585: a failed reviewer call halts with the provider's own error.
+        It used to be parsed as an unreadable answer, re-asked, and reported
+        as a rejected contract, which dropped the cause."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -1941,11 +1948,10 @@ class TestReviewNodeCoverage:
 
         result = review(state)
 
-        # #1766 → standard 0028: empty/failed reviewer content is a rejected
-        # structured contract, not a synthesized review outcome. The stage
-        # retry machinery re-runs the review.
-        assert "rejected" in result.get("error_message", "")
+        assert "API error" in result.get("error_message", "")
+        assert "gave no verdict" in result.get("error_message", "")
         assert "lld_status" not in result
+        assert mock_provider.invoke.call_count == 1
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_verdict_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
@@ -2026,7 +2032,8 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            response=_json.dumps({"verdict": "REVISE", "rationale": "Missing error handling section", "feedback_items": ["Missing error handling section"], "open_questions": []}),
+            # #3585: a REVISE carries its Tier 1 section, or N3 halts.
+            response=_json.dumps({"verdict": "REVISE", "rationale": "## Tier 1: BLOCKING Issues\n- [ ] Missing error handling section\n## Tier 2: HIGH PRIORITY\n", "feedback_items": ["Missing error handling section"], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,

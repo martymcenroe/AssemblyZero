@@ -210,13 +210,13 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "lld.invalid_model_config", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Invalid drafter",
         _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 4)
-        + _s(f"{_RQ}/nodes/review.py::review::return", 1),
+        + _s(f"{_RQ}/nodes/review.py::review::return", 2),
     ),
     Gate(
         "lld.budget.cost", "lld", JUDGES_BUDGET, ACTION_HALT,
         "[BUDGET]",
         _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 9)
-        + _s(f"{_RQ}/nodes/review.py::review::return", 3),
+        + _s(f"{_RQ}/nodes/review.py::review::return", 6),
     ),
     Gate(
         "lld.step_budget", "lld", JUDGES_BUDGET, ACTION_HALT,
@@ -249,7 +249,13 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "lld.reviewer_failed", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Reviewer response rejected",
-        _s(f"{_RQ}/nodes/review.py::review::return", 0, 2),
+        _s(f"{_RQ}/nodes/review.py::review::return", 0, 1, 3, 4, 5, 7, 8),
+        notes=(
+            "#3585: also the reviewer's preconditions (the audit_dir, a target "
+            "structure that can be listed), a reviewer call that failed, a "
+            "REVISE without its Tier sections, and an APPROVED verdict whose "
+            "resolutions could not be applied"
+        ),
     ),
     Gate(
         "lld.mechanical_validation", "lld", JUDGES_BUDGET, ACTION_HALT,
