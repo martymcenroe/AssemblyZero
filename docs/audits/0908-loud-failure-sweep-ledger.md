@@ -535,16 +535,16 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/gemini_client.py:660` | retry | no log | loud | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
 | `assemblyzero/core/gemini_client.py:671` | exhausted | no log | loud, alerts | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
 | `assemblyzero/core/gemini_client.py:730` | metadata | unknown | logged | FIXED in the core batch (#3777): loud on stderr with its cause; no agy fails at once; a fault is raised; test_<line> in test_gemini_client_loud_failure.py |
-| `assemblyzero/core/call_recording.py:153` | write | False | all | raise |
-| `assemblyzero/core/call_recording.py:154` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/call_recording.py:179` | corrupt line | count | loud, logged | ERROR |
-| `assemblyzero/core/call_recording.py:180` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/call_recording.py:187` | bad record | count | loud, logged | ERROR |
-| `assemblyzero/core/call_recording.py:251` | write | discarded | loud, stops, alerts | check |
-| `assemblyzero/core/call_recording.py:284` | unreadable count | discarded | logged, stops | raise |
-| `assemblyzero/core/call_recording.py:353` | replay overrun | failed result | loud, alerts | ERROR |
-| `assemblyzero/core/call_recording.py:372` | divergence | failed result | loud, alerts | ERROR |
-| `assemblyzero/core/call_recording.py:388` | missing success | True | logged, stops | refuse |
+| `assemblyzero/core/call_recording.py:153` | write | False | all | FIXED in the core batch (#3772): a write that fails raises RecordingError naming the file and the cause; test_153 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:154` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3772): the tag and its handler are removed; test_154 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:179` | corrupt line | count | loud, logged | FIXED in the core batch (#3772): raises RecordingError naming the file and the line, where the ledger prescribed an ERROR line, since a recording with a call missing replays as a false divergence; a final line with no newline is still counted; test_179 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:180` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3772): the tag is removed; test_180 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:187` | bad record | count | loud, logged | FIXED in the core batch (#3772): a line that is not a call record raises RecordingError naming the file and the line; test_187 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:251` | write | discarded | loud, stops, alerts | FIXED in the core batch (#3772): nothing to check, since the append raises and the call's result is not returned; test_251 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:284` | unreadable count | discarded | logged, stops | FIXED in the core batch (#3772): a recording that ends in a write that did not complete refuses the next append; test_284 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:353` | replay overrun | failed result | loud, alerts | FIXED in the core batch (#3772): every replay refusal is an ERROR line on stderr and the log, and still a failed result; test_353 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:372` | divergence | failed result | loud, alerts | FIXED in the core batch (#3772): every replay refusal is an ERROR line on stderr and the log, and still a failed result; test_372 in test_call_recording_loud_failure.py |
+| `assemblyzero/core/call_recording.py:388` | missing success | True | logged, stops | FIXED in the core batch (#3772): a recorded call with no success field is refused, not served as a success; test_388 in test_call_recording_loud_failure.py |
 | `assemblyzero/core/errors.py:365` | retry-after | None | logged | FIXED in the core batch (#3774): a retry-after header that is not a number of seconds is an ERROR line naming its value, and the rate limit is still raised with no hint; test_<line> in test_errors_loud_failure.py |
 | `assemblyzero/core/recovery_plan.py:72` | unknown workflow | string | compliant | none |
 | `assemblyzero/core/recovery_plan.py:144` | halt summary | stdout | loud | FIXED in #3581 core batch 1 (#3724): stderr |

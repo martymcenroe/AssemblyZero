@@ -170,6 +170,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 243 passed and 1 failed across every test file that imports `model_record` or `call_recording` (`test_model_record.py`, the new file, `test_seat_attribution.py`, `test_call_recording_isolation.py`, `test_call_recording_roll.py`, `test_impl_lands_through_driver.py`, `test_impl_standalone_end_state.py`, `test_lld_mock_completes.py`, `test_lld_mock_is_offline.py`, `test_lld_writes_only_worktree.py`, `test_llm_provider_loud_failure.py`), the run record's two test files and the two audits' own tests. The one failure was `test_no_fixed_site_left_in_the_baseline`, before `--write-baseline`; after it the audits' tests pass (77).
 
+## call_recording.py
+
+**New: `tests/unit/test_call_recording_loud_failure.py` (15)**: eleven for the ten sites (two for 187), plus four that pin kept behaviour (a clean recording reads back whole and in order, a partial last line is counted and not read and is quiet, an absent recording is empty and quiet, and a faithful replay is quiet).
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 11 failed, 4 passed (the four that pin kept behaviour).
+
+**Changed tests:** none. Every existing test that builds a `ReplayProvider` gives its calls a `success` field, and none writes a recording by hand.
+
+**Neighbouring suites:** 298 passed and 1 failed across every test file that imports `call_recording` or `model_record` (`test_call_recording_isolation.py`, `test_call_recording_roll.py`, `test_model_record.py`, `test_seat_attribution.py`, `test_impl_lands_through_driver.py`, `test_impl_standalone_end_state.py`, `test_lld_mock_completes.py`, `test_lld_mock_is_offline.py`, `test_lld_writes_only_worktree.py`, `test_llm_provider_loud_failure.py`, both new files), every test file that imports the replay (`test_replay_run.py`, `test_github_writes_inert.py`, `test_alert_channel_at_start.py`) and the two audits' own tests. The one failure was `test_no_fixed_site_left_in_the_baseline`, before `--write-baseline`; after it the audits' tests pass (77).
+
 ## #4161: the checkout's telemetry logs
 
 **New: `tests/unit/test_checkout_telemetry_isolation.py` (5).** Three T2 tests send one writer's record at the checkout itself and find the checkout's log unchanged and the record under `tmp_path`; one checks that a record sent to a test's own directory stays there; T1 checks that the session guard watches exactly the paths the unredirected writers use.

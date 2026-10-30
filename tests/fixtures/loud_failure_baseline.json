@@ -1,5 +1,5 @@
 {
-  "count": 280,
+  "count": 277,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -12,24 +12,6 @@
       "issue": 3581,
       "kind": "unrouted_error",
       "line": 522
-    },
-    "assemblyzero/core/call_recording.py::_append::fail_open_tag::1": {
-      "detail": "# fail-open: a run that cannot write its recording still has to finish.",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 154
-    },
-    "assemblyzero/core/call_recording.py::_append::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 153
-    },
-    "assemblyzero/core/call_recording.py::read_calls::fail_open_tag::1": {
-      "detail": "# fail-open: one truncated line -- a roll killed mid-write -- must",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 180
     },
     "assemblyzero/core/fail_open_audit.py::_Scanner._exception_text::fail_open_tag::1": {
       "detail": "# fail-open: this only names the exception type for the report. An",

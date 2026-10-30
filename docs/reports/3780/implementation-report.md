@@ -215,6 +215,19 @@ The model record says which seat, spec and model answered every call, so that a 
 
 Baseline: four entries leave (both handlers and both tags). The fail-open audit lost 2 findings.
 
+### call_recording.py (#3772, 10 sites)
+
+The recording (`calls.jsonl`) is the replay's input, and the launch gate (#2724) waits on replays: `ReplayProvider` answers call N with recorded response N only while the code sends recorded prompt N. Its readers are `tools/replay_run.py` (through `read_calls` and `speedrun/replay.py`'s `recording_for`) and `tools/compare_profiles.py` (its own reader, counting calls and verdicts per seat). A call the run consumed and the recording lacks makes every replay diverge at it as if the code had changed, the false finding #2731 exists to replace. So the write raises: the recording holds every call the run used, or the run stops.
+
+- **A write that fails raises** (153, 154, 251). `_append` raises the new `RecordingError`, naming the file and the cause, before the call's result is returned, so the run never consumes a call its recording does not hold; a resume makes the call again and records it. It used to return False, and the call site discarded it (251), so there is nothing left to check there. `RecordingError` is not an `OSError`.
+- **A line that is not a call record raises** (179, 180, 187), naming the file and the line. The ledger prescribed an ERROR line beside the count for 179. Raising goes further, for two reasons: a recording with a call missing is not a shorter recording but a wrong one, which replays as a divergence at the gap, and the count is what `_next_seq` numbered the next call by, so it numbered it into the gap. One line is still counted, not read: a final line with no newline, the write of a process that died in it. The newline is part of every write, so its call never reached the run, and the recording is read up to it, quietly; `RecordingSummary.unreadable` now counts only that.
+- **An append after a partial last line raises** (284). `_next_seq` discarded the count, and the next call was written onto the end of the partial line, and the two read as one bad line. The error says to remove the partial line, whose call never reached the run, and resume.
+- **Every replay refusal is loud** (353, 372). `_refuse` writes `ERROR [REPLAY]` to stderr and the log with the divergence, and still returns the failed result, the provider contract: the node reports it as its error, and the replay runner reads `divergence`.
+- **A recorded call with no `success` field is refused** (388). It was served as a success, so a failed call recorded without one would replay as an answer. The refusal says what the record lacks, through a new `Divergence.why`, and keeps the `ReplayProvider:` prefix the runner matches on.
+- **Callers.** `RecordingProvider.invoke` wraps every transport `get_provider` builds while a run is armed, and has no handler, so a `RecordingError` reaches the node that made the call; `utils/retry.py`'s `with_retry` catches nothing, so it is never retried. Nodes that wrap their call in a broad handler turn it into whatever they turn every failure into (their own rows). `tools/replay_run.py` calls `recording_for` outside its graph handler, so a recording with a bad line ends the replay with a traceback and no alert (its own row, `tools/`); its graph handler reports a raise inside the replay as the replay's divergence.
+
+Baseline: three entries leave (both tags and `_append`'s handler). The fail-open audit lost 2 findings.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:
