@@ -277,18 +277,23 @@ class TestNarrationRecordsEveryNode:
         assert records[0]["ordinal"] == 5
         assert records[0]["stage"] == "spec"
 
-    def test_a_node_still_runs_when_the_record_cannot_be_written(
-        self, tmp_path, tagged, capsys
+    def test_a_node_does_not_run_when_the_record_cannot_be_written(
+        self, tmp_path, tagged, capsys, operator_alerts
     ):
-        """A diagnostic that can take a roll down is worse than a missing one."""
+        """#3585: a record that cannot be written alerts and stops the node; it
+        used to be dropped and the node ran without its record."""
         from assemblyzero.workflows.narration import narrated
 
+        ran = []
         wrapped = narrated(
-            "N2_generate_spec", lambda s: {"ok": True}, self.ATLAS, 10,
-            stage="spec",
+            "N2_generate_spec", lambda s: ran.append(s) or {"ok": True},
+            self.ATLAS, 10, stage="spec",
         )
-        assert wrapped({"repo_root": "\0not a path"}) == {"ok": True}
+        with pytest.raises(ValueError):
+            wrapped({"repo_root": "\0not a path"})
         capsys.readouterr()
+        assert ran == []
+        assert len(operator_alerts) == 1
 
     def test_a_wrap_with_no_stage_narrates_but_does_not_record(
         self, tmp_path, tagged, capsys

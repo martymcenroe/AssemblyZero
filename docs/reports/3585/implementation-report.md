@@ -69,3 +69,18 @@ Caller: `workflows/requirements/nodes/analyze_codebase.py` has no handler around
 Callers that still swallow the raise: `workflows/narration.py` `_record_entry` (fixed in the next commit); `workflows/orchestrator/graph.py` `_record_stage_entry` and `_record_terminal` catch `Exception` and return. The operator is alerted before either swallows.
 
 Baseline: three entries leave (`_append`'s handler and tag, `read_records`'s tag).
+
+### workflows/narration.py (4 sites; 1 compliant row)
+
+`narrated()` wraps every node of all three graphs, so each of these ran on every node of every run.
+
+- **A node with no atlas entry fails the graph build** (64). It printed a plain line once and the run went on. `narrated()` now raises `ValueError` naming the node and the stage at wrap time; `test_graph_atlas.py` already holds every real graph to a complete atlas.
+- **A narration line that cannot be built or printed alerts and raises** (114). A broken atlas entry, a state that raises, or a closed stdout was dropped with a bare `pass` and the node ran. Now the node does not run.
+- **A convergence record that cannot be written stops the node** (160). The store alerts and raises; the wrap no longer swallows it, and adds no second alert. The `# fail-open:` tag is gone.
+- **A call-recording context that cannot be set alerts and raises** (181). It was swallowed, so the node's model calls were recorded against the node before it. The tag is gone.
+- The `TypeError` handler in `_gate_is_off` (55) is the documented "unknown gate" answer; the ledger marks it compliant and a test pins it.
+- Kept, and documented: a state with no `repo_root` records nothing.
+
+Defect found, not fixed (outside the ledger rows): the requirements workflow's state has no `repo_root` key (it carries `target_repo`), and no requirements node sets one. So `_record_entry` returns at its first check on every LLD node, and the LLD stage writes no `node.enter` records at all.
+
+Baseline: five entries leave (`narrated._wrapped`'s handler; `_record_entry`'s handler and tag; `_set_call_context`'s handler and tag).

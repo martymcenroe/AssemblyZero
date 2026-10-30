@@ -60,4 +60,19 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Changed tests:** `test_convergence_record.py::test_a_corrupt_line_is_counted_rather_than_dropped` is now `test_a_corrupt_line_stops_the_read`. The return shape changed every other read in `test_convergence_record.py` (12 lines), `test_testing_atlas.py` (2), `test_mock_roll.py` (1) and `test_call_recording_roll.py` (1); each dropped an `unreadable == 0` assertion that the raise now carries.
 
-**Neighbouring suites:** 195 passed across the new file, `test_convergence_record.py`, `test_testing_atlas.py`, `test_factory_report.py`, `test_call_recording_roll.py`, `test_mock_roll.py`, `test_checkout_telemetry_isolation.py`, `test_profile_bench.py`, `test_model_record.py`, `test_narration.py`, `test_narration_gates_off.py` and `test_halt_node.py`.
+**Neighbouring suites (convergence):** 195 passed across the new file, `test_convergence_record.py`, `test_testing_atlas.py`, `test_factory_report.py`, `test_call_recording_roll.py`, `test_mock_roll.py`, `test_checkout_telemetry_isolation.py`, `test_profile_bench.py`, `test_model_record.py`, `test_narration.py`, `test_narration_gates_off.py` and `test_halt_node.py`.
+
+## workflows/narration.py
+
+**New: `tests/unit/test_narration_loud_failure.py` (9).** Site tests for 55 (kept), 64, 114 (two shapes), 160 (two) and 181, plus a healthy node and a state with no `repo_root`, which pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module (with the convergence fix already in): 6 failed, 3 passed (the three kept-behaviour tests).
+
+**Changed tests, each asserting the new behaviour in place of the retired one:**
+- `test_narration.py::test_an_unknown_node_warns_once_then_stays_silent` is now `test_an_unknown_node_fails_the_graph_build`;
+- `test_narration.py::test_a_broken_atlas_entry_never_costs_the_node` is now `test_a_broken_atlas_entry_stops_the_node`;
+- `test_narration_gates_off.py::TestNarrationStillNeverCostsARun::test_a_node_still_runs_when_narration_explodes` is now `TestNarrationFailureIsLoud::test_a_node_does_not_run_when_narration_explodes`;
+- `test_convergence_record.py::test_a_node_still_runs_when_the_record_cannot_be_written` is now `test_a_node_does_not_run_when_the_record_cannot_be_written`;
+- `test_node_modules_supply_nodes.py::test_narrated_names_the_wrapped_module` wrapped a node with an empty atlas; it now gives the node an entry.
+
+**Neighbouring suites:** 131 passed across the new file, `test_narration.py`, `test_narration_gates_off.py`, `test_node_modules_supply_nodes.py`, `test_convergence_record.py`, `test_testing_atlas.py`, `test_graph_atlas.py`, `test_tutorial_mode.py`, `test_quiz_mode.py` and `test_halt_legibility.py`; 249 passed across `test_implementation_spec_workflow.py`, `test_requirements_graph_halts.py` and `test_finalize_repair_routing.py`, which build the graphs.

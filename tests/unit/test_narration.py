@@ -1,11 +1,12 @@
 """Graph-position narration (#2158): NODE and NEXT lines, atlas-sourced.
 
-The wrapper narrates on node entry and must never cost a run: printing
-failures degrade to silence, and an unknown node warns once by name.
+The wrapper narrates on node entry. Since #3585 a node with no atlas entry
+fails the graph build, and a narration failure alerts and stops the node.
 """
 from __future__ import annotations
 
-from assemblyzero.workflows import narration
+import pytest
+
 from assemblyzero.workflows.narration import narrated
 
 ATLAS = {
@@ -43,21 +44,19 @@ def test_successor_titles_come_from_the_atlas_end_stays_literal(capsys):
     assert "NEXT END (always)" in capsys.readouterr().out
 
 
-def test_an_unknown_node_warns_once_then_stays_silent(capsys):
-    narration._warned.discard("Z_mystery")
-    fn = narrated("Z_mystery", lambda state: state, ATLAS, 2)
-
-    fn({})
-    fn({})
-
-    out = capsys.readouterr().out
-    assert out.count("no atlas entry") == 1
+def test_an_unknown_node_fails_the_graph_build():
+    """#3585: it used to warn once and run; a graph cannot be built with a
+    node its atlas does not describe."""
+    with pytest.raises(ValueError, match="Z_mystery"):
+        narrated("Z_mystery", lambda state: state, ATLAS, 2)
 
 
-def test_a_broken_atlas_entry_never_costs_the_node(capsys):
-    """Narration failure degrades to silence; the node still runs."""
+def test_a_broken_atlas_entry_stops_the_node(capsys, operator_alerts):
+    """#3585: a narration failure alerts and raises; the node does not run."""
     broken = {"A_first": {"title": "t", "ordinal": 1}}  # no goal: KeyError
 
     fn = narrated("A_first", lambda state: "ran", broken, 1)
 
-    assert fn({}) == "ran"
+    with pytest.raises(KeyError):
+        fn({})
+    assert len(operator_alerts) == 1
