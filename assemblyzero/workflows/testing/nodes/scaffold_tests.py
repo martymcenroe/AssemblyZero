@@ -20,6 +20,7 @@ because stub tests always fail regardless of implementation.
 import ast
 import builtins
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -445,11 +446,34 @@ def generate_ts_test_file_content(
         raise ValueError(f"Cannot generate TS content for framework: {framework}")
 
 
+#: The body of every TypeScript placeholder test (#3067; ledger 0908,
+#: `scaffold_tests.py:457` and `:489`). It fails until a real test replaces
+#: it, as the Python scaffold's `assert False, 'TDD RED: ...'` does. The
+#: placeholders were `expect(true).toBe(true)` and
+#: `await expect(page).toBeTruthy()`, which pass with no implementation at
+#: all, so a fresh TypeScript scaffold could never fail its red phase and a
+#: scaffold no one replaced read as green.
+TS_RED_PLACEHOLDER = "expect(false).toBe(true);"
+
+
+def _ts_string(text: object) -> str:
+    """`text` as a TypeScript string literal. JSON's escaping is valid
+    TypeScript, so a description holding an apostrophe or a newline no longer
+    ends the literal early (`it('Replays a user's session` did)."""
+    return json.dumps(str(text))
+
+
+def _ts_comment(text: object) -> str:
+    """`text` on one line, safe to follow `//`."""
+    return " ".join(str(text).split())
+
+
 def _generate_playwright_content(
     scenarios: list[TestScenario],
     issue_number: int,
 ) -> str:
-    """Generate Playwright .spec.ts test content."""
+    """Generate Playwright .spec.ts test content: one placeholder per
+    scenario, each failing until a real test replaces it (#3067)."""
     lines = [
         "import { test, expect } from '@playwright/test';",
         "",
@@ -459,12 +483,12 @@ def _generate_playwright_content(
 
     for scenario in scenarios:
         test_name = scenario.get("description", scenario.get("id", "unnamed"))
-        expected = scenario.get("expected_behavior", "// TODO: implement assertion")
+        expected = scenario.get("expected_behavior", "no expected behaviour given")
         lines.extend([
-            f"test('{test_name}', async ({{ page }}) => {{",
-            f"  // Expected: {expected}",
-            "  // TODO: Implement test logic",
-            "  await expect(page).toBeTruthy();",
+            f"test({_ts_string(test_name)}, async ({{ page }}) => {{",
+            f"  // Expected: {_ts_comment(expected)}",
+            "  // TDD RED: a placeholder; it fails until a real test replaces it",
+            f"  {TS_RED_PLACEHOLDER}",
             "});",
             "",
         ])
@@ -477,7 +501,8 @@ def _generate_jest_content(
     framework_config: FrameworkConfig,
     issue_number: int,
 ) -> str:
-    """Generate Jest/Vitest .test.ts content."""
+    """Generate Jest/Vitest .test.ts content: one placeholder per scenario,
+    each failing until a real test replaces it (#3067)."""
     runner = get_runner(framework_config["framework"])
     import_line = runner.get_scaffold_imports()
 
@@ -486,17 +511,17 @@ def _generate_jest_content(
         "",
         f"// Issue #{issue_number} - Auto-scaffolded tests",
         "",
-        f"describe('Issue #{issue_number}', () => {{",
+        f"describe({_ts_string(f'Issue #{issue_number}')}, () => {{",
     ]
 
     for scenario in scenarios:
         test_name = scenario.get("description", scenario.get("id", "unnamed"))
-        expected = scenario.get("expected_behavior", "// TODO: implement assertion")
+        expected = scenario.get("expected_behavior", "no expected behaviour given")
         lines.extend([
-            f"  it('{test_name}', () => {{",
-            f"    // Expected: {expected}",
-            "    // TODO: Implement test logic",
-            "    expect(true).toBe(true);",
+            f"  it({_ts_string(test_name)}, () => {{",
+            f"    // Expected: {_ts_comment(expected)}",
+            "    // TDD RED: a placeholder; it fails until a real test replaces it",
+            f"    {TS_RED_PLACEHOLDER}",
             "  });",
             "",
         ])
@@ -1316,6 +1341,13 @@ def _scaffold_non_python_tests(
     test_file_path.write_text(content, encoding="utf-8")
 
     gate_log(f"[N2] Scaffolded {framework_config['framework'].value} test: {test_file_path}")
+    # #3067: said out loud, because nothing of this file can pass: each of
+    # its tests is a placeholder that fails until N4 writes the real one.
+    print(
+        f"    [N2] {framework_config['framework'].value}: {len(scenarios)} "
+        f"placeholder test(s), each failing until replaced (the spec ships "
+        f"no {framework_config['framework'].value} test bodies)"
+    )
     log_workflow_execution(
         target_repo=repo_root,
         issue_number=issue_number,

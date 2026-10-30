@@ -45,3 +45,13 @@ These drive `implement_code` itself, with `generate_file_with_retry` stood in fo
 - pytest still reads both streams (kept behaviour, passed there).
 - Two tests were added after the run against `4ac9c81a`, with the brace-matched search: an object that carries the key and does not parse raises naming the key, and a brace inside a JSON string does not end the object.
 - Against the unchanged source (7 then): 6 failed, 1 passed. On the fix: 9 passed.
+
+## #3067: `tests/unit/test_jest_validator_needs_expect.py` (14)
+
+Each runner test runs for Jest and for Vitest.
+
+- A test that asserts nothing is refused with exactly "No expect() assertions found in tests/collector.test.ts", and so is one that imports `expect` and never calls it (on `4ac9c81a`: `[]`); a test that asserts is accepted (kept behaviour).
+- The Jest/Vitest placeholder and the Playwright placeholder contain `expect(false).toBe(true)` and `TDD RED`, and neither of the old always-passing lines (on `4ac9c81a`: `expect(true).toBe(true)` and `toBeTruthy()`).
+- A scenario description with an apostrophe and a newline is written as one valid string literal, for all three frameworks (on `4ac9c81a`: `it('Replays a user's session` and a raw newline).
+- The scaffold passes its own framework's validator (kept behaviour; on `4ac9c81a` the old placeholder passed it too).
+- Against the unchanged source: 10 failed, 4 passed. On the fix: 14 passed.

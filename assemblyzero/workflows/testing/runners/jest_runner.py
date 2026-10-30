@@ -209,6 +209,14 @@ class JestRunner(BaseTestRunner):
         if not (has_describe or has_it or has_test):
             errors.append(f"No test structure (describe/it/test) found in {file_path}")
 
+        # #3067: the docstring's second check, which the code never made. A
+        # file whose tests call the code and assert nothing passes when run,
+        # and its coverage is of behaviour nobody checked. `expect` named in
+        # the import line is not a call; `expect(` in a test body is. Per
+        # file, not per test: counting per test needs a TypeScript parse.
+        if not re.search(r"\bexpect\s*\(", content):
+            errors.append(f"No expect() assertions found in {file_path}")
+
         return errors
 
     def get_scaffold_imports(self) -> str:

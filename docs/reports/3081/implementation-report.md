@@ -47,3 +47,11 @@ The premise holds: `_run_subprocess` appended stderr to stdout, and both JSON ru
 - `first_json_object` finds the report: each `{` is matched to the `}` that closes it, reading JSON strings as strings, and an object is decoded only when it opens as JSON does and names the report's key (`numPassedTests` for Jest/Vitest, `suites` for Playwright). Text after the report, a brace in a log line, and a JSON log line that is not the report are all passed over.
 - The issue proposed `raw_decode` at each `{`. That needs a handler that steps past each failed attempt, and the fail-open audit flags it: it is the fall-through shape ADR 0236 retires. The brace-matched search has no such handler. An object that carries the key and does not parse raises `ValueError`, which `parse_results` treats as it treated a `JSONDecodeError` before.
 - What `_fallback_result` does with a run that has no report, an invented failing test, is the separately filed defect the issue points to; it is unchanged here.
+
+## #3067: a Jest or Vitest test file must call `expect`
+
+The premise holds: `JestRunner.validate_test_file`'s docstring lists an `expect()` check that the code never made.
+
+- It now refuses a file with no `expect(` call: "No expect() assertions found in <file>". `expect` named in the import line is not a call. The check is per file, the repair the issue asks for; counting per test needs a TypeScript parse.
+- The TypeScript scaffold's own placeholders were the same hole from the other side (ledger 0908, `scaffold_tests.py:457` and `:489`): `expect(true).toBe(true)` and `await expect(page).toBeTruthy()` pass with no implementation, so a fresh TypeScript scaffold could never fail its red phase. Each placeholder is now `expect(false).toBe(true);` under a `TDD RED` comment, failing until a real test replaces it, as the Python scaffold's `assert False, 'TDD RED: ...'` does. N2 says so in one line per scaffold. The ledger's "and ERROR" is not taken: a placeholder that fails is the red phase working, and an ERROR line on every TypeScript scaffold would be a false alarm.
+- Scenario names are written as JSON string literals, which TypeScript reads: a description holding an apostrophe (`Replays a user's session`) or a newline used to end the literal and break the file.
