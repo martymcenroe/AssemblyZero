@@ -67,8 +67,7 @@ class TestTheRollWritesItsOwnRecord:
             furthest_stage="spec",
             gate_key="spec.review_cap",
         )
-        records, unreadable = read_records(tmp_path)
-        assert unreadable == 0
+        records = read_records(tmp_path)
         terminal = terminals_by_run(records)[TAG]
         assert terminal["outcome"] == OUTCOME_FAILED
         assert terminal["gate_key"] == "spec.review_cap"
@@ -84,7 +83,7 @@ class TestTheRollWritesItsOwnRecord:
             furthest_stage="cleanup",
             gate_key=KEY_FINALIZE,
         )
-        terminal = terminals_by_run(read_records(tmp_path)[0])[TAG]
+        terminal = terminals_by_run(read_records(tmp_path))[TAG]
         assert terminal["outcome"] == OUTCOME_PASSED
         assert terminal["gate_key"] == KEY_FINALIZE
 
@@ -94,7 +93,7 @@ class TestTheRollWritesItsOwnRecord:
         record_terminal(
             tmp_path, outcome=OUTCOME_PASSED, furthest_stage="lld"
         )
-        records, _ = read_records(tmp_path)
+        records = read_records(tmp_path)
         assert [r["event"] for r in records] == [
             EVENT_STAGE_ENTER, EVENT_NODE_ENTER, EVENT_RUN_TERMINAL,
         ]
@@ -173,20 +172,20 @@ class TestTheReportPrefersTheRecord:
 
 
 class TestReadingIsCounted:
-    def test_a_corrupt_line_is_counted_rather_than_dropped(self, tmp_path, tagged):
+    def test_a_corrupt_line_stops_the_read(self, tmp_path, tagged, operator_alerts):
+        """#3585: a reader that returns the readable records with a count lets
+        its caller drop the count and state a number it did not count. A line
+        that is not a record now alerts and raises, naming the line."""
         record_stage_enter(tmp_path, "lld", 2, 7)
         with records_path(tmp_path).open("a", encoding="utf-8") as fh:
             fh.write("{not json\n")
             fh.write(json.dumps({"event": "something.else"}) + "\n")
-        records, unreadable = read_records(tmp_path)
-        assert len(records) == 1
-        assert unreadable == 2, (
-            "a reader that reports a count while silently dropping lines is "
-            "stating a number it did not count"
-        )
+        with pytest.raises(ValueError, match=":2:"):
+            read_records(tmp_path)
+        assert len(operator_alerts) == 1
 
     def test_a_missing_store_is_empty_not_an_error(self, tmp_path):
-        assert read_records(tmp_path) == ([], 0)
+        assert read_records(tmp_path) == []
 
     def test_an_untagged_record_is_dropped_rather_than_merged(
         self, tmp_path, monkeypatch
@@ -194,7 +193,7 @@ class TestReadingIsCounted:
         """Several untagged runs under one blank key would read as one run."""
         monkeypatch.delenv("SPEEDRUN_RUN_TAG", raising=False)
         record_terminal(tmp_path, outcome=OUTCOME_PASSED, furthest_stage="lld")
-        records, _ = read_records(tmp_path)
+        records = read_records(tmp_path)
         assert len(records) == 1
         assert terminals_by_run(records) == {}
 
@@ -215,7 +214,7 @@ class TestReadingIsCounted:
             tmp_path, outcome=OUTCOME_PASSED, furthest_stage="cleanup",
             gate_key=KEY_FINALIZE,
         )
-        terminal = terminals_by_run(read_records(tmp_path)[0])[TAG]
+        terminal = terminals_by_run(read_records(tmp_path))[TAG]
         assert terminal["outcome"] == OUTCOME_PASSED
 
 
@@ -227,7 +226,7 @@ class TestFurthestReached:
         record_stage_enter(tmp_path, "lld", 2, 7)
         record_node_enter(tmp_path, "lld", "N11_finalize", 11, 11)
         record_stage_enter(tmp_path, "impl", 5, 7)
-        records, _ = read_records(tmp_path)
+        records = read_records(tmp_path)
         assert furthest_by_run(records)[TAG] == ("impl", "")
 
     def test_the_node_reported_is_the_furthest_within_the_furthest_stage(
@@ -237,7 +236,7 @@ class TestFurthestReached:
         record_node_enter(tmp_path, "spec", "N2_generate_spec", 5, 10)
         record_node_enter(tmp_path, "spec", "N5_review_spec", 8, 10)
         record_node_enter(tmp_path, "spec", "N2_generate_spec", 5, 10)
-        records, _ = read_records(tmp_path)
+        records = read_records(tmp_path)
         assert furthest_by_run(records)[TAG] == ("spec", "N5_review_spec")
 
     def test_two_runs_do_not_bleed_into_each_other(self, tmp_path, monkeypatch):
@@ -245,7 +244,7 @@ class TestFurthestReached:
         record_stage_enter(tmp_path, "impl", 5, 7)
         monkeypatch.setenv("SPEEDRUN_RUN_TAG", "run-b")
         record_stage_enter(tmp_path, "lld", 2, 7)
-        records, _ = read_records(tmp_path)
+        records = read_records(tmp_path)
         furthest = furthest_by_run(records)
         assert furthest["run-a"] == ("impl", "")
         assert furthest["run-b"] == ("lld", "")
@@ -272,7 +271,7 @@ class TestNarrationRecordsEveryNode:
         )
         assert wrapped({"repo_root": str(tmp_path)}) == {"ok": True}
         capsys.readouterr()
-        records, _ = read_records(tmp_path)
+        records = read_records(tmp_path)
         assert [r["event"] for r in records] == [EVENT_NODE_ENTER]
         assert records[0]["node"] == "N2_generate_spec"
         assert records[0]["ordinal"] == 5
@@ -301,7 +300,7 @@ class TestNarrationRecordsEveryNode:
         )
         wrapped({"repo_root": str(tmp_path)})
         assert "NODE" in capsys.readouterr().out
-        assert read_records(tmp_path) == ([], 0)
+        assert read_records(tmp_path) == []
 
     def test_a_state_with_no_repo_root_records_nothing_rather_than_guessing(
         self, tmp_path, tagged, capsys
@@ -314,7 +313,7 @@ class TestNarrationRecordsEveryNode:
         )
         wrapped({})
         capsys.readouterr()
-        assert read_records(tmp_path) == ([], 0)
+        assert read_records(tmp_path) == []
 
 
 class TestTheGraphsPassTheirStage:

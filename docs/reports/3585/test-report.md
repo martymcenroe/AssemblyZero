@@ -51,3 +51,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests, each asserting the raise in place of the empty result:** in `test_codebase_reader.py`, `test_corrupted_pyproject`, `test_corrupted_package_json`, `test_symlink_outside_repo_returns_empty`, `test_symlink_outside_repo_in_batch`, `test_non_utf8_file_returns_empty` (now `test_non_utf8_file_raises`), `test_oserror_on_exists_returns_empty` (now `..._raises`), `test_file_outside_repo_root_returns_empty` (now `..._raises`), `test_oserror_on_read_text_returns_empty` (now `..._raises`), `test_oserror_on_resolve_returns_empty` (now `..._raises`); in `test_analyze_codebase.py`, `TestSymlinkOutsideRepoBlocked::test_symlink_outside_repo_returns_empty`.
 
 **Neighbouring suites:** 184 passed across `test_codebase_reader.py`, `test_analyze_codebase.py` and the new file; 80 passed across `test_issue_2684.py`, `test_requirements_graph_halts.py`, `test_cache_semi_static.py`, `test_base_api_surface.py`, `test_base_symbols_in_api_check.py`, `test_interface_surface.py` and `test_symbol_gather_reports_unreadable.py`.
+
+## speedrun/convergence.py
+
+**New: `tests/unit/test_convergence_loud_failure.py` (12).** Site tests for 90 (three event kinds), 91, 185, 186 and 195 (two shapes), the `802` consumer test, and three kept-behaviour tests: a clean store, an absent store and a written record.
+
+**Before the fix, measured** by putting HEAD's `convergence.py` and `factory_report.py` back: 11 failed, 1 passed (`test_a_written_record_returns_true`). Two of the eleven, `test_a_clean_store_reads_with_no_alert` and `test_a_missing_store_is_a_quiet_empty_answer`, fail only on the return shape: the old reader returned `(records, count)`.
+
+**Changed tests:** `test_convergence_record.py::test_a_corrupt_line_is_counted_rather_than_dropped` is now `test_a_corrupt_line_stops_the_read`. The return shape changed every other read in `test_convergence_record.py` (12 lines), `test_testing_atlas.py` (2), `test_mock_roll.py` (1) and `test_call_recording_roll.py` (1); each dropped an `unreadable == 0` assertion that the raise now carries.
+
+**Neighbouring suites:** 195 passed across the new file, `test_convergence_record.py`, `test_testing_atlas.py`, `test_factory_report.py`, `test_call_recording_roll.py`, `test_mock_roll.py`, `test_checkout_telemetry_isolation.py`, `test_profile_bench.py`, `test_model_record.py`, `test_narration.py`, `test_narration_gates_off.py` and `test_halt_node.py`.

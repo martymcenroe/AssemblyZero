@@ -113,8 +113,7 @@ class TestEnteringANodeWritesTheRecord:
         )
         assert wrapped({"repo_root": str(tmp_path)}) == {"ok": True}
 
-        records, unreadable = read_records(tmp_path)
-        assert unreadable == 0
+        records = read_records(tmp_path)  # #3585: raises on a line that is not a record
         entries = [r for r in records if r["event"] == EVENT_NODE_ENTER]
         assert len(entries) == 1
         assert entries[0]["stage"] == "impl"
@@ -135,7 +134,7 @@ class TestEnteringANodeWritesTheRecord:
                 {"repo_root": str(tmp_path)}
             )
 
-        records, _ = read_records(tmp_path)
+        records = read_records(tmp_path)
         assert furthest_by_run(records) == {
             "run-issue4-172600": ("impl", "N5_verify_green")
         }

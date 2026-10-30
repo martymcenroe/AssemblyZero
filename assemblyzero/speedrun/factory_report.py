@@ -799,7 +799,9 @@ def apply_records(
     written as the run advances and survive a run that died before it could
     write anything terminal.
     """
-    records, _ = read_records(repo_root)
+    # #3585: a store with a line that is not a record raises (after alerting)
+    # rather than hand back a partial list with a count this line discarded.
+    records = read_records(repo_root)
     if not records:
         return facts
     terminals = terminals_by_run(records)

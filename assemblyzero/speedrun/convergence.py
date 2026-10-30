@@ -22,11 +22,11 @@ other per-repo speedrun stores:
   the outcome, the furthest stage and node reached, and the registry key of the
   gate that ended it.
 
-**A record never costs a run.** Every function here returns False rather than
-raising, exactly as `record_heal` does. That is a deliberate fall-through and it
-is loud in the only way that matters: `read_records` reports what it could not
-read, and the report says which source it used, so a run with no record is
-visible as a run with no record rather than as a run that passed.
+**A record that cannot be written is a failure** (ADR 0236, #3585). It used
+to return False, which every caller ignored, so the report quietly fell back to
+the banner for that run. `_append` now alerts the operator with the store path
+and the cause, and raises. `read_records` alerts and raises on a line that is
+not a record, so no report is ever built from a partial store.
 
 **Why the tag can be empty.** `SPEEDRUN_RUN_TAG` is set by the launcher, so a
 roll has one and a standalone workflow invocation does not. An unknown tag is
@@ -40,6 +40,8 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+
+from assemblyzero.core import alert
 
 #: One store, beside `heals.jsonl` and `prompt-failures.jsonl`. Under
 #: `data/speedrun/telemetry/`, which is structurally exempt from every janitor.
@@ -81,18 +83,31 @@ def current_run_tag() -> str:
 
 
 def _append(repo_root: Path | str, record: dict) -> bool:
+    """Append one record. True once it is on disk; alerts and raises otherwise."""
+    path = records_path(repo_root)
     try:
-        path = records_path(repo_root)
+        line = json.dumps(record) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
-        return True
-    except Exception:  # noqa: BLE001 - the record must never cost a roll
-        # fail-open: a run that cannot write its record still has to finish.
-        # The absence is visible downstream -- `read_records` returns nothing
-        # for the run and the report falls back to the banner and says so --
-        # so nothing here is mistaken for a run that passed.
-        return False
+            fh.write(line)
+    except (OSError, TypeError, ValueError) as exc:
+        alert.alert_operator(
+            what="append to the convergence record",
+            where="assemblyzero/speedrun/convergence.py _append",
+            cause=(
+                f"{type(exc).__name__}: {exc} (store {path}, event "
+                f"{record.get('event', '')}, stage {record.get('stage', '')}, "
+                f"node {record.get('node', '')})"
+            ),
+            consequence=(
+                "the run's convergence record would be missing this event, so "
+                "the record is raised and the run stops rather than leave the "
+                "factory report a gap it would fill from the banner"
+            ),
+            repo=str(repo_root),
+        )
+        raise
+    return True
 
 
 def _base(event: str, run_tag: str) -> dict:
@@ -164,36 +179,51 @@ def record_terminal(
     return _append(repo_root, record)
 
 
-def read_records(repo_root: Path | str) -> tuple[list[dict], int]:
-    """Every readable record, and how many lines were not readable.
+def _unreadable(path: Path, lineno: int, problem: str, repo_root: Path | str) -> ValueError:
+    """Alert on one line that is not a record and return the error to raise."""
+    message = f"{path}:{lineno}: {problem}"
+    alert.alert_operator(
+        what="read the convergence record",
+        where="assemblyzero/speedrun/convergence.py read_records",
+        cause=message,
+        consequence=(
+            "no report is built from a partial store; repair or remove the line "
+            "(a roll killed mid-write leaves a truncated last line)"
+        ),
+        repo=str(repo_root),
+    )
+    return ValueError(message)
 
-    The unreadable count is returned rather than logged, because a caller that
-    reports "12 runs recorded" while silently dropping three corrupt lines is
-    stating a number it did not count.
+
+def read_records(repo_root: Path | str) -> list[dict]:
+    """Every record in the store.
+
+    An absent store returns ``[]``: nothing has been recorded. A line that is
+    not JSON, or is not an object naming one of `EVENTS`, alerts the operator
+    and raises ``ValueError`` naming the store and the line (ADR 0236, #3585).
+    It used to be counted and the count returned, and the one consumer threw
+    the count away, so a report stated numbers from a store it had not fully
+    read. The count is gone with the partial read.
     """
     path = records_path(repo_root)
     if not path.exists():
-        return [], 0
+        return []
     records: list[dict] = []
-    unreadable = 0
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for lineno, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         try:
             parsed = json.loads(line)
-        except ValueError:
-            # fail-open: one truncated line -- a roll killed mid-write -- must
-            # not make the whole store unreadable. It is COUNTED rather than
-            # dropped, and the count is returned, so no caller can report a
-            # number of runs while silently having lost some.
-            unreadable += 1
-            continue
-        if isinstance(parsed, dict) and parsed.get("event") in EVENTS:
-            records.append(parsed)
-        else:
-            unreadable += 1
-    return records, unreadable
+        except ValueError as exc:
+            raise _unreadable(path, lineno, f"not JSON ({exc})", repo_root) from exc
+        if not (isinstance(parsed, dict) and parsed.get("event") in EVENTS):
+            raise _unreadable(
+                path, lineno, "not an object naming a known event", repo_root
+            )
+        records.append(parsed)
+    return records
 
 
 def terminals_by_run(records: list[dict]) -> dict[str, dict]:
