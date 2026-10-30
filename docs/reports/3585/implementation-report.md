@@ -130,3 +130,8 @@ Callers: `workflows/testing/nodes/review_test_plan.py` and `revise_test_plan.py`
 - **A kill the OS refuses, or a `taskkill` that times out, raises** (41). Every `OSError` and the timeout were swallowed as "already dead". Now only `ProcessLookupError` is quiet; the rest raise `ProcessTreeKillError` naming the pid and the cause, after an ERROR line on stderr and in the log.
 
 Callers: `core/llm_provider.py` (`_kill_process_tree`, on the idle and wall timeouts and the storm probe) and `core/gemini_client.py` (the agy timeout). Neither catches it: a tree that survived its kill now ends the call loudly instead of reporting a clean timeout.
+
+### utils/workflow_timeout.py (1 site)
+
+- **The timeout alerts before it exits** (74). The timer printed a banner to stderr and called `os._exit(42)`, never reaching `alert_operator`, so a run that died on its wall clock told nobody away from the console. The handler is now `WorkflowTimeout._expire`: banner, then `alert_operator` with the limit, the workflow and the issue, then `os._exit(42)` in a `finally`, so the process still exits when the alert cannot be delivered.
+- `WorkflowTimeout` takes optional `issue` and `workflow` keywords for the alert. The three runners do not pass them yet (they are not in this branch), so the alert says "workflow unnamed" until they do.

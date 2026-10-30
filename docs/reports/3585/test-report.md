@@ -126,3 +126,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** none.
 
 **Neighbouring suites:** 97 passed across the new file, `test_gemini_call_bounds.py`, `test_gemini_client.py`, `test_gemini_client_loud_failure.py`, `test_llm_idle_timeout.py` and `test_one_claude_cli_transport.py`.
+
+## utils/workflow_timeout.py
+
+**New: `tests/unit/test_workflow_timeout_loud_failure.py` (3).** Two site tests (the alert precedes the exit; the exit happens when the alert cannot be delivered), plus a disabled timeout that arms nothing. `os._exit` is replaced for the test.
+
+**Before the fix, measured** against the unchanged module: 2 failed, 1 passed (the kept-behaviour test).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 15 passed across the new file and `test_workflow_timeout.py`.
