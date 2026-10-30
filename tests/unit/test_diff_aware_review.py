@@ -122,8 +122,13 @@ class TestPreviousDraftPreserved:
 class TestImplSpecPreviousDraft:
     """Verify generate_spec saves spec_draft as previous_spec_draft."""
 
-    def test_generate_spec_returns_previous_spec_draft(self):
-        """generate_spec should return previous_spec_draft = old spec_draft."""
+    def test_generate_spec_returns_previous_spec_draft(self, tmp_path):
+        """generate_spec should return previous_spec_draft = old spec_draft.
+
+        #3585: the node halts without a lineage directory, and on a verdict
+        pinning cannot read, so the state carries one and the feedback names
+        a span.
+        """
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
             generate_spec,
         )
@@ -144,14 +149,14 @@ class TestImplSpecPreviousDraft:
             "config_drafter": "mock:draft",
             "config_mock_mode": True,
             "config_reviewer": "mock:review",
-            "audit_dir": "",
+            "audit_dir": str(tmp_path),
             "issue_number": 42,
             "lld_content": "# LLD",
             "current_state_snapshots": {},
             "pattern_references": [],
             "files_to_modify": [],
             "spec_draft": "# Old Spec\n\nOld content",
-            "review_feedback": "Fix something",
+            "review_feedback": "Fix `Old content`",
             "completeness_issues": [],
             "review_iteration": 0,
             "max_iterations": 3,

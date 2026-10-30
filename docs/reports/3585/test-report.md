@@ -83,3 +83,15 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
 
 - **Nothing to change.** Every row was settled by #3887 and #3891 (PR #3901).
 - **Added:** `tests/unit/test_finalize_spec_loud_failure.py`, 4 tests, for the rows `test_spec_finalize_halts.py` does not reach: the short draft (137), the temp-file cleanup (219), a failed write (224) and a spec absent after the write (234). They pass before and after, since the module is unchanged.
+
+## `nodes/generate_spec.py`
+
+- **Added:** `tests/unit/test_generate_spec_loud_failure.py`, 20 tests. Before the fix: 14 failed, 6 passed; the 6 pin kept behaviour and the compliant preflight, drafter and budget halts. After: 20 passed.
+- **Changed**, each of which relied on retired behaviour:
+  - `test_generate_spec_pinning.py`: every state has a lineage directory, and `test_an_unextractable_verdict_abstains` is now `test_an_unextractable_verdict_halts`;
+  - `test_spec_edit_script.py`: a lineage directory, and a complaint that backticks the functions the edits touch;
+  - `test_diff_aware_review.py`: a lineage directory, and feedback that backticks a span;
+  - `test_implementation_spec_workflow.py`: the `TestGenerateSpec` tests get a lineage directory, `TestTruncatePrompt` exercises `_fit_to_budget`, and `TestSplitIntoSections` is deleted with the function it tested;
+  - `test_call_recording_roll.py`: the lineage directory exists before N2.
+- **Neighbouring suites:** 17 files, 468 passed.
+- **Audits:** `audit_loud_failure.py --check` reports 0 new and 1 stale, the withdrawn tag; `audit_fail_open.py --check` PASS.

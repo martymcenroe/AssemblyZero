@@ -342,7 +342,14 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "spec.drafter_failed", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Drafter failed",
-        _s(f"{_IS}/nodes/generate_spec.py::generate_spec::return", 0, 4),
+        _s(f"{_IS}/nodes/generate_spec.py::generate_spec::return", 0, 4)
+        + _s(f"{_IS}/nodes/generate_spec.py::_halt::return", 0),
+        notes=(
+            "#3585: N2's _halt is each failure the node used to pass on: a "
+            "missing lineage directory, a verdict the pinning gate cannot read, "
+            "a prompt whose required parts exceed the budget (all before the "
+            "drafter is paid), an empty draft and a draft that cannot be saved"
+        ),
     ),
     Gate(
         "spec.preflight", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,

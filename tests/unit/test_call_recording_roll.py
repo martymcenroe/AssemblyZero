@@ -200,6 +200,10 @@ def _rmtree(path: Path) -> None:
 
 
 def _state(tmp_path: Path, repo: Path, lld_path: Path) -> dict:
+    # #3585: generate_spec halts when the lineage directory is missing, as the
+    # orchestrator and the standalone runner always create it first. N5 used to
+    # create it here, after N2's first draft had gone unsaved.
+    (tmp_path / "lineage").mkdir(exist_ok=True)
     return {
         "issue_number": 999,
         "lld_path": str(lld_path),

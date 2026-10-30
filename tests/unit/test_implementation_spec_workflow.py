@@ -1626,6 +1626,8 @@ class TestGenerateSpec:
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
         base_state["current_state_snapshots"] = {"file.py": "content"}
         base_state["pattern_references"] = []
+        # #3585: N2 halts without a lineage directory to save the draft in.
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
@@ -1644,11 +1646,13 @@ class TestGenerateSpec:
         mock_provider.return_value = drafter
 
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
+        # #3585: with a lineage directory, so the halt is the drafter's.
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
         result = generate_spec(base_state)
-        assert result["error_message"] != ""
+        assert "Drafter failed" in result["error_message"]
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
@@ -1673,8 +1677,11 @@ class TestGenerateSpec:
 
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
         base_state["spec_draft"] = "# Old Draft"
-        base_state["review_feedback"] = "Please fix X"
+        # #3585: a verdict pinning cannot read halts, and so does a missing
+        # lineage directory; "Please fix X" named nothing pinning reads.
+        base_state["review_feedback"] = "Please fix `Old Draft`"
         base_state["review_iteration"] = 0
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
@@ -2063,86 +2070,75 @@ class TestPromptProjectContext:
 
 
 class TestTruncatePrompt:
-    """Tests for Issue #409 Gap 4: section-aware prompt truncation."""
+    """Tests for Issue #409 Gap 4: whole-part prompt trimming.
+
+    #3585 replaced ``_truncate_prompt``, which re-split the joined prompt on
+    ``## `` lines, with ``_fit_to_budget``, which trims the parts the builder
+    appended. The re-split read the LLD's and the draft's own ``##`` sections
+    as unknown sections and dropped them first, and cut a prompt still over
+    budget mid-content; ``_split_into_sections``, which only it used, went
+    with it, and so did its two tests. These three keep #409's intent.
+    """
 
     def test_truncation_drops_sections_not_midstring(self):
-        """Truncation drops whole sections by priority, not mid-string."""
+        """Trimming drops whole optional parts, kept-longest last."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _truncate_prompt,
+            _DROP_CURRENT_STATE,
+            _DROP_PROJECT_CONTEXT,
+            _DROP_TEMPLATE,
             MAX_TOTAL_PROMPT_CHARS,
+            _fit_to_budget,
+            _Part,
         )
 
-        # Build a prompt that exceeds the limit (120K chars)
-        lld = "## LLD Content (Issue #99)\n\n" + "LLD line.\n" * 100
-        context = "## Project Context\n\n" + "Context line padding.\n" * 5000
-        excerpts = "## Current State of Files to Modify\n\n" + "Code excerpt.\n" * 5000
-        template = "## Implementation Spec Template\n\n" + "Template.\n" * 100
-
-        prompt = "\n\n".join([lld, context, excerpts, template])
-        assert len(prompt) > MAX_TOTAL_PROMPT_CHARS
-
-        result = _truncate_prompt(prompt)
+        parts = [
+            _Part("LLD", "## LLD Content (Issue #99)\n\n" + "LLD line.\n" * 100),
+            _Part("project context", "## Project Context\n\n" + "Context line padding.\n" * 5000,
+                  _DROP_PROJECT_CONTEXT),
+            _Part("current state", "## Current State of Files to Modify\n\n" + "Code excerpt.\n" * 5000,
+                  _DROP_CURRENT_STATE),
+            _Part("template", "## Implementation Spec Template\n\n" + "Template.\n" * 100,
+                  _DROP_TEMPLATE),
+        ]
+        result = _fit_to_budget(parts)
         assert len(result) <= MAX_TOTAL_PROMPT_CHARS
-        # LLD should survive (highest priority)
         assert "LLD Content" in result
-        # Template should survive (high priority)
         assert "Implementation Spec Template" in result
+        assert "Context line padding" not in result
+        assert "CONTEXT TRIMMED" in result and "project context" in result
 
     def test_truncation_preserves_lld_and_template(self):
-        """LLD and template survive truncation even at extreme sizes."""
+        """LLD and template survive trimming even at extreme sizes."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _truncate_prompt,
-            MAX_TOTAL_PROMPT_CHARS,
+            _DROP_PATTERNS,
+            _DROP_PROJECT_CONTEXT,
+            _DROP_TEMPLATE,
+            _fit_to_budget,
+            _Part,
         )
 
-        lld = "## LLD Content (Issue #99)\n\nCritical design info."
-        patterns = "## Similar Implementation Patterns\n\n" + "Pattern data.\n" * 6000
-        context = "## Project Context\n\n" + "Context data.\n" * 6000
-        template = "## Implementation Spec Template\n\nFollow this structure."
-
-        prompt = "\n\n".join([lld, patterns, context, template])
-        assert len(prompt) > MAX_TOTAL_PROMPT_CHARS
-
-        result = _truncate_prompt(prompt)
+        parts = [
+            _Part("LLD", "## LLD Content (Issue #99)\n\nCritical design info."),
+            _Part("patterns", "## Similar Implementation Patterns\n\n" + "Pattern data.\n" * 6000,
+                  _DROP_PATTERNS),
+            _Part("project context", "## Project Context\n\n" + "Context data.\n" * 6000,
+                  _DROP_PROJECT_CONTEXT),
+            _Part("template", "## Implementation Spec Template\n\nFollow this structure.",
+                  _DROP_TEMPLATE),
+        ]
+        result = _fit_to_budget(parts)
         assert "Critical design info" in result
         assert "Follow this structure" in result
 
     def test_no_truncation_under_limit(self):
-        """Prompts under the limit are returned unchanged."""
+        """Prompts under the limit are the parts joined, unchanged."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _truncate_prompt,
+            _fit_to_budget,
+            _Part,
         )
 
-        prompt = "## LLD\n\nShort prompt."
-        assert _truncate_prompt(prompt) == prompt
-
-
-class TestSplitIntoSections:
-    """Tests for _split_into_sections helper."""
-
-    def test_splits_by_headers(self):
-        """Sections are split on ## headers."""
-        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _split_into_sections,
-        )
-
-        prompt = "Preamble.\n\n## Section A\n\nContent A.\n\n## Section B\n\nContent B."
-        sections = _split_into_sections(prompt)
-        assert len(sections) == 3
-        assert sections[0]["header"] == ""
-        assert sections[1]["header"] == "Section A"
-        assert sections[2]["header"] == "Section B"
-
-    def test_preserves_order(self):
-        """Sections have incrementing order indices."""
-        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _split_into_sections,
-        )
-
-        prompt = "## A\nContent.\n## B\nContent.\n## C\nContent."
-        sections = _split_into_sections(prompt)
-        orders = [s["order"] for s in sections]
-        assert orders == sorted(orders)
+        parts = [_Part("LLD", "## LLD"), _Part("instructions", "Short prompt.")]
+        assert _fit_to_budget(parts) == "## LLD\n\nShort prompt."
 
 
 class TestStripPreamble:

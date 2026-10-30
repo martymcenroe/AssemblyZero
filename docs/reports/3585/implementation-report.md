@@ -73,3 +73,16 @@ Each site is the ledger row in `docs/audits/0908-loud-failure-sweep-ledger.md` n
 - **The base sweep (947, 959, 988, 1024, 1037, 1044, 1054).** A failed `git ls-tree` raises; the 200-file caps are gone; a file git cannot show raises (through `read_from_base`); a base file that does not parse raises, where it used to be regex-scraped.
 - **The symbol gather (1127).** `gather_symbols` still names every file that did not parse; the node halts on the list, and `_extract_symbols_from_files` raises instead of returning a shorter list.
 - **`core/gate_registry.py`.** The new `_halt` return is a halt site, added to the existing `spec.input_precondition` row. No row is added, so the ratchet is unchanged.
+
+### `workflows/implementation_spec/nodes/finalize_spec.py` (9 rows)
+
+Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached are now pinned.
+
+### `workflows/implementation_spec/nodes/generate_spec.py` (7 sites, 5 compliant)
+
+- **Halts before the drafter is paid.** A template that cannot be loaded now names the node, the issue and the path (328). A missing lineage directory halts (662); it used to skip the save after the call. A revision whose verdict names nothing the pinning gate can read halts (747); pinning used to abstain and pass the revision unenforced. A prompt whose required parts exceed the budget halts (1436); it used to be cut off mid-content.
+- **Halts after the call.** An empty draft halts (616); it used to be saved and sent to N3. A draft that cannot be saved halts (662).
+- **The prompt budget (1416).** The builders now append named parts, and the budget drops optional parts whole. The instructions, the LLD, the binding manifest, the draft, the completeness errors and the review feedback are never dropped. The old trimmer re-split the joined text on `##` lines, so the LLD's, the template's and the draft's own sections, and the manifest, were dropped first.
+- **The withdrawn tag (397).** Seat resolution, the preflight and the provider build share one handler, so a seat error is no longer held and raised again.
+- **For a real run:** a revision whose verdict names no backticked span, quoted phrase, test name, manifest row, Section or line range now halts at N2, and a run with no lineage directory halts at N2 rather than N6.
+- **`core/gate_registry.py`.** The new `_halt` return joins `spec.drafter_failed`; no row is added.

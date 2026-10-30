@@ -15,10 +15,19 @@ This node populates:
 - spec_path: Path where the draft was saved in the audit trail
 - review_iteration: Incremented on revision cycles
 - error_message: "" on success, error text on failure
+
+#3585 (ADR 0236): every failure returns an ``error_message`` naming the node
+and the issue, which ``route_after_generate_spec`` sends to HALT. A template
+that cannot be loaded, a lineage directory that is missing, a verdict the
+pinning gate cannot read and a prompt whose required parts exceed the budget
+all halt before the drafter is called. An empty draft and a draft that cannot
+be saved halt after it. None of them is passed on as a smaller result.
 """
 
 import logging
 import re
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +105,55 @@ MAX_TOTAL_PROMPT_CHARS = 120_000
 #: fallbacks across every boostgauge run log, seven of the sixteen the
 #: SEARCH-not-found class a single correction recovers.
 EDIT_SCRIPT_MAX_ATTEMPTS = 3
+
+
+class PromptBudgetError(ValueError):
+    """The prompt's required parts alone exceed MAX_TOTAL_PROMPT_CHARS (#3585).
+
+    The required parts are the instructions, the LLD, the binding manifest,
+    the draft under revision and the round's complaints. The prompt used to be
+    cut off mid-content, so the drafter was sent a partial LLD or draft.
+    """
+
+
+class PinningCannotRunError(RuntimeError):
+    """The round's verdict names nothing the pinning gate can read (#3585).
+
+    Pinning used to abstain and pass the revision unenforced, which is a gate
+    that could not run being read as one that passed.
+    """
+
+
+def _halt(issue_number: Any, reason: str) -> dict[str, Any]:
+    """The node's failure result for #3585's halts: loud on stderr, routed to
+    HALT by route_after_generate_spec, which alerts."""
+    message = f"[N2] generate_spec for issue #{issue_number}: {reason}"
+    print(f"ERROR {message}", file=sys.stderr, flush=True)
+    return {"error_message": message}
+
+
+def _pinning_names(
+    review_feedback: str, completeness_issues: list[str]
+) -> tuple[set[str], tuple[tuple[int, int], ...]]:
+    """What this round's verdict and complaints name, as pinning reads them."""
+    from assemblyzero.workflows.implementation_spec.revision_pinning import (
+        named_line_ranges,
+        named_tokens,
+    )
+
+    return (
+        named_tokens(review_feedback, completeness_issues),
+        named_line_ranges(completeness_issues),
+    )
+
+
+#: Why pinning cannot run, for the halt and the raise alike.
+_PINNING_UNREADABLE = (
+    "the round's verdict and completeness failures name nothing the pinning "
+    "gate can read (no backticked span, quoted phrase, test name, manifest "
+    "row id, Section reference or line range), so the revision cannot be "
+    "held to the content they name (#2532). It used to be passed unenforced"
+)
 
 
 def _spec_edit_halt(reason: str) -> str:
@@ -323,9 +381,39 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     try:
         template = load_template(SPEC_TEMPLATE_PATH, assemblyzero_root)
-    except FileNotFoundError as e:
-        print(f"    ERROR: Template not found: {e}")
-        return {"error_message": str(e)}
+    except (OSError, UnicodeDecodeError) as e:
+        # #3585: the message names the node, the issue and the template, where
+        # it used to be the bare exception text.
+        message = (
+            f"[N2] generate_spec for issue #{issue_number}: cannot load the spec "
+            f"template {SPEC_TEMPLATE_PATH} from {assemblyzero_root}: "
+            f"{type(e).__name__}: {e}"
+        )
+        print(f"ERROR {message}", file=sys.stderr, flush=True)
+        return {"error_message": message}
+
+    # -------------------------------------------------------------------------
+    # #3585: the lineage directory the draft is saved to. A missing one used
+    # to skip the save without a word, after the drafter had been paid.
+    # -------------------------------------------------------------------------
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
+    if audit_dir is None or not audit_dir.is_dir():
+        return _halt(
+            issue_number,
+            f"the audit directory {audit_dir_str or '(none in state)'} does not "
+            f"exist, so the draft cannot be saved to lineage (#2250)",
+        )
+
+    # -------------------------------------------------------------------------
+    # #3585: a revision is pinned to what its verdict names (#2532). A verdict
+    # pinning cannot read halts here, before the drafter is paid; pinning used
+    # to abstain and pass the revision unenforced.
+    # -------------------------------------------------------------------------
+    if is_revision:
+        tokens, ranges = _pinning_names(review_feedback, completeness_issues)
+        if not tokens and not ranges:
+            return _halt(issue_number, _PINNING_UNREADABLE)
 
     # -------------------------------------------------------------------------
     # Build prompt
@@ -353,25 +441,28 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             state.get("target_file", ""),
         )
     else:
-        prompt = build_drafter_prompt(
-            lld_content=state.get("lld_content", ""),
-            current_state=state.get("current_state_snapshots", {}),
-            patterns=state.get("pattern_references", []),
-            template=template,
-            issue_number=issue_number,
-            existing_draft=existing_draft if is_revision else "",
-            review_feedback=review_feedback if is_revision else "",
-            completeness_issues=completeness_issues if is_revision else [],
-            repo_root=repo_root,
-            files_to_modify=state.get("files_to_modify", []),
-            project_context=state.get("project_context", ""),
-            import_dependencies=state.get("import_dependencies", ""),
-            repo_structure=state.get("repo_structure", ""),
-            prior_completeness_breakdown=(
-                state.get("prior_completeness_breakdown", []) if is_revision else []
-            ),
-            assertion_manifest=state.get("assertion_manifest", ""),
-        )
+        try:
+            prompt = build_drafter_prompt(
+                lld_content=state.get("lld_content", ""),
+                current_state=state.get("current_state_snapshots", {}),
+                patterns=state.get("pattern_references", []),
+                template=template,
+                issue_number=issue_number,
+                existing_draft=existing_draft if is_revision else "",
+                review_feedback=review_feedback if is_revision else "",
+                completeness_issues=completeness_issues if is_revision else [],
+                repo_root=repo_root,
+                files_to_modify=state.get("files_to_modify", []),
+                project_context=state.get("project_context", ""),
+                import_dependencies=state.get("import_dependencies", ""),
+                repo_structure=state.get("repo_structure", ""),
+                prior_completeness_breakdown=(
+                    state.get("prior_completeness_breakdown", []) if is_revision else []
+                ),
+                assertion_manifest=state.get("assertion_manifest", ""),
+            )
+        except PromptBudgetError as e:
+            return _halt(issue_number, f"the prompt is over budget: {e}")
 
     # -------------------------------------------------------------------------
     # Issue #486: Pre-flight check — verify Gemini available before expensive Claude call
@@ -382,43 +473,35 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # under the mock profile); the preflight also sees the `spec.review` seat.
     from assemblyzero.core.seats import resolve
 
-    # A seat that will not resolve is reported where an unbuildable drafter
-    # always was, below, so the node keeps one "Invalid drafter" halt site.
-    seat_error: ValueError | None = None
-    drafter_seat = None
-    drafter_spec = reviewer_spec = ""
+    # A seat that will not resolve and a drafter that cannot be built share
+    # the node's one "Invalid drafter" halt site. #3585: the seats, the
+    # preflight and the provider sit in one try, so a seat error halts there
+    # directly; it used to be held in a variable and raised again below.
     try:
         # #3577: the reviewer first, so the drafter is the last seat resolved
         # before its provider is built and the call record names it.
         reviewer_spec = resolve(state, "spec.review").spec
         drafter_seat = resolve(state, "spec.draft")
         drafter_spec = drafter_seat.spec
-    except ValueError as e:
-        # fail-open: not here. The error is held and raised inside the drafter
-        # try below, so it halts with the node's one "Invalid drafter" message.
-        seat_error = e
 
-    if not mock_mode and seat_error is None:
-        from assemblyzero.core.preflight import preflight_for_specs
-        preflight = preflight_for_specs(drafter_spec, reviewer_spec)
-        if preflight is None:
-            print("    [PREFLIGHT] no Gemini node in this run; transport check skipped")
-        elif not preflight.passed:
-            warnings_str = ", ".join(preflight.warnings)
-            return {
-                # The head is the registered gate's (spec.preflight).
-                "error_message": f"[PREFLIGHT] Gemini unavailable: {warnings_str}",
-                "previous_review_feedback": review_feedback,
-            }
-        else:
-            print("    [PREFLIGHT] Gemini transport: agy answered")
+        if not mock_mode:
+            from assemblyzero.core.preflight import preflight_for_specs
+            preflight = preflight_for_specs(drafter_spec, reviewer_spec)
+            if preflight is None:
+                print("    [PREFLIGHT] no Gemini node in this run; transport check skipped")
+            elif not preflight.passed:
+                warnings_str = ", ".join(preflight.warnings)
+                return {
+                    # The head is the registered gate's (spec.preflight).
+                    "error_message": f"[PREFLIGHT] Gemini unavailable: {warnings_str}",
+                    "previous_review_feedback": review_feedback,
+                }
+            else:
+                print("    [PREFLIGHT] Gemini transport: agy answered")
 
-    # -------------------------------------------------------------------------
-    # Get drafter provider
-    # -------------------------------------------------------------------------
-    try:
-        if seat_error is not None:
-            raise seat_error
+        # ---------------------------------------------------------------------
+        # Get drafter provider
+        # ---------------------------------------------------------------------
         drafter = get_provider(drafter_spec, effort=drafter_seat.effort)
     except ValueError as e:
         print(f"    ERROR: Invalid drafter: {e}")
@@ -619,6 +702,16 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         # ---------------------------------------------------------------------
         spec_content = _strip_preamble(spec_content)
 
+        # #3585: a call that succeeded with nothing in it is a failed draft.
+        # The empty string used to be saved and sent to N3 as the spec.
+        if not spec_content.strip():
+            return _halt(
+                issue_number,
+                f"the drafter {drafter_spec} reported success but returned an "
+                f"empty response ({len(result.response or '')} chars), so there "
+                f"is no draft to validate",
+            )
+
         # #2532: the full-regeneration path is the observed regression vector
         # — run-issue331-233939's resumed grant reintroduced the S2 fix by
         # regenerating everything. Pinning applies to the diff exactly as on
@@ -653,16 +746,17 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             )
 
     # -------------------------------------------------------------------------
-    # Save to audit trail
+    # Save to audit trail (the directory was checked before the drafter call)
     # -------------------------------------------------------------------------
-    audit_dir_str = state.get("audit_dir", "")
-    audit_dir = Path(audit_dir_str) if audit_dir_str else None
-
-    spec_path = None
-    if audit_dir and audit_dir.exists():
+    try:
         file_num = next_file_number(audit_dir)
         spec_path = save_audit_file(
             audit_dir, file_num, "spec-draft.md", spec_content
+        )
+    except OSError as e:
+        return _halt(
+            issue_number,
+            f"cannot save the draft to {audit_dir}: {type(e).__name__}: {e}",
         )
 
     # -------------------------------------------------------------------------
@@ -670,8 +764,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     draft_lines = len(spec_content.splitlines()) if spec_content else 0
     print(f"    Generated {draft_lines} lines")
-    if spec_path:
-        print(f"    Saved: {spec_path.name}")
+    print(f"    Saved: {spec_path.name}")
 
     # Issue #511: Accumulate per-node cost
     node_costs = accumulate_node_cost(
@@ -697,7 +790,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         # runs an audit_dir this draft is always an existing file. Before #2250
         # there was no audit_dir, so this was "" and a halt correctly failed --
         # the lineage repair turned a correct failure into a false success.
-        "spec_draft_path": str(spec_path) if spec_path else "",
+        "spec_draft_path": str(spec_path),
         "review_iteration": review_iteration,
         "completeness_issues": [],  # Clear after use
         "previous_review_feedback": review_feedback,  # Issue #486: Save for two-strike
@@ -725,9 +818,12 @@ def _apply_pinning(
     completeness breakdown — the union the regression flag is judged
     against ("content no verdict EVER objected to").
 
-    When the current verdict names nothing extractable, pinning abstains
-    entirely — locking the whole document on an unparseable naming would
-    refuse every legitimate fix, and unknown is not guilty (#2526).
+    When the current verdict names nothing extractable, pinning cannot run.
+    Locking the whole document on an unparseable naming would refuse every
+    legitimate fix (#2526), and passing the revision unenforced, which this
+    used to do, reads a gate that could not run as one that passed. So it
+    raises PinningCannotRunError (#3585); ``generate_spec`` checks the same
+    condition before the drafter is called and halts there.
 
     Line-range citations from the current completeness failures count as
     naming (#2555): "lines 81-83" addresses ``previous`` exactly — the
@@ -737,20 +833,13 @@ def _apply_pinning(
     from assemblyzero.workflows.implementation_spec.revision_pinning import (
         demands_additions,
         enforce_pinning,
-        named_line_ranges,
         named_tokens,
         unlock_requested,
     )
 
-    current = named_tokens(review_feedback, completeness_issues)
-    ranges = named_line_ranges(completeness_issues)
+    current, ranges = _pinning_names(review_feedback, completeness_issues)
     if not current and not ranges:
-        note = (
-            "[PINNING] the verdict names nothing extractable — pinning not "
-            "applied this round (#2532)"
-        )
-        print(f"    {note}")
-        return revised, [note]
+        raise PinningCannotRunError(_PINNING_UNREADABLE)
 
     ever = set(current)
     for prior in state.get("review_feedback_history", []):
@@ -849,6 +938,12 @@ def build_drafter_prompt(
 
     Returns:
         Complete prompt string for the drafter LLM.
+
+    Raises:
+        PromptBudgetError: the prompt's required parts (the instructions, the
+            LLD, the manifest, the draft and the round's complaints) alone
+            exceed MAX_TOTAL_PROMPT_CHARS (#3585). Optional context is
+            dropped whole to fit, and the prompt says what was dropped.
     """
     if completeness_issues is None:
         completeness_issues = []
@@ -938,59 +1033,62 @@ def _build_initial_prompt(
 
     Returns:
         Initial draft prompt string.
-    """
-    sections: list[str] = []
 
-    sections.append(
+    Raises:
+        PromptBudgetError: the required parts alone exceed the budget (#3585).
+    """
+    parts: list[_Part] = []
+
+    parts.append(_Part(
+        "instructions",
         "IMPORTANT: Output ONLY the markdown content. "
-        "Start with # title. No preamble."
-    )
+        "Start with # title. No preamble.",
+    ))
 
     # LLD content
-    sections.append(f"## LLD Content (Issue #{issue_number})\n\n{lld_content}")
+    parts.append(_Part("LLD", f"## LLD Content (Issue #{issue_number})\n\n{lld_content}"))
 
     # #2533: the compiled assertion manifest is BINDING input, placed right
     # after the LLD so the rows sit beside the criteria they compiled from.
     if assertion_manifest:
-        sections.append(_manifest_section(assertion_manifest))
+        parts.append(_Part("assertion manifest", _manifest_section(assertion_manifest)))
 
     # Project context (Issue #409 Gap 1)
     if project_context:
-        sections.append(project_context)
+        parts.append(_Part("project context", project_context, _DROP_PROJECT_CONTEXT))
 
     # Current state snapshots
     snapshot_section = _format_current_state_section(current_state, files_to_modify)
     if snapshot_section:
-        sections.append(snapshot_section)
+        parts.append(_Part("current state", snapshot_section, _DROP_CURRENT_STATE))
 
     # Import dependencies (Issue #409 Gap 3)
     if import_dependencies:
-        sections.append(import_dependencies)
+        parts.append(_Part("import dependencies", import_dependencies, _DROP_IMPORTS))
 
     # Pattern references
     pattern_section = _format_patterns_section(patterns)
     if pattern_section:
-        sections.append(pattern_section)
+        parts.append(_Part("patterns", pattern_section, _DROP_PATTERNS))
 
     # Template
     if template:
-        sections.append(f"## Implementation Spec Template (follow this structure)\n\n{template}")
+        parts.append(_Part(
+            "template",
+            f"## Implementation Spec Template (follow this structure)\n\n{template}",
+            _DROP_TEMPLATE,
+        ))
 
     # Final instruction
-    sections.append(
+    parts.append(_Part(
+        "instructions",
         "Create a complete Implementation Spec following the template structure.\n"
         "Ensure EVERY file listed in the LLD has concrete implementation guidance.\n"
         f"This spec is for Issue #{issue_number}.\n"
-        "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."
-    )
+        "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE.",
+    ))
 
-    prompt = "\n\n".join(sections)
-
-    # Guard against excessively large prompts
-    if len(prompt) > MAX_TOTAL_PROMPT_CHARS:
-        prompt = _truncate_prompt(prompt)
-
-    return prompt
+    return _fit_to_budget(parts)
 
 
 # =============================================================================
@@ -1029,6 +1127,9 @@ def _build_revision_prompt(
 
     Returns:
         Revision prompt string.
+
+    Raises:
+        PromptBudgetError: the required parts alone exceed the budget (#3585).
     """
     # Issue #489: Try section-level revision for focused changes
     if review_feedback and existing_draft:
@@ -1074,16 +1175,17 @@ def _build_revision_prompt(
                     return prompt
 
     # Fallback: full revision prompt
-    sections: list[str] = []
+    parts: list[_Part] = []
 
-    sections.append(
+    parts.append(_Part(
+        "instructions",
         "IMPORTANT: Output ONLY the markdown content. "
-        "Start with # title. No preamble."
-    )
+        "Start with # title. No preamble.",
+    ))
 
     # #2533: the manifest binds revisions exactly as it binds first drafts.
     if assertion_manifest:
-        sections.append(_manifest_section(assertion_manifest))
+        parts.append(_Part("assertion manifest", _manifest_section(assertion_manifest)))
 
     # Completeness issues (highest priority — from N3 mechanical validation)
     if completeness_issues:
@@ -1106,7 +1208,7 @@ def _build_revision_prompt(
             )
             issues_text += f"```\n{repo_structure}\n```\n"
 
-        sections.append(issues_text)
+        parts.append(_Part("completeness errors", issues_text))
 
     # Closes #1465: Cumulative prior-iteration failures. Show the drafter the
     # full history of which checks failed in which iterations, so identical
@@ -1155,31 +1257,34 @@ def _build_revision_prompt(
                 "\n**Stop refining the prior approach. Change the spec's "
                 "structure or strategy fundamentally for these failures.**\n"
             )
-        sections.append(history)
+        parts.append(_Part("prior iteration history", history, _DROP_HISTORY))
 
     # Review feedback (from N5 Gemini review)
     if review_feedback:
-        sections.append(
+        parts.append(_Part(
+            "review feedback",
             "## Gemini Readiness Review Feedback\n\n"
-            f"{review_feedback}"
-        )
+            f"{review_feedback}",
+        ))
 
     # Current draft to revise
-    sections.append(f"## Current Draft (to revise)\n\n{existing_draft}")
+    parts.append(_Part("current draft", f"## Current Draft (to revise)\n\n{existing_draft}"))
 
     # Current state snapshots (for reference during revision)
     snapshot_section = _format_current_state_section(current_state, files_to_modify)
     if snapshot_section:
-        sections.append(snapshot_section)
+        parts.append(_Part("current state", snapshot_section, _DROP_CURRENT_STATE))
 
     # Original LLD for reference
-    sections.append(f"## Original LLD (Issue #{issue_number})\n\n{lld_content}")
+    parts.append(_Part("LLD", f"## Original LLD (Issue #{issue_number})\n\n{lld_content}"))
 
     # Template
     if template:
-        sections.append(
-            f"## Implementation Spec Template (REQUIRED STRUCTURE)\n\n{template}"
-        )
+        parts.append(_Part(
+            "template",
+            f"## Implementation Spec Template (REQUIRED STRUCTURE)\n\n{template}",
+            _DROP_TEMPLATE,
+        ))
 
     # Revision instructions
     # Closes #1521: writer was regressing on revision — fixing the flagged
@@ -1188,7 +1293,8 @@ def _build_revision_prompt(
     # PATCH ("not a regeneration"), explicitly forbids "tidying up" unflagged
     # content, and calls out the known failure mode by name so the LLM sees
     # the anti-pattern it must avoid.
-    sections.append(
+    parts.append(_Part(
+        "instructions",
         "CRITICAL REVISION INSTRUCTIONS — READ BEFORE WRITING:\n\n"
         "This is a TARGETED PATCH, not a regeneration. You are applying "
         "specific fixes to an existing draft. You are NOT writing a new spec.\n\n"
@@ -1224,16 +1330,10 @@ def _build_revision_prompt(
         "put a single line `UNLOCK: <one-line reason>` as the VERY FIRST "
         "line of your response (before the # heading); the unlock is "
         "logged, never silent.\n\n"
-        "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."
-    )
+        "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE.",
+    ))
 
-    prompt = "\n\n".join(sections)
-
-    # Guard against excessively large prompts
-    if len(prompt) > MAX_TOTAL_PROMPT_CHARS:
-        prompt = _truncate_prompt(prompt)
-
-    return prompt
+    return _fit_to_budget(parts)
 
 
 # =============================================================================
@@ -1351,136 +1451,87 @@ def _strip_preamble(content: str) -> str:
     return content
 
 
-def _truncate_prompt(prompt: str) -> str:
-    """Truncate prompt by dropping lowest-priority sections first.
+#: Drop ranks for a prompt's optional parts: the highest is dropped first.
+#: The order is #409's, kept-longest last. A required part (the instructions,
+#: the LLD, the binding manifest, the draft under revision, the completeness
+#: errors and the review feedback) has rank 0 and is never dropped (#3585).
+_DROP_HISTORY = 6
+_DROP_PROJECT_CONTEXT = 5
+_DROP_PATTERNS = 4
+_DROP_IMPORTS = 3
+_DROP_CURRENT_STATE = 2
+_DROP_TEMPLATE = 1
 
-    Issue #409 Gap 4: Instead of blunt 40%/30% string splitting that
-    loses file excerpts mid-content, parse the prompt into ## sections
-    and drop whole sections in priority order.
 
-    Priority (highest = kept longest):
-      Instructions/preamble, LLD, Template, Current Draft,
-      Completeness Errors, File Excerpts, Import Dependencies,
-      Patterns, Project Context
+@dataclass(frozen=True)
+class _Part:
+    """One part of a drafter prompt, as the builder appended it (#3585).
 
-    Args:
-        prompt: Full prompt content.
-
-    Returns:
-        Truncated prompt fitting within MAX_TOTAL_PROMPT_CHARS.
+    The budget works on these, not on the joined text. #409's version split
+    the joined prompt on ``## `` lines, so the LLD's, the template's and the
+    draft's own ``##`` sections read as unknown sections and were dropped
+    first, the binding manifest's header matched no priority and went first
+    too, and a prompt still over budget was cut off mid-content.
     """
+
+    name: str
+    text: str
+    #: 0 for a required part; otherwise its drop rank.
+    drop_rank: int = 0
+
+
+def _fit_to_budget(parts: list[_Part]) -> str:
+    """Join the parts, dropping optional ones whole until the prompt fits.
+
+    Dropping optional context to fit is the budget's design, not a failure:
+    the prompt says which parts were trimmed, and so does the run log. The
+    required parts are never dropped or cut; when they alone exceed the
+    budget, this raises (#3585).
+
+    Raises:
+        PromptBudgetError: the required parts exceed MAX_TOTAL_PROMPT_CHARS.
+    """
+    def joined(kept: list[_Part]) -> str:
+        return "\n\n".join(part.text for part in kept)
+
+    prompt = joined(parts)
     if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
         return prompt
 
     original_len = len(prompt)
-
-    # Split into sections by ## headers
-    sections = _split_into_sections(prompt)
-
-    # Priority keywords: lower index = higher priority (kept longer).
-    # Matching is case-insensitive substring on the ## header text.
-    _priority_keywords = [
-        "lld content",
-        "implementation spec template",
-        "current draft",
-        "mechanical completeness",
-        "current state",
-        "gemini",
-        "import dependencies",
-        "similar implementation patterns",
-        "project context",
-    ]
-
-    def _section_priority(section: dict) -> int:
-        header = section["header"].lower()
-        if not header:
-            # Preamble / final instructions — highest priority
-            return -1
-        for i, keyword in enumerate(_priority_keywords):
-            if keyword in header:
-                return i
-        # Unknown sections — drop before known ones
-        return len(_priority_keywords)
-
-    # Build a droppable list sorted by priority (lowest priority first)
-    droppable = sorted(
-        [s for s in sections if _section_priority(s) > 0],
-        key=_section_priority,
-        reverse=True,
-    )
-
-    total = sum(len(s["content"]) for s in sections)
+    kept = list(parts)
     dropped: list[str] = []
-
-    while total > MAX_TOTAL_PROMPT_CHARS and droppable:
-        victim = droppable.pop(0)
-        sections.remove(victim)
-        total -= len(victim["content"])
-        dropped.append(victim["header"] or "(unnamed)")
-
-    if dropped:
-        # Insert a notice where content was removed
-        notice = (
-            "\n\n<!-- CONTEXT TRIMMED: Dropped sections to fit budget: "
+    for victim in sorted(
+        (part for part in parts if part.drop_rank),
+        key=lambda part: part.drop_rank,
+        reverse=True,
+    ):
+        kept.remove(victim)
+        dropped.append(victim.name)
+        notice = _Part(
+            "trim notice",
+            "<!-- CONTEXT TRIMMED: Dropped sections to fit budget: "
             + ", ".join(dropped)
-            + " -->\n"
+            + " -->",
         )
-        sections.append({"header": "", "content": notice, "order": 999})
+        if len(joined(kept + [notice])) <= MAX_TOTAL_PROMPT_CHARS:
+            break
 
-    # Reassemble in original order
-    sections.sort(key=lambda s: s["order"])
-    result = "\n\n".join(s["content"] for s in sections)
-
-    # Last resort: if still over budget, hard-truncate at limit
+    result = joined(kept + [notice]) if dropped else prompt
     if len(result) > MAX_TOTAL_PROMPT_CHARS:
-        result = result[:MAX_TOTAL_PROMPT_CHARS]
+        required = [part for part in parts if not part.drop_rank]
+        required_len = len(joined(required))
+        names = ", ".join(dict.fromkeys(part.name for part in required))
+        raise PromptBudgetError(
+            f"its required parts ({names}) come to {required_len:,} chars, "
+            f"{required_len - MAX_TOTAL_PROMPT_CHARS:,} over the "
+            f"{MAX_TOTAL_PROMPT_CHARS:,}-char budget with every optional part "
+            f"dropped ({', '.join(dropped) or 'none'}); the prompt used to be "
+            f"cut off at the budget, sending the drafter a partial LLD or draft"
+        )
 
     print(
-        f"    [WARN] Prompt truncated from {original_len:,} to "
-        f"{len(result):,} chars (dropped: {', '.join(dropped) if dropped else 'none'})"
+        f"    [BUDGET] Prompt trimmed from {original_len:,} to {len(result):,} "
+        f"chars by dropping optional context: {', '.join(dropped)}"
     )
-
     return result
-
-
-def _split_into_sections(prompt: str) -> list[dict]:
-    """Split a prompt string into sections demarcated by ## headers.
-
-    Each section is a dict with:
-      - header: The ## header text (empty string for preamble/tail).
-      - content: The full text including the header line.
-      - order: Original position index for reassembly.
-
-    Args:
-        prompt: The full prompt string.
-
-    Returns:
-        List of section dicts in original order.
-    """
-    sections: list[dict] = []
-    current_header = ""
-    current_lines: list[str] = []
-
-    for line in prompt.split("\n"):
-        if line.startswith("## "):
-            # Flush previous section
-            if current_lines:
-                sections.append({
-                    "header": current_header,
-                    "content": "\n".join(current_lines),
-                    "order": len(sections),
-                })
-            current_header = line[3:].strip()
-            current_lines = [line]
-        else:
-            current_lines.append(line)
-
-    # Flush last section
-    if current_lines:
-        sections.append({
-            "header": current_header,
-            "content": "\n".join(current_lines),
-            "order": len(sections),
-        })
-
-    return sections
