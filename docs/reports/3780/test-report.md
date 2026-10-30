@@ -148,6 +148,14 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 411 passed and 1 failed across every unit and integration test file that names the module, HALT or the resume contract, plus the two audits' own tests. The failure was the fail-open baseline going stale by the fixed handler; after `--write-baseline` the audits' tests pass.
 
+## #4161: the checkout's telemetry logs
+
+**New: `tests/unit/test_checkout_telemetry_isolation.py` (5).** Three T2 tests send one writer's record at the checkout itself and find the checkout's log unchanged and the record under `tmp_path`; one checks that a record sent to a test's own directory stays there; T1 checks that the session guard watches exactly the paths the unredirected writers use.
+
+**Before the fix, measured** with the autouse fixture absent: the three T2 tests failed, the other two passed, and the new session guard failed the run naming all three files. Those writes, and the worktree's older byproducts from 2026-10-09, were recorded on #4161 and deleted.
+
+**Neighbouring suites:** 130 passed across the new file and every test of the three writers, the factory report and the call-recording isolation.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.

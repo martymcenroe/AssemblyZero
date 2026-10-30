@@ -14,6 +14,10 @@ Not in this PR, because no target run passes through them:
 ## Also carried
 
 - `tests/unit/test_alert_channel_at_start.py::test_the_implementation_workflow` passes a temporary `--repo`, and its stand-ins fail if reached (#4161). Measured against the old source, it had run a mock implementation run into the worktree.
+- **#4161: the checkout's three telemetry logs.** Stage records (`data/speedrun/telemetry/run-records.jsonl`), prompt failures (`data/speedrun/telemetry/prompt-failures.jsonl`) and hallucination checks (`data/telemetry/hallucination-log.jsonl`) take their root from the caller, and a test that runs a node from the checkout hands them the checkout. `tests/checkout_telemetry_guard.py` holds the redirect and the guarded paths:
+  - an autouse fixture in `tests/conftest.py` sends any write aimed at the checkout to the test's `tmp_path`, and a write to any other root goes where it was sent;
+  - `convergence.records_path` and `prompt_telemetry.telemetry_path` are replaced as module attributes, and `record_hallucination_event` in each of the three places it is bound;
+  - a session guard beside the home-state one (#3531) fails the run if any of the three files appears or changes, naming them.
 
 ## Modules
 
