@@ -285,22 +285,29 @@ ONLY_GOOD = (
 )
 
 
-def test_an_all_unarticulated_verdict_files_nothing_and_does_not_halt(node, capsys):
+def test_an_all_unarticulated_verdict_files_nothing_and_halts_unverified(node, capsys):
+    """#3585 (ADR 0236): no usable verdict halts as REQUIREMENTS UNVERIFIED.
+    It used to proceed to drafting; it still never files a question."""
+    from assemblyzero.workflows.requirements.nodes.analyze_requirements import (
+        REQUIREMENTS_UNVERIFIED_MARKER,
+    )
+
     result = node["run"](ALL_UNARTICULATED)
 
-    assert result == {}, "a finding the check could not state must not halt the roll"
+    assert result.get("requirements_unverified")
+    assert REQUIREMENTS_UNVERIFIED_MARKER in result["error_message"]
+    assert A_344 in result["error_message"], "the pairing is named in the halt"
     assert node["filed"] == [], "and must not become a launch-blocking question"
     out = capsys.readouterr().out
     assert "REJECTED" in out and A_344 in out
 
 
-def test_an_all_unarticulated_verdict_is_recorded_as_unverified(node):
-    """Failing open is recorded, never silent (#2290): 'not checked' and
-    'checked and clean' are different roll outcomes."""
+def test_an_all_unarticulated_verdict_writes_no_proceeded_record(node):
+    """The record said the run proceeded without a verdict; it halts now, and
+    a halt reports itself (#3585)."""
     node["run"](ALL_UNARTICULATED)
 
-    assert len(node["unverified"]) == 1
-    assert "divergence" in node["unverified"][0]["reason"]
+    assert node["unverified"] == []
 
 
 def test_a_clean_verdict_is_not_recorded_as_unverified(node):

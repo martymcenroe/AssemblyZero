@@ -74,3 +74,25 @@ The other seven pin a well-formed issue URL, an idea that is present and one nev
 **Changed tests:** `test_analyze_codebase.py`. The no-repo-path and missing-repo classes now expect the halt and an ERROR in the log, where they expected an empty context and a warning.
 
 **Neighbouring suites:** 494 passed across 21 files: the analysis tests, the interface surface, the requirements graph, the mock runs, the CLI and the gate registry.
+
+## nodes/analyze_requirements.py
+
+**New: `tests/unit/test_analyze_requirements_loud_failure.py` (19).**
+
+**Before the fix, measured:** 15 failed, 4 passed. Every site test failed. The 4 that passed pin kept behaviour:
+- an empty findings list is a clean verdict;
+- a calm storm probe reads False;
+- a mock run reads nothing;
+- a conflict that does not reproduce proceeds (779, #3767).
+
+**Changed tests, each asserting the new behaviour:**
+- `test_n0c_unarticulated_conflict.py`: an all-unarticulated verdict halts unverified, names the pairing, files nothing and writes no proceeded record.
+- `test_requirements_gate_timeout.py`: the last fail-open path halts and records nothing.
+- `test_requirements_conflict.py`: an empty body halts unverified.
+- `test_requirements_gate_escalation.py`: a broken escalation target halts, naming it, with no re-ask.
+
+**Neighbouring suites:** the first run across 28 files gave 603 passed, 1 skipped and 3 failed.
+- Two of the failures were tests of the retired behaviour, changed above.
+- The third, `test_check_requirements.py::TestConflict::test_report_says_filing_failed_when_it_did`, showed that the standalone pre-check reads "must-resolve filing failed" from the gate's captured stdout. The gate prints that line again, beside the alert.
+
+The 6 files involved then gave 154 passed.

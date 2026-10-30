@@ -61,6 +61,20 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 - **#3864 already halts an arc that cannot be cut** (153); it is pinned here.
 - **The gate registry:** `lld.arc_unreadable` covers N0b's seven new halt sites.
 
+### nodes/analyze_requirements.py (11 ledger findings: 10 fixed here, 1 by #3767; 3 compliant rows)
+
+- **Nothing proceeds without a verdict.**
+  - #2462's path, where every conflict the model reported lacked a divergence, used to proceed and record the unverified state. It now halts as REQUIREMENTS UNVERIFIED, naming the pairings, and files nothing (727, tag deleted).
+  - `_record_unverified`, which swallowed a failed run_context and a failed write (399, 407), is deleted: nothing calls it now.
+  - An empty issue body halts unverified (561, tag deleted).
+  - A bad escalation seat halts unverified, naming it (643). It used to re-ask the model that had just timed out.
+- **A finding that is not an object** makes the answer no verdict, which is retried and then halts (333). It was dropped, and a findings list could read as consistent.
+- **A storm probe that raises** is said and raised (371). It read as "no storm".
+- **The confirming ask's failure** is named in the conflict halt (763).
+- **Beside a conflict halt,** a failed telemetry record (814) or must-resolve filing (825) alerts the operator, naming the repo and issue.
+- **`_halt_unverified`** says when a halt was not retried, rather than claim a backoff that never ran.
+- **The reproduced-conflict branch** (779, compliant by #3767) is written as an if/else. The fail-open audit read the `if not confirmed: return {}` shape as a vacuous pass once the two halts ahead of it stopped returning `{}`.
+
 ## Loud-failure compliance (standard 0034)
 
 | Site (file:line) | Loud | Logged | Stops | Alerts |
@@ -69,6 +83,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 | `finalize.py` `_finalize_repair_budget` | the ValueError's traceback | names the bad value | raises out of the node | not alerted at the site: the orchestrator's `except Exception` in `run_lld_stage` records a failed stage without an alert (outside this branch) |
 | `finalize.py` `validate_lld_final` | the ValueError's traceback | says the content is empty | raises; its one caller halts on an empty draft first | through that caller's HALT |
 | `graph.py` `route_from_human_gate_draft`, `route_from_human_gate_verdict` | the gate's own ERROR line | the gate's message | an error routes to HALT | HALT calls `alert_operator` |
+| `analyze_requirements.py` `analyze_requirements` (333, 561, 643, 727, 763) | the halt message, printed, then HALT's alert record on stderr | names the issue, the seat, the pairings and the cause | `requirements_unverified` or `error_message`, which `route_after_analyze_requirements` sends to HALT | HALT calls `alert_operator` |
+| `analyze_requirements.py` `_provider_storm_active` (371) | ERROR line on stderr and in the log | the exception | re-raised out of the node | not alerted at the site (the orchestrator's catch, outside this branch) |
+| `analyze_requirements.py` telemetry and filing beside a conflict (814, 825) | `alert_operator`'s ERROR line | names the repo, the issue and the cause | the conflict halt stands | `alert_operator` at the site |
 | `analyze_codebase.py` `analyze_codebase`, `_unread_selected`, `_select_key_files`, `_search_for_file` | ERROR line on stderr and in the log, via `_loud` | names the repo, the file or listing, and the cause | `error_message`, which `route_after_analyze_codebase` sends to HALT before N0c | HALT calls `alert_operator` |
 | `generate_draft.py` `generate_draft`, `_generate_best_of_n`, `build_revision_context` | ERROR line on stderr and in the log, via `_loud` | names the path, size, spec, files and cause | `error_message`, which `route_after_generate_draft` sends to HALT; a failed candidate alone does not stop the round, by design | HALT calls `alert_operator` |
 
