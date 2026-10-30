@@ -459,10 +459,16 @@ class TestItSaysSoWhenItDidNotRun:
         assert result.status == "error"
         assert "no verdict" in result.detail
 
-    def test_recording_never_raises(self, tmp_path):
+    def test_a_record_that_cannot_be_written_alerts_and_raises(
+        self, tmp_path, operator_alerts
+    ):
+        """#3585: a lost record means the UNVERIFIED banner never prints, so the
+        write failure alerts and raises instead of returning False."""
         blocker = tmp_path / "data"
         blocker.write_text("not a directory", encoding="utf-8")
-        assert record_unverified(tmp_path, issue=7, reason="x") is False
+        with pytest.raises(OSError):
+            record_unverified(tmp_path, issue=7, reason="x")
+        assert len(operator_alerts) == 1
 
     def test_since_filters_older_records(self, tmp_path):
         record_unverified(tmp_path, issue=1, reason="old", ts="2026-08-01 00:00:00")
