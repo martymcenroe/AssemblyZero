@@ -117,3 +117,13 @@ The 6 files involved then gave 154 passed.
 - `test_structured_verdicts.py`: the verdict guesser is read from the parser module, and review's copy is gone.
 
 **Neighbouring suites:** 28 files gave 553 passed, 1 skipped, 4 deselected (e2e) and 2 failed. The 2 are `test_extract_and_discard.py::TestBlockedVerdictExtraction::test_blocked_verdict_stores_summary_not_prose` and `::TestApprovedVerdictExtraction::test_approved_verdict_stores_summary_not_prose`. Both fail identically with HEAD's `review.py` swapped back in, and both test the testing workflow's `review_test_plan`, so they are pre-existing.
+
+## nodes/human_gate.py
+
+**New: `tests/unit/test_human_gate_loud_failure.py` (17).**
+
+**Before the fix, measured:** 12 failed, 5 passed. Every site test failed in both modes. The 5 that passed pin kept behaviour: BLOCKED under the cap revises and APPROVED finalizes, in both modes, and a human who chooses to revise is not capped.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 18 files gave 447 passed and 1 skipped. They cover the interactive gates, the graph, the open-questions loop, the mock runs and the gate registry.

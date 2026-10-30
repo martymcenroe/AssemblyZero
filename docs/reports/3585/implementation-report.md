@@ -91,6 +91,16 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 - **`_parse_verdict_status`**, unused, is deleted (592); the verdict parser keeps its own.
 - **The gate registry:** `lld.reviewer_failed` covers the new sites.
 
+### nodes/human_gate.py (3 ledger findings fixed)
+
+- **N4's own decision reads `lld_status` alone** when the gate is disabled (168) or in auto mode (186), through one helper:
+  - APPROVED finalizes and BLOCKED revises;
+  - any other status halts, naming it;
+  - the word APPROVED anywhere in the verdict text, as in "NOT APPROVED", no longer finalizes.
+- **Its revise loop stops at `max_iterations` reviews** (179). It used to run until GraphRecursionError. The halt reaches HALT because of the graph commit's change to the human-gate router.
+- **A human at the prompt** still decides for himself, uncapped.
+- **The gate registry:** `lld.reviewer_failed` covers N4's two new halt sites. No lld row fit better, and a new row would move the halt-row ratchet.
+
 ## Loud-failure compliance (standard 0034)
 
 | Site (file:line) | Loud | Logged | Stops | Alerts |
@@ -102,6 +112,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-requirements-nodes`, 
 | `analyze_requirements.py` `analyze_requirements` (333, 561, 643, 727, 763) | the halt message, printed, then HALT's alert record on stderr | names the issue, the seat, the pairings and the cause | `requirements_unverified` or `error_message`, which `route_after_analyze_requirements` sends to HALT | HALT calls `alert_operator` |
 | `analyze_requirements.py` `_provider_storm_active` (371) | ERROR line on stderr and in the log | the exception | re-raised out of the node | not alerted at the site (the orchestrator's catch, outside this branch) |
 | `analyze_requirements.py` telemetry and filing beside a conflict (814, 825) | `alert_operator`'s ERROR line | names the repo, the issue and the cause | the conflict halt stands | `alert_operator` at the site |
+| `human_gate.py` `_decide_verdict` | ERROR line on stderr and in the log | names the status, or the review count and the cap | `error_message`, which `route_from_human_gate_verdict` now sends to HALT | HALT calls `alert_operator` |
 | `review.py` `review`, `_invoke_reviewer_with_feedback_schema`, `_build_target_repo_context`, `_update_draft_with_verdict` | ERROR line on stderr and in the log, via `_loud` | names the reviewer spec, the provider's cause, the target, the warnings | `error_message`, which `route_after_review` sends to HALT | HALT calls `alert_operator` |
 | `analyze_codebase.py` `analyze_codebase`, `_unread_selected`, `_select_key_files`, `_search_for_file` | ERROR line on stderr and in the log, via `_loud` | names the repo, the file or listing, and the cause | `error_message`, which `route_after_analyze_codebase` sends to HALT before N0c | HALT calls `alert_operator` |
 | `generate_draft.py` `generate_draft`, `_generate_best_of_n`, `build_revision_context` | ERROR line on stderr and in the log, via `_loud` | names the path, size, spec, files and cause | `error_message`, which `route_after_generate_draft` sends to HALT; a failed candidate alone does not stop the round, by design | HALT calls `alert_operator` |

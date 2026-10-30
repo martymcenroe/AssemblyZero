@@ -249,12 +249,15 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "lld.reviewer_failed", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Reviewer response rejected",
-        _s(f"{_RQ}/nodes/review.py::review::return", 0, 1, 3, 4, 5, 7, 8),
+        _s(f"{_RQ}/nodes/review.py::review::return", 0, 1, 3, 4, 5, 7, 8)
+        + _s(f"{_RQ}/nodes/human_gate.py::_decide_verdict::return", 0, 1),
         notes=(
             "#3585: also the reviewer's preconditions (the audit_dir, a target "
             "structure that can be listed), a reviewer call that failed, a "
-            "REVISE without its Tier sections, and an APPROVED verdict whose "
-            "resolutions could not be applied"
+            "REVISE without its Tier 1 section, an APPROVED verdict whose "
+            "resolutions could not be applied, and N4 deciding on its own: a "
+            "review status it does not know, and a draft still BLOCKED at the "
+            "review cap"
         ),
     ),
     Gate(

@@ -9,11 +9,62 @@ Provides human checkpoints:
 
 When gates are disabled or auto_mode is enabled, gates are skipped.
 When gates are enabled and not in auto_mode, prompts user for input.
+
+#3585 (ADR 0236): when N4 decides on its own it decides on ``lld_status``
+alone. APPROVED finalizes, BLOCKED revises, and anything else halts; the word
+APPROVED somewhere in the verdict text (as in "NOT APPROVED") used to
+finalize. Its own revise loop stops at ``max_iterations`` reviews; it used to
+run until GraphRecursionError. A human at the prompt still decides himself.
 """
 
+import logging
+import sys
 from typing import Any
 
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState, HumanDecision
+
+logger = logging.getLogger(__name__)
+
+
+def _loud(message: str) -> str:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[N4] %s", message)
+    print(f"ERROR [N4] {message}", file=sys.stderr, flush=True)
+    return message
+
+
+def _decide_verdict(
+    state: RequirementsWorkflowState, lld_status: str, iteration_count: int, label: str
+) -> dict[str, Any]:
+    """N4's own decision, for a disabled gate or auto mode (#3585).
+
+    Decides on ``lld_status`` alone, the status the review node set. A status
+    it does not know, and a revise loop that has spent its reviews, set
+    ``error_message``, which ``route_from_human_gate_verdict`` sends to HALT.
+    """
+    if lld_status == "APPROVED":
+        print(f"    {label} APPROVED -> finalizing")
+        return {"next_node": "N5_finalize", "iteration_count": iteration_count,
+                "error_message": ""}
+    if lld_status != "BLOCKED":
+        return {"next_node": "HALT", "iteration_count": iteration_count,
+                "error_message": _loud(
+                    f"the verdict gate cannot decide on review status "
+                    f"{lld_status!r}: only APPROVED finalizes and only BLOCKED "
+                    f"revises"
+                )}
+    verdict_count = state.get("verdict_count", 0)
+    max_iterations = state.get("max_iterations", 3)
+    if verdict_count >= max_iterations:
+        return {"next_node": "HALT", "iteration_count": iteration_count,
+                "error_message": _loud(
+                    f"the draft is still BLOCKED after {verdict_count} review(s), "
+                    f"the cap of {max_iterations}, so the verdict gate stops "
+                    f"revising"
+                )}
+    print(f"    {label} BLOCKED -> revising")
+    return {"next_node": "N1_generate_draft", "iteration_count": iteration_count,
+            "error_message": ""}
 
 
 def _prompt_draft_gate() -> str:
@@ -158,46 +209,15 @@ def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
     gates_verdict = state.get("config_gates_verdict", True)
     auto_mode = state.get("config_auto_mode", False)
     lld_status = state.get("lld_status", "PENDING")
-    current_verdict = state.get("current_verdict", "")
     iteration_count = state.get("iteration_count", 0) + 1
 
     print(f"\n[N4] Human gate (verdict: {lld_status})...")
 
-    # If gate is disabled, auto-route based on verdict
+    # If gate is disabled, or in auto mode, the gate decides (#3585).
     if not gates_verdict:
-        if lld_status == "APPROVED" or "APPROVED" in current_verdict.upper():
-            print("    Gate disabled, APPROVED -> finalizing")
-            return {
-                "next_node": "N5_finalize",
-                "iteration_count": iteration_count,
-                "error_message": "",
-            }
-        else:
-            # Auto-revise if blocked
-            print("    Gate disabled, BLOCKED -> revising")
-            return {
-                "next_node": "N1_generate_draft",
-                "iteration_count": iteration_count,
-                "error_message": "",
-            }
-
-    # Auto mode: route based on lld_status
+        return _decide_verdict(state, lld_status, iteration_count, "Gate disabled,")
     if auto_mode:
-        if lld_status == "APPROVED" or "APPROVED" in current_verdict.upper():
-            print("    [AUTO] APPROVED -> finalizing")
-            return {
-                "next_node": "N5_finalize",
-                "iteration_count": iteration_count,
-                "error_message": "",
-            }
-        else:
-            # Auto-revise if blocked
-            print("    [AUTO] BLOCKED -> revising draft")
-            return {
-                "next_node": "N1_generate_draft",
-                "iteration_count": iteration_count,
-                "error_message": "",
-            }
+        return _decide_verdict(state, lld_status, iteration_count, "[AUTO]")
 
     # Interactive mode: prompt user for decision
     choice = _prompt_verdict_gate(lld_status)
