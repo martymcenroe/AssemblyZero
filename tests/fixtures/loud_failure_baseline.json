@@ -1,5 +1,5 @@
 {
-  "count": 284,
+  "count": 280,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -78,30 +78,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 44
-    },
-    "assemblyzero/core/model_record.py::_resolved_id::fail_open_tag::1": {
-      "detail": "# fail-open: a spec the registry cannot resolve (a scripted or",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 71
-    },
-    "assemblyzero/core/model_record.py::_resolved_id::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 70
-    },
-    "assemblyzero/core/model_record.py::record_call::fail_open_tag::1": {
-      "detail": "# fail-open: the call already happened and its result is returned",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 124
-    },
-    "assemblyzero/core/model_record.py::record_call::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 123
     },
     "assemblyzero/core/operator_notify.py::send_email::fail_open_tag::1": {
       "detail": "# fail-open: #2529 \u2014 same ruling as the toast: the backstop email is",

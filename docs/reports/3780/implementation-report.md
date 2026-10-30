@@ -205,6 +205,16 @@ The run record is what a standalone LLD or implementation run leaves for the ses
 
 Baseline: ten entries leave (nine tags and `profile`'s handler). The fail-open audit lost 9 findings.
 
+### model_record.py (#3782, 4 sites)
+
+The model record says which seat, spec and model answered every call, so that a comparison between profiles is not a guess. `tools/compare_profiles.py` reads the same fields from `calls.jsonl`; the `model` lines in the run record's events log are read by people.
+
+- **A spec the seat registry refuses raises** (70, 71). `_resolved_id` used to record it with an empty model id, on the belief that scripted and test-only specs end there. They do not: `mock:` and `scripted:` resolve to their model. What reached the handler was a spec with no provider, or one resolving to a model `FORBIDDEN_MODELS` fences, recorded as answered by nothing. Through `get_provider` a forbidden Gemini model is already refused by `GeminiClient` before the call returns, so this raise is the backstop for a `RecordingProvider` built around a spec its transport was not built from.
+- **A run record that cannot take a call's line alerts** (123, 124), with the cause, the seat and the spec, and `record_call` returns False. The call already happened, and its result is returned untouched, since nothing the run produces reads that line. An `AlertDeliveryError` from the record (its own alert could not be delivered) is raised as it came, not alerted a second time.
+- **Callers.** `call_fields` and `record_call` have one caller, `RecordingProvider.invoke`, which has no handler: a refused spec ends the call there with `ProfileError` and reaches the node that made it. `record_call`'s return value is not read.
+
+Baseline: four entries leave (both handlers and both tags). The fail-open audit lost 2 findings.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

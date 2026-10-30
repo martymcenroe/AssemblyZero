@@ -690,11 +690,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/merge_driver.py:163` | missing PR/SHA | success | loud, logged, stops | raise |
 | `assemblyzero/core/merge_driver.py:164` | nonzero | raise | compliant | none |
 | `assemblyzero/core/github_writes.py:145` | replay | inert | compliant | none |
-| `assemblyzero/core/model_record.py:70` | check_spec | "" | loud, logged, alerts | raise |
-| `assemblyzero/core/model_record.py:71` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/model_record.py:70` | check_spec | "" | loud, logged, alerts | FIXED in the core batch (#3782): a spec the seat registry refuses raises its ProfileError, and the call that used it stops; test_70 in test_model_record_loud_failure.py |
+| `assemblyzero/core/model_record.py:71` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3782): the tag and its handler are removed; test_71 in test_model_record_loud_failure.py |
 | `assemblyzero/core/model_record.py:118` | no record | False | compliant | none |
-| `assemblyzero/core/model_record.py:123` | sink write | False | loud, logged, alerts | ERROR + alert |
-| `assemblyzero/core/model_record.py:124` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/model_record.py:123` | sink write | False | loud, logged, alerts | FIXED in the core batch (#3782): a run record that cannot take the line alerts with the cause and the call's result is kept; an undelivered alert is raised; test_123 in test_model_record_loud_failure.py |
+| `assemblyzero/core/model_record.py:124` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3782): the tag is removed; test_124 in test_model_record_loud_failure.py |
 | `assemblyzero/core/pr_poll.py:86` | error payload | wait | loud, logged, stops | raise |
 | `assemblyzero/core/text_sanitizer.py:72` | non-str | unstripped | loud, logged, stops | raise |
 | `assemblyzero/core/workspace_context.py:38` | missing path | raise | compliant | none |

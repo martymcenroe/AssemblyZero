@@ -160,6 +160,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 639 passed across every test file that imports the module (`test_run_record.py`, the new file, `test_model_record.py`, `test_decision_table_survives.py`, `test_impl_dry_run_is_dry.py`, `test_lld_dry_run_is_dry.py`, `test_lld_writes_only_worktree.py`), every test file that drives `tools/run_requirements_workflow.py` or `tools/run_implement_from_lld.py` (twenty-three more), and the two audits' own tests. Run before `--write-baseline`, the same set less the tool tests had one failure, `test_no_fixed_site_left_in_the_baseline`, which the new baseline cleared.
 
+## model_record.py
+
+**New: `tests/unit/test_model_record_loud_failure.py` (11)**: eight for the four sites (three for 70, three for 123), plus three that pin kept behaviour (an empty spec has no id and is quiet, a `mock:` or `scripted:` spec resolves to its model, and no open record is no write).
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 8 failed, 3 passed (the three that pin kept behaviour).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 243 passed and 1 failed across every test file that imports `model_record` or `call_recording` (`test_model_record.py`, the new file, `test_seat_attribution.py`, `test_call_recording_isolation.py`, `test_call_recording_roll.py`, `test_impl_lands_through_driver.py`, `test_impl_standalone_end_state.py`, `test_lld_mock_completes.py`, `test_lld_mock_is_offline.py`, `test_lld_writes_only_worktree.py`, `test_llm_provider_loud_failure.py`), the run record's two test files and the two audits' own tests. The one failure was `test_no_fixed_site_left_in_the_baseline`, before `--write-baseline`; after it the audits' tests pass (77).
+
 ## #4161: the checkout's telemetry logs
 
 **New: `tests/unit/test_checkout_telemetry_isolation.py` (5).** Three T2 tests send one writer's record at the checkout itself and find the checkout's log unchanged and the record under `tmp_path`; one checks that a record sent to a test's own directory stays there; T1 checks that the session guard watches exactly the paths the unredirected writers use.
