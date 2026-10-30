@@ -187,6 +187,24 @@ Baseline: no entries in either. The fail-open audit examines nine more sites.
 
 Baseline: no entries in the loud-failure baseline. The fail-open audit lost 1 finding (`load_state_snapshot`'s handler); `save_state_snapshot`'s stays, with the won't-do.
 
+### run_record.py (#3791, 24 sites)
+
+The run record is what a standalone LLD or implementation run leaves for the session that cleans up after it: the teed console (`<tag>.log`) and the events log. Nothing the run produces reads it. `factory_report.py` and the replay read only the roll's `run-issue*` logs, and the speedrun readers that glob every events log key on the roll's `START` and `EXIT` lines, which a standalone record never writes. So a record that cannot be written alerts the operator and does not stop the run: a raise from inside a `print`, or from the `crash` call in a tool's handler, would cost the run its result, or hide its own error and skip the tool's alert. Two things do raise.
+
+- **A run log that refuses a write or a flush alerts once** (77, 78, 87, 88). Both tees read the log through the record, which detaches it from both before the alert goes out, since the alert prints through the same stream; the run goes on console-only. A tee that outlives its record (a logging handler made during the run holds one) writes to the console only, where it used to write into a closed file and drop the error.
+- **git that cannot answer raises** (103, 104, 107). `_git` raises the new `GitQueryError`, naming the command, the target and the cause (the exception, or the exit code and stderr), where it returned `(False, reason)`.
+- **No partial left-in-place list** (134, 144, 155, 165). `left_in_place` raises when any of its four questions fails. It used to put an "unknown" line in that question's place beside the answers to the rest, and the finishing commands built from such a list could offer `git branch -d` for a branch that an unlisted worktree still held. The record writes the list as unknown, with the cause and an instruction to inspect the target by hand, prints the same on the console, and alerts. A crashed run asks twice (`crash`, then `finish`); the second asking is an ERROR line, not a second alert.
+- **A run log that cannot be opened alerts** (271, 272), and the run starts console-only, as before.
+- **A head git cannot read alerts** (283), and the start event carries the cause where it said `unknown`.
+- **A profile the record cannot describe raises** (318, 319). Every entry point prints the same seat table with `describe` just before it calls `announce_profile`, so this raise is what `describe` already does; a seat that does not resolve would otherwise fail its stage after the run had spent on the stages before it.
+- **A console that refuses the left-in-place list alerts** (378, 379), naming the events log that holds the list. The streams are restored in a `finally`, so an undelivered alert on the way out does not leave the tee installed.
+- **An events log that refuses a line alerts once** (410, 411), with the cause and the line. Each later lost line is an ERROR line on stderr carrying it, so a broken events log is one alert, not one per node and model call.
+- **An ERROR line that stderr cannot take alerts** (420, 421), with the line. The warning helper is gone.
+- **A run log that will not close alerts** (434, 435). One that has already refused a write and then will not close is an ERROR line.
+- **Callers.** `tools/run_requirements_workflow.py` and `tools/run_implement_from_lld.py` call `start`, `node`, `crash` and `finish`, none of which raises over its own record now; an alert that cannot be delivered (`AlertDeliveryError`) propagates from them, as the ADR requires. `profile` is reached through `model_record.announce_profile`, which every entry point calls outside a handler, so its raise exits 1 with a traceback and no alert (the entry points' own ledger rows, `tools/`), as `describe` just before it already did.
+
+Baseline: ten entries leave (nine tags and `profile`'s handler). The fail-open audit lost 9 findings.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

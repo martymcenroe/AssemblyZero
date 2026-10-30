@@ -150,6 +150,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 411 passed and 1 failed across every unit and integration test file that names the module, HALT or the resume contract, plus the two audits' own tests. The failure was the fail-open baseline going stale by the fixed handler; after `--write-baseline` the audits' tests pass.
 
+## run_record.py
+
+**New: `tests/unit/test_run_record_loud_failure.py` (28)**: twenty-six for the twenty-four sites (two each for 103 and 134), plus two that pin kept behaviour (a tee that outlives its record writes to the console quietly, and a clean run alerts no one). The failures are injected at the edges the module already uses: a run log opened as a file whose write, flush or close fails, an events log whose open is refused, a console that raises `BrokenPipeError`, and git commands that exit 128 or cannot run.
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 26 failed, 2 passed (the two that pin kept behaviour). Each failure was the missing alert, the missing raise, or the tag still in place.
+
+**Changed test:** `test_run_record.py::test_outside_a_git_repo_it_raises` (was `test_never_raises_outside_a_git_repo`).
+
+**Neighbouring suites:** 639 passed across every test file that imports the module (`test_run_record.py`, the new file, `test_model_record.py`, `test_decision_table_survives.py`, `test_impl_dry_run_is_dry.py`, `test_lld_dry_run_is_dry.py`, `test_lld_writes_only_worktree.py`), every test file that drives `tools/run_requirements_workflow.py` or `tools/run_implement_from_lld.py` (twenty-three more), and the two audits' own tests. Run before `--write-baseline`, the same set less the tool tests had one failure, `test_no_fixed_site_left_in_the_baseline`, which the new baseline cleared.
+
 ## #4161: the checkout's telemetry logs
 
 **New: `tests/unit/test_checkout_telemetry_isolation.py` (5).** Three T2 tests send one writer's record at the checkout itself and find the checkout's log unchanged and the record under `tmp_path`; one checks that a record sent to a test's own directory stays there; T1 checks that the session guard watches exactly the paths the unredirected writers use.

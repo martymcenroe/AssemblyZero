@@ -1,5 +1,5 @@
 {
-  "count": 294,
+  "count": 284,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -132,66 +132,6 @@
       "issue": 3581,
       "kind": "fail_open_tag",
       "line": 42
-    },
-    "assemblyzero/core/run_record.py::RunRecord._restore_streams::fail_open_tag::1": {
-      "detail": "# fail-open: a handle that will not close is already useless;",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 435
-    },
-    "assemblyzero/core/run_record.py::RunRecord._warn::fail_open_tag::1": {
-      "detail": "# fail-open: the last resort; there is nothing left to report to",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 421
-    },
-    "assemblyzero/core/run_record.py::RunRecord._write_events::fail_open_tag::1": {
-      "detail": "# fail-open: the warning carries the lost line to stderr; the",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 411
-    },
-    "assemblyzero/core/run_record.py::RunRecord.finish::fail_open_tag::1": {
-      "detail": "# fail-open: the events log already holds the list; a console that",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 379
-    },
-    "assemblyzero/core/run_record.py::RunRecord.profile::fail_open_tag::1": {
-      "detail": "# fail-open: the profile already loaded and validated at run",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 319
-    },
-    "assemblyzero/core/run_record.py::RunRecord.profile::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 318
-    },
-    "assemblyzero/core/run_record.py::RunRecord.start::fail_open_tag::1": {
-      "detail": "# fail-open: console-only is the fallback the warning names; the",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 272
-    },
-    "assemblyzero/core/run_record.py::_Tee.flush::fail_open_tag::1": {
-      "detail": "# fail-open: same as write; the console is the primary stream",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 88
-    },
-    "assemblyzero/core/run_record.py::_Tee.write::fail_open_tag::1": {
-      "detail": "# fail-open: the console already got the text; a log that cannot",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 78
-    },
-    "assemblyzero/core/run_record.py::_git::fail_open_tag::1": {
-      "detail": "# fail-open: the False is the signal; every caller prints the reason",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 104
     },
     "assemblyzero/core/section_utils.py::drafter_authored::fail_open_tag::1": {
       "detail": "# fail-open: only in shape -- with no stripper available the caller",

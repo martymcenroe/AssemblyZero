@@ -625,30 +625,30 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/interface_surface.py:492` | extraction | WARNING, {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/interface_surface.py:518` | root not dir | {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
 | `assemblyzero/core/interface_surface.py:552` | revision extraction | WARNING, {} | all | FIXED in the core batch (#3779): raises naming the file and cause; budget drops are named; an empty repo is logged; test_<line> in test_interface_surface_loud_failure.py |
-| `assemblyzero/core/run_record.py:77` | tee write | pass | all | ERROR |
-| `assemblyzero/core/run_record.py:78` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:87` | flush | pass | all | ERROR |
-| `assemblyzero/core/run_record.py:88` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:103` | git | (False, reason) | loud, alerts | ERROR |
-| `assemblyzero/core/run_record.py:104` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:107` | git nonzero | (False, stderr) | loud, alerts | ERROR |
-| `assemblyzero/core/run_record.py:134` | worktree list | unknown | loud, alerts | ERROR |
-| `assemblyzero/core/run_record.py:144` | branch list | unknown | loud, alerts | ERROR |
-| `assemblyzero/core/run_record.py:155` | remote refs | unknown | loud, alerts | ERROR |
-| `assemblyzero/core/run_record.py:165` | status | unavailable | loud, alerts | ERROR |
-| `assemblyzero/core/run_record.py:271` | open run log | console-only | loud, stops, alerts | ERROR + alert |
-| `assemblyzero/core/run_record.py:272` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:283` | head | unknown | loud, logged, alerts | ERROR |
-| `assemblyzero/core/run_record.py:318` | profile header | warning | loud, stops, alerts | raise |
-| `assemblyzero/core/run_record.py:319` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:378` | console print | pass | loud, logged, alerts | ERROR |
-| `assemblyzero/core/run_record.py:379` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:410` | events append | warning | loud, alerts | ERROR + alert |
-| `assemblyzero/core/run_record.py:411` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:420` | stderr warning | pass | all | alert |
-| `assemblyzero/core/run_record.py:421` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/run_record.py:434` | close | pass | loud, logged, alerts | ERROR |
-| `assemblyzero/core/run_record.py:435` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/run_record.py:77` | tee write | pass | all | FIXED in the core batch (#3791): a run log that refuses a write alerts once and the run goes on console-only; test_77 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:78` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag is removed; test_78 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:87` | flush | pass | all | FIXED in the core batch (#3791): a run log that refuses a flush alerts once and the run goes on console-only; test_87 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:88` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag is removed; test_88 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:103` | git | (False, reason) | loud, alerts | FIXED in the core batch (#3791): `_git` raises GitQueryError naming the command, the target and the cause; test_103 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:104` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag is removed; test_104 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:107` | git nonzero | (False, stderr) | loud, alerts | FIXED in the core batch (#3791): a non-zero exit raises GitQueryError with the exit code and stderr; test_107 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:134` | worktree list | unknown | loud, alerts | FIXED in the core batch (#3791): `left_in_place` raises, and the record writes the whole list as unknown with the cause and alerts once; test_134 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:144` | branch list | unknown | loud, alerts | FIXED in the core batch (#3791): `left_in_place` raises naming the branch query, and the record alerts; test_144 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:155` | remote refs | unknown | loud, alerts | FIXED in the core batch (#3791): `left_in_place` raises naming the remote-ref query, and the record alerts; test_155 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:165` | status | unavailable | loud, alerts | FIXED in the core batch (#3791): `left_in_place` raises naming the status query, and the record alerts; test_165 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:271` | open run log | console-only | loud, stops, alerts | FIXED in the core batch (#3791): a run log that cannot be opened alerts and the run starts console-only; test_271 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:272` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag is removed; test_272 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:283` | head | unknown | loud, logged, alerts | FIXED in the core batch (#3791): a head git cannot read alerts, and the start event carries the cause; test_283 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:318` | profile header | warning | loud, stops, alerts | FIXED in the core batch (#3791): a profile whose seats cannot be resolved raises at start; test_318 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:319` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag and its handler are removed; test_319 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:378` | console print | pass | loud, logged, alerts | FIXED in the core batch (#3791): a console that refuses the left-in-place list alerts, naming the events log that holds it; test_378 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:379` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag is removed; test_379 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:410` | events append | warning | loud, alerts | FIXED in the core batch (#3791): an events log that refuses a line alerts once, and each later lost line is an ERROR line on stderr; test_410 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:411` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag is removed; test_411 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:420` | stderr warning | pass | all | FIXED in the core batch (#3791): an ERROR line stderr cannot take alerts with the line; test_420 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:421` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag and the warning helper are removed; test_421 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:434` | close | pass | loud, logged, alerts | FIXED in the core batch (#3791): a run log that will not close alerts; test_434 in test_run_record_loud_failure.py |
+| `assemblyzero/core/run_record.py:435` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3791): the tag is removed; test_435 in test_run_record_loud_failure.py |
 | `assemblyzero/core/halt_node.py:229` | halt | no alert | loud, alerts | FIXED in #3581 core batch 1 (#3724): alert_operator |
 | `assemblyzero/core/halt_node.py:291` | audit_dir missing | skip | loud, logged | FIXED in #3581 core batch 1 (#3724): ERROR |
 | `assemblyzero/core/halt_node.py:297` | resume contract | WARN stdout | loud, logged, alerts | FIXED in #3581 core batch 1 (#3724): ERROR |
