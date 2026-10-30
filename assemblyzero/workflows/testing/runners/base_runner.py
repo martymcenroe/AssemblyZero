@@ -58,6 +58,45 @@ class BaseTestRunner(ABC):
                 out.append(path)
         return out
 
+    def require_dependencies(self) -> None:
+        """Raise OSError (EnvironmentError) when this runner's project cannot
+        run its tests (#4236). The base runner needs nothing beyond what its
+        constructor checked; the JavaScript runners need their packages."""
+
+    def _require_node_package(self, binary: str) -> None:
+        """Raise OSError unless `node_modules/.bin/<binary>` exists in
+        the project directory or a directory above it up to the project root
+        (#4236), or a Yarn Plug'n'Play `.pnp.cjs` stands in for node_modules.
+
+        Node resolves packages upwards, so a workspace that installs at the
+        root is installed for `web/` too. Without the package, `npx` fetches
+        the runner from the network instead of running the project's own, or
+        fails: the run never starts a suite it cannot run.
+        """
+        root = os.path.abspath(self.project_root)
+        current = os.path.abspath(self.project_dir)
+        searched: list[str] = []
+        while True:
+            searched.append(current)
+            bin_dir = os.path.join(current, "node_modules", ".bin")
+            if (
+                os.path.isfile(os.path.join(bin_dir, binary))
+                or os.path.isfile(os.path.join(bin_dir, f"{binary}.cmd"))
+                or os.path.isfile(os.path.join(current, ".pnp.cjs"))
+            ):
+                return
+            parent = os.path.dirname(current)
+            if current == root or parent == current or not (
+                parent == root or parent.startswith(root + os.sep)
+            ):
+                break
+            current = parent
+        raise OSError(
+            f"{binary} cannot run in {self.project_dir}: no "
+            f"node_modules/.bin/{binary} in {', '.join(searched)}. Install the "
+            f"project's dependencies there (npm ci) before the run"
+        )
+
     @abstractmethod
     def run_tests(
         self,

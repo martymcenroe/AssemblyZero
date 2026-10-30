@@ -36,6 +36,10 @@ class JestRunner(BaseTestRunner):
             )
         self._is_vitest = config["framework"] == TestFramework.VITEST
 
+    def require_dependencies(self) -> None:
+        """The project's own vitest or jest must be installed (#4236)."""
+        self._require_node_package("vitest" if self._is_vitest else "jest")
+
     def run_tests(
         self,
         test_paths: list[str] | None = None,

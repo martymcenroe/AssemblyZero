@@ -61,7 +61,9 @@ class TestDetection:
         """A root-only JavaScript project is detected as it was: config files,
         then package.json, then pytest."""
         (tmp_path / "jest.config.js").write_text("", encoding="utf-8")
-        (tmp_path / "pyproject.toml").write_text("pytest\n", encoding="utf-8")
+        # #3001: a pytest declaration, not the bare word -- a dependency line
+        # no longer counts as a pytest suite.
+        (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
         assert fd.detect_framework_from_project(str(tmp_path)) == [
             fd.TestFramework.JEST, fd.TestFramework.PYTEST,
         ]
@@ -102,11 +104,15 @@ class TestDetection:
 
         root = _physics_split_target(tmp_path)
         configs = _configs_with_directories(
-            [fd.TestFramework.VITEST, fd.TestFramework.PYTEST, fd.TestFramework.JEST], str(root)
+            [fd.TestFramework.VITEST, fd.TestFramework.PYTEST], str(root)
         )
-        assert [c["working_directory"] for c in configs] == ["web", None, None], (
-            "detected in web/; at the root; named by the LLD but not found, so the root"
+        assert [c["working_directory"] for c in configs] == ["web", None], (
+            "detected in web/; at the root"
         )
+        # #4237: a runner the LLD names and the project has nowhere is refused,
+        # never placed at a root where nothing is installed.
+        with pytest.raises(fd.FrameworkResolutionError, match="jest.*searched"):
+            _configs_with_directories([fd.TestFramework.JEST], str(root))
 
 
 class _Runner(BaseTestRunner):

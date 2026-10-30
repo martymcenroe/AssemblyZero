@@ -604,12 +604,46 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "No test",
         _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 0)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_pytest_single::return", 0, 1)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 0),
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 0)
+        + _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 0)
+        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 0),
         notes=(
             "no scenarios, no test files, or the named file is not on disk. "
             "Lost a fifth site in #2753 when the unreachable run_tests node "
-            "was retired; the four here are live"
+            "was retired. #4236 added the multi-framework phases' own guard, "
+            "the same message, in verify_red_phase and verify_green_phase"
         ),
+    ),
+    Gate(
+        "impl.framework_unresolved", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "the test frameworks for issue",
+        _s(f"{_TS}/nodes/load_lld.py::_framework_resolution_failed::return", 0),
+        created_by="#4237 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N0 cannot say which runner tests a file the LLD names, or where: no "
+              "directory holding a .test.ts path declares a runner, the LLD names "
+              "a runner the project has nowhere, or a package.json cannot be "
+              "read. It used to place such a runner at the root, where nothing "
+              "was installed, or raise out of the node",
+    ),
+    Gate(
+        "impl.framework_cannot_run", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "The phase stops here: every framework of the run",
+        _s(f"{_TS}/nodes/verify_phases.py::_halt_legs_cannot_run::return", 0),
+        decided_in=f"{_TS}/nodes/verify_phases.py::_framework_legs and ::_preflight_legs",
+        created_by="#4236 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a multi-framework red or green phase where a test file belongs to "
+              "no framework or to two, or a framework's runner or packages are "
+              "missing; no suite runs, so no framework is graded alone",
+    ),
+    Gate(
+        "impl.full_suite_cannot_run", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "the full-suite regression gate cannot",
+        _s(f"{_TS}/nodes/verify_phases.py::_halt_full_suite_gate::return", 0),
+        decided_in=f"{_TS}/nodes/verify_phases.py::_full_suite_gate",
+        created_by="#3087 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a framework's whole suite cannot start, or collects nothing. The "
+              "pytest gate used to read a whole suite that collected nothing as "
+              "'0 tests passed, no regressions' and validate it",
     ),
     # #2753: `impl.test_file_validation` and `impl.test_execution_failed`
     # stood here until 2026-09-04. Every site either row named lived in
@@ -699,7 +733,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.circuit_breaker", "impl", JUDGES_BUDGET, ACTION_HALT,
         "[CIRCUIT]",
         _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 2)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 5, 7)
+        # 4 and 6 since #3085 moved the zero-collected halt into
+        # `_zero_collected_route`; they were 5 and 7.
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 4, 6)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 2, 4),
         decided_in=f"{_TS}/circuit_breaker.py::check_circuit_breaker",
     ),
@@ -783,7 +819,8 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         # rather than the module that defines the token, which is the honest
         # pointer and the narrowest the check can currently be given.
         "Test(s) failing for a reason no implementation can fix",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 4),
+        # 3 since #3085 moved the zero-collected halt out of this function.
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 3),
         decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase",
         justified_by="#2761",
         notes=(
@@ -828,20 +865,23 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.green.collection_broken", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "collected 0 tests",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 2),
+        _s(f"{_TS}/nodes/verify_phases.py::_zero_collected_route::return", 0),
         created_by="#2546", justified_by="#2723",
         notes=(
             "infrastructure since #2765 (operator ruling 2026-09-04 on "
             "#2723): pytest collecting nothing is a broken suite -- an import "
             "error, a syntax error, a file pytest cannot see -- not a failing "
             "one. Worth keeping either way: a suite that collects zero tests "
-            "trivially passes and would otherwise read as green"
+            "trivially passes and would otherwise read as green. Since #3085 "
+            "one helper both green branches call, so a Jest, Vitest or "
+            "Playwright suite that collects nothing halts here too"
         ),
     ),
     Gate(
         "impl.green.iteration_cap", "impl", JUDGES_BUDGET, ACTION_HALT,
         "Green phase failed after",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 3, 6)
+        # 2 and 5 since #3085 moved the zero-collected halt out; were 3 and 6.
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 2, 5)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 1, 3),
     ),
     Gate(
@@ -882,7 +922,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.stagnation.full_suite", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "Full suite regression stagnant",
-        decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase (advisory)",
+        decided_in=f"{_TS}/nodes/verify_phases.py::_full_suite_gate (advisory)",
         created_by="#2723",
         notes="the route below it already sends the named regressions back to N4",
     ),

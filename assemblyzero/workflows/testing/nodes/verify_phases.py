@@ -11,9 +11,11 @@ N4_implement_code. Exit codes 2/3 (interrupt/internal error) stop the workflow.
 from assemblyzero.core.gate_registry import advised
 from assemblyzero.utils.shell import run_command
 import json
+import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -50,6 +52,7 @@ from assemblyzero.workflows.testing.exit_code_router import (
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
     TestFramework,
+    choose_by_test_name,
     source_extensions,
 )
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
@@ -1257,6 +1260,330 @@ def _describe_hollow_suite(state: TestingWorkflowState) -> str:
     )
 
 
+# =============================================================================
+# #4236: one run, every framework, each in its own directory on its own files
+# =============================================================================
+
+
+class FrameworkLegError(ValueError):
+    """A phase cannot say which framework runs a test file, or a framework of
+    the run cannot run at all (#4236). Halts the phase; never skipped."""
+
+
+@dataclass(frozen=True)
+class _Leg:
+    """One framework of the run: its config, the directory it runs in
+    (relative to the repository root, "." for the root), and the test files
+    of this run that belong to it."""
+
+    config: dict
+    framework: TestFramework
+    directory: str
+    test_files: tuple[str, ...]
+
+    @property
+    def label(self) -> str:
+        return _framework_label(self.framework, self.config)
+
+
+def _framework_label(framework: TestFramework, config: dict | None) -> str:
+    """`pytest` at the root; `vitest (web)` in a subdirectory."""
+    directory = (config or {}).get("working_directory")
+    if not directory or directory == ".":
+        return framework.value
+    return f"{framework.value} ({directory})"
+
+
+def _directory_depth(directory: str) -> int:
+    return 0 if directory == "." else directory.count(os.sep) + 1
+
+
+def _inside(relative: str, directory: str) -> bool:
+    return directory == "." or relative == directory or relative.startswith(directory + os.sep)
+
+
+def _owner_of(path: str, legs: list[tuple[dict, TestFramework, str]], root: str) -> int:
+    """The index of the one framework that runs `path`: the frameworks whose
+    file type it is, in the deepest directory that holds it, told apart by
+    the file's name when two share it. Raises FrameworkLegError when none or
+    more than one does."""
+    absolute = os.path.normpath(path if os.path.isabs(path) else os.path.join(root, path))
+    if not (absolute == root or absolute.startswith(root + os.sep)):
+        raise FrameworkLegError(
+            f"test file {path} is outside the repository {root}; no framework "
+            f"of this run would run it"
+        )
+    relative = os.path.relpath(absolute, root)
+    candidates = [
+        index for index, (_config, framework, directory) in enumerate(legs)
+        if relative.endswith(source_extensions(framework)) and _inside(relative, directory)
+    ]
+    if candidates:
+        deepest = max(_directory_depth(legs[i][2]) for i in candidates)
+        candidates = [i for i in candidates if _directory_depth(legs[i][2]) == deepest]
+    if len(candidates) > 1:
+        chosen = choose_by_test_name([legs[i][1] for i in candidates], relative)
+        candidates = [i for i in candidates if legs[i][1] in chosen]
+    if len(candidates) == 1:
+        return candidates[0]
+    labels = ", ".join(_framework_label(fw, config) for config, fw, _d in legs)
+    if not candidates:
+        raise FrameworkLegError(
+            f"test file {relative} belongs to no framework of this run "
+            f"({labels}): none runs its file type in a directory that holds "
+            f"it, so nothing would run it"
+        )
+    raise FrameworkLegError(
+        f"test file {relative} belongs to more than one framework of this run "
+        f"({', '.join(_framework_label(legs[i][1], legs[i][0]) for i in candidates)}); "
+        f"the run cannot say which one runs it"
+    )
+
+
+def _framework_legs(state: TestingWorkflowState) -> list[_Leg]:
+    """Every framework of the run, with the test files that belong to it (#4236).
+
+    `framework_configs` is what N0 wrote. A state without it (a checkpoint
+    from before #4236) has `framework_config` alone, and that one framework
+    runs every test file, exactly as before. With more than one framework,
+    each test file belongs to exactly one, or the phase halts: a file no
+    framework owns would never run, and a pass would hide it.
+    """
+    configs = state.get("framework_configs")
+    if not configs:
+        framework_config = state.get("framework_config")
+        configs = [framework_config] if framework_config else [{"framework": TestFramework.PYTEST}]
+    configs = [config for config in configs if config]
+    multi = len(configs) > 1
+    described: list[tuple[dict, TestFramework, str]] = []
+    for config in configs:
+        framework = _resolve_framework_enum(config) if "framework" in config else TestFramework.PYTEST
+        if framework is None:
+            if multi:
+                raise FrameworkLegError(
+                    f"framework_configs names {config.get('framework')!r}, "
+                    f"which is not a test framework"
+                )
+            framework = TestFramework.PYTEST  # the single-framework default, unchanged
+        directory = os.path.normpath(config.get("working_directory") or ".")
+        described.append((config, framework, directory))
+
+    test_files = [str(f) for f in (state.get("test_files") or [])]
+    if not multi:
+        config, framework, directory = described[0]
+        return [_Leg(config, framework, directory, tuple(test_files))]
+
+    repo_root_str = state.get("repo_root", "")
+    root = os.path.abspath(repo_root_str) if repo_root_str else str(get_repo_root())
+    owned: list[list[str]] = [[] for _ in described]
+    for path in test_files:
+        owned[_owner_of(path, described, root)].append(path)
+    return [
+        _Leg(config, framework, directory, tuple(owned[index]))
+        for index, (config, framework, directory) in enumerate(described)
+    ]
+
+
+def _preflight_legs(state: TestingWorkflowState, legs: list[_Leg]) -> None:
+    """Every JavaScript framework of a multi-framework run can start: its
+    runner exists and its project's packages are installed (#4236). Raises
+    FrameworkLegError naming the framework, its directory and the cause, so
+    the phase halts before any suite runs rather than testing half the run."""
+    repo_root_str = state.get("repo_root", "")
+    repo_root = repo_root_str or str(get_repo_root())
+    for leg in legs:
+        if leg.framework == TestFramework.PYTEST:
+            continue
+        try:
+            runner = get_runner(
+                leg.framework, repo_root,
+                working_directory=leg.config.get("working_directory"),
+            )
+            runner.require_dependencies()
+        except (ValueError, OSError) as e:
+            raise FrameworkLegError(
+                f"{leg.label} cannot run: {type(e).__name__}: {e}"
+            ) from e
+
+
+def _halt_legs_cannot_run(node: str, output_key: str, error: FrameworkLegError) -> dict[str, Any]:
+    """The phase's halt when its frameworks cannot be run (#4236). Routed to
+    HALT, which alerts the operator; deterministic, because the same tree
+    gives the same answer on a retry."""
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [{node}] {error}. The phase stops here: "
+        f"every framework of the run runs, or none is graded (#4236)."
+    )
+    print(f"    [{node}] ERROR {message}")
+    return {output_key: message, "next_node": "end", "error_message": message}
+
+
+def _leg_state(state: TestingWorkflowState, leg: _Leg) -> dict[str, Any]:
+    """The state one framework's phase reads: its own test files, and the
+    implementation files of its own language in its own directory, so its
+    snapshot and restore (#2050) never reach another framework's files."""
+    repo_root_str = state.get("repo_root", "")
+    root = os.path.abspath(repo_root_str) if repo_root_str else str(get_repo_root())
+    leg_state = dict(state)
+    leg_state["test_files"] = list(leg.test_files)
+    leg_state["implementation_files"] = _leg_sources(state, leg, root)
+    return leg_state
+
+
+def _leg_sources(state: TestingWorkflowState, leg: _Leg, root: str) -> list[str]:
+    sources: list[str] = []
+    for path in state.get("implementation_files") or []:
+        absolute = os.path.normpath(path if os.path.isabs(path) else os.path.join(root, path))
+        relative = os.path.relpath(absolute, root)
+        if str(path).endswith(source_extensions(leg.framework)) and _inside(relative, leg.directory):
+            sources.append(path)
+    return sources
+
+
+def _rejoin(full: list[str], leg_part: list[str], returned: list[str]) -> list[str]:
+    """`full` with the leg's part replaced by what the leg returned, in order."""
+    kept = [f for f in full if f not in leg_part or f in returned]
+    return kept + [f for f in returned if f not in kept]
+
+
+def _rejoin_leg_files(
+    state: TestingWorkflowState, leg: _Leg, result: dict[str, Any],
+) -> dict[str, Any]:
+    """A leg that registers files (#2897) registers them into the run's lists,
+    never in place of the other frameworks' files."""
+    repo_root_str = state.get("repo_root", "")
+    root = os.path.abspath(repo_root_str) if repo_root_str else str(get_repo_root())
+    if "test_files" in result:
+        result["test_files"] = _rejoin(
+            list(state.get("test_files") or []), list(leg.test_files), list(result["test_files"]),
+        )
+    if "implementation_files" in result:
+        result["implementation_files"] = _rejoin(
+            list(state.get("implementation_files") or []),
+            _leg_sources(state, leg, root), list(result["implementation_files"]),
+        )
+    return result
+
+
+def _no_targeted_tests(node: str, phase: str, state: TestingWorkflowState, leg: _Leg) -> None:
+    """Said out loud and logged: a framework of the run that no test file of
+    this run belongs to has nothing of its own to verify here. Its whole
+    suite still runs at the full-suite gate (#3087)."""
+    print(
+        f"    [{node}] {leg.label}: no test file of this run belongs to it -- "
+        f"nothing of it to verify in the {phase} phase; its whole suite runs "
+        f"at the full-suite gate (#4236)"
+    )
+    repo_root_str = state.get("repo_root", "")
+    log_workflow_execution(
+        target_repo=Path(repo_root_str) if repo_root_str else get_repo_root(),
+        issue_number=state.get("issue_number", 0),
+        workflow_type="testing",
+        event=f"{phase}_phase_framework_without_tests",
+        details={"framework": leg.framework.value, "directory": leg.directory},
+    )
+
+
+def _zero_collected_route(
+    state: TestingWorkflowState,
+    *,
+    runner_name: str,
+    output: str,
+    repo_root: Path,
+    file_num: int,
+    iteration_count: int,
+    exit_code: int,
+    carried: dict[str, Any],
+) -> dict[str, Any]:
+    """The green phase's answer to a run that collected zero tests (#2546,
+    #3085), for every framework.
+
+    #2546: a zero needs a denominator. run-issue331-235455 collected ZERO
+    tests (a generated conftest re-registered a parent conftest's option;
+    pytest died at conftest load with exit 1), and the gate read the empty
+    collection as "all 0 test(s) pass", diagnosed the 0% coverage as a test
+    GAP, prescribed more tests for a suite that cannot load, and halted as
+    coverage stagnation blaming the LLD and spec -- which had just passed
+    five rounds of review. Zero collected is a COLLECTION failure, never a
+    pass and never a coverage problem: the first occurrence hands the
+    implement-iterate loop a named repair task (#2547 -- the defect lives in
+    the run's own planned files), and a second occurrence halts with the
+    collection error named, so the resume reads the true cause.
+
+    #3085: the guard was the pytest branch's alone, so a Jest, Vitest or
+    Playwright suite that collected nothing fell through to the coverage
+    branch and was sent to the implementer as undertested. Both branches
+    call this, so there is nowhere for the two to disagree. `carried` is
+    the branch's own record of the run (`pytest_exit_code`, or the runner's
+    `test_run_result`).
+    """
+    collection_error = _summarize_collection_failure(output)
+    strikes = int(state.get("zero_collected_strikes", 0) or 0) + 1
+    repaired = "test/conftest files" if runner_name == "pytest" else "test files"
+    print(
+        f"    [N5] {runner_name} collected 0 tests -- collection is broken; "
+        "this is not a pass and not a coverage gap (#2546)"
+    )
+    if collection_error:
+        print(f"    [N5] collection error: {collection_error[:200]}")
+    log_workflow_execution(
+        target_repo=repo_root,
+        issue_number=state.get("issue_number", 0),
+        workflow_type="testing",
+        event="green_phase_zero_collected",
+        details={"strikes": strikes, "exit_code": exit_code,
+                 "framework": runner_name,
+                 "collection_error": collection_error[:300]},
+    )
+    if strikes >= 2:
+        error_msg = (
+            f"Green phase failed: {runner_name} collected 0 tests on "
+            f"{strikes} iterations -- collection is broken, not a "
+            f"coverage problem. Collection error: "
+            f"{collection_error or '(no exception line captured; see green_phase_output)'}. "
+            f"The generated {repaired} need repair; the LLD and "
+            f"spec are not implicated (#2546)."
+        )
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": 0,
+            "previous_coverage": 0,
+            "previous_passed": 0,
+            "previous_green_failures": [],
+            "test_failure_summary": collection_error,
+            "zero_collected_strikes": strikes,
+            "file_counter": file_num,
+            **carried,
+            "iteration_count": iteration_count + 1,
+            "next_node": "end",
+            "error_message": error_msg,
+        }
+    print(
+        "    [N5] routing the collection failure to the implement-iterate "
+        "loop as a named repair task (the defect is in this run's own "
+        "planned files)"
+    )
+    return {
+        "green_phase_output": output,
+        "coverage_achieved": 0,
+        "previous_coverage": 0,
+        "previous_passed": 0,
+        "previous_green_failures": [],
+        "test_failure_summary": (
+            f"{runner_name} collected 0 tests -- collection is broken, and no "
+            f"test can run until it is repaired. Collection error: "
+            f"{collection_error or '(see output)'}. Fix the named defect "
+            f"in the planned files; do not add tests."
+        ),
+        "zero_collected_strikes": strikes,
+        "file_counter": file_num,
+        **carried,
+        "iteration_count": iteration_count + 1,
+        "next_node": "N4_implement_code",
+        "error_message": "",
+    }
+
+
 def _verify_red_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # Get data from state
     test_files = state.get("test_files", [])
@@ -1668,16 +1995,28 @@ COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
 
 
 def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
-    """N3: Verify all tests fail (TDD red phase)."""
+    """N3: Verify all tests fail (TDD red phase).
+
+    #4236: every framework of the run (`framework_configs`) verifies its own
+    test files, in its own directory. A framework no test file of this run
+    belongs to has nothing to verify here and says so; one that cannot run,
+    or a test file no framework owns, halts the phase.
+    """
     gate_log("[N3] Verifying red phase (all tests should fail)...")
 
     if state.get("mock_mode"):
         return _mock_verify_red_phase(state)
 
-    framework_configs = state.get("framework_configs")
-    if not framework_configs:
-        framework_config = state.get("framework_config")
-        framework_configs = [framework_config] if framework_config else [{"framework": TestFramework.PYTEST}]
+    try:
+        legs = _framework_legs(state)
+        multi = len(legs) > 1
+        if multi:
+            _preflight_legs(state, legs)
+    except FrameworkLegError as e:
+        return _halt_legs_cannot_run("N3", "red_phase_output", e)
+    if multi and not any(leg.test_files for leg in legs):
+        print("    [GUARD] BLOCKED: No test files to run")
+        return {"error_message": "GUARD: No test files generated"}
 
     aggregated_output = ""
     aggregated_passed = 0
@@ -1687,59 +2026,61 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     highest_exit = 0
     final_next_node = "N4_implement_code"
     file_counter = state.get("file_counter", 0)
-    
-    for idx, fwc in enumerate(framework_configs):
-        if not fwc:
+    merged: dict[str, Any] = {}
+
+    for leg in legs:
+        if multi and not leg.test_files:
+            _no_targeted_tests("N3", "red", state, leg)
             continue
-            
-        fw_enum = _resolve_framework_enum(fwc) if "framework" in fwc else TestFramework.PYTEST
-        
-        if fw_enum and fw_enum != TestFramework.PYTEST:
-            res = _verify_red_non_pytest(state, fwc, fw_enum)
+        leg_state = _leg_state(state, leg) if multi else state
+
+        if leg.framework != TestFramework.PYTEST:
+            res = _verify_red_non_pytest(leg_state, leg.config, leg.framework)
         else:
-            res = _verify_red_pytest_single(state)
-            
-        aggregated_output += f"=== Framework: {fw_enum.value if fw_enum else 'pytest'} ===\n"
+            res = _verify_red_pytest_single(leg_state)
+        if multi:
+            res = _rejoin_leg_files(state, leg, res)
+
+        aggregated_output += f"=== Framework: {leg.label} ===\n"
         aggregated_output += res.get("red_phase_output", "") + "\n\n"
-        
+
         trr = res.get("test_run_result", {})
         if trr:
             aggregated_passed += trr.get("passed", 0)
             aggregated_failed += trr.get("failed", 0)
             aggregated_errors += trr.get("errors", 0)
             aggregated_total += trr.get("total", 0)
-            
+
         exit_code = res.get("pytest_exit_code", 0)
         highest_exit = max(highest_exit, exit_code)
-        
+
         file_counter = max(file_counter, res.get("file_counter", 0))
         state["file_counter"] = file_counter
-        
+        merged.update(res)
+
         next_node = res.get("next_node")
         if next_node not in ("N4_implement_code", "N5_verify_green") or res.get("error_message"):
-            res["red_phase_output"] = aggregated_output
-            res["file_counter"] = file_counter
+            merged["red_phase_output"] = aggregated_output
+            merged["file_counter"] = file_counter
             if highest_exit:
-                res["pytest_exit_code"] = highest_exit
-            return res
-            
+                merged["pytest_exit_code"] = highest_exit
+            return merged
+
         if next_node == "N5_verify_green":
             final_next_node = "N5_verify_green"
-            
-    if 'res' not in locals():
-        res = {}
-    res["red_phase_output"] = aggregated_output
-    res["file_counter"] = file_counter
-    res["pytest_exit_code"] = highest_exit
-    res["next_node"] = final_next_node
-    res["error_message"] = ""
-    res["test_run_result"] = {
+
+    merged["red_phase_output"] = aggregated_output
+    merged["file_counter"] = file_counter
+    merged["pytest_exit_code"] = highest_exit
+    merged["next_node"] = final_next_node
+    merged["error_message"] = ""
+    merged["test_run_result"] = {
         "passed": aggregated_passed,
         "failed": aggregated_failed,
         "errors": aggregated_errors,
         "total": aggregated_total,
     }
-    return res
+    return merged
 def _hill_climb(
     state, repo_root, passed_count, coverage_achieved, current_green_failures,
     updates, passing_tests: list[str] | None = None,
@@ -2614,84 +2955,16 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # Issue #501: Extract failed test names for identity-based stagnation
     current_green_failures = _extract_failed_test_names(output)
 
-    # --------------------------------------------------------------------------
-    # #2546: a zero needs a denominator. run-issue331-235455 collected ZERO
-    # tests (a generated conftest re-registered a parent conftest's option;
-    # pytest died at conftest load with exit 1), and this gate read the empty
-    # collection as "all 0 test(s) pass", diagnosed the 0% coverage as a test
-    # GAP, prescribed more tests for a suite that cannot load, and halted as
-    # coverage stagnation blaming the LLD and spec — which had just passed
-    # five rounds of review. Zero collected is a COLLECTION failure, never a
-    # pass and never a coverage problem: the first occurrence hands the
-    # implement-iterate loop a named repair task (#2547 — the defect lives
-    # in the run's own planned files), and a second occurrence halts with
-    # the collection error named, so the resume reads the true cause.
-    # --------------------------------------------------------------------------
+    # #2546: a zero needs a denominator -- zero collected is a COLLECTION
+    # failure, never a pass and never a coverage problem. #3085: the guard is
+    # one helper both green branches call.
     total_collected = passed_count + failed_count + error_count
     if total_collected == 0:
-        collection_error = _summarize_collection_failure(output)
-        strikes = int(state.get("zero_collected_strikes", 0) or 0) + 1
-        print(
-            "    [N5] pytest collected 0 tests -- collection is broken; "
-            "this is not a pass and not a coverage gap (#2546)"
+        return _zero_collected_route(
+            state, runner_name="pytest", output=output, repo_root=repo_root,
+            file_num=file_num, iteration_count=iteration_count,
+            exit_code=exit_code, carried={"pytest_exit_code": exit_code},
         )
-        if collection_error:
-            print(f"    [N5] collection error: {collection_error[:200]}")
-        log_workflow_execution(
-            target_repo=repo_root,
-            issue_number=state.get("issue_number", 0),
-            workflow_type="testing",
-            event="green_phase_zero_collected",
-            details={"strikes": strikes, "exit_code": exit_code,
-                     "collection_error": collection_error[:300]},
-        )
-        if strikes >= 2:
-            error_msg = (
-                f"Green phase failed: pytest collected 0 tests on "
-                f"{strikes} iterations -- collection is broken, not a "
-                f"coverage problem. Collection error: "
-                f"{collection_error or '(no exception line captured; see green_phase_output)'}. "
-                f"The generated test/conftest files need repair; the LLD and "
-                f"spec are not implicated (#2546)."
-            )
-            return {
-                "green_phase_output": output,
-                "coverage_achieved": 0,
-                "previous_coverage": 0,
-                "previous_passed": 0,
-                "previous_green_failures": [],
-                "test_failure_summary": collection_error,
-                "zero_collected_strikes": strikes,
-                "file_counter": file_num,
-                "pytest_exit_code": exit_code,
-                "iteration_count": iteration_count + 1,
-                "next_node": "end",
-                "error_message": error_msg,
-            }
-        print(
-            "    [N5] routing the collection failure to the implement-iterate "
-            "loop as a named repair task (the defect is in this run's own "
-            "planned files)"
-        )
-        return {
-            "green_phase_output": output,
-            "coverage_achieved": 0,
-            "previous_coverage": 0,
-            "previous_passed": 0,
-            "previous_green_failures": [],
-            "test_failure_summary": (
-                f"pytest collected 0 tests -- collection is broken, and no "
-                f"test can run until it is repaired. Collection error: "
-                f"{collection_error or '(see output)'}. Fix the named defect "
-                f"in the planned files; do not add tests."
-            ),
-            "zero_collected_strikes": strikes,
-            "file_counter": file_num,
-            "pytest_exit_code": exit_code,
-            "iteration_count": iteration_count + 1,
-            "next_node": "N4_implement_code",
-            "error_message": "",
-        }
 
     # Check for failures
     if failed_count > 0 or error_count > 0:
@@ -3069,86 +3342,13 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
 
     # --------------------------------------------------------------------------
     # Issue #842: Full suite regression gate — run ONCE after new tests pass.
-    # Catches regressions in existing 4000+ tests that the targeted test run misses.
+    # #3087: one gate for every framework, `_full_suite_gate`.
     # --------------------------------------------------------------------------
     if not state.get("full_suite_validated", False):
-        print("    [N5] Running full test suite regression check...")
-        # #2048: iterations must be independent. boostgauge #2's generated
-        # visual test wrote its baseline PNG on first run; the revise loop then
-        # changed the renderer, and every later iteration failed RMS-diff
-        # against the stale baseline forever -- "2 regressions" became "same 4
-        # failing, stagnant" without the model having any way to win. Files a
-        # test RUN creates are droppings, not implementation: N4 writes its
-        # files before pytest starts, so anything new afterwards was made by
-        # the run itself and is removed before the next iteration judges.
-        droppings_before = _snapshot_untracked(repo_root)
-        full_result = run_pytest([], repo_root=repo_root)
-        # #2443: copy rendered images into the lineage BEFORE the droppings
-        # removal deletes them -- announced below only when the suite is
-        # clean, since that is the moment the leg's baselines stand accepted.
-        sample_dir, sample_files = _preserve_visual_samples(
-            repo_root, state.get("audit_dir", "")
+        gate = _full_suite_gate(
+            state, repo_root, TestFramework.PYTEST, None, iteration_count, max_iterations,
         )
-        _remove_test_run_droppings(repo_root, droppings_before)
-        full_parsed = full_result["parsed"]
-        full_failed = full_parsed.get("failed", 0)
-        full_errors = full_parsed.get("errors", 0)
-        full_passed = full_parsed.get("passed", 0)
-
-        if full_failed > 0 or full_errors > 0:
-            full_output = full_result["stdout"] + "\n" + full_result["stderr"]
-            regression_summary = _build_failure_summary(full_output)
-            regression_names = _extract_failed_test_names(full_output)
-            # #2914: a collection error's cause leads the summary, so
-            # attribution reaches the file that owns it rather than the test
-            # files that tripped over it.
-            collection_cause = collection_error_blocks(full_output)
-            if collection_cause:
-                regression_summary = (collection_cause + "\n\n" + regression_summary).strip()
-                print(
-                    f"    [N5] Full suite: collection failed ({full_errors} error(s)); "
-                    f"nothing ran -- routing the cause to N4 (#2914)"
-                )
-
-            # Check for stagnation: same regressions across 2 iterations → halt
-            previous_regressions = state.get("full_suite_regressions", [])
-            if previous_regressions and sorted(regression_names) == sorted(previous_regressions):
-                # #2048: name them. "same 4 test(s)" sent the diagnosis to a
-                # manual worktree + full-suite re-run; the names were in hand.
-                named = ", ".join(regression_names[:4])
-                if len(regression_names) > 4:
-                    named += f" (and {len(regression_names) - 4} more)"
-                # #2723: advisory. The route below already sends the same
-                # regressions back to N4 with their names; halting here only
-                # decided that a second look was not worth paying for, which
-                # is a budget's decision and not this gate's.
-                print("    [STAGNANT] " + advised(
-                    "impl.stagnation.full_suite",
-                    f"Full suite regression stagnant: same "
-                    f"{len(regression_names)} test(s) failing across "
-                    f"iterations: {named}.",
-                ))
-
-            print(f"    [N5] Full suite: {full_failed + full_errors} regression(s) detected "
-                  f"({full_passed} passed) — routing back to N4")
-
-            log_workflow_execution(
-                target_repo=repo_root,
-                issue_number=state.get("issue_number", 0),
-                workflow_type="testing",
-                event="full_suite_regression",
-                details={
-                    "full_passed": full_passed,
-                    "full_failed": full_failed,
-                    "full_errors": full_errors,
-                    "regression_names": regression_names[:10],
-                },
-            )
-
-            # #2920: a regression found after green is a new task with a
-            # small budget of its own, not the last breath of the loop's.
-            repair_cap = _full_suite_repair_grace(state, iteration_count, max_iterations)
-            repair_passes = int(state.get("full_suite_repair_passes", 0) or 0)
+        if gate is not None:
             return {
                 **green_updates,
                 "green_phase_output": output,
@@ -3156,31 +3356,11 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
                 "previous_green_failures": [],
-                "test_failure_summary": regression_summary,
-                "full_suite_validated": False,
-                "full_suite_regressions": regression_names,
-                "full_suite_repair_passes": repair_passes + 1,
-                "max_iterations": repair_cap if repair_cap is not None else max_iterations,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
-                "next_node": "N4_implement_code",
-                "error_message": "",
+                **gate,
             }
-
-        print(f"    [N5] Full suite: {full_passed} tests passed — no regressions")
-
-        # #2443: the leg's baselines stand accepted here. Name the preserved
-        # samples out loud -- a sample discoverable only by knowing where to
-        # look is the state #1902 established as the hazard.
-        if sample_dir:
-            shown = ", ".join(sample_files[:4])
-            if len(sample_files) > 4:
-                shown += f" (and {len(sample_files) - 4} more)"
-            print(
-                f"    [N5] visual samples preserved for review: {sample_dir} "
-                f"({len(sample_files)} file(s): {shown})"
-            )
     # --------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------
@@ -3261,17 +3441,205 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
 
 
 
+def _halt_full_suite_gate(label: str, why: str) -> dict[str, Any]:
+    """The gate's halt when the whole suite cannot run, or collects nothing
+    (#3087). A gate that cannot run cannot be told from one that passed, so
+    `full_suite_validated` says False and the run stops (ADR 0236)."""
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [N5] the full-suite regression gate cannot "
+        f"run for {label}: {why}. A gate that cannot run cannot be told from "
+        f"one that passed, so the run stops here (#3087)."
+    )
+    print(f"    [N5] ERROR {message}")
+    return {
+        "full_suite_validated": False,
+        "full_suite_regressions": [],
+        "next_node": "end",
+        "error_message": message,
+    }
+
+
+def _full_suite_gate(
+    state: TestingWorkflowState,
+    repo_root: Path,
+    framework: TestFramework,
+    framework_config: dict | None,
+    iteration_count: int,
+    max_iterations: int,
+) -> dict[str, Any] | None:
+    """Issue #842's full-suite regression gate, for every framework (#3087).
+
+    Run ONCE after the targeted tests pass. Catches regressions in existing
+    tests that the targeted test run misses. The framework's whole suite runs
+    in its own directory: `run_pytest([])` for pytest, and for Jest, Vitest
+    and Playwright the runner with no test paths, which runs every test its
+    project configures.
+
+    Returns None when the whole suite ran and passed. Otherwise the gate's
+    own state updates, which the caller merges into its return: a regression
+    goes back to N4 with its names (#842, #2914, #2920); a suite that cannot
+    run, or that collects nothing, halts.
+    """
+    label = _framework_label(framework, framework_config)
+    is_pytest = framework == TestFramework.PYTEST
+    print(
+        "    [N5] Running full test suite regression check"
+        + ("" if is_pytest else f" ({label})") + "..."
+    )
+    # #2048: iterations must be independent. boostgauge #2's generated
+    # visual test wrote its baseline PNG on first run; the revise loop then
+    # changed the renderer, and every later iteration failed RMS-diff
+    # against the stale baseline forever -- "2 regressions" became "same 4
+    # failing, stagnant" without the model having any way to win. Files a
+    # test RUN creates are droppings, not implementation: N4 writes its
+    # files before the suite starts, so anything new afterwards was made by
+    # the run itself and is removed before the next iteration judges.
+    droppings_before = _snapshot_untracked(repo_root)
+    if is_pytest:
+        full_result = run_pytest([], repo_root=repo_root)
+        full_output = full_result["stdout"] + "\n" + full_result["stderr"]
+        full_parsed = full_result["parsed"]
+        full_exit = full_result["returncode"]
+    else:
+        try:
+            runner = get_runner(
+                framework, str(repo_root),
+                working_directory=(framework_config or {}).get("working_directory"),
+            )
+            runner.require_dependencies()
+        except (ValueError, OSError) as e:
+            return _halt_full_suite_gate(
+                label, f"its runner cannot run: {type(e).__name__}: {e}"
+            )
+        full_run = runner.run_tests(test_paths=None)
+        full_output = full_run["raw_output"]
+        full_parsed = full_run
+        full_exit = full_run["exit_code"]
+    # #2443: copy rendered images into the lineage BEFORE the droppings
+    # removal deletes them -- announced below only when the suite is
+    # clean, since that is the moment the leg's baselines stand accepted.
+    sample_dir, sample_files = _preserve_visual_samples(
+        repo_root, state.get("audit_dir", "")
+    )
+    _remove_test_run_droppings(repo_root, droppings_before)
+    full_failed = full_parsed.get("failed", 0)
+    full_errors = full_parsed.get("errors", 0)
+    full_passed = full_parsed.get("passed", 0)
+
+    # #3087: a whole suite that collected nothing is not a clean suite.
+    if full_passed + full_failed + full_errors == 0:
+        cause = _summarize_collection_failure(full_output) or "no error line captured"
+        return _halt_full_suite_gate(
+            label, f"its whole suite collected 0 tests (exit {full_exit}): {cause}"
+        )
+
+    if full_failed > 0 or full_errors > 0:
+        regression_summary = (
+            _build_failure_summary(full_output) if is_pytest
+            else full_output[-MAX_FAILURE_SUMMARY_CHARS:]
+        )
+        regression_names = _extract_failed_test_names(full_output)
+        # #2914: a collection error's cause leads the summary, so
+        # attribution reaches the file that owns it rather than the test
+        # files that tripped over it.
+        collection_cause = collection_error_blocks(full_output)
+        if collection_cause:
+            regression_summary = (collection_cause + "\n\n" + regression_summary).strip()
+            print(
+                f"    [N5] Full suite: collection failed ({full_errors} error(s)); "
+                f"nothing ran -- routing the cause to N4 (#2914)"
+            )
+
+        # Check for stagnation: same regressions across 2 iterations → halt
+        previous_regressions = state.get("full_suite_regressions", [])
+        if previous_regressions and sorted(regression_names) == sorted(previous_regressions):
+            # #2048: name them. "same 4 test(s)" sent the diagnosis to a
+            # manual worktree + full-suite re-run; the names were in hand.
+            named = ", ".join(regression_names[:4])
+            if len(regression_names) > 4:
+                named += f" (and {len(regression_names) - 4} more)"
+            # #2723: advisory. The route below already sends the same
+            # regressions back to N4 with their names; halting here only
+            # decided that a second look was not worth paying for, which
+            # is a budget's decision and not this gate's.
+            print("    [STAGNANT] " + advised(
+                "impl.stagnation.full_suite",
+                f"Full suite regression stagnant: same "
+                f"{len(regression_names)} test(s) failing across "
+                f"iterations: {named}.",
+            ))
+
+        print(f"    [N5] Full suite ({label}): {full_failed + full_errors} regression(s) "
+              f"detected ({full_passed} passed) — routing back to N4")
+
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="full_suite_regression",
+            details={
+                "framework": label,
+                "full_passed": full_passed,
+                "full_failed": full_failed,
+                "full_errors": full_errors,
+                "regression_names": regression_names[:10],
+            },
+        )
+
+        # #2920: a regression found after green is a new task with a
+        # small budget of its own, not the last breath of the loop's.
+        repair_cap = _full_suite_repair_grace(state, iteration_count, max_iterations)
+        repair_passes = int(state.get("full_suite_repair_passes", 0) or 0)
+        return {
+            "test_failure_summary": regression_summary,
+            "full_suite_validated": False,
+            "full_suite_regressions": regression_names,
+            "full_suite_repair_passes": repair_passes + 1,
+            "max_iterations": repair_cap if repair_cap is not None else max_iterations,
+            "next_node": "N4_implement_code",
+            "error_message": "",
+        }
+
+    print(f"    [N5] Full suite ({label}): {full_passed} tests passed — no regressions")
+
+    # #2443: the leg's baselines stand accepted here. Name the preserved
+    # samples out loud -- a sample discoverable only by knowing where to
+    # look is the state #1902 established as the hazard.
+    if sample_dir:
+        shown = ", ".join(sample_files[:4])
+        if len(sample_files) > 4:
+            shown += f" (and {len(sample_files) - 4} more)"
+        print(
+            f"    [N5] visual samples preserved for review: {sample_dir} "
+            f"({len(sample_files)} file(s): {shown})"
+        )
+    return None
+
+
 def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
-    """N5: Verify all tests pass (TDD green phase)."""
+    """N5: Verify all tests pass (TDD green phase).
+
+    #4236: every framework of the run (`framework_configs`) runs its own
+    test files in its own directory, and the run goes on only when every one
+    passes. A framework no test file of this run belongs to still runs its
+    whole suite at the full-suite gate (#3087). One that cannot run, or a
+    test file no framework owns, halts the phase.
+    """
     gate_log("[N5] Verifying green phase (all tests should pass)...")
 
     if state.get("mock_mode"):
         return _mock_verify_green_phase(state)
 
-    framework_configs = state.get("framework_configs")
-    if not framework_configs:
-        framework_config = state.get("framework_config")
-        framework_configs = [framework_config] if framework_config else [{"framework": TestFramework.PYTEST}]
+    try:
+        legs = _framework_legs(state)
+        multi = len(legs) > 1
+        if multi:
+            _preflight_legs(state, legs)
+    except FrameworkLegError as e:
+        return _halt_legs_cannot_run("N5", "green_phase_output", e)
+    if multi and not any(leg.test_files for leg in legs):
+        print("    [GUARD] BLOCKED: No test files to run")
+        return {"error_message": "GUARD: No test files generated"}
 
     aggregated_output = ""
     aggregated_passed = 0
@@ -3285,90 +3653,110 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     iteration_count = state.get("iteration_count", 0)
     previous_passed = state.get("previous_passed", 0)
     previous_coverage = state.get("previous_coverage", 0.0)
-    
-    for idx, fwc in enumerate(framework_configs):
-        if not fwc:
+    already_validated = bool(state.get("full_suite_validated", False))
+    validated: list[bool] = []
+    whole_suite_only: list[_Leg] = []
+    merged: dict[str, Any] = {}
+
+    for leg in legs:
+        if multi and not leg.test_files:
+            _no_targeted_tests("N5", "green", state, leg)
+            whole_suite_only.append(leg)
             continue
-            
-        fw_enum = _resolve_framework_enum(fwc) if "framework" in fwc else TestFramework.PYTEST
-        
-        if fw_enum and fw_enum != TestFramework.PYTEST:
-            res = _verify_green_non_pytest(state, fwc, fw_enum)
+        leg_state = _leg_state(state, leg) if multi else state
+
+        if leg.framework != TestFramework.PYTEST:
+            res = _verify_green_non_pytest(leg_state, leg.config, leg.framework)
         else:
-            res = _verify_green_pytest_single(state)
-            
-        aggregated_output += f"=== Framework: {fw_enum.value if fw_enum else 'pytest'} ===\n"
+            res = _verify_green_pytest_single(leg_state)
+        if multi:
+            res = _rejoin_leg_files(state, leg, res)
+
+        aggregated_output += f"=== Framework: {leg.label} ===\n"
         aggregated_output += res.get("green_phase_output", "") + "\n\n"
-        
+
         trr = res.get("test_run_result", {})
         if trr:
             aggregated_passed += trr.get("passed", 0)
             aggregated_failed += trr.get("failed", 0)
             aggregated_errors += trr.get("errors", 0)
             aggregated_total += trr.get("total", 0)
-            
+
         cov = res.get("coverage_achieved", 100.0)
         min_coverage = min(min_coverage, cov)
-        
+
         file_counter = max(file_counter, res.get("file_counter", 0))
         state["file_counter"] = file_counter
-        
+
         if "iteration_count" in res:
             iteration_count = max(iteration_count, res["iteration_count"])
         if "previous_passed" in res:
             previous_passed = max(previous_passed, res["previous_passed"])
         if "previous_coverage" in res:
             previous_coverage = max(previous_coverage, res["previous_coverage"])
-            
+
         exit_code = res.get("pytest_exit_code", 0)
         highest_exit = max(highest_exit, exit_code)
-        
+        validated.append(bool(res.get("full_suite_validated", False)))
+        merged.update(res)
+
         next_node = res.get("next_node")
-        
-        if next_node in ("N4_implement_code", "N4c_augment_tests", "end") or res.get("error_message"):
-            res["green_phase_output"] = aggregated_output
-            res["file_counter"] = file_counter
-            if highest_exit:
-                res["pytest_exit_code"] = highest_exit
+
+        if next_node in ("N4_implement_code", "N4c_augment_tests", "end", "N2_scaffold_tests") or res.get("error_message"):
+            merged["green_phase_output"] = aggregated_output
+            merged["file_counter"] = file_counter
+            if next_node == "N2_scaffold_tests" or highest_exit:
+                merged["pytest_exit_code"] = highest_exit
             if "iteration_count" not in res and iteration_count:
-                res["iteration_count"] = iteration_count
-            if next_node:
-                res["next_node"] = next_node
-            return res
-            
-        if next_node == "N2_scaffold_tests":
-            res["green_phase_output"] = aggregated_output
-            res["file_counter"] = file_counter
-            res["pytest_exit_code"] = highest_exit
-            if iteration_count:
-                res["iteration_count"] = iteration_count
-            if next_node:
-                res["next_node"] = next_node
-            return res
-            
+                merged["iteration_count"] = iteration_count
+            if multi:
+                # An earlier framework's clean gate does not validate the run
+                # while this one fails: only this framework's own result, or
+                # what the state already held, stands (#4236).
+                merged["full_suite_validated"] = res.get("full_suite_validated", already_validated)
+            return merged
+
         if not final_next_node:
             final_next_node = next_node
-            
-    if min_coverage == 100.0 and not framework_configs:
-        min_coverage = 0.0
-        
-    if 'res' not in locals():
-        res = {}
-    res["green_phase_output"] = aggregated_output
-    res["coverage_achieved"] = min_coverage
-    res["previous_coverage"] = previous_coverage
-    res["previous_passed"] = previous_passed
-    res["file_counter"] = file_counter
-    res["pytest_exit_code"] = highest_exit
-    res["test_run_result"] = {
+
+    # #3087: a framework with no test in this run still has its whole suite
+    # run, once, after every targeted framework is green.
+    if not already_validated:
+        max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
+        for leg in whole_suite_only:
+            repo_root_str = state.get("repo_root", "")
+            repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+            gate = _full_suite_gate(
+                state, repo_root, leg.framework, leg.config,
+                state.get("iteration_count", 0), max_iterations,
+            )
+            if gate is not None:
+                merged.update(gate)
+                merged["green_phase_output"] = aggregated_output
+                merged["coverage_achieved"] = min_coverage
+                merged["file_counter"] = file_counter
+                merged["pytest_exit_code"] = highest_exit
+                merged["iteration_count"] = state.get("iteration_count", 0) + 1
+                return merged
+            validated.append(True)
+
+    merged["green_phase_output"] = aggregated_output
+    merged["coverage_achieved"] = min_coverage
+    merged["previous_coverage"] = previous_coverage
+    merged["previous_passed"] = previous_passed
+    merged["file_counter"] = file_counter
+    merged["pytest_exit_code"] = highest_exit
+    merged["test_run_result"] = {
         "passed": aggregated_passed,
         "failed": aggregated_failed,
         "errors": aggregated_errors,
         "total": aggregated_total,
     }
-    res["next_node"] = final_next_node or "N6_e2e_validation"
-    res["error_message"] = ""
-    return res
+    merged["full_suite_validated"] = all(validated)
+    merged["full_suite_regressions"] = []
+    merged["next_node"] = final_next_node or "N6_e2e_validation"
+    merged["error_message"] = ""
+    return merged
 def _resolve_framework_enum(framework_config: dict) -> TestFramework | None:
     """Extract TestFramework enum from framework_config dict.
 
@@ -3404,8 +3792,11 @@ def _verify_red_non_pytest(
             framework, str(repo_root),
             working_directory=framework_config.get("working_directory"),  # #3707
         )
+        runner.require_dependencies()  # #4236: never start a suite that cannot run
     except (ValueError, EnvironmentError) as e:
-        return {"error_message": f"Runner unavailable for {framework.value}: {e}"}
+        message = f"Runner unavailable for {framework.value}: {e}"
+        print(f"    [N3] ERROR {message}")
+        return {"error_message": message}
 
     result = runner.run_tests(test_paths=test_files)
 
@@ -3580,8 +3971,11 @@ def _verify_green_non_pytest(
             framework, str(repo_root),
             working_directory=framework_config.get("working_directory"),  # #3707
         )
+        runner.require_dependencies()  # #4236: never start a suite that cannot run
     except (ValueError, EnvironmentError) as e:
-        return {"error_message": f"Runner unavailable for {framework.value}: {e}"}
+        message = f"Runner unavailable for {framework.value}: {e}"
+        print(f"    [N5] ERROR {message}")
+        return {"error_message": message}
 
     result = runner.run_tests(test_paths=test_files)
 
@@ -3627,6 +4021,15 @@ def _verify_green_non_pytest(
     # Stagnation detection
     previous_coverage = state.get("previous_coverage", -1.0)
     previous_passed = state.get("previous_passed", -1)
+
+    # #3085: zero collected is a collection failure, never a coverage
+    # shortfall -- the same guard, the same helper, as the pytest branch.
+    if passed + failed + errors == 0:
+        return _zero_collected_route(
+            state, runner_name=framework.value, output=output, repo_root=repo_root,
+            file_num=file_num, iteration_count=iteration_count,
+            exit_code=exit_code, carried={"test_run_result": dict(result)},
+        )
 
     if failed > 0 or errors > 0:
         if iteration_count + 1 >= max_iterations:
@@ -3748,6 +4151,23 @@ def _verify_green_non_pytest(
     print(f"    [N5] Green phase PASSED: {passed} tests, "
           f"{coverage_achieved:.1f}% coverage ({framework.value})")
 
+    # #3087: #842's full-suite regression gate, which this path never ran.
+    if not state.get("full_suite_validated", False):
+        gate = _full_suite_gate(
+            state, repo_root, framework, framework_config, iteration_count, max_iterations,
+        )
+        if gate is not None:
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "iteration_count": iteration_count + 1,
+                **gate,
+            }
+
     log_workflow_execution(
         target_repo=repo_root,
         issue_number=state.get("issue_number", 0),
@@ -3769,6 +4189,8 @@ def _verify_green_non_pytest(
             "previous_passed": passed,
             "file_counter": file_num,
             "test_run_result": dict(result),
+            "full_suite_validated": True,
+            "full_suite_regressions": [],
             "next_node": "N7_finalize",
             "error_message": "",
         }
@@ -3780,6 +4202,8 @@ def _verify_green_non_pytest(
         "previous_passed": passed,
         "file_counter": file_num,
         "test_run_result": dict(result),
+        "full_suite_validated": True,
+        "full_suite_regressions": [],
         "next_node": "N6_e2e_validation",
         "error_message": "",
     }

@@ -32,30 +32,55 @@ from assemblyzero.workflows.testing.audit import (
 )
 from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
-    detect_framework_dirs,
-    resolve_framework,
+    place_frameworks,
+    resolve_framework_dirs,
 )
 from assemblyzero.workflows.testing.knowledge.patterns import detect_test_types
+from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import DETERMINISTIC_FAILURE
 from assemblyzero.workflows.testing.runner_registry import checkpoint_safe, get_framework_config
 from assemblyzero.workflows.testing.state import TestingWorkflowState, TestScenario
 
 
-def _configs_with_directories(frameworks: list[TestFramework], repo_root: str) -> list[dict]:
+def _configs_with_directories(
+    frameworks: dict[TestFramework, str | None] | list[TestFramework], repo_root: str,
+) -> list[dict]:
     """Each framework's registry config with `working_directory` set to where
-    detection, or a `test_dirs` declaration in .unleashed.json, places its
-    project beneath the repository root; None for the root (#3707).
+    `place_frameworks` places its project beneath the repository root; None
+    for the root (#3707).
 
-    A framework the LLD names that the project does not declare anywhere
-    runs at the root, as before.
+    A framework the LLD names that the project has nowhere raises
+    FrameworkResolutionError (#4237). It used to run at the root, where
+    nothing was installed.
     """
-    dirs = detect_framework_dirs(repo_root)
     configs: list[dict] = []
-    for framework in frameworks:
+    for framework, directory in place_frameworks(frameworks, repo_root).items():
         config = dict(get_framework_config(framework))
-        directory = dirs.get(framework, ".")
         config["working_directory"] = None if directory == "." else directory
         configs.append(config)
     return configs
+
+
+def _framework_configs(lld_content: str, repo_root: str) -> list[dict]:
+    """Every framework the run tests with, each with its working directory,
+    in the order the run uses them (#4236). The first is `framework_config`.
+
+    Raises ValueError -- FrameworkResolutionError, or an unreadable
+    package.json or .unleashed.json -- when the frameworks cannot be resolved.
+    """
+    return _configs_with_directories(resolve_framework_dirs(lld_content, repo_root), repo_root)
+
+
+def _framework_resolution_failed(issue_number: int, error: ValueError) -> dict[str, Any]:
+    """N0's halt when the run cannot say which frameworks test it, or where
+    (#4236, #4237). Routed to HALT, which alerts the operator; deterministic,
+    because the same tree resolves the same way on a retry."""
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [N0] the test frameworks for issue "
+        f"#{issue_number} could not be resolved: {error}. Nothing is tested "
+        f"until the target or the LLD says which runner tests each file."
+    )
+    print(f"    [N0] ERROR {message}")
+    return {"error_message": message}
 
 
 def _frameworks_with_directories(configs: list[dict]) -> dict[str, str]:
@@ -1062,11 +1087,13 @@ def _load_from_issue(  # pragma: no cover
     file_num = next_file_number(audit_dir)
     save_audit_file(audit_dir, file_num, "issue-only-spec.md", lld_content)
 
-    # Issue #381: Detect test framework(s)
-    frameworks = resolve_framework(lld_content, str(repo_root))
-    fw_configs = _configs_with_directories(frameworks, str(repo_root))  # #3707
+    # Issue #381: Detect test framework(s). #4236: every one is kept.
+    try:
+        fw_configs = _framework_configs(lld_content, str(repo_root))  # #3707
+    except ValueError as e:
+        return _framework_resolution_failed(issue_number, e)
+    frameworks = [config["framework"] for config in fw_configs]
     gate_log(f"    Frameworks: {_frameworks_with_directories(fw_configs)}")
-    fw_config = fw_configs[0] if fw_configs else None
 
     # Log workflow start
     log_workflow_execution(
@@ -1094,7 +1121,8 @@ def _load_from_issue(  # pragma: no cover
         "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
         "file_counter": next_file_number(audit_dir),
-        "framework_config": checkpoint_safe(fw_config),  # #3708: strings, not enums
+        "framework_config": checkpoint_safe(fw_configs[0]),  # #3708: strings, not enums
+        "framework_configs": [checkpoint_safe(c) for c in fw_configs],  # #4236
         "total_scenarios": len(test_scenarios),
     }
 
@@ -1313,11 +1341,13 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         test_plan_content += f"- Description: {scenario['description']}\n\n"
     save_audit_file(audit_dir, file_num, "test-plan.md", test_plan_content)
 
-    # Issue #381: Detect test framework(s)
-    frameworks = resolve_framework(lld_content, str(repo_root))
-    fw_configs = _configs_with_directories(frameworks, str(repo_root))  # #3707
+    # Issue #381: Detect test framework(s). #4236: every one is kept.
+    try:
+        fw_configs = _framework_configs(lld_content, str(repo_root))  # #3707
+    except ValueError as e:
+        return _framework_resolution_failed(issue_number, e)
+    frameworks = [config["framework"] for config in fw_configs]
     print(f"    Frameworks: {_frameworks_with_directories(fw_configs)}")
-    fw_config = fw_configs[0] if fw_configs else None
 
     # Log workflow start
     log_workflow_execution(
@@ -1358,7 +1388,8 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         "file_counter": file_num,
         "iteration_count": 0,
         "error_message": "",
-        "framework_config": checkpoint_safe(fw_config),  # #3708: strings, not enums
+        "framework_config": checkpoint_safe(fw_configs[0]),  # #3708: strings, not enums
+        "framework_configs": [checkpoint_safe(c) for c in fw_configs],  # #4236
         "total_scenarios": len(test_scenarios),
     }
 
@@ -1434,10 +1465,11 @@ Requirement: REQ-2
     file_num = next_file_number(audit_dir)
     mock_lld_path = save_audit_file(audit_dir, file_num, "lld.md", mock_lld)
 
-    # Issue #381: Detect test framework (even in mock mode)
-    frameworks = resolve_framework(mock_lld, str(repo_root))
-    fw_configs = _configs_with_directories(frameworks, str(repo_root))  # #3707
-    fw_config = fw_configs[0] if fw_configs else None
+    # Issue #381: Detect test framework (even in mock mode). #4236: every one.
+    try:
+        fw_configs = _framework_configs(mock_lld, str(repo_root))  # #3707
+    except ValueError as e:
+        return _framework_resolution_failed(issue_number, e)
 
     print(f"    [MOCK] Loaded mock LLD for issue #{issue_number}")
 
@@ -1456,6 +1488,7 @@ Requirement: REQ-2
         "file_counter": file_num,
         "iteration_count": 0,
         "error_message": "",
-        "framework_config": checkpoint_safe(fw_config),  # #3708: strings, not enums
+        "framework_config": checkpoint_safe(fw_configs[0]),  # #3708: strings, not enums
+        "framework_configs": [checkpoint_safe(c) for c in fw_configs],  # #4236
         "total_scenarios": len(mock_scenarios),
     }
