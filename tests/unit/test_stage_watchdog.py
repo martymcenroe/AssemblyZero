@@ -104,9 +104,14 @@ class TestProgrammingErrorsAreNotRetried:
             '{"credentials": [{"name": "c1", "type": "oauth", "enabled": true}]}',
             encoding="utf-8",
         )
-        return GeminiClient(
+        client = GeminiClient(
             model="gemini-3.1-pro-high",
         )
+        # Since #3777 a client with no agy fails at once, before the call these
+        # tests stand in for. CI has no agy, so the client is told it has one;
+        # `_invoke_via_cli` is replaced in every test, so nothing runs it.
+        client._agy_cli = "/stand-in/agy"
+        return client
 
     # #3777 (ADR 0236): `_invoke_via_cli` reports every transport failure as
     # `(False, "", reason)`, so an exception out of it is a fault in this

@@ -50,6 +50,9 @@ class TestBlockedVerdictExtraction:
         mock_result.success = True
         mock_result.response = json.dumps({
             "verdict": "BLOCKED",
+            # A verdict carries its reason: rationale is one of
+            # VERDICT_SCHEMA's two required keys (#3802).
+            "rationale": "REQ-2 has no test for its empty-input edge.",
             "summary": "Missing edge case coverage for REQ-2.",
             "blocking_issues": [
                 {"section": "Coverage", "issue": "REQ-2 missing edge cases", "severity": "BLOCKING"},
@@ -89,6 +92,7 @@ class TestApprovedVerdictExtraction:
         mock_result.success = True
         mock_result.response = json.dumps({
             "verdict": "APPROVED",
+            "rationale": "Every requirement has a test, edge cases included.",
             "summary": "All requirements covered with good edge cases.",
         })
         mock_result.input_tokens = 100
