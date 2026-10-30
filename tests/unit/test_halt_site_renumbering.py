@@ -252,14 +252,15 @@ class TestItNarrowsTheReportWithoutWeakeningTheCheck:
         assert fresh == []
         assert ghosts == []
 
-    def test_a_row_naming_something_that_is_not_a_site_key_survives(self, walked):
+    def test_a_row_naming_something_that_is_not_a_site_key_raises(self, walked):
+        """#3776: it used to be passed over and left in the phantom list; the
+        renumbering report cannot be trusted while it stands."""
         registry = REGISTRY_BEFORE + (
             Gate("gate.malformed", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
                  "MALFORMED", ("not-a-site-key",)),
         )
-        moved, fresh, ghosts = renumberings(walked(BEFORE), registry)
-        assert moved == []
-        assert ghosts == [("gate.malformed", "not-a-site-key")]
+        with pytest.raises(ValueError, match="gate.malformed"):
+            renumberings(walked(BEFORE), registry)
 
 
 class TestTheRealRegistryIsStillClean:
