@@ -175,3 +175,12 @@ Every runner imports `emit`, `flush` and `track_tool`, and two register `flush` 
 - The `track_tool` handler (237) re-raises; the ledger marks it compliant.
 
 Callers: nothing catches the new raises, so a broken credentials file or a buffer that cannot take an event now stops the tool at its first emit. Baseline: seven entries leave.
+
+### telemetry/actor.py (2 sites, loud but not raised)
+
+`detect_github_user` labels every telemetry event.
+
+- **`gh`'s exit code is read** (34). A non-zero exit was scanned anyway and fell through to "unknown". It now writes `ERROR [TELEMETRY] GitHub user not detected (gh auth status exited N)` to stderr, never `gh`'s output, and records "unknown".
+- **`gh` missing or timing out is an ERROR line** (48), naming the exception type, instead of a bare `pass`. The handler is narrowed to `OSError` and `SubprocessError`.
+- **`gh` is no longer asked for the token.** The call was `gh auth status --show-token`; the username line does not need it.
+- **Not raised and not alerted, deliberately.** "unknown" is the label the docstring declares. Every `emit` calls this, and CI runs the unit tier with no `gh` login and with telemetry on, so a raise would fail every test that emits there, and an alert would land in whichever test emits first. Baseline: the handler entry leaves.

@@ -176,3 +176,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** in `test_telemetry_emitter.py`, `TestWriteToBuffer::test_never_raises` is now `test_a_buffer_write_failure_alerts_and_raises`, and `TestEmit::test_never_raises_on_any_error` is now `test_an_event_that_cannot_be_built_alerts_and_raises`; the now-unused `Path` import is removed.
 
 **Neighbouring suites:** 120 passed across the new file, `test_telemetry_emitter.py`, `test_factory_report.py`, `test_red_phase_import_is_named.py`, `test_spec_test_missing_imports.py` and `test_requirements_graph_halts.py`.
+
+## telemetry/actor.py
+
+**New: `tests/unit/test_telemetry_actor_loud_failure.py` (5).** Site tests for 34 (a failing `gh`; the token never requested) and 48 (`gh` missing, `gh` timing out), plus a logged-in `gh` that names the user quietly.
+
+**Before the fix, measured** against the unchanged module: 4 failed, 1 passed (the kept-behaviour test).
+
+**Changed tests:** none; `test_telemetry_actor.py::test_fallback_on_error` still holds ("unknown" on `FileNotFoundError`).
+
+**Neighbouring suites:** 45 passed across the new file, `test_telemetry_actor.py`, `test_telemetry_emitter.py` and `test_telemetry_emitter_loud_failure.py`.
