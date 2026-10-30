@@ -104,3 +104,14 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 - **An empty reviewer response (771)** raises `StructuredContractError`; it was a BLOCKED verdict the reviewer never issued.
 - **The withdrawn tag (203).** The template fallback moved into `_read_review`, whose handler re-raises, and the failure tuple is built by `_reviewer_failed`, so neither handler returns a stand-in result.
 - **`core/gate_registry.py`.** The new `_halt` return joins `spec.review.empty_draft`; no row is added.
+
+### `workflows/implementation_spec/criteria_coverage.py` (4 sites)
+
+- **A row the check cannot read (171, 180)** raises `CriteriaTableError` naming it: the wrong number of cells, or neither a REQ tag nor an ID. Both used to be skipped, dropping the criterion from the count.
+- **A check that cannot run (222, 237)** is no longer `ok`. With no criteria table, or untagged rows, the report still says why, but its caller set `passed=report.ok` and passed the gate unverified.
+- **For the caller:** `validate_completeness.py` should raise `CompletenessCannotCheck` on a report that did not run, and on `CriteriaTableError`. As it stands, the failed check is sent to the drafter, who cannot tag the LLD.
+
+### `workflows/implementation_spec/assertion_manifest.py` (1 site, 1 compliant, 1 not changed)
+
+- **A fragment with no literal (325)** is a `CompileFailure` naming it, and its row contributes nothing partial; it used to be skipped while the row's other fragments compiled.
+- **Abstention (259) is not changed.** The prescription was for the caller to halt on `abstained`, but every LLD carries the Section 2.1 table, so every LLD without a criteria decision table abstains. Halting there would halt every non-visual run.

@@ -318,13 +318,16 @@ def compile_manifest(
             if not fragments:
                 fragments = [binding or criterion]
 
-            compiled_any = False
             fragment_rows: list[ManifestRow] = []
+            #: #3585: fragments with no literal of their own and none from the
+            #: binding cell. Each used to be skipped while the row's other
+            #: fragments compiled, so the manifest silently lost a sample point.
+            literal_less: list[tuple[int, str]] = []
             for index, fragment in enumerate(fragments, start=1):
                 literals = extract_literals(fragment) or binding_literals
                 if not literals:
+                    literal_less.append((index, fragment))
                     continue
-                compiled_any = True
                 fragment_rows.append(ManifestRow(
                     row_id=f"{criterion_id}.{index}",
                     criterion_id=criterion_id,
@@ -334,7 +337,7 @@ def compile_manifest(
                     source=f"decision table row {criterion_id}",
                 ))
 
-            if not compiled_any:
+            if not fragment_rows:
                 failures.append(CompileFailure(
                     criterion_id,
                     "no literal value anywhere in the row — a criterion "
@@ -342,6 +345,17 @@ def compile_manifest(
                     "non-test ruling #265 retired",
                     row_text,
                 ))
+                continue
+            if literal_less:
+                for index, fragment in literal_less:
+                    failures.append(CompileFailure(
+                        criterion_id,
+                        f"assertion fragment {index} ({fragment!r}) carries no "
+                        f"literal value and the binding cell has none to back it, "
+                        f"so that sample point cannot compile — the row's other "
+                        f"fragments are not compiled without it (#3585)",
+                        row_text,
+                    ))
                 continue
 
             # Every hex the row cites must resolve into the contract.

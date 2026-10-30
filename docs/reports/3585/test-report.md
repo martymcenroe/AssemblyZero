@@ -111,3 +111,16 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
   - `test_spec_conflict_filing.py`: a failed filing is asserted to alert the operator, not to print a WARNING.
 - **Neighbouring suites:** 18 files, 511 passed after the changes.
 - **Audits:** `audit_loud_failure.py --check` 0 new, 3 stale (two of them this module's); `audit_fail_open.py --check` PASS.
+
+## `criteria_coverage.py`
+
+- **Added:** `tests/unit/test_criteria_coverage_loud_failure.py`, 8 tests. Before the fix: 5 failed, 3 passed. After: 8 passed.
+- **Changed:** two `test_criteria_coverage.py` tests that read "not applicable" now read "cannot be checked" and assert the report is not ok; `test_call_recording_roll.py` tags its one criterion and cites it in the scripted spec.
+- **Neighbouring suites:** all 103 unit test files that import the spec workflow, in one run: 2,163 passed and 2 failed, the two roll tests fixed above (6 passed on rerun).
+- **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
+
+## `assertion_manifest.py`
+
+- **Added:** `tests/unit/test_assertion_manifest_loud_failure.py`, 6 tests, including a pin of the abstention left unchanged. Before the fix: 2 failed, 4 passed. After: 6 passed.
+- **Neighbouring suites:** 9 files, 271 passed.
+- **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
