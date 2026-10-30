@@ -1,4 +1,4 @@
-"""The spend lock lifts itself at the time it was thrown with (#3646)."""
+"""The spend lock lifts itself at the time it was thrown with (#4229)."""
 from __future__ import annotations
 
 import sys

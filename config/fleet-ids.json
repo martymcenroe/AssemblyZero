@@ -1,0 +1,33 @@
+{
+  "_about": "The fleet's public, non-secret identifiers, read through tools/fleet_ids.py. Generated from the operator's private registry, which holds these and the identifiers that are not public: change a value there and regenerate, never here. Only identifiers already published in public files are copied.",
+  "ids": {
+    "github_owner": {
+      "value": "martymcenroe",
+      "what": "the GitHub account that owns every fleet repository"
+    },
+    "cerberus_app_id": {
+      "value": "3079970",
+      "what": "GitHub App ID of Cerberus-AZ, the fleet's PR reviewer"
+    },
+    "cerberus_bot_login": {
+      "value": "cerberus-az[bot]",
+      "what": "the login Cerberus-AZ reviews as"
+    },
+    "pr_sentinel_app_id": {
+      "value": "2975092",
+      "what": "GitHub App ID of pr-sentinel, which posts the pr-sentinel / issue-reference check"
+    },
+    "cloudflare_fleet_account_id": {
+      "value": "4fe1c5e241425c85d0f2c35c69fb45b8",
+      "what": "CloudFlare account the fleet's Workers and sites deploy to"
+    },
+    "aws_account_id": {
+      "value": "383687041805",
+      "what": "the fleet's AWS account"
+    },
+    "aws_region": {
+      "value": "us-east-1",
+      "what": "the fleet's AWS region"
+    }
+  }
+}

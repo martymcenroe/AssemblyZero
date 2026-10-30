@@ -280,12 +280,47 @@ def log_llm_call(result: LLMCallResult) -> None:
             f"provider={result.provider} model={result.model_used} call failed: "
             f"{result.error_message or 'no error message'}"
         )
+    _ledger_line(result)
 
 
 def _loud_error(message: str) -> None:
     """An ERROR line on stderr, and the log (ADR 0236 property 1)."""
     logger.error("[LLM] %s", message)
     print(f"ERROR [LLM] {message}", file=sys.stderr, flush=True)
+
+
+#: The providers whose calls this module records in the model-call ledger
+#: (#4199), and the transport each is. The Gemini seat's lines are written per
+#: agy process by GeminiClient, so recording them here would count each twice;
+#: the mock provider calls no model.
+_LEDGER_TRANSPORTS = {"claude": "claude", "anthropic": "anthropic-api"}
+
+
+def _ledger_line(result: LLMCallResult) -> None:
+    """One model-call ledger line for a Claude CLI or Anthropic API call (#4199)."""
+    transport = _LEDGER_TRANSPORTS.get(result.provider)
+    if transport is None:
+        return
+    from assemblyzero.core import model_call_ledger
+
+    usage = {
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "cache_read_input_tokens": result.cache_read_tokens,
+        "cache_creation_input_tokens": result.cache_creation_tokens,
+    }
+    if not any(usage.values()):
+        usage = None
+    if result.success:
+        outcome = "ok"
+    elif "timeout" in (result.failure_class or ""):
+        outcome = "timeout"
+    else:
+        outcome = "failed"
+    model_call_ledger.record(
+        "assemblyzero.llm_provider", transport, result.model_used, usage,
+        result.duration_ms / 1000.0, outcome, result.error_message,
+    )
 
 
 def _load_anthropic_api_key() -> Optional[str]:
@@ -1763,11 +1798,13 @@ class GeminiProvider(LLMProvider):
     3-pro-preview and 3-flash-preview entries superseded by 3.1 equivalents.
 
     Supported models (every alias resolves to an id in config.AGY_GEMINI_MODELS):
-    - 3.1-pro (default) - gemini-3.1-pro-high
-    - 3.1-pro-high - gemini-3.1-pro-high
-    - 3.1-pro-low - gemini-3.1-pro-low
-    - 3.1-pro-preview, 2.5-pro, pro - legacy aliases kept so older configs
-      keep working; all resolve to gemini-3.1-pro-high
+    - 3.8-flash-high, 3.8-flash-medium, 3.8-flash-low - gemini-3.8-flash-*
+    - 3.1-pro (default), 3.1-pro-high, 3.1-pro-preview, 2.5-pro, pro - legacy
+      aliases kept so profiles and older configs keep working; all resolve to
+      gemini-3.8-flash-high
+    - 3.1-pro-low - legacy alias, resolves to gemini-3.8-flash-low
+
+    No alias resolves to Argon; config.FORBIDDEN_MODELS refuses it (#4178).
     """
 
     # Model mapping from friendly names to actual model IDs
@@ -1778,22 +1815,28 @@ class GeminiProvider(LLMProvider):
     # working instead of erroring at the CLI.
     # Issue #3710: gemini-2.5-pro, gemini-2.5-flash and gemini-3.1-flash-preview
     # are absent from `agy models` (read 2026-10-06). The 2.5 Pro aliases remap
-    # the same way; the Flash aliases are removed, since Flash is forbidden for
-    # governance and no Pro id stands in for it.
+    # the same way, and the Flash aliases were removed.
+    # Issue #4178: `agy models` (read 2026-10-21) lists no Pro id, only 3.8
+    # Flash and Argon, and the operator forbids Argon. Every alias resolves
+    # to 3.8 Flash.
     MODEL_MAP = {
-        "2.5-pro": "gemini-3.1-pro-high",  # dead at the CLI (#3710)
-        "pro": "gemini-3.1-pro-high",  # dead at the CLI (#3710)
-        "3.1-pro-preview": "gemini-3.1-pro-high",  # superseded preview (#1764)
-        "3.1-pro": "gemini-3.1-pro-high",
-        "3.1-pro-high": "gemini-3.1-pro-high",
-        "3.1-pro-low": "gemini-3.1-pro-low",
+        "2.5-pro": "gemini-3.8-flash-high",  # dead at the CLI (#3710)
+        "pro": "gemini-3.8-flash-high",  # dead at the CLI (#3710)
+        "3.1-pro-preview": "gemini-3.8-flash-high",  # superseded preview (#1764)
+        "3.1-pro": "gemini-3.8-flash-high",  # dead at the CLI (#4178)
+        "3.1-pro-high": "gemini-3.8-flash-high",  # dead at the CLI (#4178)
+        "3.1-pro-low": "gemini-3.8-flash-low",  # dead at the CLI (#4178)
+        "3.8-flash-high": "gemini-3.8-flash-high",
+        "3.8-flash-medium": "gemini-3.8-flash-medium",
+        "3.8-flash-low": "gemini-3.8-flash-low",
     }
 
     def __init__(self, model: str = "3.1-pro"):
         """Initialize Gemini provider.
 
         Args:
-            model: Model identifier (2.5-pro, flash, 3.1-pro-preview, etc.).
+            model: Model alias, a key of MODEL_MAP (3.1-pro, 3.8-flash-low,
+                etc.).
 
         Raises:
             ValueError: If model is not recognized.

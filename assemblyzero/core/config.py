@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Primary review model - highest reasoning tier available
 # Issue #773 made this Claude Opus via the Max subscription. ADR 0234 (2026-09-24): Gemini in agy validates, so the reviewer id is the Gemini model the agy transport accepts.
-REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.1-pro-high")
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.8-flash-high")
 
 # Acceptable fallback models
 REVIEWER_MODEL_FALLBACKS: list[str] = []  # no Claude fallback for the reviewer seat (ADR 0234)
@@ -27,12 +27,21 @@ FORBIDDEN_MODELS = [
     "gemini-lite",
     "gemini-3-pro-preview",
     "gemini-3-pro",
+    # Never Argon: the operator's order, 2026-10-16 and again 2026-10-21
+    # ("DO NOT USE ARGON", #4178). Argon's budget is weekly, and a previous
+    # agent spent a whole week of it in one run. A family entry: every check
+    # matches it as a substring, so all three gemini-4-argon ids are refused.
+    "gemini-4-argon",
 ]
 
-# The Gemini ids GeminiProvider may send: the Pro models `agy models` lists
-# (catalog read 2026-10-06, #3710). Every GeminiProvider.MODEL_MAP value must
-# be one of these; update this when agy's catalog changes.
-AGY_GEMINI_MODELS = frozenset({"gemini-3.1-pro-high", "gemini-3.1-pro-low"})
+# The Gemini ids GeminiProvider may send: the 3.8 Flash models `agy models`
+# lists (catalog read 2026-10-21, #4178; recorded in tests/fixtures/
+# agy_models.txt). The catalog's other Gemini is Argon, which is forbidden
+# above, and it lists no Pro. Every GeminiProvider.MODEL_MAP value must be one
+# of these; when agy's catalog changes, re-record the fixture and update this.
+AGY_GEMINI_MODELS = frozenset(
+    {"gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low"}
+)
 
 # =============================================================================
 # Claude Model (REQ-2: Claude 4.6)

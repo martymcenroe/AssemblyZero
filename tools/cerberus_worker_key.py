@@ -8,7 +8,7 @@ threat model) and an agent's child process is the agent's.
     # from the AssemblyZero checkout
     poetry run python tools/cerberus_worker_key.py
 
-It sets the Cerberus App ID (3079970; not confidential), decrypts ~/.secrets/cerberus-pem.gpg (pinentry asks for the
+It sets the Cerberus App ID (from config/fleet-ids.json; not confidential), decrypts ~/.secrets/cerberus-pem.gpg (pinentry asks for the
 passphrase), converts the PEM to base64 PKCS#8, the form the Worker's WebCrypto
 import takes, and pipes each value to `wrangler secret put` on stdin. The key
 never reaches argv, the environment, a file, or the screen. It ends by listing
@@ -31,15 +31,16 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fleet_ids  # noqa: E402
 from _pat_session import cerberus_pem_session  # noqa: E402
 
 SENTINEL = Path(__file__).resolve().parents[1] / "sentinel"
 
 
 # Not secret: an App ID only identifies the App; the private key is what signs.
-# The operator confirmed the value on 2026-09-27. The fleet ID registry is a
-# separate issue; until it lands, the value lives here.
-CERBERUS_APP_ID = "3079970"
+# The operator confirmed the value on 2026-09-27; it is read from the fleet's
+# identifier file (#4165).
+CERBERUS_APP_ID = fleet_ids.get("cerberus_app_id")
 
 
 def run(args: list[str], value: str | None = None) -> subprocess.CompletedProcess[str]:

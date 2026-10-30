@@ -14,8 +14,15 @@ defects made that possible, and both are pinned here:
   written off as a dead credential instead of retried.
 """
 
+import json
+import os
 import subprocess
+import sys
+import textwrap
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from assemblyzero.core import gemini_client as gc
 
@@ -136,3 +143,53 @@ class TestStdinTransportTimeout:
         assert "3221225794" in err
         # and that message is what #1872's detector keys on
         assert gc._is_spawn_failure(err) is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="off Windows the timeout signals a process group")
+class TestTimeoutEndsOnlyTheCall:
+    """#4195: off Windows, kill_process_tree signals agy's process GROUP. In the
+    caller's group a timeout killed the caller and its siblings with SIGKILL.
+
+    The call runs in a child process in a session of its own, so a regression
+    kills that child (exit -9) and fails this test, instead of killing the test
+    run itself."""
+
+    def test_the_caller_and_its_sibling_survive_a_timeout(self, tmp_path):
+        fake = tmp_path / "agy"
+        fake.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+        fake.chmod(0o755)
+        caller = tmp_path / "caller.py"
+        caller.write_text(textwrap.dedent(f"""
+            import json
+            import subprocess
+
+            from assemblyzero.core import gemini_client as gc
+
+            sibling = subprocess.Popen(["sleep", "30"])
+            client = gc.GeminiClient.__new__(gc.GeminiClient)
+            client._agy_cli = {str(fake)!r}
+            client.model = "test-model"
+            ok, text, err = client._invoke_via_stdin("p", timeout_seconds=1)
+            alive = sibling.poll() is None
+            sibling.kill()
+            print(json.dumps({{"ok": ok, "err": err, "sibling_alive": alive}}))
+        """), encoding="utf-8")
+        root = Path(gc.__file__).resolve().parents[2]
+        result = subprocess.run(
+            [sys.executable, str(caller)],
+            cwd=root,
+            env={**os.environ, "PYTHONPATH": str(root)},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            # The caller gets a group of its own, so a regression's SIGKILL to
+            # the group stops at the caller and never reaches this test run.
+            start_new_session=True,
+        )
+
+        assert result.returncode == 0, (result.returncode, result.stderr[-500:])
+        report = json.loads(result.stdout.strip().splitlines()[-1])
+        assert report["ok"] is False
+        assert "timeout" in report["err"].lower()
+        assert report["sibling_alive"] is True

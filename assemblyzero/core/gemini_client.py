@@ -171,7 +171,7 @@ _ON_WINDOWS = os.name == "nt"
 
 
 def _find_linux_agy() -> Optional[str]:
-    """agy on Linux: ``~/.local/bin/agy`` first, then PATH, never a Windows build (#3651).
+    """agy on Linux: ``~/.local/bin/agy`` first, then PATH, never a Windows build (#4233).
 
     agy installs into ``~/.local/bin``, which a non-login shell and a process
     started with ``wsl.exe --exec`` do not have on PATH. A PATH answer under
@@ -262,7 +262,7 @@ def _find_wsl_agy() -> Optional[str]:
 #: exactly where the harm happens -- at failure time, when something else has
 #: already gone wrong and attention is short. The module and provider names are
 #: left alone: renaming them is a wider change for no extra safety, since
-#: `gemini-3.1-pro-high` really is the model's name.
+#: the model really is a Gemini model.
 TRANSPORT_LABEL = "agy (Antigravity CLI)"
 
 #: The same fact in log-line form, for the ``[LLM] ...`` diagnostics this module
@@ -402,6 +402,29 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text).replace("\r\n", "\n").replace("\r", "")
 
 
+def _agy_json_reply(text: str) -> Optional[dict]:
+    """agy's ``--output-format json`` reply, or None when ``text`` is not one (#4199).
+
+    The reply is one object carrying ``status``, and ``response`` and
+    ``usage`` with it. Text that does not open with ``{`` is agy's plain
+    output, read on the plain-text path as before. Text that opens like JSON
+    and does not parse is a broken reply, and raises. A parsed object that is
+    not agy's envelope, such as a model answer that happens to be JSON, is
+    plain text too.
+    """
+    if not text.startswith("{"):
+        return None
+    try:
+        reply = json.loads(text)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"agy printed output that opens like JSON and does not parse: {text[:200]!r}"
+        ) from exc
+    if isinstance(reply, dict) and "status" in reply and "response" in reply:
+        return reply
+    return None
+
+
 # =============================================================================
 # Gemini Client
 # =============================================================================
@@ -419,7 +442,10 @@ class GeminiClient:
         model: str = REVIEWER_MODEL,
     ):
         """Initialize the client."""
-        if model in FORBIDDEN_MODELS:
+        # Exact match, then family (#4178): "gemini-4-argon" refuses every
+        # Argon id, the way seats.check_spec reads the list.
+        lowered = model.lower()
+        if any(entry.lower() in lowered for entry in FORBIDDEN_MODELS):
             raise ValueError(f"Model '{model}' is forbidden.")
             
         if not model.startswith("gemini-"):
@@ -502,8 +528,43 @@ class GeminiClient:
         #1765 error boundaries below keep a CLI banner from passing as model
         output.
 
+        Every agy process this starts writes one line to the model-call
+        ledger, success or failure (#4199); one that never started writes
+        none, because no model was called.
+
         Returns:
             Tuple of (success, response_text, error_message)
+        """
+        started = time.monotonic()
+        spent: dict = {}
+        try:
+            ok, text, error = self._agy_once(full_prompt, timeout_seconds, spent)
+        except Exception as exc:
+            self._ledger_line(spent, started, False, f"{type(exc).__name__}: {exc}")
+            raise
+        self._ledger_line(spent, started, ok, error)
+        return ok, text, error
+
+    def _ledger_line(self, spent: dict, started: float, ok: bool, error: str) -> None:
+        """The model-call ledger line for one agy process, if it started (#4199)."""
+        if not spent.get("ran"):
+            return
+        from assemblyzero.core import model_call_ledger
+
+        outcome = "ok" if ok else ("timeout" if "timeout" in error.lower() else "failed")
+        model_call_ledger.record(
+            "assemblyzero.gemini_client", "agy", self.model, spent.get("usage"),
+            time.monotonic() - started, outcome, None if ok else error,
+        )
+
+    def _agy_once(
+        self, full_prompt: str, timeout_seconds: float, spent: dict
+    ) -> tuple[bool, str, str]:
+        """One agy process; fills ``spent`` for the ledger (see _invoke_via_stdin).
+
+        agy is asked for JSON (#4199), the only form in which it reports the
+        call's tokens: ``{"status", "response", "usage"}``. Output that is not
+        that object is handled exactly as before, as plain text.
         """
         import tempfile
 
@@ -520,7 +581,7 @@ class GeminiClient:
                 proc = subprocess.Popen(
                     self._agy_argv(
                         tmp_cwd, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
-                        "--model", self.model,
+                        "--model", self.model, "--output-format", "json",
                     ),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -529,7 +590,13 @@ class GeminiClient:
                     encoding="utf-8",
                     errors="replace",
                     cwd=tmp_cwd,
+                    # #4195: off Windows, kill_process_tree signals the process
+                    # GROUP. In the caller's group, a timeout killed the caller
+                    # and every sibling with SIGKILL; in a session of its own,
+                    # the group is agy and its descendants only.
+                    start_new_session=os.name != "nt",
                 )
+                spent["ran"] = True
                 try:
                     stdout, stderr = proc.communicate(
                         input=full_prompt, timeout=timeout_seconds
@@ -553,6 +620,9 @@ class GeminiClient:
             return False, "", f"agy stdin invocation failed: {e}"
 
         text = _strip_ansi(stdout or "").strip()
+        reply = _agy_json_reply(text)
+        if reply is not None and isinstance(reply.get("usage"), dict):
+            spent["usage"] = reply["usage"]
 
         # #3612: an agent agy could not load means the default agent, with its
         # tools, answered. That is a failed call, whatever the exit status.
@@ -568,6 +638,16 @@ class GeminiClient:
             return False, "", (
                 f"agy exited {returncode} (stdin path): {detail[:400]}"
             )
+        if reply is not None:
+            # #4199: agy's own verdict on the call. A status other than
+            # SUCCESS is a failed call, whatever text came with it.
+            status = reply.get("status")
+            if status != "SUCCESS":
+                return False, "", f"agy status {status!r} (stdin path): {text[:400]}"
+            text = _strip_ansi(str(reply.get("response") or "")).strip()
+            if text:
+                return True, text, ""
+            return False, "", "agy returned no output (stdin path)"
         first_line = text.splitlines()[0].strip() if text else ""
         if first_line.startswith("Error:"):
             return False, "", f"agy error output (stdin path): {text[:400]}"

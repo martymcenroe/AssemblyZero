@@ -221,7 +221,7 @@ def _forget_worktree(repo_root: Path, worktree_path: Path) -> None:
     path that was never registered. It replaced a repo-wide prune, which
     drops EVERY registration git thinks is stale: on a machine running agents
     on both Windows and WSL, each side sees the other side's live worktrees
-    that way (#3649).
+    that way (#4232).
     """
     _run(["git", "worktree", "remove", str(worktree_path)], cwd=repo_root)
 

@@ -1,5 +1,6 @@
 """assemblyzero_config's defaults are derived from the checkout, on every platform (#3536)."""
 
+import logging
 import sys
 from pathlib import Path
 
@@ -46,3 +47,36 @@ def test_the_module_spells_no_projects_root():
     source = Path(assemblyzero_config.__file__).read_text(encoding="utf-8")
     code = [ln for ln in source.splitlines() if not ln.lstrip().startswith("#")]
     assert not any("mcwiz\\Projects" in ln or "mcwiz/Projects" in ln for ln in code if '"""' not in ln)
+
+
+def _config_off_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(assemblyzero_config, "CONFIG_PATH", tmp_path / "absent.json")
+    monkeypatch.setattr(assemblyzero_config.AssemblyZeroConfig, "_detected_os", "unix")
+    return assemblyzero_config.AssemblyZeroConfig()
+
+
+def test_a_windows_path_off_windows_is_left_alone_and_not_called_an_attack(
+    tmp_path, monkeypatch, caplog
+):
+    """Off Windows a C:\\ path names the Windows side. The sanitizer resolved it
+    against the current directory and warned of a traversal attempt (#4180)."""
+    config = _config_off_windows(tmp_path, monkeypatch)
+    path = "C:\\Users\\dev\\Projects\\x"
+    with caplog.at_level(logging.WARNING, logger="assemblyzero_config"):
+        assert config._sanitize_path(path) == path
+    assert caplog.records == []
+
+
+def test_a_windows_traversal_off_windows_is_still_stripped_and_warned(
+    tmp_path, monkeypatch, caplog
+):
+    config = _config_off_windows(tmp_path, monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="assemblyzero_config"):
+        assert config._sanitize_path("C:\\Users\\..\\..\\Windows") == "C:\\Users\\Windows"
+    assert any("potential traversal" in r.getMessage() for r in caplog.records)
+
+
+def test_windows_format_off_windows_is_the_windows_spelling(tmp_path, monkeypatch):
+    """What new_repo.py writes into a scaffold's inherit_from (#4180)."""
+    config = _config_off_windows(tmp_path, monkeypatch)
+    assert config.assemblyzero_root() == DEFAULTS["assemblyzero_root"]["windows"]

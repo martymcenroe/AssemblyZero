@@ -79,7 +79,7 @@ EXTERNAL_REF_PATTERN = re.compile(
 ISSUE_BODY = """## Context
 
 Branch protection on this repo gates on the Cloudflare Worker check
-`pr-sentinel / issue-reference` (app_id 2975092). The legacy per-repo
+`pr-sentinel / issue-reference` (the pr-sentinel App). The legacy per-repo
 `.github/workflows/pr-sentinel.yml` (app_id 15368) is now redundant —
 and actively posts FAILURE checks on every dependabot PR (since it
 doesn't recognize `No-Issue:` exemptions), making mergeable_state
@@ -105,7 +105,7 @@ PR_BODY = """## Summary
 Deletes `.github/workflows/pr-sentinel.yml`. Closes {issue_number}.
 
 Branch protection on this repo gates on the Cloudflare Worker check
-`pr-sentinel / issue-reference` (app_id 2975092). The legacy per-repo
+`pr-sentinel / issue-reference` (the pr-sentinel App). The legacy per-repo
 workflow (app_id 15368) is redundant — and actively posts FAILURE
 checks on every dependabot PR since it doesn't recognize `No-Issue:`.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upgrade one repository's stale auto-reviewer.yml caller to the canonical one (#3641).
+"""Upgrade one repository's stale auto-reviewer.yml caller to the canonical one (#4227).
 
 THIS SCRIPT MUST BE RUN BY THE USER, NOT BY AN AGENT (ADR-0216). It decrypts
 the classic PAT into this process's heap; an agent-spawned process would be

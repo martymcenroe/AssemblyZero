@@ -212,7 +212,21 @@ class TestVerifyModelIsPro:
     def test_pro_preview_variant(self):
         """Pro preview variant passes."""
         client = AdversarialGeminiClient(provider=MagicMock())
-        assert client.verify_model_is_pro({"model": "gemini-3-pro-preview-0514"}) is True
+        assert client.verify_model_is_pro({"model": "gemini-3.1-pro-preview-0514"}) is True
+
+    @pytest.mark.parametrize("model", ["gemini-3.8-flash-high", "gemini-3.8-flash-low"])
+    def test_allowed_flash_passes(self, model):
+        """#4192: 3.8 Flash is the Gemini the client sends, so its reply counts."""
+        client = AdversarialGeminiClient(provider=MagicMock())
+        assert client.verify_model_is_pro({"model": model}) is True
+
+    @pytest.mark.parametrize("model", ["gemini-4-argon-high", "gemini-3-pro-preview-0514"])
+    def test_a_forbidden_reply_is_refused(self, model):
+        """#4192: the reply check reads FORBIDDEN_MODELS as the request check
+        does, so Argon, or a retired id, never counts."""
+        client = AdversarialGeminiClient(provider=MagicMock())
+        with pytest.raises(GeminiModelDowngradeError, match="forbidden"):
+            client.verify_model_is_pro({"model": model})
 
 
 class TestIsQuotaError:
@@ -497,33 +511,39 @@ class TestTheRequestedModelIsChosenNotSpelled:
             "fleet migrations cannot reach this call"
         )
 
-    def test_it_resolves_to_a_pro_identifier(self):
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            resolve_adversarial_model,
-        )
+    def test_the_default_seat_runs_on_flash(self):
+        """#4192: agy lists no Pro and Argon is forbidden, so the default
+        seat's alias resolves to 3.8 Flash, and adversarial review runs on it.
+        #4178 left this seat refusing Flash, which stopped the review."""
+        from assemblyzero.core.config import AGY_GEMINI_MODELS
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
 
-        model_id = resolve_adversarial_model()
-        assert "pro" in model_id
-        assert "flash" not in model_id
+        model_id = ag.resolve_adversarial_model()
+        assert model_id == "gemini-3.8-flash-high"
+        assert model_id in AGY_GEMINI_MODELS
         assert "preview" not in model_id, (
             "a path that fails open should not run on a dated preview"
         )
 
-    def test_the_requested_model_is_not_forbidden(self):
-        """The check #2286 asked for: the REQUEST is validated, where
-        verify_model_is_pro only ever inspected the reply."""
-        from assemblyzero.core.config import FORBIDDEN_MODELS
-        from assemblyzero.workflows.testing.adversarial_gemini import (
-            resolve_adversarial_model,
-        )
+    def test_the_request_and_reply_checks_agree(self):
+        """#2374: the two ends of one call accept the same models."""
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
 
-        assert resolve_adversarial_model() not in FORBIDDEN_MODELS
+        model_id = ag.resolve_adversarial_model()
+        client = ag.AdversarialGeminiClient(provider=MagicMock())
+        assert client.verify_model_is_pro({"model": model_id}) is True
+
+    @pytest.mark.parametrize("spec", ["gemini:gemini-4-argon-high", "gemini:4-argon"])
+    def test_argon_is_refused_before_any_request(self, spec):
+        """#4192 R3: Argon stays refused."""
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
+
+        with pytest.raises(ag.ForbiddenModelError):
+            ag.resolve_adversarial_model(spec)
 
     @pytest.mark.parametrize("alias", ["flash", "2.5-flash", "3.1-flash-preview"])
-    def test_a_forbidden_tier_is_refused_before_any_request(self, alias):
-        """Including 3.1-flash-preview, which FORBIDDEN_MODELS does not catch
-        (#2374) but which verify_model_is_pro would reject in the response.
-        The two ends of one call have to agree."""
+    def test_a_retired_alias_is_refused_before_any_request(self, alias):
+        """Aliases the map no longer carries, for ids agy no longer offers."""
         from assemblyzero.workflows.testing import adversarial_gemini as ag
 
         with pytest.raises(ag.ForbiddenModelError):

@@ -1,4 +1,4 @@
-"""The spend lock binds on both sides of a Windows + WSL machine (#3647)."""
+"""The spend lock binds on both sides of a Windows + WSL machine (#4230)."""
 from __future__ import annotations
 
 import sys

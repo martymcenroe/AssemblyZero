@@ -15,7 +15,7 @@ Nothing else in the settings file is touched.
 
 On a machine with both Windows and WSL, every mode acts on both homes, the
 running side's and the other side's, so a lock thrown on either side binds both
-(#3647). The homes come from ``assemblyzero.core.seats.claude_homes``, the same
+(#4230). The homes come from ``assemblyzero.core.seats.claude_homes``, the same
 list the workflow reads.
 
     poetry run python tools/claude_spend_lock.py --status
@@ -109,7 +109,7 @@ def status_lines(settings: Path, lock_file: Path) -> list[str]:
         f"lock file: {'present' if lock_file.is_file() else 'absent'} ({lock_file})"
     )
     if lock_file.is_file():
-        # #3646: when it was thrown, when it lifts, and whether it binds now.
+        # #4229: when it was thrown, when it lifts, and whether it binds now.
         thrown = datetime.fromtimestamp(lock_file.stat().st_mtime).astimezone()
         until = lock_until(lock_file.read_text(encoding="utf-8", errors="replace"))
         lifts = until.astimezone().strftime("%Y-%m-%d %I:%M %p %Z") if until else "only when lifted by hand"
@@ -119,7 +119,7 @@ def status_lines(settings: Path, lock_file: Path) -> list[str]:
 
 
 def lock_text(until: datetime | None) -> str:
-    """The lock file's text: the explanation, and the lift time when there is one (#3646)."""
+    """The lock file's text: the explanation, and the lift time when there is one (#4229)."""
     return LOCK_TEXT + (f"{UNTIL_PREFIX} {until.isoformat()}\n" if until else "")
 
 
@@ -187,14 +187,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--apply", action="store_true", help="write; without it, print what would change")
     ap.add_argument(
         "--until", type=parse_until, default=None,
-        help="with --lock: 'YYYY-MM-DD HH:MM' local time, the weekly reset; the lock stops binding then (#3646)",
+        help="with --lock: 'YYYY-MM-DD HH:MM' local time, the weekly reset; the lock stops binding then (#4229)",
     )
     ap.add_argument("--settings", type=Path, default=None)
     ap.add_argument("--lock-file", type=Path, default=None)
     ap.add_argument("--backup-dir", type=Path, default=None)
     ap.add_argument(
         "--claude-home", type=Path, action="append", default=[],
-        help="a ~/.claude directory to act on; repeatable. Default: every home this machine has (#3647)",
+        help="a ~/.claude directory to act on; repeatable. Default: every home this machine has (#4230)",
     )
     args = ap.parse_args(argv)
     if args.until is not None and not args.lock:
@@ -220,7 +220,7 @@ def targets_for(args: argparse.Namespace) -> list[tuple[Path, Path, Path]]:
 
     Explicit --settings/--lock-file/--backup-dir name one home, as before. Otherwise
     each --claude-home, or by default every home the machine has: the running side's
-    and the other side's (#3647), so a lock thrown on either side binds both.
+    and the other side's (#4230), so a lock thrown on either side binds both.
     """
     if args.settings or args.lock_file or args.backup_dir:
         return [(args.settings or SETTINGS, args.lock_file or LOCK_FILE, args.backup_dir or BACKUP_DIR)]
@@ -243,7 +243,7 @@ def run_one(
     settings_changed = new != obj
     wanted = lock_text(until)
     if lock:
-        # #3646: re-throwing with a different lift time rewrites the file.
+        # #4229: re-throwing with a different lift time rewrites the file.
         lock_changed = not lock_file.is_file() or lock_file.read_text(encoding="utf-8") != wanted
     else:
         lock_changed = lock_file.is_file()

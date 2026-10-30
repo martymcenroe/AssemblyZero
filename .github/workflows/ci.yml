@@ -1,5 +1,5 @@
 # CI Workflow - every test tier on every push/PR
-# Issues #325, #116, #225, #2283
+# Issues #325, #116, #225, #2283, #4208
 #
 # pyproject's addopts deselects integration, e2e and adversarial, so each tier
 # needs its own step naming its marker. Until #2283 only unit ran on a PR and
@@ -9,6 +9,14 @@
 # Tier selectors use `tests/` plus the marker, never a directory alone -- two
 # e2e-marked tests live in tests/unit/test_issue_257.py, and `tests/e2e/` would
 # quietly run 17 of 19.
+#
+# Handoff data only (#4208): a pull request whose every changed path is on the
+# closed list in the `handoff` step -- files /handoff commits, which no test
+# reads -- skips every step after it, and `test` reports success. The job still
+# starts, because `test` is the required check and a workflow filtered by paths
+# never reports. Anything else, and every push to main, runs every tier. The list
+# lives here, not in a program, so that widening it is a workflow change, which
+# only the operator can land.
 
 name: CI
 
@@ -28,19 +36,66 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      # Handoff data only (#4208). Reads the paths this pull request changed, from its
+      # merge commit against the first parent, and answers only=true when every one is on
+      # LISTED. Any other answer, an error included, runs every step. The runner's own
+      # python3 runs it, so it costs no setup.
+      - name: Handoff data only?
+        id: handoff
+        if: github.event_name == 'pull_request'
+        shell: python3 {0}
+        run: |
+          import os
+          import subprocess
+
+          LISTED = {'docs/lessons-learned.md'}
+
+
+          def answer():
+              parents = subprocess.run(["git", "rev-list", "--parents", "-n", "1", "HEAD"],
+                                       capture_output=True, text=True)
+              if parents.returncode != 0 or len(parents.stdout.split()) != 3:
+                  return False, "HEAD is not a pull request merge commit, so every step runs"
+              diff = subprocess.run(["git", "diff", "--no-renames", "--name-only", "-z", "HEAD^1", "HEAD"],
+                                    capture_output=True, text=True)
+              if diff.returncode != 0:
+                  return False, "git diff failed, so every step runs: " + diff.stderr.strip()[:200]
+              paths = [p for p in diff.stdout.split("\0") if p]
+              if not paths:
+                  return False, "no path changed, so every step runs"
+              off = [p for p in paths if p not in LISTED]
+              if off:
+                  return False, f"{off[0]} and {len(off) - 1} other paths are not handoff data, so every step runs"
+              listed = ", ".join(sorted(paths))
+              return True, f"every changed path is handoff data ({listed}), so the steps after it are skipped"
+
+
+          try:
+              only, why = answer()
+          except Exception as exc:
+              only, why = False, f"the check failed ({exc!r}), so every step runs"
+          print(why)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("only=" + ("true" if only else "false") + "\n")
 
       - name: Set up Python
+        if: steps.handoff.outputs.only != 'true'
         uses: actions/setup-python@v7
         with:
           python-version: '3.14'
 
       - name: Install Poetry
+        if: steps.handoff.outputs.only != 'true'
         uses: snok/install-poetry@v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
       - name: Cache dependencies
+        if: steps.handoff.outputs.only != 'true'
         uses: actions/cache@v6
         with:
           path: .venv
@@ -49,9 +104,11 @@ jobs:
             venv-${{ runner.os }}-
 
       - name: Install dependencies
+        if: steps.handoff.outputs.only != 'true'
         run: poetry install --no-interaction --with dev
 
       - name: Run unit tests with coverage
+        if: steps.handoff.outputs.only != 'true'
         run: poetry run python tools/test-gate.py tests/unit/ -v --tb=short --cov=assemblyzero --cov-report=term-missing --cov-report=xml:coverage.xml
         env:
           LANGSMITH_TRACING: "false"
@@ -62,6 +119,7 @@ jobs:
       # seventy tests skip without a GitHub token or Gemini access; that is a
       # reason to tolerate skips here, not to defer the other sixty-four.
       - name: Run integration tests
+        if: steps.handoff.outputs.only != 'true'
         run: poetry run python tools/test-gate.py tests/ -v --tb=short -m integration
         env:
           LANGSMITH_TRACING: "false"
@@ -70,6 +128,7 @@ jobs:
       # Fully mock-driven and needs no credentials -- the whole tier runs in
       # about six seconds, so there was never a cost argument for excluding it.
       - name: Run e2e tests
+        if: steps.handoff.outputs.only != 'true'
         run: poetry run python tools/test-gate.py tests/ -v --tb=short -m e2e
         env:
           LANGSMITH_TRACING: "false"
@@ -84,12 +143,13 @@ jobs:
       # #2285 is settled this step starts asserting instead of skipping, with
       # no workflow change.
       - name: Run adversarial tests
+        if: steps.handoff.outputs.only != 'true'
         run: poetry run python tools/test-gate.py tests/ -v --tb=short -m adversarial
         env:
           LANGSMITH_TRACING: "false"
 
       - name: Upload coverage report
-        if: always()
+        if: always() && steps.handoff.outputs.only != 'true'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report

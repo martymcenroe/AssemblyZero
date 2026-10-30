@@ -1,4 +1,4 @@
-"""No AssemblyZero code prunes worktrees (#3649).
+"""No AssemblyZero code prunes worktrees (#4232).
 
 On a machine running agents on both Windows and WSL, each side's git reads the
 other side's worktrees as stale (measured 2026-09-26), so `git worktree prune`

@@ -141,7 +141,8 @@ def test_wsl_short_prompt_rides_stdin_with_the_wsl_argv():
     argv = popen.call_args[0][0]
     cwd = popen.call_args[1]["cwd"]
     assert argv[:5] == ["wsl.exe", "--cd", cwd, "--exec", WSL_AGY]
-    assert argv[5:] == ["--agent", gc.AGY_AGENT_NAME, "--model", MODEL]
+    # #4199: JSON, the only form in which agy reports the call's tokens.
+    assert argv[5:] == ["--agent", gc.AGY_AGENT_NAME, "--model", MODEL, "--output-format", "json"]
     assert "--sandbox" not in argv and "-p" not in argv
 
 

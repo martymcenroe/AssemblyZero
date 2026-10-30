@@ -34,8 +34,8 @@ When registering ANY new task — agent or operator:
 | Claude-DailyAudit | Daily 4:30 AM | Rotates through projects running `/audit` |
 | Claude-Heartbeat | Hourly | Monitors usage quotas and Claude availability |
 | Claude-Capture | Hourly :58 | Quota scrape just before hour boundary |
-| Claude-AgyRulesNightly | Daily 5:45 AM | Keeps every repository's `.agents/rules/repo-claude-md.md` in step with its `CLAUDE.md`; opens and merges a PR per repository that drifted. Code lives in a private repository. (#3638) |
-| Claude-UniversalClaudeMdBackup | Daily 5:55 AM | Nightly versioned snapshot of `C:\Users\mcwiz\Projects\CLAUDE.md` into a private repository's canonical copy. Opens a PR on drift and merges it once checks pass. (#1262, #3638) |
+| Claude-AgyRulesNightly | Daily 5:45 AM | Keeps every repository's `.agents/rules/repo-claude-md.md` in step with its `CLAUDE.md`; opens and merges a PR per repository that drifted. Code lives in a private repository. (#4226) |
+| Claude-UniversalClaudeMdBackup | Daily 5:55 AM | Nightly versioned snapshot of `C:\Users\mcwiz\Projects\CLAUDE.md` into a private repository's canonical copy. Opens a PR on drift and merges it once checks pass. (#1262, #4226) |
 | Claude-DependabotFleet | Daily 6:00 AM | Fleet-wide dependabot PR review + merge (#1091, #1092) |
 
 ---
@@ -142,7 +142,7 @@ Warnings appended when:
 
 ## Claude-UniversalClaudeMdBackup
 
-Nightly versioned snapshot of the universal CLAUDE.md (`C:\Users\mcwiz\Projects\CLAUDE.md`) into a canonical copy kept in a private repository. When the canonical copy on that repository's `main` has drifted from the live file, the task opens a PR and **merges it itself** once the checks pass and Cerberus approves (#3638).
+Nightly versioned snapshot of the universal CLAUDE.md (`C:\Users\mcwiz\Projects\CLAUDE.md`) into a canonical copy kept in a private repository. When the canonical copy on that repository's `main` has drifted from the live file, the task opens a PR and **merges it itself** once the checks pass and Cerberus approves (#4226).
 
 ### Configuration
 
@@ -188,7 +188,7 @@ Start-ScheduledTask -TaskName 'Claude-UniversalClaudeMdBackup'
 
 ## Claude-AgyRulesNightly
 
-Every night, for every repository of the owner that is neither a fork nor archived, the task compares `.agents/rules/repo-claude-md.md` on the default branch with what the fleet's agy rules tool generates from that branch's `CLAUDE.md`. For each repository where the file is missing or has drifted, it opens an issue (in the repository's issue home when that is elsewhere), commits the regenerated file through the GitHub API, opens a PR, and merges it once the checks pass. No local checkout is written. (#3638)
+Every night, for every repository of the owner that is neither a fork nor archived, the task compares `.agents/rules/repo-claude-md.md` on the default branch with what the fleet's agy rules tool generates from that branch's `CLAUDE.md`. For each repository where the file is missing or has drifted, it opens an issue (in the repository's issue home when that is elsewhere), commits the regenerated file through the GitHub API, opens a PR, and merges it once the checks pass. No local checkout is written. (#4226)
 
 | Property | Value |
 |----------|-------|
@@ -404,4 +404,4 @@ Register-ScheduledTask -TaskName 'Claude-Heartbeat' -Action $action -Trigger $tr
 |---------|------|---------|
 | 1.0 | 2026-01-17 | Initial version documenting existing scheduled tasks |
 | 1.1 | 2026-05-10 | (#1099) Added Hard Rules section — no-admin requirement, mandatory `-WindowStyle Hidden -NoProfile`, subprocess-silence verification, current-user principal for credit attribution. Added Claude-Capture + Claude-DependabotFleet to the overview. |
-| 1.2 | 2026-09-26 | (#3644) Hard Rules 5 and 6: runbook 0918's elevation claim is wrong, and the Defender flag on inline `WindowStyle Hidden` PowerShell. Both moved here from the universal instruction file, which now points at this runbook. |
+| 1.2 | 2026-09-26 | (#4228) Hard Rules 5 and 6: runbook 0918's elevation claim is wrong, and the Defender flag on inline `WindowStyle Hidden` PowerShell. Both moved here from the universal instruction file, which now points at this runbook. |

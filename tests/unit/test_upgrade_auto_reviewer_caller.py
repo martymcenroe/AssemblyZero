@@ -1,4 +1,4 @@
-"""tools/upgrade_auto_reviewer_caller.py with the HTTP layer stubbed (#3641)."""
+"""tools/upgrade_auto_reviewer_caller.py with the HTTP layer stubbed (#4227)."""
 
 from __future__ import annotations
 

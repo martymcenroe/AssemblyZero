@@ -556,6 +556,16 @@
 
 **Context:** A long day that began with a calendar and ended with a rulebook. [The Great God Om](The-Great-God-Om) had papers, talks, posts and inventions all pointing at the same goal, and the work was deciding their order. A talk invitation from Porto was declined gracefully, and a coffee in North Texas was offered instead. A search tool swept nine public event sources and found, among five hundred listings, that "energy" matches energy healing and "grid" matches crystal grids. Then came the harder question: what had already gone out into the world, what could still be held back, and what must stay unsaid until the paperwork was in. Om's answer was plain: "what is disclosed is disclosed. i'd like to not make it worse." The rule went into writing, and so did a second one: a need stated without a solution discloses nothing. Most magic is restraint. The spell you don't cast is the one nobody can take back.
 
+### 2026-10-28
+
+---
+
+**13:00** — *On a release that had to be shipped four times before it stayed shipped*
+
+> "The thing about shipping is that the world keeps checking whether you meant it."
+
+**Context:** A release went out to production the long way round. The pull request carrying it sat for three hours without its approval, because the robot that grants approvals had never heard the pull request open, and the tool that was meant to nudge it again had politely decided there was nothing to nudge. Then the test site refused it four times, each time for a new reason: a font that no page admitted to using, a smoke check written before the security rule it walked into, a browser walk that went looking for the course without its pass, and one test that wandered into a scene as nobody at all. Each refusal was the machinery doing its job, so each got its own small fix and another go. In between, [The Great God Om](The-Great-God-Om) discovered that the privacy policy had been promising something he never meant, overruled it on the spot, and set out a whole campaign of new work, from counting every visitor to telling a church in one town from a church in another. The release reached production a little before one in the afternoon, eleven hours after the grant that ordered it. The day's other lesson went into an issue of its own: a permission that matches only one spelling of a command is a permission an agent will spell differently.
+
 ---
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.

@@ -37,11 +37,11 @@ from typing import Any
 
 # Import AssemblyZero config for path resolution
 try:
-    from assemblyzero_config import config
+    from assemblyzero_config import _spellings, config
 except ImportError:
     # Fallback if running from a different directory
     sys.path.insert(0, str(Path(__file__).parent))
-    from assemblyzero_config import config
+    from assemblyzero_config import _spellings, config
 
 # Cerberus secret deploy helpers (used by --cerberus-pem flag)
 try:
@@ -386,13 +386,17 @@ def detach_stdin() -> bool:
     operator types or pastes the passphrase while focus is wrong, those
     keystrokes land on whatever holds the terminal -- which must never be
     this process. After this call, anything typed at the controlling
-    terminal is discarded: it cannot be read, echoed, or logged here.
+    terminal never reaches this process: it cannot be read, echoed, or
+    logged here.
 
-    The passphrase belongs to pinentry's own dialog, which reads from its
-    own handle, not from the inherited terminal. If gpg is ever configured
-    with a tty-based pinentry, it will now fail loudly rather than quietly
-    accept a secret through the wrong channel -- that is the intended
-    trade, not a regression.
+    The passphrase belongs to pinentry, which reads from its own handle,
+    never from this process's stdin: a dialog on Windows, and on Ubuntu
+    pinentry-curses, which opens the terminal itself. gpg tells pinentry
+    which terminal from GPG_TTY, or failing that from its own stdin, which
+    after this call is the null device. So the terminal's name goes into
+    GPG_TTY first (#4179). It names a device and carries no secret. A run
+    with no terminal at all (cron, a pipe) records nothing, and gpg fails
+    loudly rather than accept a secret through the wrong channel.
 
     Returns:
         True if stdin was detached, False if there was no real stdin to
@@ -404,6 +408,14 @@ def detach_stdin() -> bool:
     except (AttributeError, ValueError, OSError):
         # No real stdin -- nothing can be typed into it, so nothing to do.
         return False
+
+    # os.ttyname does not exist on Windows, where pinentry is a dialog and
+    # needs no terminal.
+    if hasattr(os, "ttyname") and os.isatty(fd):
+        try:
+            os.environ["GPG_TTY"] = os.ttyname(fd)
+        except OSError:
+            pass
 
     try:
         with open(os.devnull, "rb") as devnull:
@@ -528,24 +540,34 @@ def create_project_json(project_path: Path, name: str, github_user: str) -> None
         name: Project name
         github_user: GitHub username
     """
+    project_json = project_json_content(project_path, name, github_user)
+    project_json_path = project_path / ".claude" / "project.json"
+    project_json_path.write_text(json.dumps(project_json, indent=2) + "\n", encoding='utf-8')
+
+
+def project_json_content(project_path: Path, name: str, github_user: str) -> dict:
+    """What create_project_json writes, built without touching the disk."""
     # Get path formats from config
     projects_root_unix = config.projects_root_unix()
     assemblyzero_root_windows = config.assemblyzero_root()
 
-    project_json = {
+    return {
         "variables": {
             "PROJECT_ROOT": f"{projects_root_unix}/{name}",
-            "PROJECT_ROOT_WINDOWS": str(project_path),
+            # The Windows spelling whichever side runs this: from Ubuntu,
+            # project_path is /mnt/c/... (#4180).
+            "PROJECT_ROOT_WINDOWS": _spellings(project_path)["windows"],
             "PROJECT_NAME": name,
             "GITHUB_REPO": f"{github_user}/{name}",
             "TOOLS_DIR": f"{projects_root_unix}/{name}/tools",
             "WORKTREE_PATTERN": f"{name}-{{ID}}"
         },
-        "inherit_from": assemblyzero_root_windows
+        "inherit_from": assemblyzero_root_windows,
+        # Whose spelling PROJECT_ROOT and TOOLS_DIR hold (#4180). Git Bash
+        # writes /c/..., Ubuntu writes /mnt/c/..., and Ubuntu opens both
+        # through its /c symlink (ADR-0004).
+        "unix_paths_from": "git-bash" if os.name == "nt" else "linux",
     }
-
-    project_json_path = project_path / ".claude" / "project.json"
-    project_json_path.write_text(json.dumps(project_json, indent=2) + "\n", encoding='utf-8')
 
 
 PROJECT_TYPES = ("minimal", "python", "chrome-extension", "pypi", "cf-worker", "web")
@@ -3219,7 +3241,10 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
     # Step 2: Initialize git
     print("\n2. Initializing git...")
-    run_command(["git", "init"], cwd=project_path)
+    # Name the branch: every later step pushes and protects main. Git for
+    # Windows sets init.defaultBranch=main; Ubuntu's git does not, and a bare
+    # init there made master, so the push failed (#4185).
+    run_command(["git", "init", "--initial-branch=main"], cwd=project_path)
     run_command(["git", "config", "pull.rebase", "true"], cwd=project_path)
     print("  Initialized git repository (pull.rebase=true)")
 

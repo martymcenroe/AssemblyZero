@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-shot: upgrade comp-environ's auto-reviewer.yml to the NEW caller format.
 
-Superseded for any other repository by `upgrade_auto_reviewer_caller.py --repo` (#3641);
+Superseded for any other repository by `upgrade_auto_reviewer_caller.py --repo` (#4227);
 kept as the record of what ran for comp-environ.
 
 Bug (comp-environ#11): comp-environ's `.github/workflows/auto-reviewer.yml`

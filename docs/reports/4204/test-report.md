@@ -1,0 +1,5 @@
+# Test Report: #4204
+
+- T1, T2: `tests/unit/test_gpg_wait_has_no_timeout.py` (new). Each of `classic_pat_session`, `cerberus_pem_session`, `pr_sentinel_app_session` and `gpg_secret_session` calls gpg with `timeout=None`, and so does `verify_encrypted_secret._decrypt`. With `tests/unit/test_pat_session_terminal.py`: 11 passed.
+- Full suite on the branch: 11737 passed, 22 failed, 66 skipped, 6 xfailed. None of the 22 is in a test file that imports `_pat_session`, `verify_encrypted_secret` or `new_repo`: 16 in `tests/test_auto_reviewer_wait_loop.py` (`the 'Wait for required checks' step is gone`), 2 in `tests/tools/test_dependabot_review.py`, and one each in `tests/test_universal_claude_md.py`, `tests/unit/test_cascade_detector.py` (a timing bound, `0.0053 < 0.005`), `tests/unit/test_checkpoint_carries_no_enums.py` and `tests/integration/test_orchestrator_graph.py`.
+- `ruff check` on the changed and new files: clean, apart from two existing E741 findings on lines this change does not touch.

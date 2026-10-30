@@ -1,8 +1,8 @@
 # 0935 - PR Stuck on `mergeable_state=blocked` or `behind`: Recovery Procedures
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.2
-**Last Updated:** 2026-10-07
+**Version:** 1.3
+**Last Updated:** 2026-10-21
 
 ---
 
@@ -12,10 +12,10 @@ Diagnose and recover when a PR stays at `mergeable_state=blocked` long after cre
 
 **Use when:** `gh api repos/{owner}/{repo}/pulls/{N} --jq '.mergeable_state'` returns:
 
-- **`blocked`** and the typical 30-second auto-approval window has passed (Cerberus-AZ should approve within 10–30s after pr-sentinel passes) — follow Steps 1–7 below.
-- **`behind`** and stays there indefinitely (branch protection's "Require branches to be up to date" gate; the standard poll-until-clean loop never terminates) — follow the "Behind-State Recovery" section after Step 7.
+- **`blocked`** a minute or more after the PR opened. pr-sentinel posts `issue-reference` and approves as Cerberus in one request, seconds after the PR opens (Step 4). Follow Steps 1–7 below.
+- **`behind`** and stays there indefinitely (branch protection's "Require branches to be up to date" gate; the standard poll-until-clean loop never terminates). Follow the "Behind-State Recovery" section after Step 7.
 
-**Do NOT use this for:** legitimate failures where pr-sentinel reported `failure` (those are diagnosed by reading the check output and fixing the actual problem). This runbook is for the harder case where a check stays `pending` forever, `action_required` is silently misclassified, or branch protection requires an update that the standard merge sequence doesn't perform.
+**Do NOT use this for:** legitimate failures where pr-sentinel reported `failure` (those are diagnosed by reading the check output and fixing the actual problem). This runbook is for the harder cases: a check that stays `pending` forever, a PR whose body is correct but which has no review at all (the "No Review At All" section), or branch protection requiring an update that the standard merge sequence doesn't perform.
 
 ---
 
@@ -99,31 +99,23 @@ For EACH match, verify the referenced `#N` is an open issue (not closed, not a P
 gh api repos/{owner}/{repo}/issues/{N} --jq '{state: .state, is_pr: (.pull_request != null)}'
 ```
 
-If `state=closed` OR `is_pr=true` → worker rejects → posts `action_required` → Auto Review treats as pending → 10-minute timeout → repeat. **This is the failure.**
+If `state=closed` OR `is_pr=true`, the worker posts `action_required` on `issue-reference` and does not approve. The PR stays `blocked`, and the merge driver stops at `poll_timeout`. **This is the failure.**
 
 ---
 
-## Step 4: Why Auto Review Says "pending" When Worker Already Failed
+## Step 4: How the PR Gets Approved
 
-Auto Review (`AssemblyZero/.github/workflows/auto-reviewer.yml`) poll-loop branch logic, quoted from the workflow for reading, not for running:
+pr-sentinel does the whole approval in one webhook request (`AssemblyZero/sentinel/src/webhook.js`, #3663). It runs on the `opened`, `edited`, `reopened` and `synchronize` events, and in order it:
 
-```text
-if [ "$STATUS" = "success" ]; then
-  echo "  ✅ ${check_name}: passed"
-elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
-  echo "  ❌ ${check_name}: ${STATUS} — will NOT approve"
-  exit 1
-else
-  echo "  ⏳ ${check_name}: pending (attempt $((ATTEMPT+1))/${MAX_ATTEMPTS})"
-  ALL_PASSED=false
-fi
-```
+1. checks the body for a closing directive (Step 3's regex);
+2. confirms each referenced number is an open issue;
+3. checks the merge driver's stamp;
+4. posts the `issue-reference` check-run, `success` or `action_required`;
+5. when the check passed and the author is not Dependabot, approves the head commit as Cerberus, unless Cerberus already approved that commit (`sentinel/src/cerberus.js`).
 
-The check-run conclusion `action_required` is neither `success`, `failure`, nor `cancelled` — it falls through to the `else` branch and prints `⏳ pending`. The poll runs 30 attempts × 20s = 10 min, then times out. The check ran and FAILED at second 0 — Auto Review just doesn't classify the failure correctly.
+A failed approval request is written to the Worker's log and does not change the check. The fine-grained PAT can read neither the check-runs nor that log.
 
-**Symptomatic signature:** Auto Review log shows 30 consecutive `⏳ ... pending` lines, never `❌`, then `Timed out waiting for checks after 600s`.
-
-(Bug worth filing against `AssemblyZero/.github/workflows/auto-reviewer.yml` to handle `action_required` and `timed_out` as failures.)
+**Auto Review is retired.** Before #3663 a separate workflow, `.github/workflows/auto-reviewer.yml`, polled for `issue-reference` and then approved. It now carries `if: false`, so the retired Auto Review job concludes `skipped` in about two seconds on every PR. A `skipped` Auto Review run is normal, and it is never the reason a PR is stuck.
 
 ---
 
@@ -144,24 +136,17 @@ Write the rephrased body to a file in the repo's `data/scratch-<date>-<topic>/` 
 gh pr edit {N} --repo {owner}/{repo} --body-file {body_file}
 ```
 
-Pass the same file to the merge driver when you rerun it, so the body it checks is the body on the PR. The `edited` webhook re-fires sentinel. Worker re-evaluates against the new body and posts a fresh check-run. If body now passes regex + all extracted refs are open issues, conclusion is `success`.
+Pass the same file to the merge driver when you rerun it, so the body it checks is the body on the PR. The `edited` webhook re-fires sentinel. Worker re-evaluates against the new body and posts a fresh check-run. If body now passes regex + all extracted refs are open issues, conclusion is `success`, and the same request approves as Cerberus (Step 4).
 
 ---
 
-## Step 6: Re-trigger Auto Review (Without a New Commit)
+## Step 6: Nothing Else to Re-trigger
 
-Auto Review only triggers on `pull_request` event types `[opened, synchronize, reopened]` — NOT `edited`. After Step 5, sentinel's check is fresh but Auto Review is still showing the stale failed run.
+pr-sentinel acts on `edited`, so the body edit in Step 5 already re-ran the check and the approval. The merge driver's rerun in Step 7 stamps the body, which is another edit. No other job has to be woken.
 
-The fine-grained PAT cannot `gh run rerun` (needs `actions:write`). The non-destructive trigger:
+**Do not close and reopen the PR.** Earlier versions of this runbook did, to wake Auto Review, which no longer runs (Step 4).
 
-```bash
-gh pr close {N}  --repo {owner}/{repo}
-gh pr reopen {N} --repo {owner}/{repo}
-```
-
-`reopened` is in Auto Review's trigger list. New run starts, polls for issue-reference (now `success`), Cerberus-AZ submits the approving review.
-
-**DO NOT** push an empty commit to re-trigger — git history pollution. Force-push to "clean up" the noise commit afterward is BANNED.
+**DO NOT** push an empty commit to re-trigger. It pollutes git history, and a force-push to "clean up" the noise commit afterward is BANNED.
 
 ---
 
@@ -170,6 +155,39 @@ gh pr reopen {N} --repo {owner}/{repo}
 Rerun the merge driver with the same arguments as the run that stopped (root `CLAUDE.md`, "Merging PRs (Universal)"). It finds the open PR and reuses it, stamps it so pr-sentinel re-evaluates, waits for `clean`, merges, verifies the squash on `origin/main`, and removes the worktree and the branch. Never merge, fast-forward, remove the worktree or delete the branch by hand (#3803).
 
 If the driver fails again at the same stage, stop and report its output (Two-Strike Rule).
+
+---
+
+## No Review At All: `skipped`, `REVIEW_REQUIRED`, Body Correct
+
+| Symptom | Step that works | If it fails |
+|---------|-----------------|-------------|
+| Auto Review `skipped`, no review, `REVIEW_REQUIRED`, body correct, worker healthy | Rerun the merge driver once (Step 7) | Stop and report (below) |
+
+**What it looks like.** The driver stops at `poll_timeout` with the PR still `blocked`. Then:
+
+- the branch's Auto Review run concluded `skipped`, which is normal (Step 4);
+- the PR has no review at all, and `reviewDecision` is `REVIEW_REQUIRED`;
+- Steps 2 and 3 find the body correct: each closing directive names an open issue, and nothing parasitic;
+- Step 1's `/health` returns `200`.
+
+Read the review state and the runs with:
+
+```bash
+gh pr view {N} --repo {owner}/{repo} --json reviewDecision,reviews
+gh run list --repo {owner}/{repo} --branch {branch} --limit 3
+```
+
+**Step that works.** Rerun the merge driver once, with the same arguments (Step 7), as the root `CLAUDE.md` route for `poll_timeout` says. It reuses the open PR and stamps its body. The stamp is an `edited` event, so pr-sentinel runs again and approves if the check passes. On 2026-10-21 one rerun was enough: the PR went `clean` three polls later and merged.
+
+**If the rerun also stops at `poll_timeout` with no review,** stop and report. Do not edit the body, close and reopen the PR, or push a commit to provoke the Worker. The report gives:
+
+- the PR number, its head commit, and the time it opened, in Central;
+- both driver stage lines;
+- the `reviewDecision`, review and run output above;
+- that the body and `/health` checked clean.
+
+The cause is in the Worker's log, which only the operator can read. A cause found there is tracked in its own issue. This runbook does not guess at it.
 
 ---
 
@@ -220,7 +238,8 @@ These have all been attempted; all violate user-set rules. Memory: `feedback_nev
 | `gh pr merge --admin` | Bypasses branch protection; governance requires non-author approval |
 | `gh pr review --approve` (self-approve) | GitHub blocks; would bypass governance even if it worked |
 | Asking user to manually approve | Cerberus-AZ exists for this — its job to approve, not user's |
-| Pushing empty / noise commits to re-trigger workflows | Git history pollution; `gh pr close && gh pr reopen` works without a commit |
+| Pushing empty / noise commits to re-trigger workflows | Git history pollution; a body edit, or the driver's rerun, re-fires pr-sentinel without a commit |
+| Closing and reopening the PR to re-trigger a review | It wakes nothing a body edit does not: Auto Review is retired, and pr-sentinel already runs on `edited` (Step 6) |
 | `gh pr merge --auto` | `allow_auto_merge=false` on all repos (Standard 0016) |
 | `gh pr merge`, worktree removal or branch deletion by hand | The merge driver does all three; a hand-finished landing is how worktrees and branches get left behind. Rerun the driver (Step 7) |
 | `git checkout` in any form | The shell guard refuses every form of it |
@@ -239,16 +258,17 @@ mergeable_state == "blocked"
 │   └─→ Worker DOWN, escalate, do not proceed
 │
 ├─ Step 2: PR body lacks `Closes #N`
-│   └─→ Step 5 (add it), then Step 6 (close/reopen), then Step 7
+│   └─→ Step 5 (add it), then Step 7
 │
 ├─ Step 2: PR body has `Closes #ISSUE_N` but ISSUE_N is closed
-│   └─→ Create new issue, Step 5 with new ref, Step 6, Step 7
+│   └─→ Create new issue, Step 5 with new ref, Step 7
 │
 ├─ Step 3: PR body has parasitic match (close/closed/closes near non-target #N)
-│   └─→ Step 5 (rephrase), Step 6 (close/reopen), Step 7
+│   └─→ Step 5 (rephrase), Step 7
 │
-└─ All above pass + Auto Review last run >10 min ago
-    └─→ Step 6 (close/reopen) to re-trigger, Step 7
+└─ All above pass, Auto Review `skipped`, no review, `REVIEW_REQUIRED`
+    └─→ "No Review At All": rerun the driver once (Step 7)
+        └─→ still no review: stop and report
 
 mergeable_state == "behind"
 │
@@ -287,3 +307,4 @@ mergeable_state == "dirty"
 | 1.0 | 2026-05-10 | Initial. Captures the PR #527 incident (negation-parsed-as-Closes) and codifies the broader recovery procedures. |
 | 1.1 | 2026-05-27 | Added "Behind-State Recovery" section for `mergeable_state=behind`. Documents the `update-branch` API technique discovered during Hermes PR #475 unblock and persisted to Hermes `docs/lessons-learned.md` (PR #488). Decision tree extended to handle `behind`, `unstable`, `unknown`, `dirty`. Closes #1347. |
 | 1.2 | 2026-10-07 | #3803: every recovery ends in a rerun of the merge driver. Removed the hand merge, checkout, fast-forward and branch deletion from Step 7, the inline `--body` from Step 5, and the `update-branch` loop, which makes the driver's push fail. `behind` and `dirty` merge `origin/main` in the worktree. Five rows added to the banned table. |
+| 1.3 | 2026-10-21 | #4189: Auto Review was retired by #3663. Step 4 now describes pr-sentinel's approval as Cerberus; Step 6 no longer closes and reopens the PR. New section "No Review At All" for a `skipped` Auto Review with no review and a correct body, with its branch in the decision tree. |

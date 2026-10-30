@@ -69,7 +69,7 @@ def test_parse_repo_names_filters_denylist():
 
 
 def test_parse_repo_names_skips_filenames_with_extensions():
-    # "Projects/CLAUDE.md" names a file, not a repository. #3648: it is not
+    # "Projects/CLAUDE.md" names a file, not a repository. #4231: it is not
     # captured at all, since a missing repository is now reported rather than
     # dropped, and a file must not be mistaken for one.
     text = f"{GB}/CLAUDE.md was edited"
@@ -103,7 +103,7 @@ def test_extract_repo_names_strips_worktree_suffix_when_parent_exists(tmp_path, 
 
 
 def test_extract_repo_names_keeps_a_missing_repo_so_it_is_reported(tmp_path, monkeypatch):
-    """#3648: dropping a named repo that is not there is how a wrong root read as clean."""
+    """#4231: dropping a named repo that is not there is how a wrong root read as clean."""
     fake_root = tmp_path / "Projects"
     fake_root.mkdir(parents=True)
     monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)

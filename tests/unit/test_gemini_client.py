@@ -345,7 +345,7 @@ def test_find_agy_cli_uses_path():
 
 
 def test_linux_agy_prefers_local_bin_over_path(tmp_path, monkeypatch):
-    """#3651: ~/.local/bin/agy is found even when PATH lacks it (a non-login shell)."""
+    """#4233: ~/.local/bin/agy is found even when PATH lacks it (a non-login shell)."""
     from assemblyzero.core import gemini_client as gc
 
     agy = tmp_path / ".local" / "bin" / "agy"

@@ -46,7 +46,7 @@ GeminiTimeoutError = TypedTimeoutError
 
 
 class GeminiModelDowngradeError(Exception):
-    """Raised when the reply did not come from a Gemini Pro model."""
+    """Raised when the reply did not come from an allowed Gemini model."""
 
     pass
 
@@ -127,20 +127,18 @@ def resolve_adversarial_model(spec: str | None = None) -> str:
                 f"is forbidden by FORBIDDEN_MODELS entry {forbidden!r}"
             )
 
-    # FORBIDDEN_MODELS does not catch every Flash: its entries are
-    # `gemini-flash` and `gemini-2.5-flash`, and neither is a substring of
-    # `gemini-3.1-flash-preview`, so a 3.1-line Flash passes the list (#2374).
-    # `verify_model_is_pro` right below rejects any "flash" in the RESPONSE, so
-    # without this the request gate would be looser than the response gate and
-    # this call could ask for a model its own reply check would then refuse.
-    # The two ends of one call must agree; the list's gap is #2374's to close.
-    for tier in ("flash", "lite"):
-        if tier in lowered:
-            raise ForbiddenModelError(
-                f"Adversarial alias {alias!r} resolves to {model_id!r}, a "
-                f"{tier} tier. Governance calls run on Pro; verify_model_is_pro "
-                f"would reject this model's own response."
-            )
+    # The two ends of one call must agree (#2374): this request check and
+    # `verify_model_is_pro` below both accept the ids in AGY_GEMINI_MODELS.
+    # #4192: that is 3.8 Flash, since agy offers no Pro and Argon is
+    # forbidden. The Flash refusal that stood here was agent-written, never
+    # the operator's, and after #4178 it stopped adversarial review outright.
+    from assemblyzero.core.config import AGY_GEMINI_MODELS
+
+    if lowered not in AGY_GEMINI_MODELS:
+        raise ForbiddenModelError(
+            f"Adversarial alias {alias!r} resolves to {model_id!r}, which is "
+            f"not an allowed Gemini model ({', '.join(sorted(AGY_GEMINI_MODELS))})"
+        )
     return model_id
 
 
@@ -185,18 +183,25 @@ class AdversarialGeminiClient:
         self._provider = get_provider(spec, effort=effort)
 
     def verify_model_is_pro(self, response_metadata: dict) -> bool:
-        """Check response metadata to confirm Gemini Pro was used.
+        """Check response metadata to confirm an allowed Gemini model answered.
+
+        The name predates #4192. The allowed models are those in
+        ``config.AGY_GEMINI_MODELS`` (3.8 Flash), the same set the request
+        check uses, plus a Pro id, which agy no longer offers. A forbidden
+        model, Argon among them, never passes.
 
         Args:
             response_metadata: Dictionary containing model info from the API response.
 
         Returns:
-            True if Pro model confirmed.
+            True if an allowed model is confirmed.
 
         Raises:
-            GeminiModelDowngradeError: If Flash, an unrecognised model, or no
-                model info is present.
+            GeminiModelDowngradeError: If the model is forbidden, unrecognised,
+                or no model info is present.
         """
+        from assemblyzero.core.config import AGY_GEMINI_MODELS, FORBIDDEN_MODELS
+
         model_name = response_metadata.get("model", "")
 
         if not model_name:
@@ -206,20 +211,20 @@ class AdversarialGeminiClient:
 
         model_lower = model_name.lower()
 
-        if "flash" in model_lower:
+        if any(entry.lower() in model_lower for entry in FORBIDDEN_MODELS):
             raise GeminiModelDowngradeError(
-                f"Expected Gemini Pro but received {model_name}"
+                f"The reply names {model_name!r}, which is forbidden"
             )
 
-        if "pro" in model_lower:
-            logger.info("Gemini Pro model confirmed: %s", model_name)
+        if model_lower in AGY_GEMINI_MODELS or "pro" in model_lower:
+            logger.info("Gemini model confirmed: %s", model_name)
             return True
 
-        # #3808: a model that is neither Pro nor Flash is not a confirmed Pro.
-        # It used to warn and pass, so an unverified model's review counted.
+        # #3808: an unrecognised model is not confirmed. It used to warn and
+        # pass, so an unverified model's review counted.
         raise GeminiModelDowngradeError(
-            f"Expected Gemini Pro but the reply names {model_name!r}, which is "
-            f"not a recognised Pro model"
+            f"The reply names {model_name!r}, which is not an allowed Gemini "
+            f"model"
         )
 
     def generate_adversarial_tests(

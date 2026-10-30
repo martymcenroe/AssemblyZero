@@ -34,7 +34,8 @@ rotation runbook, alongside the token-scope, verification, revocation,
 and residue-destruction steps.
 
 REQUIRED operational rule:
-    The user runs scripts that import this module, in their own Git Bash.
+    The user runs scripts that import this module, in their own terminal:
+    Git Bash on Windows, or a WSL terminal on Ubuntu (#4179).
     NEVER let an agent (Claude Code, Codex, Gemini) invoke them via its
     Bash tool — the spawned Python process becomes the agent's child and
     its heap is theoretically readable by the agent for the seconds the
@@ -43,6 +44,7 @@ REQUIRED operational rule:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -52,7 +54,12 @@ from typing import Iterator
 DEFAULT_PAT_PATH: Path = Path.home() / ".secrets" / "classic-pat.gpg"
 DEFAULT_CERBERUS_PEM_PATH: Path = Path.home() / ".secrets" / "cerberus-pem.gpg"
 DEFAULT_PR_SENTINEL_APP_PATH: Path = Path.home() / ".secrets" / "pr-sentinel-app.gpg"
-GPG_TIMEOUT_S: int = 180
+# No limit on the passphrase wait (#4204). gpg waits inside pinentry for the
+# operator, and a timeout killed his run under him after three minutes. A
+# prompt that never reached him fails at once (PinentryUnavailable, #4135);
+# anything else he ends himself with Ctrl-C. The law: no timeouts that
+# override the human.
+GPG_TIMEOUT_S: int | None = None
 MAX_GPG_ATTEMPTS: int = 5
 
 # Human names for each secret this module decrypts (#1853). The operator holds
@@ -68,7 +75,8 @@ SECRET_PR_SENTINEL_APP: str = "pr-sentinel App credential (App ID + PEM)"
 # passphrase was asked for and a retry cannot help (#4135). Closed set, taken
 # from gpg's own messages: the agent could not start pinentry, or pinentry
 # found no terminal. On Ubuntu, pinentry-curses fails this way under a script
-# that detached its stdin.
+# that detached its stdin without first recording the terminal in GPG_TTY,
+# as new_repo.py does (#4179).
 GPG_NO_PROMPT_PHRASES: tuple[str, ...] = (
     "problem with the agent",
     "Inappropriate ioctl for device",
@@ -96,11 +104,41 @@ def _stop_if_no_prompt(stderr: str, secret_name: str) -> None:
         raise PinentryUnavailable(
             f"gpg could not show the passphrase prompt for the {secret_name}; "
             f"nothing was asked of you. gpg said: {stderr}\n"
-            "Run this from Git Bash on Windows, where pinentry is a dialog. "
-            "On Ubuntu the only pinentry is terminal-based, and a script "
-            "that detaches its stdin (new_repo.py, #1806) refuses it by "
-            "design."
+            + _no_prompt_advice()
         )
+
+
+def _no_prompt_advice() -> str:
+    """Why gpg found nowhere to prompt, and what to do about it (#4179).
+
+    On Ubuntu, pinentry-curses draws in the terminal GPG_TTY names, or else
+    the one on gpg's stdin. A script that closes its stdin (new_repo.py,
+    #1806) records the terminal in GPG_TTY first, so a run with neither had
+    no terminal to begin with.
+    """
+    if sys.platform == "win32":
+        return (
+            "gpg-agent could not start its pinentry dialog. Restart the agent "
+            "with `gpgconf --kill gpg-agent` and run this again."
+        )
+    terminal = os.environ.get("GPG_TTY")
+    if not terminal and os.isatty(0):
+        try:
+            terminal = os.ttyname(0)
+        except OSError:
+            pass
+    if not terminal:
+        return (
+            "This run has no terminal, so a terminal pinentry has nowhere to "
+            "draw the prompt: it was started from cron, a background job or a "
+            "pipe. Run it from an interactive terminal."
+        )
+    return (
+        f"gpg was given the terminal {terminal} and still could not show the "
+        "prompt there. Check that the pinentry-program set in "
+        "~/.gnupg/gpg-agent.conf, if any, is installed, restart the agent "
+        "with `gpgconf --kill gpg-agent`, and run this again."
+    )
 
 
 def _announce_decrypt(
@@ -173,9 +211,8 @@ def classic_pat_session(
             The error message includes the one-time-setup command.
         RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
             Carries gpg's last stderr so the caller can diagnose.
-        subprocess.TimeoutExpired: If pinentry doesn't respond within
-            GPG_TIMEOUT_S on a single attempt -- propagates rather than
-            retrying, since a hung pinentry won't unhang.
+        PinentryUnavailable: If gpg could not show its prompt at all.
+            The wait for the passphrase itself has no time limit (#4204).
     """
     if not pat_path.exists():
         raise FileNotFoundError(
@@ -270,8 +307,7 @@ def cerberus_pem_session(
     Raises:
         FileNotFoundError: If the encrypted PEM file does not exist.
         RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
-        subprocess.TimeoutExpired: Same hung-pinentry handling as
-            classic_pat_session.
+        PinentryUnavailable: As for classic_pat_session; no time limit.
 
     Implementation note: the body intentionally duplicates
     classic_pat_session's structure rather than sharing a helper.
@@ -447,8 +483,7 @@ def gpg_secret_session(
     Raises:
         FileNotFoundError: If the encrypted file does not exist.
         RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
-        subprocess.TimeoutExpired: Same hung-pinentry handling as
-            classic_pat_session.
+        PinentryUnavailable: As for classic_pat_session; no time limit.
     """
     if not path.exists():
         raise FileNotFoundError(f"{secret_name} not found at {path}.")
