@@ -38,3 +38,31 @@ The three swallowed handlers are gone from the module (`checkpoint_exists`, `run
 
 - `assemblyzero/workflows/requirements/nodes/finalize.py` files the issue through `_finalize_issue`, which runs `gh issue create`, without checking `config_mock_mode`, so `--type issue --mock` files a real issue. The LLD half stops on mock. That package belongs to another agent's work.
 - `run_single_workflow` compiles the graph with no checkpointer, so `--resume` does not resume from the checkpoint `checkpoint_exists` looks for: it reruns the brief from the start.
+
+## `tools/run_implement_from_lld.py` (#4097): 23 sites
+
+Eight rows were fixed by PR #4159 (#4150): lines 296, 345, 353, 1344, 1377, 1442, 1458 and 1484. Each was checked against the code here and holds as the ledger's FIXED note says; their tests are in `tests/unit/test_impl_lands_through_driver.py`. This change fixes the other fifteen, and keeps everything the branch's earlier commits added to the module: the transport preflight, the issue-branch refusal and worktree provisioning.
+
+### The handler
+
+`main()` parses the arguments and runs the start-up channel check, then calls `_main(args)` inside `except Exception`. The handler prints `[implement] ERROR: <cause>` on stderr, adds the traceback when the exception is not the tool's own `RunFailed`, calls `alert.alert_operator` with what, where, cause, the exception's consequence, the resolved repository and the issue, closes the run record when `_main` opened one, and returns 1 (line 1489). The refusals the earlier commits added still print, alert and exit 1 where they happen.
+
+### What each site does now
+
+- **Git reads.** `get_current_branch` raises with git's exit code and stderr when `rev-parse` fails (77); it used to return "" and the caller refused as if the HEAD were detached. `_worktree_entries` raises with git's stderr instead of returning None, so `find_existing_worktree` and `create_worktree`'s reuse check can no longer read a failed listing as "no worktree" (123).
+- **The status file.** `_write_status_file` raises when the file cannot be written (961). Inside the run, the inner handler closes the record and re-raises it, and `main` alerts once: agents that read the file to tell a success from a failure cannot see this run's outcome.
+- **Refusals before anything ran.** A missing `--repo` (990), a repository that cannot be detected (996), a non-positive issue (1008), another issue's work branch (1087), a detached HEAD (1096) and a worktree that could not be cut (1123) each raise. The dry run's "(unreadable)" fallback is deleted, since an unreadable branch now raises.
+- **`--select`.** No LLD directory, no LLD files, no file named `LLD-<number>.md`, and an answer that selects nothing each raise, so exit 0 is only the operator cancelling with 0, Ctrl-C or Ctrl-D (1003).
+- **Inputs.** Any rejected context file stops the run before the graph is built, listing every rejection; it used to run with the context that was left (1181, 1183). A bad model profile raises (1199).
+- **`--resume`.** `resume_checkpoint_refusal` checks for the issue's checkpoint before the worktree is touched. No database, or one with no checkpoint for the issue's thread, refuses; it used to print "starting fresh" and run from the start (1331). It does not create a database to look in.
+
+### Compliance with standard 0034
+
+| Failure path | Loud | Logged with details | Stops | Alerts |
+|---|---|---|---|---|
+| A `RunFailed` before the worktree (77, 123, 990, 996, 1003, 1008, 1087, 1096, 1123, 1331) | `[implement] ERROR:` on stderr | `alert_operator`: what, where, cause with git's exit code and stderr or the path, consequence "nothing ran", repo, issue | exits 1; no worktree cut, no model called | `alert_operator` |
+| A `RunFailed` after the record opened (1181, 1183, 1199) | same | same, and the run record finishes `fail` | exits 1 before the graph is built | `alert_operator` |
+| The status file not written (961) | same | same, with the file and the OSError; the record finishes `fail` | exits 1 | `alert_operator`, once |
+| Any other exception outside the graph's try (1489) | ERROR line with type, and the traceback | `alert_operator` with type and message; the record is closed | exits 1 | `alert_operator` |
+
+The loud-failure baseline held no entry for this module after PR #4159; no `# fail-open:` tag was in it or is added. `main`'s handler carries `# noqa: BLE001`.
