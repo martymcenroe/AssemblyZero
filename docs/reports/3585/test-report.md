@@ -37,3 +37,5 @@ Each fixed site has a test that fails before its fix and passes after, run again
 **Neighbouring suites:** 1004 passed across the 44 test files that name the module (1003 in the full run, plus the one corrected line range); 150 passed across `test_assertion_manifest.py`, `test_gate_registry.py`, `test_check_classification.py` and `test_completeness_message_addressability.py`; 131 passed across `test_golden_disasters.py`, `test_factory_report.py`, `test_interaction_matrix.py` and `test_cap_bundles.py`.
 
 **Audits:** `audit_loud_failure.py --check`: 0 new, 10 stale (the graph entry and nine here). `audit_fail_open.py --check`: no new fail-open.
+
+**Changed later (found by the compile_manifest batch):** `test_call_recording_roll.py::TestARecordedRollReplaysExactly` (2 cases) failed after this module's commit. Its LLD's one criterion carried no REQ tag, and N3 now halts on that (1892) instead of passing it as "not applicable". The scenario now carries REQ-1, and the spec's test cites it in a docstring; 6 passed. The file does not name this module, which is why the sweep over files that do missed it.
