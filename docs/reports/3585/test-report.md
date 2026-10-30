@@ -39,3 +39,15 @@ Each fixed site has a test that fails before its fix and passes after, run again
 **Audits:** `audit_loud_failure.py --check`: 0 new, 10 stale (the graph entry and nine here). `audit_fail_open.py --check`: no new fail-open.
 
 **Changed later (found by the compile_manifest batch):** `test_call_recording_roll.py::TestARecordedRollReplaysExactly` (2 cases) failed after this module's commit. Its LLD's one criterion carried no REQ tag, and N3 now halts on that (1892) instead of passing it as "not applicable". The scenario now carries REQ-1, and the spec's test cites it in a docstring; 6 passed. The file does not name this module, which is why the sweep over files that do missed it.
+
+## nodes/compile_manifest.py
+
+**New: `tests/unit/test_compile_manifest_loud_failure.py` (24).** Each test is named for its ledger line, plus tests that pin what is kept: a repo with no gate declaration compiles, a compiled manifest is persisted, an ordinary LLD sits out and records why (89, WON'T DO), a mock run files nothing and still halts (186), a working filing files one per criterion, a recorded absence and a recorded abstain pass N1c (230, the abstain half WON'T DO), and rows with their criteria list pass.
+
+**Before the fix, measured** against the unchanged module: 16 failed, 8 passed. The 8 are the kept-behaviour pins. Of the 16, six halts did not happen, five tags were present, one filing failure sent no alert, and two N1c findings were empty. The other two, 198 and 199, call `_file_failures` with its new signature, so before the fix they failed on its missing `mock_mode` argument rather than on the behaviour.
+
+**Changed tests:** `test_assertion_manifest.py::TestTheCompileNode` and `test_decision_table_survives.py::TestTheNodeTravelsTheAbsenceForward` get a temporary repo root. The abstain-gate state in `test_decision_table_survives.py` carries the `assertion_manifest_absent` flag N1b always writes. `test_a_bare_pass_through_still_works` became `test_a_recorded_absence_passes_through` and `test_a_bare_state_with_no_recorded_absence_is_a_finding`. All 11 tests these fixed passed with HEAD's module, so none was pre-existing.
+
+**Neighbouring suites:** 336 passed across `test_assertion_manifest.py`, `test_decision_table_survives.py`, `test_implementation_spec_workflow.py`, `test_spec_graph_loud_failure.py`, `test_gate_registry.py` and the new file. 446 passed across the 22 other test files that name the manifest or the spec graph, including the mock-roll, orchestrator and recorded-roll suites.
+
+**Audits:** `audit_loud_failure.py --check`: 0 new, 17 stale (1 graph, 9 validate_completeness, 7 here). `audit_fail_open.py --check`: no new fail-open.

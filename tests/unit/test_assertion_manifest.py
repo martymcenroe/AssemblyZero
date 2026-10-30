@@ -9,6 +9,7 @@ conflict halts with a must-resolve BEFORE any draft spend, never a fall-through.
 
 from __future__ import annotations
 
+import pytest
 
 from assemblyzero.workflows.implementation_spec.assertion_manifest import (
     compile_manifest,
@@ -173,10 +174,15 @@ class TestTheGate:
 
 
 class TestTheCompileNode:
+    @pytest.fixture(autouse=True)
+    def _target_repo(self, tmp_path):
+        # #3585: N1b halts without a repo root to read the contract from.
+        self.repo = str(tmp_path)
+
     def _state(self, lld: str, **kw) -> dict:
         return {
             "lld_content": lld,
-            "repo_root": "",
+            "repo_root": self.repo,
             "issue_number": 332,
             "config_mock_mode": False,
             **kw,

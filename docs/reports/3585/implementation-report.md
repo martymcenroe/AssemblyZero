@@ -35,3 +35,21 @@ On real runs, N3 now halts where it used to pass: when the target repo's poetry 
 Not changed, reported: `base_tree.read_from_base` returns "" both when the file is absent and when git fails, so `_pyproject_for_run` cannot tell a base with no pyproject from a git failure. It still falls to the checkout on "". The `spec.completeness_cannot_check` row's notes in `gate_registry.py` still name only the unparseable-callee case.
 
 Baseline: nine loud-failure entries leave (seven tags and two swallowed handlers).
+
+### nodes/compile_manifest.py: N1b halts on a missing input, a failed filing alerts, N1c passes only a recorded absence (13 sites fixed, 2 WON'T DO)
+
+What N1b needs and cannot get raises `ManifestCannotRun`. N1b halts through `_halt_manifest_cannot_run`, which prints `ERROR [N1b] ...` to stderr and returns "N1b assertion manifest cannot run: ..."; the existing router sends it to HALT, which alerts.
+
+- **The contract** (54, 63, 66, 67): no repo root, a visual-gate declaration that cannot be loaded, a declared contract that is not a file, and a contract that cannot be read each raise. They used to compile without the contract, losing the cross-document hex check with a stdout line or none. No declaration is still an answer.
+- **The lineage artifact** (155): an unset or missing `audit_dir`, or a write that fails, raises. It used to skip the manifest's lineage copy silently.
+- **The must-resolve filing** (198, 199, 210, 211): no repo root, no issue number, or a filer that raises calls `alert_operator` with the cause and every criterion left unfiled. The halt on the uncompilable criteria stands. It used to file against "." and issue 0, and print a WARNING on failure.
+- **Mock mode** (186, 188): N1b decides it and files nothing, as documented test-mode behaviour, with no early return.
+- **N1c** (230, 231, 256) passes through only on an absence N1b recorded, and says why. No manifest and no record, or rows with no criteria list, is a finding through the existing GATE return. The fallback that re-derived criteria from the rows, which could only agree with them, is gone.
+
+**WON'T DO: the abstain (89, and the abstain half of 230).** The ledger asks for at least an ERROR and an alert when the compiler abstains, meaning the LLD has tables and none in the criteria shape. Counted on 2026-10-30 over the 110 LLDs in this repository: 110 abstain, 0 compile, 0 have no tables. Only the #332 visual-criteria shape carries a binding column, so an alert there would fire on every non-visual run. The tags are gone; the comment states the contract and the count, the abstain still prints and travels forward on state, and the pass-through is pinned.
+
+Compliance: each new failure path is loud (an ERROR line on stderr from N1b, or alert_operator's own line), logged (the message names the repo, the declared path or the audit dir, and the cause), stops (N1b's cannot-run return and N1c's findings route to HALT; a failed filing changes nothing because the run is already halting), and alerts (HALT calls `alert_operator`; the filing calls it directly).
+
+**Shared files changed:** `assemblyzero/core/gate_registry.py` gains the row `spec.manifest_cannot_run` for the new halt site, citing the operator's 2026-10-06 ADR 0236 acceptance in `created_by`. `tests/fixtures/gate_registry_baseline.json` raises `halt_rows_per_stage.spec` from 20 to 21 in the same change, as the ratchet requires.
+
+Baseline: seven loud-failure entries leave (five tags and two swallowed handlers).

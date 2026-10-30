@@ -297,6 +297,16 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         created_by="#2533",
     ),
     Gate(
+        "spec.manifest_cannot_run", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "N1b assertion manifest cannot run:",
+        _s(f"{_IS}/nodes/compile_manifest.py::_halt_manifest_cannot_run::return", 0),
+        created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N1b lacks an input it must have: a repo root, the contract the "
+              "repo's visual-gate declaration names, or a lineage directory "
+              "for the manifest. It used to compile without the contract, or "
+              "skip the lineage artifact, with a stdout line or none (ADR 0236)",
+    ),
+    Gate(
         "spec.finalize.draft_guard", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "GUARD: Cannot finalize empty spec draft",
         _s(f"{_IS}/nodes/finalize_spec.py::finalize_spec::return", 0, 1),
