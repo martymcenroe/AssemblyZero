@@ -258,3 +258,19 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** seven assertions of `RESULT: PASS` on vacuous runs, in `test_ownership_check.py`, `test_check_requirements_form.py` and `test_scope_coverage.py`, now assert `RESULT: NOT CHECKED` and the parts it names.
 
 **Neighbouring suites:** 309 passed across ten files.
+
+## form_check.py, scope_coverage.py, step_budget.py, parsers/verdict_parser.py
+
+**New:** `test_form_check_loud_failure.py` (3), `test_scope_coverage_loud_failure.py` (4), `test_step_budget_loud_failure.py` (6), `test_verdict_parser_loud_failure.py` (3). Before the fix every site test failed and every kept test passed, except form_check's kept test, which asserts the new `not_checked` attribute and so fails against the base module.
+
+**Changed tests:** two vacuous-scope assertions in `test_scope_coverage.py`, the junk-cap test in `test_step_budget.py`, and two parser tests in `test_issue_257.py`.
+
+**Neighbouring suites:** 220 passed across the module tests; 278 passed across the step budget's callers.
+
+## config.py, discrimination_check.py, table_injection.py
+
+**New:** `test_requirements_config_loud_failure.py` (5), `test_discrimination_check_loud_failure.py` (2), `test_table_injection_loud_failure.py` (4). Before the fix: every site test failed; the kept and compliant tests passed.
+
+**Changed tests:** three invalid-config tests in `test_requirements_config.py` expect the raise at construction.
+
+**Neighbouring suites:** 207 passed.

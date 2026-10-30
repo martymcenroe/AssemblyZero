@@ -406,7 +406,14 @@ def worn_criterion_id(sentence: str) -> str | None:
 
 
 def check_ears(body: str, report: FormReport) -> None:
-    """Validate the marked requirements section. Absence is a vacuous pass."""
+    """Validate the marked requirements section.
+
+    Absence means the EARS check could not run. Since #3585 that is not a
+    pass: ``FormReport.not_checked`` names it and the verdict renders NOT
+    CHECKED. It is not a violation, because the fleet's one converted issue
+    (boostgauge #7, ruled 2026-08-12) carries its requirements in decision
+    tables and no ``## Requirements`` section, and a violation would fail it.
+    """
     lines = section_lines(body, REQUIREMENTS_HEADING)
     if lines is None:
         report.ears_ran = False

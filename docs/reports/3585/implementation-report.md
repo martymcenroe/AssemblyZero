@@ -217,3 +217,16 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 
 - **An untagged owner row in a joinable table is a violation** (459); its criteria were skipped as "already reported" when nothing had reported them.
 - **A form check that examined nothing of a part renders NOT CHECKED** (611, 627, and `form_check.py:821`): no variable table, owners named only in prose, no requirements section, or no table of the checked kind. `FormReport.not_checked` names each part, and the verdict line lists them. `FormReport.ok` still means "no violations", because the preflight and the tools read it that way; `tools/check_requirements_form.py` therefore still exits 0 on NOT CHECKED, which is reported for the parent.
+
+### form_check.py, scope_coverage.py, step_budget.py, parsers/verdict_parser.py (8 ledger rows)
+
+- **No requirements section** (form_check 388) is named in the NOT CHECKED verdict, not added as a violation: the fleet's one converted issue carries no such section and is ruled correct, and a violation would fail it. Won't-do for the violation, pinned.
+- **Scope coverage** (467, 476): a vacuous report is no longer `ok`, and an alias naming a row the table lacks is a violation. Refusing the launch on a vacuous scope is a won't-do: the 2026-08-12 ruling keeps unconverted prose from refusing.
+- **The step budget** (83, 159): a cap that is not a number raises; a spent budget is an ERROR line and an alert, since HALT never runs on that path.
+- **The verdict parser** (76, 135): an empty verdict, and one whose status cannot be read, raise. The review node's broad handler still swallows them.
+
+### config.py, discrimination_check.py, table_injection.py (4 ledger rows: 3 fixed, 1 compliant)
+
+- **A WorkflowConfig validates itself when built** (122); its validator had no caller.
+- **Discrimination coverage with no Acceptance Criteria section** is not `ok` (278).
+- **A source table outside the body raises** (120) instead of being clamped into a partial "verbatim" injection. The append when there is no Section 3 stays (184, compliant).

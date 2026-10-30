@@ -344,7 +344,8 @@ class TestVacuousStatesAreDisclosed:
         assert report.vacuous
         assert "NOT CHECKED" in report.disclosure()
         assert "no scope enumeration" in report.disclosure()
-        assert report.ok  # nothing was found wrong, and nothing was judged
+        # #3585: nothing was judged, so the report is not ok
+        assert not report.ok
 
     def test_no_criteria_table_is_not_checked(self) -> None:
         report = check_scope_coverage(TITLE_331, LEDE_331)
@@ -371,7 +372,7 @@ class TestVacuousStatesAreDisclosed:
     def test_an_empty_body_never_raises(self) -> None:
         report = check_scope_coverage("", "")
         assert report.vacuous
-        assert report.ok
+        assert not report.ok  # #3585: vacuous is not ok
 
 
 # ---------------------------------------------------------------------------

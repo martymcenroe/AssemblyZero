@@ -176,8 +176,10 @@ class TestTheDerivedLimit:
             CLEAN_RUN_STEPS + HEADROOM_STEPS
         )
 
-    def test_a_junk_cap_falls_back_rather_than_raising(self):
-        assert recursion_limit("not a number") == recursion_limit(3)
+    def test_a_junk_cap_raises(self):
+        """#3585: it used to fall back to 3 without a word."""
+        with pytest.raises(ValueError, match="max_iterations"):
+            recursion_limit("not a number")
 
     def test_the_repair_cap_is_a_judgment_not_a_constraint(self, monkeypatch, capsys):
         """#2245's last criterion. MAX_FINALIZE_REPAIRS was 2 partly because a

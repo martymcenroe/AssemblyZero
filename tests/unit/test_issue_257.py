@@ -601,14 +601,11 @@ def test_110():
     Just random text.
     """
 
-    # TDD: Act
-    result = parse_verdict(malformed_verdict)
-
-    # TDD: Assert
-    # Should not crash, should return empty/default result
-    assert result is not None
-    assert result.verdict_status in ("UNKNOWN", "BLOCKED")
-    assert len(result.resolutions) == 0
+    # TDD: Act / Assert
+    # #3585: a status nobody can read raises, quoting the verdict; it used to
+    # degrade to UNKNOWN and the approved draft kept its open questions.
+    with pytest.raises(ValueError, match="no status"):
+        parse_verdict(malformed_verdict)
 
 
 def test_discuss_verdict(verdict_with_discuss):
@@ -708,9 +705,9 @@ def test_simple_approved_keyword(verdict_simple_approved):
 
 def test_empty_verdict():
     """Test empty verdict content."""
-    result = parse_verdict("")
-    assert result.verdict_status == "UNKNOWN"
-    assert len(result.parse_warnings) >= 1
+    # #3585: raises (was UNKNOWN with the warning only in a field)
+    with pytest.raises(ValueError, match="empty"):
+        parse_verdict("")
 
 
 def test_empty_draft():
