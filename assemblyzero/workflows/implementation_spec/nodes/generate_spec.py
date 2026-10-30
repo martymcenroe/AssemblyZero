@@ -419,6 +419,16 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             return _halt(issue_number, _PINNING_UNREADABLE)
 
     # -------------------------------------------------------------------------
+    # #3585: the LLD's machine-owned decision table (#2611) is read before the
+    # drafter is paid. A damaged block raises; it used to be read around.
+    # -------------------------------------------------------------------------
+    spec_injection = _spec_injection()
+    try:
+        spec_injection.build_injection(state.get("lld_content", ""))
+    except spec_injection.DamagedInjectionError as e:
+        return _halt(issue_number, str(e))
+
+    # -------------------------------------------------------------------------
     # Build prompt
     # Issue #642: Use build_retry_prompt() with tiered context pruning when
     # retry_count >= 1 in workflow state.

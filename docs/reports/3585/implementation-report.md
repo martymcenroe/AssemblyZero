@@ -133,3 +133,11 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 
 - **A token estimate that fails (232)** logs an ERROR naming the exception and re-raises; it returned -1, which a caller could read as a count.
 - **The tier-two fallback (174) is not changed.** Tier 2 prunes to save tokens; when the LLD has no section for the file, tier 1 sends the whole LLD, which loses nothing, and the result says it fell back.
+
+### Four one-site modules
+
+- **`error_path_coverage.py` (102).** A spec with no implementation fence is a check that cannot run, and is no longer `ok`; its caller recorded it as passed. A tests-only or docs-only spec now fails this check.
+- **`review_progress.py` (73).** A `max_iterations` that is not an integer raises; it stood in a base cap of 3, so the run reviewed to a ceiling nobody set.
+- **`nodes/human_gate.py` (146).** Reaching the gate while it is disabled is a misrouted graph and halts; it used to proceed to N5 as a "safety fallback".
+- **`table_injection.py` (139).** A machine-owned decision-table block that holds no criteria table raises `DamagedInjectionError`; it used to read around the damage to every criteria table in the LLD. N2 checks it before the drafter is paid.
+- **`core/gate_registry.py`.** The gate's new return makes the no-draft guard index 1; `spec.input_precondition` names both.

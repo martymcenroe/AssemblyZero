@@ -277,9 +277,11 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 0, 1, 2, 3)
         + _s(f"{_IS}/nodes/analyze_codebase.py::analyze_codebase::return", 0)
         + _s(f"{_IS}/nodes/analyze_codebase.py::_halt::return", 0)
-        + _s(f"{_IS}/nodes/human_gate.py::human_gate::return", 0),
+        + _s(f"{_IS}/nodes/human_gate.py::human_gate::return", 0, 1),
         notes=(
-            "#3585: N0 return 1 is the new repo_root guard (it used to read the "
+            "#3585: N4 return 0 is the gate reached while disabled (a misrouted "
+            "graph; it used to proceed to N5), so the no-draft guard moved from "
+            "0 to 1. N0 return 1 is the new repo_root guard (it used to read the "
             "working directory), so the LLD-not-found and unreadable returns "
             "moved from 1 and 2 to 2 and 3. N1's _halt is every failure the node "
             "used to print as a WARNING and pass: an empty plan, a Modify or "

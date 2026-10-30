@@ -144,3 +144,14 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
 - **Changed:** `test_retry_prompt_builder.py`'s sentinel test now expects the raise.
 - **Neighbouring suites:** 3 files, 65 passed.
 - **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
+
+## Four one-site modules: `error_path_coverage.py`, `review_progress.py`, `nodes/human_gate.py`, `table_injection.py`
+
+- **Added:** four test files, 19 tests in all. Before the fix, with the four modules and `generate_spec.py` put back: 9 failed, 10 passed. After: 19 passed. The table-injection file is named `test_spec_...` because the requirements workflow has a module of the same name.
+- **Changed:**
+  - `test_spec_stage_pair.py`: a spec with no implementation fence cannot be checked, and is not ok;
+  - `test_implementation_spec_workflow.py`: `test_t050` gains one implementation fence so the error-path check runs, and the disabled-gate test now expects a halt;
+  - `test_call_recording_roll.py`: the scripted spec gains an implementation fence;
+  - `test_review_convergence.py`: a garbage cap now raises.
+- **Neighbouring suites:** all 116 unit test files that import the spec workflow, with the error-path change: 2,402 passed. With all four changes, the 26 closest files: 725 passed.
+- **Audits:** `audit_loud_failure.py --check` 0 new, 4 stale (the earlier modules'); `audit_fail_open.py --check` PASS.

@@ -90,6 +90,13 @@ Implements REQ-1.
 
 - `src/greet.py` (Add)
 
+## 6. Change Instructions
+
+```python
+def greet(name):
+    return f"hello, {name}"
+```
+
 ## 10. Test Plan
 
 ### 10.1 Test Functions

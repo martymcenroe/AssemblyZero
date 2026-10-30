@@ -1114,12 +1114,15 @@ class TestValidateCompleteness:
         )
 
         # #3585: Section 10 and the LLD it cites are present, because N3
-        # fails a spec with no Section 10 (a fact) and halts without the LLD.
-        # Section 10's one fence leaves both proxies failing: the Modify file
-        # is never mentioned, and one fence is under the threshold of three.
+        # fails a spec with no Section 10 (a fact) and halts without the LLD;
+        # and one implementation fence, so error_paths_have_tests can run (a
+        # spec with none is a check that cannot run, which is not a pass).
+        # Both proxies still fail: the Modify file is never mentioned near a
+        # fence, and two fences are under the threshold of three.
         base_state["spec_draft"] = (
             "# Implementation Spec\n\n## Overview\n\nChanges.\n\n"
             + ("filler content\n" * 20)
+            + "\n```python\ndef build():\n    return None\n```\n"
             + SECTION_TEN
         )
         base_state["lld_content"] = TAGGED_LLD
@@ -1539,16 +1542,20 @@ class TestImportResolvesExtendedSourceLayouts:
 class TestHumanGate:
     """Tests for N4: human_gate node."""
 
-    def test_disabled_gate_auto_routes(self, base_state):
-        """Disabled gate → N5."""
+    def test_disabled_gate_halts_as_misrouted(self, base_state):
+        """Disabled gate reached → a misrouted graph, which halts (#3585).
+
+        It used to route to N5 as a safety fallback, hiding the misrouting.
+        """
+        from assemblyzero.workflows.implementation_spec.graph import route_after_human_gate
         from assemblyzero.workflows.implementation_spec.nodes.human_gate import human_gate
 
         base_state["human_gate_enabled"] = False
         base_state["spec_draft"] = "# Some spec"
 
         result = human_gate(base_state)
-        assert result["next_node"] == "N5_review_spec"
-        assert result["error_message"] == ""
+        assert "human_gate_enabled" in result["error_message"]
+        assert route_after_human_gate(result) == "HALT"
 
     def test_no_spec_returns_end(self, base_state):
         """No spec draft → END."""
