@@ -156,3 +156,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed test:** `test_speedrun.py::test_run_logger_skips_malformed_lines` is now `test_run_logger_refuses_malformed_lines`.
 
 **Neighbouring suites:** 35 passed across the new file, `test_speedrun.py` and `test_model_record.py`.
+
+## telemetry/store.py
+
+**New: `tests/unit/test_telemetry_store_loud_failure.py` (7).** Site tests for 71, 88, 114 and 127, plus a disabled store, a day with no file, and written records read back and queried, which pin kept behaviour.
+
+**Before the fix, measured** by putting HEAD's `store.py` back: 4 failed, 3 passed (the kept-behaviour tests).
+
+**Changed test:** `test_llm_instrumentation.py::TestWriteFailure::test_oserror_does_not_propagate` is now `test_oserror_alerts_and_propagates`; the file's now-unused `import logging` is removed.
+
+**Neighbouring suites:** 31 passed across the new file, `test_llm_instrumentation.py` and `test_telemetry_cost_loud_failure.py`.

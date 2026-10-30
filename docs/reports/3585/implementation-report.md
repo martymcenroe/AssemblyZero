@@ -149,3 +149,13 @@ The speed-run record is opt-in (`--speedrun`), and when it is on it is the durab
 - **A malformed run-log line alerts and raises** `ValueError` naming the log and the line (335). It was skipped with a WARNING, so the summary counted fewer attempts than the log holds.
 
 Callers: the runners' `_finalize_speedrun` (`tools/run_requirements_workflow.py`, `tools/run_implement_from_lld.py`) and `tools/speedrun_summarize.py` do not catch.
+
+### telemetry/store.py (4 sites)
+
+- **A call record that cannot be written alerts and raises** (71). `CallStore.write` swallowed every exception at WARNING and the record was lost.
+- **A corrupt line in a day's file alerts and raises** (88), naming the file and the line. It was skipped at WARNING.
+- **A `calls-*.jsonl` file whose name holds no date alerts and raises** (114). It was skipped silently.
+- **A corrupt line met by `query` alerts and raises** (127). It was skipped silently.
+- A disabled store, and a day with no file, stay quiet.
+
+Callers: `InstrumentedCall.__exit__` writes through it; its one user is `assemblyzero/nodes/anthropic_provider.py`, which no run reaches. Baseline: `CallStore.write`'s handler entry leaves.
