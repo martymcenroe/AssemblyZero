@@ -409,7 +409,8 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "spec.review.empty_draft", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "GUARD: Spec draft is empty",
-        _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 1),
+        _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 1)
+        + _s(f"{_IS}/nodes/review_spec.py::_halt::return", 0),
         justified_by="#2723",
         notes=(
             "infrastructure since #2773 (operator ruling 2026-09-04 on "
@@ -417,7 +418,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
             "no span for a revision to cite, and asking the drafter to revise "
             "nothing is regeneration, which #2569 removed from the revision "
             "path. Also saves the paid reviewer call on a draft with no "
-            "content"
+            "content. #3585: N5's _halt is the draft under the minimum or over "
+            "the review limit and the missing lineage directory (before the "
+            "call), and a verdict that cannot be recorded (after it)"
         ),
     ),
     Gate(

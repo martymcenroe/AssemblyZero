@@ -2198,6 +2198,8 @@ class TestReviewSpec:
 
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
+        # #3585: N5 halts with no lineage directory to record the verdict in.
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 
@@ -2226,6 +2228,7 @@ class TestReviewSpec:
 
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
+        base_state["audit_dir"] = base_state["repo_root"]  # #3585
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 
@@ -2258,6 +2261,7 @@ class TestReviewSpec:
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
         base_state["review_iteration"] = 3
         base_state["max_iterations"] = 3
+        base_state["audit_dir"] = base_state["repo_root"]  # #3585
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 
@@ -2358,12 +2362,15 @@ class TestParseReviewVerdict:
         with pytest.raises(StructuredContractError):
             parse_review_verdict("Verdict: APPROVED\n\nGreat work!")
 
-    def test_empty_response_blocked(self):
-        """Empty → BLOCKED (an empty response is an infrastructure signal;
-        the conservative pre-0028 behavior stands)."""
+    def test_empty_response_raises(self):
+        """Empty → StructuredContractError (#3585). It used to return a
+        BLOCKED verdict the reviewer never issued."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        assert parse_review_verdict("")[0] == "BLOCKED"
+        with pytest.raises(StructuredContractError, match="empty"):
+            parse_review_verdict("")
 
     def test_discuss_json_rejects_not_in_enum(self):
         """DISCUSS is not in REVIEW_SPEC_SCHEMA's enum — a contract

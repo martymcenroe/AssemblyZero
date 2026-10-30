@@ -18,10 +18,18 @@ This node populates:
 - review_feedback: Gemini's detailed review comments
 - review_iteration: Current review round (unchanged; N2 increments on revision)
 - error_message: "" on success, error text on failure
+
+#3585 (ADR 0236): every failure returns an ``error_message`` that
+``route_after_review`` sends to HALT. A draft under the minimum or over the
+review limit, and a run with no lineage directory, halt before the reviewer is
+paid; a verdict that cannot be saved halts after. The reviewer always sees the
+whole draft and the whole LLD: neither is cut to fit any more. An empty
+response is a contract violation, never a BLOCKED verdict nobody issued.
 """
 
 import difflib
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +145,14 @@ baselines."""
 # =============================================================================
 
 
+def _halt(issue_number: Any, reason: str) -> dict[str, Any]:
+    """The node's failure result for #3585's halts: loud on stderr, routed to
+    HALT by route_after_review, which alerts."""
+    message = f"[N5] review_spec for issue #{issue_number}: {reason}"
+    print(f"ERROR {message}", file=sys.stderr, flush=True)
+    return {"error_message": message}
+
+
 def _invoke_reviewer_with_spec_schema(
     provider,
     prompt: str,
@@ -167,26 +183,16 @@ def _invoke_reviewer_with_spec_schema(
     result = provider.invoke(system, prompt, **schema_kwargs)
     if not getattr(result, "success", False):
         detail = getattr(result, "error_message", None) or "LLM call failed with no error detail"
-        return None, str(detail)
+        return _reviewer_failed(str(detail))
     raw = getattr(result, "response", None) or ""
     if not raw.strip():
-        return None, "LLM call returned an empty response"
+        return _reviewer_failed("LLM call returned an empty response")
     # Standard 0028: a schema-violating response is rejected through the
     # same (None, error) path as an infrastructure failure — the caller
     # surfaces it and the stage retry re-asks. No regex fallback exists.
     try:
-        return parse_structured_review_spec(raw), ""
+        return _read_review(raw, "verdict"), ""
     except StructuredContractError as first:
-        # #2837: the prompt's own "Required Output Format" is a markdown
-        # template; when the reviewer follows it (run 15, 2026-09-05) the
-        # verdict is fully legible and is read as our own format (0028 §3).
-        template = parse_markdown_review_spec(raw)
-        if template is not None:
-            print(
-                "    [N5] verdict read from the review's own output template, "
-                f"not JSON (#2837): {template['verdict']}"
-            )
-            return template, ""
         # Neither shape. One re-ask naming the defect; then the rejection.
         print(
             "    [N5] reviewer answered in neither the JSON contract nor the "
@@ -195,26 +201,51 @@ def _invoke_reviewer_with_spec_schema(
         retry = provider.invoke(system + _REASK_FOR_JSON, prompt, **schema_kwargs)
         if not getattr(retry, "success", False):
             detail = getattr(retry, "error_message", None) or "LLM call failed with no error detail"
-            return None, str(detail)
+            return _reviewer_failed(str(detail))
         raw_retry = getattr(retry, "response", None) or ""
         try:
-            return parse_structured_review_spec(raw_retry), ""
+            return _read_review(raw_retry, "re-asked verdict"), ""
         except StructuredContractError as second:
-            # fail-open: not open -- the rejection is returned as (None, error)
-            # for the caller to surface, exactly as the first handler above
-            # does; the node halts on it. Declared so the audit sees the pair.
-            template = parse_markdown_review_spec(raw_retry)
-            if template is not None:
-                print(
-                    "    [N5] re-asked verdict read from the review's own output "
-                    f"template (#2837): {template['verdict']}"
-                )
-                return template, ""
-            return None, (
+            # #3585: the rejection is this function's failure result, which
+            # the node halts on; the comment here used to be the withdrawn tag.
+            return _reviewer_failed(
                 "structured contract violated in review_spec: unreadable twice -- "
                 f"first: {first.reason}; re-ask: {second.reason}"
                 f" | response begins: {second.excerpt!r}"
             )
+
+
+def _reviewer_failed(reason: str) -> tuple[None, str]:
+    """The reviewer helper's failure result, ``(None, reason)``.
+
+    The node turns it into an ``error_message`` routed to HALT; it is never
+    read as a verdict (#1868).
+    """
+    return None, reason
+
+
+def _read_review(raw: str, label: str) -> ReviewSpecResult:
+    """The verdict in ``raw``: the JSON contract, else the output template.
+
+    #2837: the prompt's own "Required Output Format" is a markdown template;
+    when the reviewer follows it (run 15, 2026-09-05) the verdict is fully
+    legible and is read as our own format (0028 §3).
+
+    Raises:
+        StructuredContractError: ``raw`` is in neither shape (the JSON
+            parser's own error, so its reason names the contract).
+    """
+    try:
+        return parse_structured_review_spec(raw)
+    except StructuredContractError:
+        template = parse_markdown_review_spec(raw)
+        if template is None:
+            raise
+        print(
+            f"    [N5] {label} read from the review's own output template, "
+            f"not JSON (#2837): {template['verdict']}"
+        )
+        return template
 
 
 #: Appended to the system prompt for the one re-ask (#2837).
@@ -329,13 +360,36 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
             "error_message": "GUARD: Spec draft is empty",
         }
 
+    # #3585: a draft under the minimum used to be reviewed anyway, after a
+    # WARNING; one over the limit was cut, and an APPROVED verdict on the
+    # part then stood for the whole. Both halt here, before the reviewer is
+    # paid.
     content_len = len(spec_draft)
     if content_len < MIN_SPEC_SIZE:
-        print(f"    [GUARD] WARNING: Spec suspiciously short ({content_len} chars)")
+        return _halt(
+            issue_number,
+            f"the spec draft is {content_len} chars, under the {MIN_SPEC_SIZE}-char "
+            f"minimum, so it is not sent for review",
+        )
 
     if content_len > MAX_SPEC_SIZE:
-        print(f"    [GUARD] Truncating spec from {content_len} to {MAX_SPEC_SIZE} chars")
-        spec_draft = spec_draft[:MAX_SPEC_SIZE] + "\n\n<!-- Truncated for review -->\n"
+        return _halt(
+            issue_number,
+            f"the spec draft is {content_len:,} chars, over the {MAX_SPEC_SIZE:,}-char "
+            f"review limit; a review of part of it cannot approve the whole",
+        )
+
+    # #3585: the verdict is recorded in lineage. An unset directory used to
+    # drop the record without a word; it halts here, before the reviewer is
+    # paid. A set directory that is absent is still created (#1889).
+    audit_dir_str = state.get("audit_dir", "")
+    if not audit_dir_str:
+        return _halt(
+            issue_number,
+            "no audit directory is set in state, so the verdict cannot be recorded "
+            "in lineage",
+        )
+    audit_dir = Path(audit_dir_str)
 
     # -------------------------------------------------------------------------
     # Build review content
@@ -408,10 +462,6 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Save verdict to audit trail
     # -------------------------------------------------------------------------
-    audit_dir_str = state.get("audit_dir", "")
-    audit_dir = Path(audit_dir_str) if audit_dir_str else None
-    verdict_path = None
-
     verdict_content = f"Verdict: {verdict_status}\n\nRationale: {spec_result['rationale']}\n"
     if spec_result.get("feedback_items"):
         verdict_content += "\n## Feedback Items\n"
@@ -420,24 +470,27 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
 
     # #1889: create the audit dir if it is absent rather than silently
     # dropping the verdict. A run that blocked and left no record of why is
-    # the failure this whole gate exists to prevent.
-    if audit_dir:
-        try:
-            audit_dir.mkdir(parents=True, exist_ok=True)
-            file_num = next_file_number(audit_dir)
-            verdict_path = save_audit_file(
-                audit_dir, file_num, "readiness-verdict.md", verdict_content
-            )
-        except OSError as exc:
-            print(f"    WARNING: could not persist verdict: {exc}")
+    # the failure this whole gate exists to prevent. #3585: a save that fails
+    # halts; it used to print a WARNING and go on with no record.
+    try:
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        file_num = next_file_number(audit_dir)
+        verdict_path = save_audit_file(
+            audit_dir, file_num, "readiness-verdict.md", verdict_content
+        )
+    except OSError as exc:
+        return _halt(
+            issue_number,
+            f"cannot record the {verdict_status} verdict in {audit_dir}: "
+            f"{type(exc).__name__}: {exc}",
+        )
 
     # -------------------------------------------------------------------------
     # Report results
     # -------------------------------------------------------------------------
     verdict_lines = len(verdict_content.splitlines()) if verdict_content else 0
     print(f"    Verdict: {verdict_status} ({verdict_lines} lines)")
-    if verdict_path:
-        print(f"    Saved: {verdict_path.name}")
+    print(f"    Saved: {verdict_path.name}")
 
     # #1889: BLOCKED is the more severe outcome and used to print nothing but
     # a line count, so the reviewer's finding — the whole point of the gate —
@@ -531,9 +584,11 @@ def _file_conflict_if_any(state, rationale: str) -> None:
     "Next step: resolve ." with nothing in it, and the question had to be filed
     by hand for the block to be tracked at all.
 
-    Same contract as N0c's filing: never raises, never changes the halt. The
-    roll is already stopping; a filing problem is loud in the log and nothing
-    more.
+    Same contract as N0c's filing: never changes the halt. The roll is
+    already stopping. #3585: a filing that fails alerts the operator with its
+    cause, because the halt's own alert names the conflict and not the missing
+    question; it used to print a WARNING on stdout and nothing more. A failed
+    alert raises AlertDeliveryError, as every alert does.
     """
     from assemblyzero.core.exit_codes import CONFLICT_MARKER
 
@@ -556,9 +611,21 @@ def _file_conflict_if_any(state, rationale: str) -> None:
             origin=SPEC_REVIEW_ORIGIN,
         )
     except Exception as exc:  # noqa: BLE001 - filing must never mask the halt
+        from assemblyzero.core import alert
+
+        issue_number = state.get("issue_number") or 0
         print(
-            f"    [spec review] WARNING: must-resolve filing failed ({exc}); "
-            "halting anyway."
+            f"    [spec review] ERROR: must-resolve filing failed ({exc}); "
+            "the operator is alerted and the run halts anyway."
+        )
+        alert.alert_operator(
+            what=f"file the must-resolve question for issue #{issue_number}'s "
+                 f"requirements conflict",
+            where="assemblyzero.workflows.implementation_spec.nodes.review_spec"
+                  "._file_conflict_if_any (N5)",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="the spec stage halts BLOCKED with no question filed to "
+                        "rule on; file it by hand from the halt's rationale",
         )
 
 
@@ -581,6 +648,12 @@ def _build_review_content(
 
     Issue #491: When previous_spec_draft exists and changes are <20% of total,
     prepend a unified diff to focus the reviewer on what changed.
+
+    #3585: the LLD is sent whole. It used to be cut at 50,000 chars, so the
+    reviewer judged traceability against part of it, silently. LLDs in this
+    repo run to 58,000 chars, so halting at the old cut would stop real runs;
+    the reviewer's context holds the whole document, and the draft has its own
+    limit (MAX_SPEC_SIZE), checked by the node.
 
     Args:
         spec_draft: Generated Implementation Spec markdown.
@@ -634,13 +707,10 @@ def _build_review_content(
         f"## Implementation Spec to Review\n\n{spec_draft}"
     )
 
-    # Original LLD for cross-reference (truncated if very large)
+    # Original LLD for cross-reference, whole (#3585)
     if lld_content:
-        lld_excerpt = lld_content
-        if len(lld_excerpt) > 50_000:
-            lld_excerpt = lld_excerpt[:50_000] + "\n\n<!-- LLD truncated for review -->\n"
         sections.append(
-            f"## Original LLD (for cross-reference)\n\n{lld_excerpt}"
+            f"## Original LLD (for cross-reference)\n\n{lld_content}"
         )
 
     # Review criteria
@@ -766,9 +836,16 @@ def parse_review_verdict(response: str) -> tuple[str, str]:
         Tuple of (verdict_status, feedback_text).
         verdict_status: One of "APPROVED", "REVISE", "BLOCKED".
         feedback_text: The full response as feedback for revision prompts.
+
+    Raises:
+        StructuredContractError: the response violates the schema, or is
+            empty (#3585). An empty response used to come back as a BLOCKED
+            verdict the reviewer never issued.
     """
     if not response or not response.strip():
-        return "BLOCKED", ""
+        raise StructuredContractError(
+            "parse_review_verdict", "the reviewer response is empty", response or "",
+        )
     result = parse_structured_review_spec(response)
     verdict = result["verdict"]
     feedback = review_feedback_text(result["rationale"], result["feedback_items"])

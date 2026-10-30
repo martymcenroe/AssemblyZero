@@ -94,3 +94,13 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 - **Approval (196)** needs an explicit marker; the word APPROVED anywhere in the text no longer passes the gate. The LLD stage always writes `**Final Status:**`, so its LLDs are unaffected.
 - **The read and the length guard (260, 266)** name the issue, the path, the exception type and the length; a file that is not UTF-8 is reported, where it raised past the node.
 - **`core/gate_registry.py`.** The node's returns shift by the new guard and gain two; `spec.input_precondition` names 0 to 3 and `spec.lld_not_usable` 4 to 7. No row is added.
+
+### `workflows/implementation_spec/nodes/review_spec.py` (7 sites, 10 compliant)
+
+- **Halts before the reviewer is paid.** A draft under the minimum (334) used to be reviewed after a WARNING; one over the limit (338) was cut, and an APPROVED verdict on the part then stood for the whole. A call with no audit directory (432) dropped the verdict record. All three halt.
+- **A verdict that cannot be recorded (432)** halts; it used to print a WARNING and go on. A set but absent directory is still created (#1889).
+- **The LLD (641) is sent whole.** It used to be cut at 50,000 characters, so traceability was judged against part of it. A halt there would stop real runs, since LLDs in this repo reach 58,000 characters; the draft keeps its own limit.
+- **A must-resolve filing that fails (558)** now alerts the operator with its cause; the halt is unchanged.
+- **An empty reviewer response (771)** raises `StructuredContractError`; it was a BLOCKED verdict the reviewer never issued.
+- **The withdrawn tag (203).** The template fallback moved into `_read_review`, whose handler re-raises, and the failure tuple is built by `_reviewer_failed`, so neither handler returns a stand-in result.
+- **`core/gate_registry.py`.** The new `_halt` return joins `spec.review.empty_draft`; no row is added.

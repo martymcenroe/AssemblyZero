@@ -102,3 +102,12 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
 - **Changed** in `test_implementation_spec_workflow.py`: the two `TestParseLldTable` tests that expected `[]` for a missing table, and `test_unknown_defaults_to_add`, now expect `ValueError`.
 - **Neighbouring suites:** 16 files, 514 passed after the three changes.
 - **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.
+
+## `nodes/review_spec.py`
+
+- **Added:** `tests/unit/test_review_spec_loud_failure.py`, 18 tests. Before the fix: 11 failed, 7 passed; the 7 pin compliant rows and kept behaviour. After: 18 passed.
+- **Changed:**
+  - `test_implementation_spec_workflow.py`: three `TestReviewSpec` tests get a lineage directory, and `test_empty_response_blocked` is now `test_empty_response_raises`;
+  - `test_spec_conflict_filing.py`: a failed filing is asserted to alert the operator, not to print a WARNING.
+- **Neighbouring suites:** 18 files, 511 passed after the changes.
+- **Audits:** `audit_loud_failure.py --check` 0 new, 3 stale (two of them this module's); `audit_fail_open.py --check` PASS.
