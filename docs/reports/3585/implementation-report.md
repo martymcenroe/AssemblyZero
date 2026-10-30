@@ -25,3 +25,13 @@ The ledger exists so a roll whose requirements gate proceeded without a verdict 
 Callers that still swallow the raise: `workflows/requirements/nodes/analyze_requirements.py` `_record_unverified` prints a WARNING; `tools/orchestrate.py` and `tools/speedrun_roll.py` `_requirements_unverified_lines` catch any exception around the read. Neither file is in this branch.
 
 Compliance: each failure path writes an ERROR line through `alert_operator`, records what, where, cause and consequence, alerts, and raises.
+
+### utils/ast_sentinel.py (2 sites)
+
+- **A file that does not parse raises** (472). `analyze_source` raises `SentinelCannotRun` naming the file, the line and the syntax error, chained from the `SyntaxError`. It used to return a `<syntax>` finding, which the mechanical validator filed as the advisory "symbol '<syntax>' may not be imported".
+- **A file that cannot be read raises** (498). `analyze_file` raises `SentinelCannotRun` for an `OSError` or `UnicodeDecodeError`, naming the path. It used to return an `<io>` finding.
+- An undefined name is still a finding in the result; only "could not check" moved to a raise.
+
+Caller that still swallows the raise: `workflows/requirements/nodes/validate_mechanical.py` `run_ast_sentinel_on_modify_files` catches `Exception` and logs at DEBUG (its own loud-failure baseline entry). Until it is fixed, a broken file goes from an advisory warning to nothing.
+
+Compliance: the raise carries what and where (the file) and the cause; stopping and alerting fall to the caller, which is in the requirements package.
