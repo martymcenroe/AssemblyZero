@@ -628,6 +628,16 @@ GATE_REGISTRY: tuple[Gate, ...] = (
               "framework alone, so a second framework's red phase had nothing to run",
     ),
     Gate(
+        "impl.scaffold_validation_cannot_run", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "scaffold cannot be",
+        _s(f"{_TS}/nodes/validate_tests_mechanical.py::_halt_validation_cannot_run::return", 0),
+        decided_in=f"{_TS}/nodes/validate_tests_mechanical.py::_non_pytest_errors",
+        created_by="#3081 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a Playwright, Jest or Vitest scaffold's validator cannot be built "
+              "(no npx), or the run's frameworks cannot be read. It used to return "
+              "is_valid True with a warning, so a check that could not run passed",
+    ),
+    Gate(
         "impl.framework_unresolved", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "the test frameworks for issue",
         _s(f"{_TS}/nodes/load_lld.py::_framework_resolution_failed::return", 0),

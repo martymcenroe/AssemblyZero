@@ -14,3 +14,13 @@ In progress. Each issue's section is written when its commit lands.
 - T1: in a two-framework run the Vitest scaffold is `web/tests/issue_7.test.ts`, and `verify_phases._framework_legs` gives it to the Vitest leg and `tests/test_issue_7.py` to pytest; a single-framework Vitest config with `working_directory: web` gets `web/tests/`; a JavaScript framework at the root and pytest keep the root's `tests/` (two kept behaviours).
 - T2: a scaffold for Vitest in `web/` in a run whose frameworks are pytest at the root and Vitest in `app/` raises `ScaffoldPathError` naming `issue_7.test.ts`, `pytest` and `vitest (app)`; a `working_directory` of `../elsewhere` raises naming "outside the repository".
 - Against the unchanged source: 4 failed (`assert [] == [...web/tests/issue_7.test.ts]`, the root's `tests/` path, and `ImportError: cannot import name 'ScaffoldPathError'` twice), 2 passed. On the fix: 6 passed.
+
+## #3081: `tests/unit/test_ts_scaffold_is_validated.py` (7)
+
+- The Vitest scaffold returns `generated_tests`, equal to the file it wrote, and no `test_file_content` (on `4ac9c81a`: `KeyError: 'generated_tests'`).
+- End to end, N2 then N2.5 on a Vitest target: no errors, `is_valid` True, route `continue`, `route_after_validate` gives `N3_verify_red` (on `4ac9c81a`: `Empty test file: .../tests/issue_7.test.ts`).
+- A good file on disk with an empty state key validates; a bad file on disk with a good state key is refused with "No test structure" (on `4ac9c81a` each was judged on the state key, so both came out the other way).
+- A test file that cannot be read halts naming the path and "cannot be read", routed to HALT; a runner that cannot be built (no `npx`) halts naming `vitest` and `npx`, prints an ERROR line on stderr, and routes to HALT (on `4ac9c81a`: `is_valid` True for both).
+- With two frameworks, a TypeScript scaffold with no test in it is refused beside a good Python one (on `4ac9c81a`: valid, since the Python scaffold alone was checked).
+- `test_a_test_file_that_cannot_be_read_halts_naming_it` was written as "...is a validation error naming it" and run that way against `4ac9c81a`, where it failed; the fail-open audit then refused the handler that recorded an error and stepped past the file, so an unreadable file halts instead, and the test asserts the halt.
+- Against the unchanged source: 7 failed. On the fix: 7 passed.

@@ -1336,9 +1336,12 @@ def _scaffold_non_python_tests(
         ext = framework_config["test_file_extension"]
         save_audit_file(audit_dir, file_num, f"test-scaffold{ext}", content)
 
+    # #3081: the key the validator reads, the one #789 named. This path
+    # returned `test_file_content`, which nothing read, so every Playwright,
+    # Jest and Vitest scaffold was validated as an empty file.
     return {
         "test_files": [str(test_file_path)],
-        "test_file_content": content,
+        "generated_tests": content,
         "file_counter": file_num,
         "error_message": "",
     }
@@ -1392,7 +1395,7 @@ def _scaffold_every_framework(
             return result
         test_files.extend(result.get("test_files", []))
         file_counter = result.get("file_counter", file_counter)
-        content = result.get("generated_tests", result.get("test_file_content"))
+        content = result.get("generated_tests", "")
         if run.framework == TestFramework.PYTEST or generated is None:
             generated = content
     return {
