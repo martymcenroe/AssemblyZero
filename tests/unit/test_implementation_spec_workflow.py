@@ -702,17 +702,20 @@ class TestParseLldTable:
         change_types = {f["change_type"] for f in files}
         assert "Add" in change_types or "Modify" in change_types
 
-    def test_empty_content_returns_empty(self):
-        """Empty content → empty list."""
+    def test_empty_content_raises(self):
+        """Empty content → ValueError (#3585); it returned [], which read as
+        a table with no rows."""
         from assemblyzero.workflows.implementation_spec.nodes.load_lld import parse_files_to_modify
 
-        assert parse_files_to_modify("") == []
+        with pytest.raises(ValueError, match="Section 2.1"):
+            parse_files_to_modify("")
 
-    def test_no_table_returns_empty(self):
-        """Content without table → empty list."""
+    def test_no_table_raises(self):
+        """Content without table → ValueError (#3585)."""
         from assemblyzero.workflows.implementation_spec.nodes.load_lld import parse_files_to_modify
 
-        assert parse_files_to_modify("# LLD\n\nNo table here.\n") == []
+        with pytest.raises(ValueError, match="Section 2.1"):
+            parse_files_to_modify("# LLD\n\nNo table here.\n")
 
 
 class TestFindLldPath:
@@ -779,11 +782,13 @@ class TestNormalizeChangeType:
         assert _normalize_change_type("delete") == "Delete"
         assert _normalize_change_type("remove") == "Delete"
 
-    def test_unknown_defaults_to_add(self):
-        """Unknown type → Add."""
+    def test_unknown_raises(self):
+        """Unknown type → ValueError (#3585); it defaulted to Add, so a file
+        meant to be modified or deleted was specified as new."""
         from assemblyzero.workflows.implementation_spec.nodes.load_lld import _normalize_change_type
 
-        assert _normalize_change_type("unknown") == "Add"
+        with pytest.raises(ValueError, match="'unknown'"):
+            _normalize_change_type("unknown")
 
 
 class TestCheckApprovedStatus:

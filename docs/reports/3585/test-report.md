@@ -95,3 +95,10 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
   - `test_call_recording_roll.py`: the lineage directory exists before N2.
 - **Neighbouring suites:** 17 files, 468 passed.
 - **Audits:** `audit_loud_failure.py --check` reports 0 new and 1 stale, the withdrawn tag; `audit_fail_open.py --check` PASS.
+
+## `nodes/load_lld.py`
+
+- **Added:** `tests/unit/test_spec_load_lld_loud_failure.py`, 19 tests, named `test_spec_...` because the testing workflow has a module of the same name. Before the fix: 12 failed, 7 passed. After: 19 passed.
+- **Changed** in `test_implementation_spec_workflow.py`: the two `TestParseLldTable` tests that expected `[]` for a missing table, and `test_unknown_defaults_to_add`, now expect `ValueError`.
+- **Neighbouring suites:** 16 files, 514 passed after the three changes.
+- **Audits:** `audit_loud_failure.py --check` 0 new; `audit_fail_open.py --check` PASS.

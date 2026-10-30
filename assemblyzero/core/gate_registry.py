@@ -274,22 +274,30 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "spec.input_precondition", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "No issue number provided",
-        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 0, 1, 2)
+        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 0, 1, 2, 3)
         + _s(f"{_IS}/nodes/analyze_codebase.py::analyze_codebase::return", 0)
         + _s(f"{_IS}/nodes/analyze_codebase.py::_halt::return", 0)
         + _s(f"{_IS}/nodes/human_gate.py::human_gate::return", 0),
         notes=(
-            "#3585: N1's _halt is every failure the node used to print as a "
-            "WARNING and pass: an empty plan, a Modify or Delete target missing, "
-            "not a file, unreadable or unparseable, an unknown change type, a "
-            "context file that cannot be read, and a base git cannot answer"
+            "#3585: N0 return 1 is the new repo_root guard (it used to read the "
+            "working directory), so the LLD-not-found and unreadable returns "
+            "moved from 1 and 2 to 2 and 3. N1's _halt is every failure the node "
+            "used to print as a WARNING and pass: an empty plan, a Modify or "
+            "Delete target missing, not a file, unreadable or unparseable, an "
+            "unknown change type, a context file that cannot be read, and a base "
+            "git cannot answer"
         ),
     ),
     Gate(
         "spec.lld_not_usable", "spec", JUDGES_UPSTREAM, ACTION_HALT,
         "GUARD: LLD content too short",
-        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 3, 4),
-        notes="the LLD is too short or not approved; this stage cannot revise it",
+        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 4, 5, 6, 7),
+        notes=(
+            "the LLD is too short or not approved; this stage cannot revise it. "
+            "#3585 added returns 6 (no Section 2.1 table, or a change type no "
+            "spelling matches) and 7 (a table that lists no files); the short "
+            "and not-approved returns moved from 3 and 4 to 4 and 5"
+        ),
     ),
     Gate(
         "spec.manifest_uncompilable", "spec", JUDGES_UPSTREAM, ACTION_HALT,

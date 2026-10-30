@@ -86,3 +86,11 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 - **The withdrawn tag (397).** Seat resolution, the preflight and the provider build share one handler, so a seat error is no longer held and raised again.
 - **For a real run:** a revision whose verdict names no backticked span, quoted phrase, test name, manifest row, Section or line range now halts at N2, and a run with no lineage directory halts at N2 rather than N6.
 - **`core/gate_registry.py`.** The new `_halt` return joins `spec.drafter_failed`; no row is added.
+
+### `workflows/implementation_spec/nodes/load_lld.py` (7 sites, 3 compliant)
+
+- **No repo_root (234)** halts; it used to read the working directory.
+- **The Section 2.1 table (105, 165, 290).** An absent table, a change type no known spelling matches, and a table that lists no files each halt, naming the issue and the LLD's path. They used to read as no files, as "Add", and as a WARNING. Directory rows are skipped before their type is read.
+- **Approval (196)** needs an explicit marker; the word APPROVED anywhere in the text no longer passes the gate. The LLD stage always writes `**Final Status:**`, so its LLDs are unaffected.
+- **The read and the length guard (260, 266)** name the issue, the path, the exception type and the length; a file that is not UTF-8 is reported, where it raised past the node.
+- **`core/gate_registry.py`.** The node's returns shift by the new guard and gain two; `spec.input_precondition` names 0 to 3 and `spec.lld_not_usable` 4 to 7. No row is added.
