@@ -402,6 +402,21 @@ def route_after_mechanical_hooks(
 MAX_COVERAGE_AUGMENT_ATTEMPTS = 2
 
 
+def route_after_augment(
+    state: TestingWorkflowState,
+) -> Literal["N5_verify_green", "HALT"]:
+    """Route after N4c (augment_tests_for_coverage) (#4246).
+
+    N4c returns to verification, and never to implementation (#2327). A
+    recorded reason halts: coverage that could not be measured, or a gap in a
+    framework N4c cannot write tests for. The edge used to go back to N5
+    unconditionally, and N5's next result overwrote the reason.
+    """
+    if state.get("error_message", ""):
+        return "HALT"
+    return "N5_verify_green"
+
+
 def route_after_green(
     state: TestingWorkflowState,
 ) -> Literal[
@@ -730,10 +745,19 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # #2327: test additions always return to verification. The node never
-    # routes to implementation, so a coverage shortfall cannot become an
-    # implementation edit by any path.
-    workflow.add_edge("N4c_augment_tests", "N5_verify_green")
+    # #2327: test additions return to verification. The node never routes to
+    # implementation, so a coverage shortfall cannot become an implementation
+    # edit by any path. #4246: a recorded reason halts instead; the edge back
+    # to N5 was unconditional, so N4c's error was overwritten by the next
+    # measurement (ledger 0908, graph.py:732).
+    workflow.add_conditional_edges(
+        "N4c_augment_tests",
+        route_after_augment,
+        {
+            "N5_verify_green": "N5_verify_green",
+            "HALT": "HALT",
+        },
+    )
 
     # #3706: a failed build hook halts; the green phase never runs on it.
     workflow.add_conditional_edges(

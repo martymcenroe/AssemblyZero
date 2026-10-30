@@ -108,7 +108,9 @@ class TestJestRunnerParseResults:
         assert result["failed"] >= 1
 
     def test_parse_with_coverage_map(self, jest_runner):
-        """Parse report with coverage data."""
+        """A report's coverageMap is not a coverage source (#4246): coverage
+        is the json-summary a `measure_coverage` run writes, read by
+        `read_coverage_report`. The parse says it measured nothing."""
         report = {
             "success": True,
             "numPassedTests": 3,
@@ -123,7 +125,8 @@ class TestJestRunnerParseResults:
             },
         }
         result = jest_runner.parse_results(json.dumps(report), exit_code=0)
-        assert result["coverage_percent"] == 75.0  # 3/4 statements covered
+        assert result["passed"] == 3
+        assert result["coverage_percent"] is None
 
 
 class TestJestRunnerRunTests:

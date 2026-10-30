@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,7 @@ from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     count_stub_tests,
 )
 from assemblyzero.workflows.testing.runner_registry import get_runner, resolve_framework
+from assemblyzero.workflows.testing.runners.base_runner import CoverageReportError
 from assemblyzero.workflows.testing.state import (
     DEFAULT_MAX_ITERATIONS,
     TestingWorkflowState,
@@ -3265,6 +3267,7 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
+            "coverage_gap_framework": "pytest",  # #4246: N4c's to fill
             "next_node": "N4c_augment_tests",
             "error_message": "",
             # All tests pass here; a count plateau is a failing-branch concept.
@@ -3394,6 +3397,20 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     }
 
 
+
+
+def _halt_coverage_unreadable(label: str, error: Exception) -> dict[str, Any]:
+    """The green phase's halt when a Jest or Vitest run whose tests all
+    passed has no coverage report it can read (#4246). Never 0% in its
+    place: a percentage no report backs would be read as a test gap and sent
+    to N4c for tests that cannot close it. Routed to HALT, which alerts."""
+    message = (
+        f"COVERAGE MEASUREMENT FAILED: [N5] {label}: {error}. No percentage "
+        f"exists to judge. This is a harness or measurement defect, not a "
+        f"test gap and not a defect in the LLD or spec (#4246)."
+    )
+    print(f"    [N5] ERROR {message}", file=sys.stderr)
+    return {"next_node": "end", "error_message": message}
 
 
 def _halt_full_suite_gate(label: str, why: str) -> dict[str, Any]:
@@ -3932,14 +3949,6 @@ def _verify_green_non_pytest(
         print(f"    [N5] ERROR {message}")
         return {"error_message": message}
 
-    result = runner.run_tests(test_paths=test_files)
-
-    output = result["raw_output"]
-    passed = result["passed"]
-    failed = result["failed"]
-    errors = result["errors"]
-    exit_code = result["exit_code"]
-
     # Compute coverage based on coverage_type
     coverage_type = framework_config.get("coverage_type")
     if isinstance(coverage_type, str):
@@ -3948,15 +3957,42 @@ def _verify_green_non_pytest(
         except ValueError:
             coverage_type = CoverageType.LINE
 
+    # #4246: Jest and Vitest measure line coverage on this run; it used to be
+    # left off, so every run read 0%. A run whose tests all pass and whose
+    # report cannot be read stops here, naming the report.
+    try:
+        result = runner.run_tests(
+            test_paths=test_files,
+            measure_coverage=coverage_type != CoverageType.SCENARIO,
+        )
+    except CoverageReportError as e:
+        return _halt_coverage_unreadable(
+            _framework_label(framework, framework_config), e,
+        )
+
+    output = result["raw_output"]
+    passed = result["passed"]
+    failed = result["failed"]
+    errors = result["errors"]
+    exit_code = result["exit_code"]
+
     if coverage_type == CoverageType.SCENARIO:
         # Playwright: coverage = passed / total_scenarios
         coverage_achieved = runner.compute_scenario_coverage(result, total_scenarios) * 100.0
+        shown_coverage = f"{coverage_achieved:.1f}%"
     else:
-        # Jest/Vitest: line coverage from runner output
-        coverage_achieved = result.get("coverage_percent", 0.0)
+        # Jest/Vitest: line coverage the run measured. None while tests fail
+        # or none ran: coverage decides nothing on those routes, and the 0.0
+        # recorded for them is said to be unmeasured (#4246).
+        measured = result.get("coverage_percent")
+        coverage_achieved = float(measured) if measured is not None else 0.0
+        shown_coverage = (
+            f"{coverage_achieved:.1f}%" if measured is not None
+            else "not measured while tests fail or none ran"
+        )
 
     print(f"    [N5] Results: {passed} passed, {failed} failed | "
-          f"Coverage: {coverage_achieved:.1f}% | Exit: {exit_code} ({framework.value})")
+          f"Coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
 
     # #2867: same as the pytest path -- the measurement rides the checkpoint.
     record_measurement(
@@ -4090,6 +4126,16 @@ def _verify_green_non_pytest(
                 "error_message": trip_reason,
             }
 
+        # #4246, as #2327 did for pytest: every test passes and the shortfall
+        # is in lines no test reaches, so this is a TEST gap. It used to go to
+        # N4_implement_code, where the cheapest edit that raises coverage is
+        # deleting the code no test reaches. N4c is told which framework's
+        # gap it is, and it halts on one it cannot write tests for.
+        print(
+            f"    [N5] all {passed} {framework.value} test(s) pass; coverage "
+            f"{coverage_achieved:.1f}% < {coverage_target}% target -- a test "
+            f"gap, routing to test additions (never to implementation)"
+        )
         return {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
@@ -4098,7 +4144,8 @@ def _verify_green_non_pytest(
             "file_counter": file_num,
             "test_run_result": dict(result),
             "iteration_count": iteration_count + 1,
-            "next_node": "N4_implement_code",
+            "coverage_gap_framework": framework.value,
+            "next_node": "N4c_augment_tests",
             "error_message": "",
         }
 

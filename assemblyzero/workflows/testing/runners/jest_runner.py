@@ -6,6 +6,7 @@ JSON report parsing, and TypeScript test file validation.
 
 import json
 import logging
+import os
 import re
 import shutil
 
@@ -17,11 +18,24 @@ from assemblyzero.workflows.testing.framework_detector import (
 )
 from assemblyzero.workflows.testing.runners.base_runner import (
     BaseTestRunner,
+    CoverageReportError,
     combined_output,
     first_json_object,
 )
 
 logger = logging.getLogger(__name__)
+
+#: Where a coverage run's report goes, beneath the framework's project
+#: directory (#4246): both runners' default, so a JavaScript project's
+#: .gitignore already names it in the common case.
+COVERAGE_DIR = "coverage"
+
+#: The istanbul json-summary reporter's file name, for Vitest and Jest alike.
+COVERAGE_SUMMARY = "coverage-summary.json"
+
+#: Vitest measures coverage through one of these packages (#4246). Closed:
+#: the two providers Vitest ships.
+VITEST_COVERAGE_PROVIDERS: tuple[str, ...] = ("@vitest/coverage-v8", "@vitest/coverage-istanbul")
 
 
 class JestRunner(BaseTestRunner):
@@ -41,18 +55,94 @@ class JestRunner(BaseTestRunner):
         self._is_vitest = config["framework"] == TestFramework.VITEST
 
     def require_dependencies(self) -> None:
-        """The project's own vitest or jest must be installed (#4236)."""
+        """The project's own vitest or jest must be installed (#4236), and
+        for Vitest a coverage provider, because the green phase measures
+        coverage (#4246). Jest's coverage is built in."""
         self._require_node_package("vitest" if self._is_vitest else "jest")
+        if self._is_vitest:
+            self._require_one_node_module(VITEST_COVERAGE_PROVIDERS, "measure coverage")
+
+    @property
+    def coverage_report_path(self) -> str:
+        """Where a coverage run writes its istanbul json-summary (#4246)."""
+        return os.path.join(self.project_dir, COVERAGE_DIR, COVERAGE_SUMMARY)
+
+    def _coverage_args(self) -> list[str]:
+        """Ask for line coverage, as a json-summary in COVERAGE_DIR (#4246).
+        These replace the project's own coverage reporters for the run, so
+        no text table lands on the stdout the JSON report is read from."""
+        if self._is_vitest:
+            return [
+                "--coverage.enabled=true",
+                "--coverage.reporter=json-summary",
+                f"--coverage.reportsDirectory={COVERAGE_DIR}",
+            ]
+        return [
+            "--coverage",
+            "--coverageReporters=json-summary",
+            f"--coverageDirectory={COVERAGE_DIR}",
+        ]
+
+    def read_coverage_report(self) -> float:
+        """`total.lines.pct` from the run's json-summary (#4246). Raises
+        CoverageReportError naming the path when there is no report, it does
+        not parse, or it carries no line percentage (istanbul writes
+        "Unknown" when nothing was instrumented). Never 0% in place of one."""
+        path = self.coverage_report_path
+        if not os.path.isfile(path):
+            raise CoverageReportError(
+                f"no coverage report at {path}: the run's tests passed and it "
+                f"wrote none"
+            )
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                summary = json.load(f)
+        except (OSError, ValueError) as e:
+            raise CoverageReportError(
+                f"the coverage report at {path} cannot be read: "
+                f"{type(e).__name__}: {e}"
+            ) from e
+        lines = (summary.get("total") or {}).get("lines") if isinstance(summary, dict) else None
+        pct = lines.get("pct") if isinstance(lines, dict) else None
+        if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+            raise CoverageReportError(
+                f"the coverage report at {path} has no line percentage "
+                f"(total.lines.pct is {pct!r})"
+            )
+        return float(pct)
 
     def run_tests(
         self,
         test_paths: list[str] | None = None,
         extra_args: list[str] | None = None,
+        *,
+        measure_coverage: bool = False,
     ) -> TestRunResult:
-        """Run 'npx jest --json' or 'npx vitest run --reporter=json'."""
+        """Run 'npx jest --json' or 'npx vitest run --reporter=json'.
+
+        #4246: with `measure_coverage`, the run also writes a json-summary to
+        `coverage_report_path`, and a report left there by an earlier run is
+        removed first, so it is never read as this one's. When every test
+        passed, `coverage_percent` is the report's line percentage, and a
+        report that cannot be read raises CoverageReportError. While tests
+        fail, or when none ran, coverage decides nothing in the green phase,
+        and `coverage_percent` is None: not measured. Without
+        `measure_coverage` (the red phase, the full-suite gate) it is None
+        too, and the argv is as it was.
+        """
         test_paths = self._paths_for_runner(test_paths)  # #3707
+        if measure_coverage:
+            stale = self.coverage_report_path
+            if os.path.isfile(stale):
+                try:
+                    os.remove(stale)
+                except OSError as e:
+                    raise CoverageReportError(
+                        f"an earlier run's coverage report at {stale} cannot "
+                        f"be removed, so this run's could not be told from it: "
+                        f"{type(e).__name__}: {e}"
+                    ) from e
         if self._is_vitest:
-            import os
             print("Running vitest runner for project:", self.project_dir)
             package_json_path = os.path.join(self.project_dir, "package.json")
             has_typecheck_script = False
@@ -83,6 +173,9 @@ class JestRunner(BaseTestRunner):
         else:
             command = ["npx", "jest", "--json"]
 
+        if measure_coverage:
+            command.extend(self._coverage_args())
+
         if extra_args:
             command.extend(extra_args)
 
@@ -90,7 +183,15 @@ class JestRunner(BaseTestRunner):
             command.extend(test_paths)
 
         stdout, stderr, exit_code = self._run_subprocess(command)
-        return self.parse_results(stdout, exit_code, stderr)
+        result = self.parse_results(stdout, exit_code, stderr)
+        if (
+            measure_coverage
+            and result["passed"] > 0
+            and result["failed"] == 0
+            and result["errors"] == 0
+        ):
+            result["coverage_percent"] = self.read_coverage_report()
+        return result
 
     def parse_results(
         self, raw_output: str, exit_code: int, stderr: str = "",
@@ -111,12 +212,17 @@ class JestRunner(BaseTestRunner):
         first JSON object that carries `numPassedTests`, the count it reads
         first; `stderr` (npx's warnings) is kept in the result's `raw_output`
         for the reader and never parsed.
+
+        #4246: `coverage_percent` is None here, not measured. The report's
+        `coverageMap` is not read: coverage comes from the json-summary a
+        `measure_coverage` run writes (`read_coverage_report`), one source,
+        where it used to read 0% whenever the map was absent, which was
+        every run, because none asked for coverage.
         """
         passed = 0
         failed = 0
         skipped = 0
         errors = 0
-        coverage_percent = 0.0
         shown = combined_output(raw_output, stderr)
 
         try:
@@ -128,10 +234,6 @@ class JestRunner(BaseTestRunner):
             passed = report.get("numPassedTests", 0)
             failed = report.get("numFailedTests", 0)
             skipped = report.get("numPendingTests", 0)
-
-            # Extract coverage if available
-            if "coverageMap" in report and report["coverageMap"]:
-                coverage_percent = self._extract_coverage(report["coverageMap"])
 
         except (ValueError, KeyError, TypeError, AttributeError) as e:
             logger.warning("Failed to parse Jest/Vitest JSON output: %s", e)
@@ -145,34 +247,12 @@ class JestRunner(BaseTestRunner):
             "skipped": skipped,
             "errors": errors,
             "total": total,
-            "coverage_percent": coverage_percent,
+            "coverage_percent": None,  # #4246: not measured here
             "coverage_type": CoverageType.LINE,
             "raw_output": shown,
             "exit_code": exit_code,
             "framework": self.config["framework"],
         }
-
-    def _extract_coverage(self, coverage_map: dict) -> float:
-        """Extract overall line coverage percentage from Jest coverageMap.
-
-        Averages line coverage across all files.
-        """
-        if not coverage_map:
-            return 0.0
-
-        total_statements = 0
-        covered_statements = 0
-
-        for _file_path, file_coverage in coverage_map.items():
-            statement_map = file_coverage.get("statementMap", {})
-            s_counts = file_coverage.get("s", {})
-            total_statements += len(statement_map)
-            covered_statements += sum(1 for count in s_counts.values() if count > 0)
-
-        if total_statements == 0:
-            return 0.0
-
-        return (covered_statements / total_statements) * 100.0
 
     def _fallback_result(self, raw_output: str, exit_code: int) -> TestRunResult:
         """Create a fallback result when JSON parsing fails."""
@@ -182,7 +262,7 @@ class JestRunner(BaseTestRunner):
             "skipped": 0,
             "errors": 1 if exit_code != 0 else 0,
             "total": 1,
-            "coverage_percent": 0.0,
+            "coverage_percent": None,  # #4246: nothing was measured
             "coverage_type": CoverageType.LINE,
             "raw_output": raw_output,
             "exit_code": exit_code,

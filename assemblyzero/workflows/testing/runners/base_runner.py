@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 300
 
 
+class CoverageReportError(RuntimeError):
+    """A run asked to measure coverage whose report cannot be read (#4246).
+
+    Raised, never read as 0%: a percentage no report backs is a measurement
+    failure, not a coverage gap. Names the report's path and the cause.
+    """
+
+
 def combined_output(stdout: str, stderr: str) -> str:
     """Both streams, stdout first, as a reader of the run's output sees them."""
     return stdout + ("\n" + stderr if stderr else "")
@@ -140,10 +148,8 @@ class BaseTestRunner(ABC):
         the runner from the network instead of running the project's own, or
         fails: the run never starts a suite it cannot run.
         """
-        root = os.path.abspath(self.project_root)
-        current = os.path.abspath(self.project_dir)
         searched: list[str] = []
-        while True:
+        for current in self._node_search_dirs():
             searched.append(current)
             bin_dir = os.path.join(current, "node_modules", ".bin")
             if (
@@ -152,16 +158,44 @@ class BaseTestRunner(ABC):
                 or os.path.isfile(os.path.join(current, ".pnp.cjs"))
             ):
                 return
-            parent = os.path.dirname(current)
-            if current == root or parent == current or not (
-                parent == root or parent.startswith(root + os.sep)
-            ):
-                break
-            current = parent
         raise OSError(
             f"{binary} cannot run in {self.project_dir}: no "
             f"node_modules/.bin/{binary} in {', '.join(searched)}. Install the "
             f"project's dependencies there (npm ci) before the run"
+        )
+
+    def _node_search_dirs(self) -> list[str]:
+        """The project directory and each directory above it up to the
+        project root: where Node resolves a package from."""
+        root = os.path.abspath(self.project_root)
+        current = os.path.abspath(self.project_dir)
+        dirs: list[str] = []
+        while True:
+            dirs.append(current)
+            parent = os.path.dirname(current)
+            if current == root or parent == current or not (
+                parent == root or parent.startswith(root + os.sep)
+            ):
+                return dirs
+            current = parent
+
+    def _require_one_node_module(self, names: tuple[str, ...], purpose: str) -> None:
+        """Raise OSError unless one of the packages `names` is installed in
+        `node_modules` in the project directory or above it, or a Yarn
+        Plug'n'Play `.pnp.cjs` stands in for node_modules (#4246)."""
+        searched: list[str] = []
+        for current in self._node_search_dirs():
+            searched.append(current)
+            if os.path.isfile(os.path.join(current, ".pnp.cjs")) or any(
+                os.path.isdir(os.path.join(current, "node_modules", *name.split("/")))
+                for name in names
+            ):
+                return
+        raise OSError(
+            f"{self.config['framework'].value} cannot {purpose} in "
+            f"{self.project_dir}: neither {' nor '.join(names)} is installed in "
+            f"node_modules in {', '.join(searched)}. Install one (for example "
+            f"npm i -D {names[0]}) before the run"
         )
 
     @abstractmethod
@@ -169,8 +203,15 @@ class BaseTestRunner(ABC):
         self,
         test_paths: list[str] | None = None,
         extra_args: list[str] | None = None,
+        *,
+        measure_coverage: bool = False,
     ) -> TestRunResult:
-        """Execute tests and return unified results."""
+        """Execute tests and return unified results.
+
+        `measure_coverage` (#4246) asks a runner that measures line coverage
+        to do so and to report it in `coverage_percent`; a runner whose
+        coverage is measured elsewhere (pytest's, by `run_pytest`) or is
+        scenario coverage (Playwright's) ignores it."""
         raise NotImplementedError
 
     @abstractmethod

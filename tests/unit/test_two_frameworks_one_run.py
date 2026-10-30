@@ -83,6 +83,8 @@ def _mixed_target(root: Path, *, node_modules: bool = True) -> Path:
     if node_modules:
         (web / "node_modules" / ".bin").mkdir(parents=True)
         (web / "node_modules" / ".bin" / "vitest").write_text("", encoding="utf-8")
+        # #4246: the green run measures coverage, so the provider is installed.
+        (web / "node_modules" / "@vitest" / "coverage-v8").mkdir(parents=True)
     return root
 
 
@@ -101,14 +103,13 @@ class _Proc:
 
 
 def _vitest_report(passed: int, failed: int) -> str:
-    """Jest-compatible JSON, with the `coverageMap` the runner's parser reads
-    (one statement, covered: 100 %)."""
+    """Jest-compatible JSON. Coverage is not in it: since #4246 the runner
+    reads the json-summary a coverage run writes (`_Recorder.run_command`)."""
     return json.dumps({
         "numPassedTests": passed,
         "numFailedTests": failed,
         "numPendingTests": 0,
         "numTotalTests": passed + failed,
-        "coverageMap": {"src/engine.ts": {"statementMap": {"0": {}}, "s": {"0": 1}}},
     })
 
 
@@ -136,6 +137,11 @@ class _Recorder:
     def run_command(self, command, **kwargs):
         self.vitest_calls.append((list(command), str(kwargs.get("cwd"))))
         passed, failed = self._vitest
+        if any(arg.startswith("--coverage") for arg in command):
+            # #4246: a coverage run writes its json-summary (100 % here).
+            report = Path(kwargs["cwd"]) / "coverage" / "coverage-summary.json"
+            report.parent.mkdir(exist_ok=True)
+            report.write_text(json.dumps({"total": {"lines": {"pct": 100}}}), encoding="utf-8")
         return _Proc(_vitest_report(passed, failed), 1 if failed else 0)
 
 
@@ -391,6 +397,7 @@ class TestAFrameworkThatCannotRunHalts:
         root = _mixed_target(tmp_path, node_modules=False)
         (root / "node_modules" / ".bin").mkdir(parents=True)
         (root / "node_modules" / ".bin" / "vitest").write_text("", encoding="utf-8")
+        (root / "node_modules" / "@vitest" / "coverage-v8").mkdir(parents=True)
         recorder = _Recorder(pytest_passed=1, pytest_failed=0,
                              vitest_passed=1, vitest_failed=0)
         state = _run_state(

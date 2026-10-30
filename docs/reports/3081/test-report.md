@@ -55,3 +55,13 @@ Each runner test runs for Jest and for Vitest.
 - A scenario description with an apostrophe and a newline is written as one valid string literal, for all three frameworks (on `4ac9c81a`: `it('Replays a user's session` and a raw newline).
 - The scaffold passes its own framework's validator (kept behaviour; on `4ac9c81a` the old placeholder passed it too).
 - Against the unchanged source: 10 failed, 4 passed. On the fix: 14 passed.
+
+## #4246: `tests/unit/test_vitest_measures_coverage.py` (15)
+
+`base_runner.run_command` stands in for `npx` and, for a coverage run, writes the json-summary a real one would, in the directory the run was started in.
+
+- T1: the Vitest argv starts `npx vitest run --reporter=json` and carries `--coverage.enabled=true` and `--coverage.reporter=json-summary`, and a stand-in report of 85% is read as 85.0; Jest carries `--coverage` and `--coverageReporters=json-summary` and reads 72.5; a run not asked to measure has the old argv exactly and `coverage_percent` None (on `4ac9c81a` all three failed: `run_tests` took no `measure_coverage`).
+- T2: no report, and a report whose percentage is `"Unknown"`, each raise `CoverageReportError` naming `web/coverage/coverage-summary.json`; a stale report from an earlier run is removed and never read; the green phase halts with "COVERAGE MEASUREMENT FAILED" and the path, prints an ERROR line on stderr, and routes to HALT; a failing run needs no report and still routes to N4 (kept behaviour, passed there).
+- The Vitest preflight requires a coverage provider, naming `@vitest/coverage-v8` and `web/` (on `4ac9c81a`: no error); either provider is enough (passed there: nothing was required).
+- T3: a Vitest shortfall (50% against 90%) routes to `N4c_augment_tests` with `coverage_gap_framework` `vitest` and the iteration counted (on `4ac9c81a`: `N4_implement_code`); N4c given a Vitest gap halts naming `vitest` and `pytest`, prints an ERROR line, and `route_after_augment` gives HALT; the built graph has no plain N4c to N5 edge and routes N4c through its router; in a two-framework run N4c extends the `.py` file, not the `.test.ts` (on `4ac9c81a`: the `.test.ts`).
+- Against the unchanged source: 12 failed, 3 passed. On the fix: 15 passed.

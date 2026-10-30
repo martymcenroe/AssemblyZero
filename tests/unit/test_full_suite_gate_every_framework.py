@@ -43,8 +43,9 @@ def _result(passed: int, failed: int = 0, errors: int = 0, coverage: float = 95.
 def _runner(targeted: dict, full: dict) -> MagicMock:
     """A runner whose whole-suite call (no test paths) answers `full`."""
     runner = MagicMock()
+    # #4246: the targeted green run passes `measure_coverage`.
     runner.run_tests.side_effect = (
-        lambda test_paths=None, extra_args=None: full if not test_paths else targeted
+        lambda test_paths=None, extra_args=None, **_: full if not test_paths else targeted
     )
     return runner
 

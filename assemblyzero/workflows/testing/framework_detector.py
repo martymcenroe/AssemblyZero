@@ -83,7 +83,9 @@ class TestRunResult(TypedDict):
     skipped: int
     errors: int
     total: int
-    coverage_percent: float
+    #: #4246: None when the run did not measure line coverage (it was not
+    #: asked to, or its tests did not all pass); never 0% in place of one.
+    coverage_percent: float | None
     coverage_type: CoverageType
     raw_output: str
     exit_code: int

@@ -76,6 +76,9 @@ class TestTheGraphReachesHalt:
             "N4_implement_code",
             "N4b_completeness_gate",
             "N4_5_mechanical_hooks",  # #3706: a failed build hook halts
+            # #4246: coverage it cannot measure, or a gap it cannot fill.
+            # Its edge back to N5 was unconditional, and N5 overwrote the reason.
+            "N4c_augment_tests",
             "N5_verify_green",
             "N6_e2e_validation",
             "N7_finalize",

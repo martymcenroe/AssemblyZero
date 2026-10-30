@@ -27,10 +27,14 @@ class PytestRunner(BaseTestRunner):
         self,
         test_paths: list[str] | None = None,
         extra_args: list[str] | None = None,
+        *,
+        measure_coverage: bool = False,
     ) -> TestRunResult:
         """Run pytest with --tb=short -q and parse output.
 
         Uses --json-report if available, falls back to stdout parsing.
+        `measure_coverage` is accepted and ignored (#4246): the green phase
+        measures pytest's coverage through `run_pytest`, with pytest-cov.
         """
         # #1904: bare "pytest" resolved from the ORCHESTRATOR's PATH — AZ's
         # venv, not the target repo's. Phase 3 of the boostgauge campaign

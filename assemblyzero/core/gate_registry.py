@@ -725,9 +725,23 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.coverage_unreadable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "COVERAGE MEASUREMENT FAILED",
         _s(f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage::return", 0)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 1),
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 1)
+        + _s(f"{_TS}/nodes/verify_phases.py::_halt_coverage_unreadable::return", 0),
         decided_in=f"{_TS}/coverage_report.py",
-        notes="a harness defect, never a test gap; see #2690's mapping",
+        notes="a harness defect, never a test gap; see #2690's mapping. Since "
+              "#4246 a Jest or Vitest run whose tests all pass and whose "
+              "json-summary cannot be read halts here too; it read 0%",
+    ),
+    Gate(
+        "impl.coverage_gap_not_augmentable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "and N4c adds pytest tests only",
+        _s(f"{_TS}/nodes/augment_tests.py::_halt_gap_not_augmentable::return", 0),
+        decided_in=f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage",
+        created_by="#4246 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a coverage shortfall in a Jest, Vitest or Playwright suite reaches "
+              "N4c, which writes pytest tests only. The shortfall used to go to "
+              "N4_implement_code, where #2327 forbids it: the cheapest edit that "
+              "raises coverage deletes the code no test reaches",
     ),
     Gate(
         "impl.e2e_safety_limit", "impl", JUDGES_BUDGET, ACTION_HALT,
