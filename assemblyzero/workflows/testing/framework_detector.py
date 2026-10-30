@@ -71,7 +71,9 @@ class FrameworkConfig(TypedDict):
     import_patterns: list[str]
     result_parser: str
     coverage_type: CoverageType
-    coverage_target: float
+    #: #3089: an integer percentage, the unit of every coverage target in
+    #: the run. It was `coverage_target: float`, a fraction nothing read.
+    coverage_target_percent: int
     scaffold_template: str
     working_directory: Optional[str]
 

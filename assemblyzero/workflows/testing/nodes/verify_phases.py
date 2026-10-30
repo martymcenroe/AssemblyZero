@@ -1374,13 +1374,32 @@ def _halt_legs_cannot_run(node: str, output_key: str, error: FrameworkLegError) 
 def _leg_state(state: TestingWorkflowState, leg: _Leg) -> dict[str, Any]:
     """The state one framework's phase reads: its own test files, and the
     implementation files of its own language in its own directory, so its
-    snapshot and restore (#2050) never reach another framework's files."""
+    snapshot and restore (#2050) never reach another framework's files.
+    #3089: and its own `framework_config`, so the pytest leg, which reads the
+    config from its state, is judged by its own coverage target."""
     repo_root_str = state.get("repo_root", "")
     root = os.path.abspath(repo_root_str) if repo_root_str else str(get_repo_root())
     leg_state = dict(state)
     leg_state["test_files"] = list(leg.test_files)
     leg_state["implementation_files"] = _leg_sources(state, leg, root)
+    leg_state["framework_config"] = leg.config
     return leg_state
+
+
+def _coverage_target(state: TestingWorkflowState, framework_config: dict | None) -> int | float:
+    """The coverage target one framework is judged by (#3089): its config's
+    `coverage_target_percent`, which N0 writes on every framework.
+
+    A config without one is from a checkpoint written before #3089, when the
+    run's `coverage_target` governed every framework, so that is the answer
+    for it, quietly: it is the target that run was already being judged by.
+    The registry's old fractional `coverage_target` (0.95) is never read; a
+    fraction read as a percentage is a gate nothing can fail.
+    """
+    value = (framework_config or {}).get("coverage_target_percent")
+    if value is None:
+        return state.get("coverage_target", 90)
+    return value
 
 
 def _leg_sources(state: TestingWorkflowState, leg: _Leg, root: str) -> list[str]:
@@ -2583,7 +2602,8 @@ def _align_plan_files_with_the_spec(
 def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # Get data from state
     test_files = state.get("test_files", [])
-    coverage_target = state.get("coverage_target", 90)
+    # #3089: pytest's own target, from its config.
+    coverage_target = _coverage_target(state, state.get("framework_config"))
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
     iteration_count = state.get("iteration_count", 0)
@@ -2861,7 +2881,7 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     ]
     _absent = [reading for reading in _readings if not reading.measured]
     _reading = _absent[0] if _absent else _readings[0]
-    _below_target = coverage_achieved < state.get("coverage_target", 90)
+    _below_target = coverage_achieved < coverage_target  # #3089: the same target
     if (
         failed_count == 0
         and error_count == 0
@@ -3929,7 +3949,7 @@ def _verify_green_non_pytest(
     Preserves stagnation detection and circuit breaker logic.
     """
     test_files = state.get("test_files", [])
-    coverage_target = state.get("coverage_target", 90)
+    coverage_target = _coverage_target(state, framework_config)  # #3089: its own
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
     iteration_count = state.get("iteration_count", 0)

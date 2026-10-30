@@ -60,14 +60,25 @@ def _configs_with_directories(
     return configs
 
 
-def _framework_configs(lld_content: str, repo_root: str) -> list[dict]:
+def _framework_configs(
+    lld_content: str, repo_root: str, declared_target: int | None = None,
+) -> list[dict]:
     """Every framework the run tests with, each with its working directory,
     in the order the run uses them (#4236). The first is `framework_config`.
+
+    #3089: each carries `coverage_target_percent`, the target the green
+    phase judges that framework by: `declared_target` for every framework
+    when the LLD (or the operator) declares one, else the framework's own
+    default from the registry.
 
     Raises ValueError -- FrameworkResolutionError, or an unreadable
     package.json or .unleashed.json -- when the frameworks cannot be resolved.
     """
-    return _configs_with_directories(resolve_framework_dirs(lld_content, repo_root), repo_root)
+    configs = _configs_with_directories(resolve_framework_dirs(lld_content, repo_root), repo_root)
+    if declared_target is not None:
+        for config in configs:
+            config["coverage_target_percent"] = int(declared_target)
+    return configs
 
 
 def _framework_resolution_failed(issue_number: int, error: ValueError) -> dict[str, Any]:
@@ -890,6 +901,19 @@ def extract_coverage_target(lld_content: str) -> int:
     Returns:
         Coverage target percentage (default 95, per ADR 0207).
     """
+    declared = declared_coverage_target(lld_content)
+    if declared is not None:
+        return declared
+    return 95  # Default (see ADR 0207: LLM Team Coverage Targets)
+
+
+def declared_coverage_target(lld_content: str) -> int | None:
+    """The coverage target the LLD declares, or None when it declares none
+    (#3089). `extract_coverage_target` is this with ADR 0207's 95 in place of
+    None; N0 needs the difference, because an undeclared target leaves each
+    framework its own (95 for line coverage, 100 for Playwright's
+    scenarios), while a declared one governs every framework of the run.
+    Declaring none is a legitimate answer, so None is quiet."""
     comparator = r"(?:[≥≤>=<≧≦]|>=|<=)?\s*"
     patterns = [
         rf"coverage(?: target)?[:\*\s]+{comparator}(\d+)%",
@@ -902,8 +926,7 @@ def extract_coverage_target(lld_content: str) -> int:
         match = re.search(pattern, lld_content, re.IGNORECASE)
         if match:
             return int(match.group(1))
-
-    return 95  # Default (see ADR 0207: LLM Team Coverage Targets)
+    return None
 
 
 def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
@@ -1088,8 +1111,11 @@ def _load_from_issue(  # pragma: no cover
     save_audit_file(audit_dir, file_num, "issue-only-spec.md", lld_content)
 
     # Issue #381: Detect test framework(s). #4236: every one is kept.
+    # #3089: the target the run uses (the operator's, else the issue's
+    # declared one) governs every framework; with neither, each keeps its own.
+    declared_target = state.get("coverage_target", declared_coverage_target(lld_content))
     try:
-        fw_configs = _framework_configs(lld_content, str(repo_root))  # #3707
+        fw_configs = _framework_configs(lld_content, str(repo_root), declared_target)  # #3707
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
     frameworks = [config["framework"] for config in fw_configs]
@@ -1342,8 +1368,12 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     save_audit_file(audit_dir, file_num, "test-plan.md", test_plan_content)
 
     # Issue #381: Detect test framework(s). #4236: every one is kept.
+    # #3089: the LLD's declared target governs every framework, as it
+    # governs the run's `coverage_target` here; with none, each keeps its own.
     try:
-        fw_configs = _framework_configs(lld_content, str(repo_root))  # #3707
+        fw_configs = _framework_configs(  # #3707
+            lld_content, str(repo_root), declared_coverage_target(lld_content),
+        )
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
     frameworks = [config["framework"] for config in fw_configs]
@@ -1467,7 +1497,8 @@ Requirement: REQ-2
 
     # Issue #381: Detect test framework (even in mock mode). #4236: every one.
     try:
-        fw_configs = _framework_configs(mock_lld, str(repo_root))  # #3707
+        # #3089: the mock run's target, 90, on every framework.
+        fw_configs = _framework_configs(mock_lld, str(repo_root), 90)  # #3707
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
 

@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 # --- Framework configuration registry ---
+#: #3089: `coverage_target_percent` is each framework's own target, an integer
+#: percentage like the run's `coverage_target`: ADR 0207's 95 for line
+#: coverage, and 100 for Playwright's scenario coverage, where every scenario
+#: must pass. N0 writes the LLD's declared target over it when the LLD
+#: declares one, and the green phase judges each framework by its own. It
+#: was `coverage_target`, a fraction (0.95) that nothing read; the new name
+#: carries the unit, so a fraction left in an old checkpoint is never read as
+#: 0.95% and made into a gate nothing can fail.
 _FRAMEWORK_CONFIGS: dict[TestFramework, FrameworkConfig] = {
     TestFramework.PYTEST: {
         "framework": TestFramework.PYTEST,
@@ -26,7 +34,7 @@ _FRAMEWORK_CONFIGS: dict[TestFramework, FrameworkConfig] = {
         "import_patterns": ["import pytest", "from pytest"],
         "result_parser": "pytest_json",
         "coverage_type": CoverageType.LINE,
-        "coverage_target": 0.95,
+        "coverage_target_percent": 95,
         "scaffold_template": "pytest_standard",
         "working_directory": None,
     },
@@ -38,7 +46,7 @@ _FRAMEWORK_CONFIGS: dict[TestFramework, FrameworkConfig] = {
         "import_patterns": ["import { test", "from '@playwright/test'"],
         "result_parser": "playwright_json",
         "coverage_type": CoverageType.SCENARIO,
-        "coverage_target": 1.0,
+        "coverage_target_percent": 100,
         "scaffold_template": "playwright_spec",
         "working_directory": None,
     },
@@ -50,7 +58,7 @@ _FRAMEWORK_CONFIGS: dict[TestFramework, FrameworkConfig] = {
         "import_patterns": ["describe(", "it(", "expect("],
         "result_parser": "jest_json",
         "coverage_type": CoverageType.LINE,
-        "coverage_target": 0.95,
+        "coverage_target_percent": 95,
         "scaffold_template": "jest_standard",
         "working_directory": None,
     },
@@ -62,7 +70,7 @@ _FRAMEWORK_CONFIGS: dict[TestFramework, FrameworkConfig] = {
         "import_patterns": ["import { describe", "from 'vitest'"],
         "result_parser": "jest_json",  # Vitest JSON output is jest-compatible
         "coverage_type": CoverageType.LINE,
-        "coverage_target": 0.95,
+        "coverage_target_percent": 95,
         "scaffold_template": "vitest_standard",
         "working_directory": None,
     },
