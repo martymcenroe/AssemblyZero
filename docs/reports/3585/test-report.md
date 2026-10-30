@@ -166,3 +166,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed test:** `test_llm_instrumentation.py::TestWriteFailure::test_oserror_does_not_propagate` is now `test_oserror_alerts_and_propagates`; the file's now-unused `import logging` is removed.
 
 **Neighbouring suites:** 31 passed across the new file, `test_llm_instrumentation.py` and `test_telemetry_cost_loud_failure.py`.
+
+## telemetry/emitter.py
+
+**New: `tests/unit/test_telemetry_emitter_loud_failure.py` (10).** Site tests for 68, 84, 151, 156, 192, 200 and 203; tests for 54 and 171 that pin the two kept answers; and a healthy emit and flush.
+
+**Before the fix, measured** by putting HEAD's `emitter.py` back: 7 failed, 3 passed (the two won't-do pins and the healthy path).
+
+**Changed tests:** in `test_telemetry_emitter.py`, `TestWriteToBuffer::test_never_raises` is now `test_a_buffer_write_failure_alerts_and_raises`, and `TestEmit::test_never_raises_on_any_error` is now `test_an_event_that_cannot_be_built_alerts_and_raises`; the now-unused `Path` import is removed.
+
+**Neighbouring suites:** 120 passed across the new file, `test_telemetry_emitter.py`, `test_factory_report.py`, `test_red_phase_import_is_named.py`, `test_spec_test_missing_imports.py` and `test_requirements_graph_halts.py`.

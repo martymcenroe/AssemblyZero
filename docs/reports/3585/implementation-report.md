@@ -159,3 +159,19 @@ Callers: the runners' `_finalize_speedrun` (`tools/run_requirements_workflow.py`
 - A disabled store, and a day with no file, stay quiet.
 
 Callers: `InstrumentedCall.__exit__` writes through it; its one user is `assemblyzero/nodes/anthropic_provider.py`, which no run reaches. Baseline: `CallStore.write`'s handler entry leaves.
+
+### telemetry/emitter.py (9 sites: 7 fixed, 2 won't do, and 1 compliant row)
+
+Every runner imports `emit`, `flush` and `track_tool`, and two register `flush` with `atexit`; graph routers and implementation nodes call `emit`. The module was fire-and-forget: every failure was a bare `pass` or a silent `None`.
+
+- **A credentials file that exists but cannot be loaded raises** `TelemetryConfigError` (68), on every emit and flush, with an ERROR line each time and one alert per process. The cause names the exception type and the path, never the file's contents. Nothing is cached on failure.
+- **An event the buffer cannot take alerts and raises** (84). It was dropped with a bare `pass`.
+- **A failed DynamoDB write is an ERROR line, and the event is buffered** (151), with one alert per process: an outage fails every emit, and one email says so.
+- **An event that cannot be built alerts and raises** (156). The outer `pass` is gone.
+- **A buffered event that fails to upload stays buffered** (192), with an ERROR line naming the file and line, and one alert per process.
+- **A buffer file that cannot be read or rewritten alerts and raises** (200), saying how many events were uploaded before it. The outer `pass` around the whole flush is gone (203).
+- **Won't do, 54: no credentials file is local-only mode.** Every event is kept in the buffer, so nothing is lost, and the opt-out is `ASSEMBLYZERO_TELEMETRY=0`. An alert here would send one email per process from every machine without upload credentials, and would put an extra alert into whichever unit test emits first. Documented in the docstring and pinned.
+- **Won't do, 171: `flush` with no client returns 0.** In local-only mode nothing was uploaded, so 0 is the true count; a raise would fail every runner's `atexit` flush on such a machine. Pinned. The sync CLI that prints "No buffered events to sync." on that 0 is `telemetry/sync.py`, which no run imports.
+- The `track_tool` handler (237) re-raises; the ledger marks it compliant.
+
+Callers: nothing catches the new raises, so a broken credentials file or a buffer that cannot take an event now stops the tool at its first emit. Baseline: seven entries leave.
