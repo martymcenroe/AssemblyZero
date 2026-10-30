@@ -162,9 +162,14 @@ class TestTheScaffoldIsTheContract:
         assert result == [str(scaffold), other]
 
     def test_implement_code_routes_through_the_helper(self) -> None:
-        """The unlink lives in the helper's legacy branch and nowhere else."""
+        """The unlink lives in the helper's legacy branch and nowhere else.
+
+        #4245: `implement_code` reaches `merge_test_files` through
+        `registered_test_files`, which calls it once per framework of the run.
+        """
         source = inspect.getsource(impl_orchestrator.implement_code)
-        assert "merge_test_files(" in source
+        assert "registered_test_files(" in source
+        assert "merge_test_files(" in inspect.getsource(impl_orchestrator.registered_test_files)
         assert "scaffold_path.unlink()" not in source
         assert '"test_files": test_files_after' in source
 

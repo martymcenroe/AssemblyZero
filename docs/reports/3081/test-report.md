@@ -24,3 +24,13 @@ In progress. Each issue's section is written when its commit lands.
 - With two frameworks, a TypeScript scaffold with no test in it is refused beside a good Python one (on `4ac9c81a`: valid, since the Python scaffold alone was checked).
 - `test_a_test_file_that_cannot_be_read_halts_naming_it` was written as "...is a validation error naming it" and run that way against `4ac9c81a`, where it failed; the fail-open audit then refused the handler that recorded an error and stepped past the file, so an unreadable file halts instead, and the test asserts the halt.
 - Against the unchanged source: 7 failed. On the fix: 7 passed.
+
+## #4245: `tests/unit/test_n4_registers_every_framework.py` (5)
+
+These drive `implement_code` itself, with `generate_file_with_retry` stood in for.
+
+- T1: N4 writing `web/src/replay.ts` and `web/tests/replay.test.ts` on the two-framework target registers `web/tests/replay.test.ts`; the Vitest stub scaffold is removed from the list and from disk, and `tests/test_issue_7.py` stays (on `4ac9c81a`: the TypeScript test was not in `test_files`).
+- T2: a Python test is registered as before, the stub scaffold replaced by it (kept behaviour, passed there).
+- T3: `tests/stray.test.ts`, outside every framework's directory, halts N4 naming it with "belongs to no framework", prints an ERROR line on stderr, and routes to HALT (on `4ac9c81a`: no error).
+- The red phase's prior-attempt registration for the Vitest leg gives `[web/tests/replay.test.ts]` alone (on `4ac9c81a`: `tests/test_issue_7.py` came first).
+- Against the unchanged source: 4 failed, 1 passed. On the fix: 5 passed.

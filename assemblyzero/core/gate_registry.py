@@ -638,6 +638,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
               "is_valid True with a warning, so a check that could not run passed",
     ),
     Gate(
+        "impl.test_file_unowned", "impl", JUDGES_UPSTREAM, ACTION_HALT,
+        "A test file N4 wrote that no",
+        _s(f"{_TS}/nodes/implementation/orchestrator.py::_halt_test_file_unowned::return", 0),
+        decided_in=f"{_TS}/framework_ownership.py::owner_of",
+        created_by="#4245 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N4 wrote a test file (a Python test under tests/, or a .test.ts, "
+              ".test.js, .spec.ts or .spec.js) that no framework of the run runs, "
+              "or that two would. N4 used to register Python tests alone, so a "
+              "TypeScript test it wrote never ran and a regression in it passed",
+    ),
+    Gate(
         "impl.framework_unresolved", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "the test frameworks for issue",
         _s(f"{_TS}/nodes/load_lld.py::_framework_resolution_failed::return", 0),

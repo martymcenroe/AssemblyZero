@@ -1115,9 +1115,16 @@ def _register_prior_attempt_files(
     modules sat on disk, and N4c set out to close a gap that did not exist.
 
     Every planned file present joins the list N4 would have put it in --
-    tests through `merge_test_files`, so the scaffold rule keeps its one
-    home. Nothing present, nothing registered: an empty dict leaves the
-    state as it was.
+    tests through `registered_test_files`, N4's own helper, so the scaffold
+    rule keeps its one home. Nothing present, nothing registered: an empty
+    dict leaves the state as it was.
+
+    #4245: with several frameworks the helper merges each framework's files
+    with that framework's own scaffold. It used pytest's for every leg, so a
+    Vitest leg with the spec suite on disk had `tests/test_issue_<N>.py`
+    pulled into its files and its own stub scaffold dropped. A planned test
+    file no framework of the run owns raises FrameworkLegError, which halts
+    the phase.
     """
     repo_root = Path(state.get("repo_root", "") or ".")
     planned = [
@@ -1136,18 +1143,13 @@ def _register_prior_attempt_files(
     sources = [p for p in absolute if not _is_test_path(p)]
 
     from assemblyzero.workflows.testing.nodes.implementation.orchestrator import (
-        merge_test_files,
+        registered_test_files,
     )
 
-    issue_number = state.get("issue_number", 0)
-    merged_tests = merge_test_files(
-        scaffold_path=repo_root / "tests" / f"test_issue_{issue_number}.py",
-        scaffold_is_spec_suite=bool(
-            (state.get("spec_test_suite") or {}).get("functions")
-        ),
-        real_test_files=tests,
-        prior_test_files=list(state.get("test_files", []) or []),
-    )
+    try:
+        merged_tests = registered_test_files(state, tests, repo_root)
+    except TestFileOwnershipError as e:
+        raise FrameworkLegError(str(e)) from e
     prior_sources = list(state.get("implementation_files", []) or [])
     merged_sources = prior_sources + [p for p in sources if p not in prior_sources]
     print(
@@ -1983,10 +1985,14 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             continue
         leg_state = _leg_state(state, leg) if multi else state
 
-        if leg.framework != TestFramework.PYTEST:
-            res = _verify_red_non_pytest(leg_state, leg.config, leg.framework)
-        else:
-            res = _verify_red_pytest_single(leg_state)
+        try:
+            if leg.framework != TestFramework.PYTEST:
+                res = _verify_red_non_pytest(leg_state, leg.config, leg.framework)
+            else:
+                res = _verify_red_pytest_single(leg_state)
+        except FrameworkLegError as e:
+            # #4245: a prior attempt's planned test file no framework owns.
+            return _halt_legs_cannot_run("N3", "red_phase_output", e)
         if multi:
             res = _rejoin_leg_files(state, leg, res)
 
