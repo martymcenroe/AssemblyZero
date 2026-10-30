@@ -107,9 +107,13 @@ def test_an_unwritable_durable_copy_stops_finalize(tmp_path, capsys):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("", encoding="utf-8")
     write_root = tmp_path / "wt"
+    # #3585: finalize refuses to write without the run's audit_dir.
+    audit = tmp_path / "audit"
+    audit.mkdir()
     state = {
         "workflow_type": "lld", "issue_number": 7, "target_repo": str(tmp_path),
         "current_draft": "# LLD\n", "lld_status": "APPROVED", "verdict_count": 1,
+        "audit_dir": str(audit),
     }
     with patch.object(finalize_mod, "validate_lld_final", return_value=[]), \
          patch.object(finalize_mod, "embed_review_evidence", return_value="# LLD\n"), \

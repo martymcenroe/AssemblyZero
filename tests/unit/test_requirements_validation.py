@@ -3,6 +3,7 @@
 Issue #235: Mechanical LLD validation gates to catch structural issues.
 """
 
+import pytest
 
 from assemblyzero.workflows.requirements.nodes.finalize import validate_lld_final
 from assemblyzero.workflows.requirements.nodes.generate_draft import validate_draft_structure
@@ -209,10 +210,10 @@ class TestValidateLldFinal:
         errors = validate_lld_final(content)
         assert len(errors) == 0
 
-    def test_passes_empty_content(self):
-        """Test that empty content passes."""
-        errors = validate_lld_final("")
-        assert len(errors) == 0
+    def test_empty_content_fails(self):
+        """#3585: an empty LLD cannot be shown to pass; it used to."""
+        with pytest.raises(ValueError, match="empty"):
+            validate_lld_final("")
 
     def test_todo_in_prose_now_caught(self):
         """Test that TODO in regular prose IS caught by _detect_open_questions (#775)."""

@@ -33,6 +33,19 @@ def write_root_is_target(monkeypatch):
     )
 
 
+@pytest.fixture
+def landing_is_out_of_scope(monkeypatch):
+    """#3585: a landing that fails now halts finalize, and these targets are
+    not git repos. The tests that use this are about what finalize saves, so
+    the landing is a no-op; `TestFinalizeNodeAdditional` tests the landing."""
+    import importlib
+
+    fz = importlib.import_module(
+        "assemblyzero.workflows.requirements.nodes.finalize"
+    )
+    monkeypatch.setattr(fz, "_commit_and_push_files", lambda state: state)
+
+
 class TestLoadInputNode:
     """Tests for load_input node."""
 
@@ -964,6 +977,7 @@ class TestFinalizeNode:
         assert result.get("error_message", "") == ""
         assert "github.com" in result.get("issue_url", "")
 
+    @pytest.mark.usefixtures("landing_is_out_of_scope")
     def test_saves_lld_to_target_repo(self, tmp_path):
         """Test saving LLD for LLD workflow."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
@@ -1402,6 +1416,7 @@ class TestFinalizeLineageFiles:
     that path. Supersedes #241 (which originally added the unwanted commit).
     """
 
+    @pytest.mark.usefixtures("landing_is_out_of_scope")
     def test_finalize_excludes_lineage_files_from_created_files(self, tmp_path):
         """Finalize must not enumerate lineage files into created_files."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
@@ -1514,10 +1529,13 @@ class TestFinalizeLineageFiles:
         state["issue_title"] = "Add Feature"
         state["lld_status"] = "REVISE"
         state["audit_dir"] = str(target_repo / "audit")
+        Path(state["audit_dir"]).mkdir()
 
-        finalize(state)
+        result = finalize(state)
 
         mock_commit.assert_not_called()
+        # #3585: and it halts, naming the verdict, instead of ending quietly.
+        assert "'REVISE', not APPROVED" in result["error_message"]
 
     @patch("assemblyzero.workflows.requirements.nodes.finalize._commit_and_push_files")
     def test_finalize_commits_on_approved_lld_verdict(self, mock_commit, tmp_path):
@@ -1540,6 +1558,8 @@ class TestFinalizeLineageFiles:
         state["issue_title"] = "Add Feature"
         state["lld_status"] = "APPROVED"
         state["audit_dir"] = str(target_repo / "audit")
+        # #3585: finalize halts without the run's audit_dir.
+        Path(state["audit_dir"]).mkdir()
 
         finalize(state)
 
@@ -1582,6 +1602,7 @@ class TestFinalizeLineageFiles:
             f"Expected move-before-commit, got: {call_order}"
         )
 
+    @pytest.mark.usefixtures("landing_is_out_of_scope")
     def test_finalize_handles_empty_audit_dir(self, tmp_path):
         """Should handle case where audit_dir exists but is empty."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
@@ -1613,8 +1634,10 @@ class TestFinalizeLineageFiles:
         created_files = result.get("created_files", [])
         assert len(created_files) >= 1
 
-    def test_finalize_handles_nonexistent_audit_dir(self, tmp_path):
-        """Should handle case where audit_dir doesn't exist."""
+    def test_finalize_halts_on_a_nonexistent_audit_dir(self, tmp_path):
+        """#3585: an audit_dir that does not exist halts finalize before the
+        LLD is written. It used to save the LLD and skip the lineage without a
+        word."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -1634,8 +1657,8 @@ class TestFinalizeLineageFiles:
 
         result = finalize(state)
 
-        # Should succeed (LLD gets saved even without lineage)
-        assert result.get("error_message", "") == ""
+        assert "does not exist" in result["error_message"]
+        assert not (target_repo / "docs" / "lld" / "active" / "LLD-077.md").exists()
 
 
 class TestLoadInputRetryLogic:
@@ -2243,8 +2266,9 @@ class TestFinalizeIssueNumberParsing:
     """Tests for issue number parsing in finalize."""
 
     @patch("subprocess.run")
-    def test_handles_invalid_issue_number_in_url(self, mock_run, tmp_path):
-        """Test handles URL with invalid issue number gracefully."""
+    def test_halts_on_invalid_issue_number_in_url(self, mock_run, tmp_path):
+        """#3585: a filed URL with no issue number halts, naming the URL. It
+        used to succeed with filed_issue_number 0."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -2266,8 +2290,7 @@ class TestFinalizeIssueNumberParsing:
 
         result = finalize(state)
 
-        # Should succeed but filed_issue_number stays 0
-        assert result.get("error_message", "") == ""
+        assert "issues/not-a-number" in result["error_message"]
         assert result.get("filed_issue_number") == 0
 
 

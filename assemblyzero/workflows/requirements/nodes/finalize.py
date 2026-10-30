@@ -4,9 +4,16 @@ Updates GitHub issue with final draft, commits artifacts to git, and closes work
 For LLD workflows, saves LLD file with embedded review evidence.
 
 Issue #513: First-pass acceptance rate tracking.
+
+#3585 (ADR 0236): a finalize that cannot finish says so on standard error at
+the point of failure, names what it was finishing, and sets ``error_message``,
+which ``route_after_finalize`` sends to HALT, and HALT alerts the operator. A
+missing audit trail stops the node before anything is filed or written, and an
+LLD the reviewer did not approve is neither saved nor landed.
 """
 
 from assemblyzero.utils.shell import run_command
+import logging
 import re
 import shutil
 import subprocess
@@ -37,8 +44,50 @@ from assemblyzero.core.verdict_schema import (
     scan_residual_questions,
 )
 
+logger = logging.getLogger(__name__)
+
 # Constants
 GH_TIMEOUT_SECONDS = 30
+
+
+def _fail(message: str) -> str:
+    """Say a finalize failure at ERROR, on stderr and in the log, and hand it
+    back (#3585, ADR 0236 property 1).
+
+    The caller puts the message in ``error_message``; ``route_after_finalize``
+    sends it to HALT, which alerts the operator with it.
+    """
+    logger.error("[finalize] %s", message)
+    print(f"ERROR [finalize] {message}", file=sys.stderr, flush=True)
+    return message
+
+
+def _halt(state: dict[str, Any], message: str) -> dict[str, Any]:
+    """Set a loud ``error_message`` on ``state`` and return it, for HALT."""
+    state["error_message"] = _fail(message)
+    return state
+
+
+def _audit_dir_problem(state: dict[str, Any], doing: str) -> str:
+    """Why the run's audit directory cannot be written, or "" when it can.
+
+    Every run's audit directory is made by N0 (``load_input``), so one that is
+    unset or absent at N5 means the record of what finalize did would be lost.
+    It used to be skipped without a word (#3510 stopped it writing into the
+    cwd instead). #3585: it stops the node before ``doing`` happens.
+    """
+    audit_dir = str(state.get("audit_dir", "") or "")
+    if not audit_dir:
+        return (
+            f"cannot {doing}: the run has no audit_dir, so what finalize did "
+            f"could not be recorded in its lineage"
+        )
+    if not Path(audit_dir).is_dir():
+        return (
+            f"cannot {doing}: the audit_dir {audit_dir} does not exist, so what "
+            f"finalize did could not be recorded in its lineage"
+        )
+    return ""
 
 
 def cleanup_todo_placeholders(content: str) -> str:
@@ -100,17 +149,28 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
         state: Workflow state containing current_draft, target_repo, etc.
 
     Returns:
-        Updated state with issue_url, filed_issue_number.
+        Updated state with issue_url, filed_issue_number; or error_message,
+        which routes to HALT (#3585), naming the repo and what failed.
     """
     target_repo = Path(state.get("target_repo", "."))
     current_draft = state.get("current_draft", "")
-    audit_dir = Path(state.get("audit_dir", "."))
+
+    # #3585: checked before filing, so an issue is never filed with no
+    # record of it in the run's lineage.
+    problem = _audit_dir_problem(state, f"file the issue in {target_repo}")
+    if problem:
+        return {"error_message": _fail(problem)}
+    audit_dir = Path(state["audit_dir"])
 
     # Parse title and body from draft
     title, body = _parse_issue_content(current_draft)
 
     if not title:
-        return {"error_message": "Could not parse issue title from draft"}
+        return {"error_message": _fail(
+            f"cannot file the issue in {target_repo}: the draft has no '# ' "
+            f"title line ({len(current_draft)} characters, from "
+            f"{state.get('current_draft_path') or 'current_draft'})"
+        )}
 
     # File issue using gh CLI
     try:
@@ -122,31 +182,39 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
             timeout=GH_TIMEOUT_SECONDS,
             cwd=str(target_repo),
         )
-
-        if result.returncode != 0:
-            return {"error_message": f"Failed to create issue: {result.stderr.strip()}"}
-
-        issue_url = result.stdout.strip()
-
-        # Extract issue number from URL
-        # Format: https://github.com/owner/repo/issues/123
-        issue_number = 0
-        if "/issues/" in issue_url:
-            try:
-                issue_number = int(issue_url.split("/issues/")[-1])
-            except ValueError:
-                pass
-
     except subprocess.TimeoutExpired:
-        return {"error_message": "Timeout creating GitHub issue"}
-    except FileNotFoundError:
-        return {"error_message": "gh CLI not found. Install GitHub CLI."}
+        return {"error_message": _fail(
+            f"gh issue create timed out after {GH_TIMEOUT_SECONDS}s in "
+            f"{target_repo} for '{title}'; whether the issue was filed is unknown"
+        )}
+    except FileNotFoundError as e:
+        return {"error_message": _fail(
+            f"cannot run gh issue create in {target_repo} for '{title}': "
+            f"{type(e).__name__}: {e}"
+        )}
 
-    # Save final state to audit (#3510: an empty audit_dir is not the cwd)
-    if state.get("audit_dir") and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        final_content = f"# Issue Filed\n\nURL: {issue_url}\n\n---\n\n{current_draft}"
-        save_audit_file(audit_dir, file_num, "final.md", final_content)
+    if result.returncode != 0:
+        return {"error_message": _fail(
+            f"Failed to create issue in {target_repo} for '{title}' (gh exit "
+            f"{result.returncode}): {result.stderr.strip()}"
+        )}
+
+    issue_url = result.stdout.strip()
+
+    # Format: https://github.com/owner/repo/issues/123. #3585: a URL without
+    # a number used to file "successfully" as issue 0.
+    number_text = issue_url.rsplit("/issues/", 1)[-1] if "/issues/" in issue_url else ""
+    if not number_text.isdigit():
+        return {"error_message": _fail(
+            f"gh issue create in {target_repo} for '{title}' printed "
+            f"{issue_url!r}, which is not an issue URL ending in its number; "
+            f"the issue may be filed, but which one cannot be told"
+        )}
+    issue_number = int(number_text)
+
+    file_num = next_file_number(audit_dir)
+    final_content = f"# Issue Filed\n\nURL: {issue_url}\n\n---\n\n{current_draft}"
+    save_audit_file(audit_dir, file_num, "final.md", final_content)
 
     return {
         "issue_url": issue_url,
@@ -244,9 +312,19 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
                 print(f"    LLD PR landed by the merge driver: {pr_url}")
                 # #3750: final_lld_path named the worktree copy, which the
                 # driver just removed; the durable copy is what remains.
+                # #3585: a landing with no durable copy left final_lld_path
+                # naming the removed copy, and the stage read that as an LLD
+                # that was never produced.
                 durable = durable_lld_path(target_repo, issue_number)
-                if durable.is_file():
-                    state["final_lld_path"] = str(durable)
+                if not durable.is_file():
+                    return _halt(
+                        state,
+                        f"the LLD for issue #{issue_number} landed ({pr_url}) "
+                        f"but its durable copy {durable} is not on disk, so no "
+                        f"copy of the landed LLD survives on this machine "
+                        f"for the stages after it",
+                    )
+                state["final_lld_path"] = str(durable)
         else:
             # Issue workflow remains on the legacy direct-push path.
             commit_sha = commit_and_push(
@@ -260,13 +338,19 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
                 state["commit_sha"] = commit_sha
 
     except (GitOperationError, GitBranchError) as e:
-        # The files are already saved, so the workflow returns; but the
-        # failure is said, and carried in commit_error for the orchestrator's
-        # lld stage, which fails on it (#3740). It was silent until then.
+        # The files are already saved, but nothing landed. commit_error is
+        # what the orchestrator's lld stage fails on (#3740); #3585 adds
+        # error_message, so the graph halts and HALT alerts, where it used to
+        # end at END with the reason printed only to stdout.
         # GitBranchError (#1754): base-branch detection failed (e.g.
         # detached HEAD) — refusing beats silently PRing against main.
-        print(f"    [LLD] NOT LANDED: {e}")
         state["commit_error"] = str(e)
+        subject = f"issue #{issue_number}" if issue_number else f"'{slug}'"
+        return _halt(
+            state,
+            f"the {workflow_type} output for {subject} in {target_repo} was "
+            f"saved but NOT LANDED: {type(e).__name__}: {e}",
+        )
 
     return state
 
@@ -362,11 +446,18 @@ def validate_lld_final(content: str, open_questions_resolved: bool = False) -> l
 
     Returns:
         List of error messages. Empty list if validation passes.
+
+    Raises:
+        ValueError: the content is empty or only whitespace (#3585). It used
+            to return no errors, which is a pass, for an LLD never written.
     """
     errors = []
 
-    if not content:
-        return errors
+    if not content or not content.strip():
+        raise ValueError(
+            "the LLD to validate is empty, so it cannot be shown to pass "
+            "finalize's checks"
+        )
 
     # Check for unresolved open questions ONLY in the Open Questions section
     # Skip this check if reviewer already resolved them (Issue #259)
@@ -445,11 +536,18 @@ def _finalize_repair_budget(state: Dict[str, Any]) -> int:
     workflow's own cap — then clamps it to what the graph's step budget can
     actually carry (see MAX_FINALIZE_REPAIRS). At least one repair is always
     allowed: a cap of zero would reproduce the defect.
+
+    An absent cap is the workflow's default of 3. A cap that is not a whole
+    number raises, naming it (#3585); it used to be read as 3.
     """
+    raw = state.get("max_iterations", 3) or 3
     try:
-        cap = int(state.get("max_iterations", 3) or 3)
-    except (TypeError, ValueError):
-        cap = 3
+        cap = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"max_iterations is {raw!r}, which is not a whole number, so "
+            f"finalize cannot size its repair budget"
+        ) from exc
     return max(1, min(cap, MAX_FINALIZE_REPAIRS))
 
 
@@ -485,14 +583,15 @@ def _request_finalize_repair(
 
     if repairs_done >= budget:
         state["finalize_repair_pending"] = False
-        state["error_message"] = (
+        # #3864 routes this to HALT, which alerts.
+        return _halt(
+            state,
             f"[FINALIZE] {error_msg}. {repairs_done} repair revision(s) were "
             f"already spent on this draft and finalize still blocks, so the "
             f"loop stops rather than regenerating (#2233). The draft is "
             f"unchanged on disk; fix the named defect and relaunch to resume "
-            f"from this stage."
+            f"from this stage.",
         )
-        return state
 
     state["finalize_repair_count"] = repairs_done + 1
     state["finalize_repair_pending"] = True
@@ -515,7 +614,10 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
         state: Workflow state with current_draft, lld_status, etc.
 
     Returns:
-        Updated state with created_files populated
+        Updated state with created_files populated, or with error_message
+        (#3585), which routes to HALT. Every precondition is checked before
+        anything is written: the issue number, the audit_dir, a draft, and a
+        review status of APPROVED.
     """
     workflow_type = state.get("workflow_type", "lld")
     if workflow_type != "lld":
@@ -526,15 +628,41 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     current_draft = state.get("current_draft", "")
     lld_status = state.get("lld_status", "BLOCKED")
     verdict_count = state.get("verdict_count", 0)
-    audit_dir = Path(state.get("audit_dir", ""))
 
     # Validate issue_number
     if not issue_number:
-        state["error_message"] = "No issue number for LLD finalization"
-        return state
+        return _halt(
+            state,
+            f"cannot save the LLD in {target_repo}: the state has no issue number",
+        )
+
+    problem = _audit_dir_problem(
+        state, f"save the LLD for issue #{issue_number} in {target_repo}"
+    )
+    if problem:
+        return _halt(state, problem)
+    audit_dir = Path(state["audit_dir"])
 
     if not current_draft:
-        return state
+        # #3585: this returned with no error, and finalize logged "complete".
+        return _halt(
+            state,
+            f"cannot save the LLD for issue #{issue_number} in {target_repo}: "
+            f"there is no draft to finalize",
+        )
+
+    # #3585: an LLD the reviewer did not approve used to be saved (with its
+    # durable copy, which a later rebuild restores first, #3764), logged
+    # "complete" and quietly not landed. It reaches here when a gate sends a
+    # non-APPROVED verdict on; it is neither saved nor landed.
+    if lld_status != "APPROVED":
+        return _halt(
+            state,
+            f"the LLD for issue #{issue_number} in {target_repo} has review "
+            f"status {lld_status!r}, not APPROVED, so it is not saved or "
+            f"landed; the draft stays at "
+            f"{state.get('current_draft_path') or 'current_draft'}",
+        )
 
     open_questions_status = state.get("open_questions_status", "")
     open_questions_resolved = open_questions_settled(open_questions_status)
@@ -571,14 +699,14 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     try:
         write_root = lld_write_root(state)
     except GitOperationError as exc:
-        # fail-open: not a fall-through -- error_message is the halt; the
-        # finalize node and its caller stop on it, and nothing is written into
-        # the checkout in the worktree's place.
-        state["error_message"] = (
-            f"LLD not saved: the LLD worktree could not be cut ({exc}). "
-            f"Refusing to write into the checkout ({target_repo}) instead (#3510)."
+        # error_message routes finalize to HALT (#3864), which alerts; nothing
+        # is written into the checkout in the worktree's place.
+        return _halt(
+            state,
+            f"LLD for issue #{issue_number} not saved: the LLD worktree could "
+            f"not be cut ({exc}). Refusing to write into the checkout "
+            f"({target_repo}) instead (#3510).",
         )
-        return state
 
     # Save to docs/lld/active/LLD-{issue_number}.md
     lld_dir = write_root / "docs" / "lld" / "active"
@@ -588,8 +716,11 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Output verification guard
     if not lld_path.exists():
-        state["error_message"] = f"LLD file not created at {lld_path}"
-        return state
+        return _halt(
+            state,
+            f"the LLD for issue #{issue_number} was written to {lld_path} "
+            f"and is not there",
+        )
 
     print(f"    Saved LLD to: {lld_path}")
     print(f"    Final Status: {lld_status}")
@@ -645,21 +776,19 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
             # rebuild restores from (#3764), so a run without it would let a
             # later stage fall back to an older copy. error_message routes
             # finalize to HALT (#3864), which alerts.
-            message = (
+            return _halt(
+                state,
                 f"could not write the durable LLD copy {durable} for issue "
                 f"#{issue_number} ({type(e).__name__}: {e}); the run stops "
-                f"before landing so no later stage restores an older LLD (#3750)."
+                f"before landing so no later stage restores an older LLD (#3750).",
             )
-            print(f"ERROR [finalize] {message}", file=sys.stderr)
-            state["error_message"] = message
-            return state
 
     # Save to audit trail. #3510: `Path("")` is the current directory, which
     # always exists, so a state with no audit_dir wrote NNN-final.md into
-    # wherever the process happened to be running.
-    if state.get("audit_dir") and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "final.md", lld_content)
+    # wherever the process happened to be running. #3585: the audit_dir was
+    # checked before anything was written, above.
+    file_num = next_file_number(audit_dir)
+    save_audit_file(audit_dir, file_num, "final.md", lld_content)
 
     return state
 
@@ -671,17 +800,27 @@ def _cleanup_source_idea(state: Dict[str, Any]) -> None:
 
     Args:
         state: Workflow state with source_idea, filed_issue_number, error_message.
+
+    No declared idea is an answer, not a failure: a workflow started from a
+    brief or an issue has nothing to move. A declared idea that is not on
+    disk sets error_message (#3585), which routes to HALT: it used to return
+    without a word, and the idea was never moved to done.
     """
     source_idea = state.get("source_idea", "")
     if not source_idea:
         return
 
-    source_path = Path(source_idea)
-    if not source_path.exists():
-        return
-
     # Only cleanup on success (no error and issue was filed)
     if state.get("error_message"):
+        return
+
+    source_path = Path(source_idea)
+    if not source_path.exists():
+        state["error_message"] = _fail(
+            f"the issue was filed ({state.get('issue_url', '')}) but its "
+            f"source idea {source_path} is not on disk, so it cannot be moved "
+            f"to ideas/done/"
+        )
         return
 
     # Get issue number from filed_issue_number
@@ -730,7 +869,45 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
         updates = _finalize_issue(state)
         state.update(updates)
 
-    # Issue #513: Log workflow completion with first-pass tracking
+    # Closes #1457: move-to-done runs BEFORE the commit. Previously the commit
+    # captured lineage in active/ then this move relocated those files to done/,
+    # leaving the working tree dirty after every successful workflow run. With
+    # AZ #1458 (lineage no longer in created_files) the dirty-state was mostly
+    # defused, but the order is still wrong: post-commit working-tree mutation
+    # is incoherent. Moving first ensures that whatever lineage is committed —
+    # if any — lives at its final on-disk location.
+    if not state.get("error_message"):
+        target_repo = Path(state.get("target_repo", "."))
+        # #3510: a mock run's lineage lives under the mock output root, and
+        # moves to done/ there; resolved against the checkout it would fall
+        # through to the legacy branch and land in the checkout's docs/.
+        lineage_root = (
+            mock_output_root(target_repo, int(state.get("issue_number") or 0))
+            if state.get("config_mock_mode") and workflow_type == "lld"
+            else target_repo
+        )
+        # #3585: the move was skipped without a word when the audit_dir was
+        # gone; the lineage then stayed in active/ and nothing landed it.
+        problem = _audit_dir_problem(state, "move the run's lineage to done/")
+        if problem:
+            state["error_message"] = _fail(problem)
+        else:
+            move_lineage_to_done(Path(state["audit_dir"]), lineage_root)
+
+    # For LLD workflow, commit only on APPROVED — REVISE / BLOCKED outputs
+    # are not project history and must not land on target main (#1456).
+    # #3585: _save_lld_file now sets error_message for a non-APPROVED LLD,
+    # so the error check is the gate. Issue workflow commits unconditionally
+    # (no per-verdict gate exists for that path).
+    if not state.get("error_message"):
+        state = _commit_and_push_files(state)
+
+    # Cleanup source idea after successful issue creation
+    if workflow_type == "issue" and not state.get("error_message"):
+        _cleanup_source_idea(state)
+
+    # Issue #513: Log workflow completion with first-pass tracking. #3585:
+    # last, so a landing or an idea move that fails is never logged complete.
     if not state.get("error_message"):
         verdict_count = state.get("verdict_count", 0)
         draft_count = state.get("draft_count", 0)
@@ -772,41 +949,5 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
             event="complete",
             details=completion_details,
         )
-
-    # Closes #1457: move-to-done runs BEFORE the commit. Previously the commit
-    # captured lineage in active/ then this move relocated those files to done/,
-    # leaving the working tree dirty after every successful workflow run. With
-    # AZ #1458 (lineage no longer in created_files) the dirty-state was mostly
-    # defused, but the order is still wrong: post-commit working-tree mutation
-    # is incoherent. Moving first ensures that whatever lineage is committed —
-    # if any — lives at its final on-disk location.
-    if not state.get("error_message"):
-        audit_dir = Path(state.get("audit_dir", ""))
-        target_repo = Path(state.get("target_repo", "."))
-        # #3510: a mock run's lineage lives under the mock output root, and
-        # moves to done/ there; resolved against the checkout it would fall
-        # through to the legacy branch and land in the checkout's docs/.
-        lineage_root = (
-            mock_output_root(target_repo, int(state.get("issue_number") or 0))
-            if state.get("config_mock_mode") and workflow_type == "lld"
-            else target_repo
-        )
-        if state.get("audit_dir") and audit_dir.exists():
-            move_lineage_to_done(audit_dir, lineage_root)
-
-    # For LLD workflow, commit only on APPROVED — REVISE / BLOCKED outputs
-    # are not project history and must not land on target main. Issue workflow
-    # commits unconditionally (no per-verdict gate exists for that path).
-    # Closes #1456.
-    workflow_type = state.get("workflow_type", "lld")
-    lld_blocked = (
-        workflow_type == "lld" and state.get("lld_status") != "APPROVED"
-    )
-    if not state.get("error_message") and not lld_blocked:
-        state = _commit_and_push_files(state)
-
-    # Cleanup source idea after successful issue creation
-    if workflow_type == "issue" and not state.get("error_message"):
-        _cleanup_source_idea(state)
 
     return state

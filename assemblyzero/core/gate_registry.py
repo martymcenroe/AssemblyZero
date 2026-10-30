@@ -268,7 +268,11 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "lld.finalize.issue_creation", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Failed to create issue",
-        _s(f"{_RQ}/nodes/finalize.py::_finalize_issue::return", 0, 1, 2, 3),
+        _s(f"{_RQ}/nodes/finalize.py::_finalize_issue::return", 0, 1, 2, 3, 4, 5),
+        notes=(
+            "#3585: also the audit_dir precondition, checked before filing, "
+            "and a filed URL that carries no issue number"
+        ),
     ),
     # ---- spec: the implementation-spec workflow -------------------------
     Gate(
