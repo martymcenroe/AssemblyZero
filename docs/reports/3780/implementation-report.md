@@ -175,6 +175,14 @@ The watchdog prints a progress line for a running stage and never kills it; boun
 
 Baseline: no entries in either. The fail-open audit examines nine more sites.
 
+### state_persistence.py (#3797, 1 site fixed, 1 won't-do)
+
+- **A snapshot that exists and cannot be read raises** (77), naming the file and the cause. `load_state_snapshot` used to return None for it, the same answer as "no snapshot was written". An absent snapshot is still None.
+- **Won't do: 42, the `str()` of a value JSON cannot hold.** The ledger prescribed raising. But `save_state_snapshot`'s one caller is HALT, which writes the snapshot before it writes the recovery plan and alerts; a raise would cost every halt whose state holds such a value its recovery plan and its alert, the opposite of the rule. And nothing reads the snapshot back as state: `load_state_snapshot` has no caller in `assemblyzero/` or `tools/`, and the resume contract only hashes the file. The docstring says so now; `test_42_*` pin it; the ledger row and #3797 record the won't-do.
+- **Callers.** `load_state_snapshot` has none outside its tests. `save_state_snapshot` is unchanged for HALT.
+
+Baseline: no entries in the loud-failure baseline. The fail-open audit lost 1 finding (`load_state_snapshot`'s handler); `save_state_snapshot`'s stays, with the won't-do.
+
 ## Also carried: #4163, a committed test artifact the tiers kept appending to
 
 `audit/calls.jsonl` was committed by accident in PR #3573: three call recordings of fixture text from a test run. The call recorder's context is a module global, and a test that left it armed made every later model call in the process write there, under pytest's working directory. The measurement run for #3801 added a fourth line, which dirtied a tracked file. The fix:

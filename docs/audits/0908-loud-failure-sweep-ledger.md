@@ -586,8 +586,8 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/retry.py:95` | exhausted | raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
 | `assemblyzero/core/utf8_console.py:76` | tier 1 | tier 2 | compliant | none |
 | `assemblyzero/core/utf8_console.py:83` | both tiers | False | loud, logged | ERROR |
-| `assemblyzero/core/state_persistence.py:42` | serialize | str() | loud, logged, stops | raise |
-| `assemblyzero/core/state_persistence.py:77` | snapshot | None | all | raise |
+| `assemblyzero/core/state_persistence.py:42` | serialize | str() | loud, logged, stops | WON'T DO (#3797): the snapshot is HALT's record and is written before HALT alerts, so a raise here would cost the halt its recovery plan and its alert; nothing reads the snapshot back as state (load_state_snapshot has no caller, and the resume contract only hashes the file), so a value's str() is how the record holds what JSON cannot; the docstring says so, pinned by test_42_* in test_state_persistence_loud_failure.py |
+| `assemblyzero/core/state_persistence.py:77` | snapshot | None | all | FIXED in the core batch (#3797): a snapshot that exists and cannot be read or parsed raises naming it; an absent one is still None; test_<line> in test_state_persistence_loud_failure.py |
 | `assemblyzero/core/operator_wait.py:41` | isatty | False | logged | ERROR |
 | `assemblyzero/core/operator_wait.py:42` | tag | records the fall-through as a decision | all | remove |
 | `assemblyzero/core/retry_mode.py:40` | malformed | REGENERATED | compliant | none |

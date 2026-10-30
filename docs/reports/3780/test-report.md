@@ -138,6 +138,16 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 
 **Neighbouring suites:** 164 passed and 3 failed across every test file that imports the module and the two audits' own tests. The 3 failures are not this change: `test_stage_watchdog.py::TestProgrammingErrorsAreNotRetried` fails the same way with HEAD's `stage_watchdog.py` in place. Those tests drive `GeminiClient.invoke` and assert its behaviour before faa39781 (#3777), which made a fault in the call raise instead of returning "Programming error"; they were not among that commit's changed tests.
 
+## state_persistence.py
+
+**New: `tests/unit/test_state_persistence_loud_failure.py` (5)**: two for 77 (a corrupt snapshot and an unreadable one), `test_an_absent_snapshot_is_none`, which pins kept behaviour, and two `test_42_*` that pin the won't-do (a value JSON cannot hold is written as text, and the docstring carries the reason).
+
+**Before the fix, measured** by writing the tests first and running them against the unchanged module: 3 failed, 2 passed. The failures were the two for 77 and the docstring pin; the passes were the absent snapshot and the kept `str()`.
+
+**Changed test:** `test_state_persistence.py::test_load_corrupt_json_raises` (was `test_load_corrupt_json_returns_none`).
+
+**Neighbouring suites:** 411 passed and 1 failed across every unit and integration test file that names the module, HALT or the resume contract, plus the two audits' own tests. The failure was the fail-open baseline going stale by the fixed handler; after `--write-baseline` the audits' tests pass.
+
 ## #4163: the call recorder between tests
 
 **New: `tests/unit/test_call_recording_isolation.py` (3).** The first test arms the recorder; the second finds it disarmed; the third checks the artifact is gone and `/audit/` is ignored.
