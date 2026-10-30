@@ -1,8 +1,10 @@
-# Test Report: the implementation-spec workflow under standard 0034 (#3585 step 5, first half)
+# Test Report: the implementation-spec workflow under standard 0034 (#3585 step 5)
 
-Each fixed site has a test that fails before its fix and passes after, run against the unchanged module first. Filled in module by module.
+Each fixed site has a test that fails before its fix and passes after, run against the unchanged module first. The package was swept in two halves and assembled on one branch; each half's sections follow in its order.
 
-## graph.py
+## The first half
+
+### graph.py
 
 **New: `tests/unit/test_spec_graph_loud_failure.py` (11).** Five tests are named for the N3 unrouted-error entry: three router states that carry an `error_message` (below the cap, beside a pass, beside a grace), the loud-failure scan of the spec graph, and a graph built from the real router and the real HALT node, with the edge map read from the compiled graph, asserting one alert. Four pin kept routes: a failure with no error revises, a grace with no error revises, the cap with no grace halts, and a revision does not alert. Two pin the rows #3887 fixed (265 and 513).
 
@@ -14,7 +16,7 @@ Each fixed site has a test that fails before its fix and passes after, run again
 
 **Audits:** `audit_loud_failure.py --check`: 0 new, 1 stale (the entry above). `audit_fail_open.py --check`: no new fail-open.
 
-## nodes/validate_completeness.py
+### nodes/validate_completeness.py
 
 **New: `tests/unit/test_validate_completeness_loud_failure.py` (57).** Each test is named for its ledger line, one or more per site, plus tests that pin what is kept: an empty draft below the cap revises, a complete state reaches a verdict, no pattern references and no pyproject are answers, tagged criteria still gate, a probe that answers is read, no repo root owns no packages, an untagged fence that does not parse is counted and passed over, a resolvable stdlib base still lends its methods, and the two rows #3767 fixed (1725, 1746).
 
@@ -40,7 +42,7 @@ Each fixed site has a test that fails before its fix and passes after, run again
 
 **Changed later (found by the compile_manifest batch):** `test_call_recording_roll.py::TestARecordedRollReplaysExactly` (2 cases) failed after this module's commit. Its LLD's one criterion carried no REQ tag, and N3 now halts on that (1892) instead of passing it as "not applicable". The scenario now carries REQ-1, and the spec's test cites it in a docstring; 6 passed. The file does not name this module, which is why the sweep over files that do missed it.
 
-## nodes/compile_manifest.py
+### nodes/compile_manifest.py
 
 **New: `tests/unit/test_compile_manifest_loud_failure.py` (24).** Each test is named for its ledger line, plus tests that pin what is kept: a repo with no gate declaration compiles, a compiled manifest is persisted, an ordinary LLD sits out and records why (89, WON'T DO), a mock run files nothing and still halts (186), a working filing files one per criterion, a recorded absence and a recorded abstain pass N1c (230, the abstain half WON'T DO), and rows with their criteria list pass.
 
@@ -51,3 +53,16 @@ Each fixed site has a test that fails before its fix and passes after, run again
 **Neighbouring suites:** 336 passed across `test_assertion_manifest.py`, `test_decision_table_survives.py`, `test_implementation_spec_workflow.py`, `test_spec_graph_loud_failure.py`, `test_gate_registry.py` and the new file. 446 passed across the 22 other test files that name the manifest or the spec graph, including the mock-roll, orchestrator and recorded-roll suites.
 
 **Audits:** `audit_loud_failure.py --check`: 0 new, 17 stale (1 graph, 9 validate_completeness, 7 here). `audit_fail_open.py --check`: no new fail-open.
+
+## The second half
+
+Each new test file names its tests `test_<line>_...` after the ledger row they pin. Every file was first run against the unchanged module: each site test failed and each test of kept behaviour passed.
+
+### `base_tree.py`
+
+- **Added:** `tests/unit/test_base_tree_loud_failure.py`, 18 tests. Before the fix: 8 failed, 10 passed. After: 18 passed.
+- **Changed**, each of which relied on the retired local-branch fallback:
+  - `test_spec_base_aware.py`: `test_a_base_that_does_not_exist_is_not_fatal` is now `test_a_base_that_does_not_exist_raises`;
+  - `test_import_checker_base.py`, `test_import_check_names_the_real_module.py` and `test_call_recording_roll.py`: their fixtures push the base branch to a bare origin.
+- **Neighbouring suites:** `test_spec_base_aware`, `test_import_checker_base`, `test_import_check_names_the_real_module`, `test_spec_calls_existing_code`, `test_failopen_tags_3767`, `test_import_checker_env`, `test_base_api_surface`, `test_base_symbols_in_api_check`, `test_call_recording_roll`, `test_resume_after_ceiling_halt`, `test_stage_verdict_is_explicit`, `test_first_party_mid_build`, `test_mock_roll` and `test_implementation_spec_workflow` (207 passed): all pass.
+- **Audits:** `audit_loud_failure.py --check` PASS at 280; `audit_fail_open.py --check` PASS, no new fail-open.

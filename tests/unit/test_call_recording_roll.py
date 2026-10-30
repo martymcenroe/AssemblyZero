@@ -150,6 +150,14 @@ def workspace(tmp_path: Path):
     (repo / "README.md").write_text("base\n", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "base")
+    # #3585: the run's base is read from origin only, so the target has one.
+    origin = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", "-b", "main", str(origin)],
+        capture_output=True, text=True, check=True,
+    )
+    _git(repo, "remote", "add", "origin", str(origin))
+    _git(repo, "push", "-q", "origin", "main")
 
     lld_path = tmp_path / "LLD-999.md"
     lld_path.write_text(LLD, encoding="utf-8")

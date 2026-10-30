@@ -1,8 +1,8 @@
-# Implementation Report: the implementation-spec workflow under standard 0034 (#3585 step 5, first half)
+# Implementation Report: the implementation-spec workflow under standard 0034 (#3585 step 5)
 
-The rule is ADR 0236 and standard 0034. This branch takes the first half of `assemblyzero/workflows/implementation_spec/`: N3's route in `graph.py`, then `nodes/validate_completeness.py`, then `nodes/compile_manifest.py`. The module issues were deleted on 2026-10-30, so ledger 0908 names every site; line numbers are the ledger's, at `79e18ad1`.
+The rule is ADR 0236 and standard 0034. The module issues were deleted on 2026-10-30, so ledger 0908 names every site; line numbers are the ledger's, at `79e18ad1`. The package was swept in two halves and assembled on one branch.
 
-## Modules
+## The first half: N3's route in `graph.py`, then `nodes/validate_completeness.py`, then `nodes/compile_manifest.py`
 
 ### graph.py: N3's errors reach HALT
 
@@ -53,3 +53,13 @@ Compliance: each new failure path is loud (an ERROR line on stderr from N1b, or 
 **Shared files changed:** `assemblyzero/core/gate_registry.py` gains the row `spec.manifest_cannot_run` for the new halt site, citing the operator's 2026-10-06 ADR 0236 acceptance in `created_by`. `tests/fixtures/gate_registry_baseline.json` raises `halt_rows_per_stage.spec` from 20 to 21 in the same change, as the ratchet requires.
 
 Baseline: seven loud-failure entries leave (five tags and two swallowed handlers).
+## The second half: the nodes and helpers other than `graph.py`, `nodes/validate_completeness.py` and `nodes/compile_manifest.py`
+
+Each site is the ledger row in `docs/audits/0908-loud-failure-sweep-ledger.md` named by file and line at `79e18ad1`.
+
+### `workflows/implementation_spec/base_tree.py` (4 sites)
+
+- **A failed fetch (41) and a base not on origin (45).** `base_ref` ignored the fetch's exit code, and when `origin/<base>` did not resolve it fell back to the local branch, which nothing fast-forwards (#2021). Both now raise `BaseTreeError` with the command, the exit code and git's stderr.
+- **A git error read as absence (54, 63).** `exists_on_base` used `git cat-file -e`, which exits non-zero both for a missing path and for a ref git cannot read. It now asks `git ls-tree --full-tree`, which exits 0 with no output for a missing path and fails only for a git error, which raises. `read_from_base` returns `""` only for a path the base does not ship, and raises on any other failed `git show`.
+- **`BaseTreeError`** is a `RuntimeError`, not an `OSError`, so no caller reads a git failure as a missing file.
+- **Callers.** `analyze_codebase` catches it and halts (below). `validate_completeness.py` does not catch it yet; a git failure there now raises out of N3 rather than reading as absent.
