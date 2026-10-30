@@ -3,7 +3,7 @@
   "measured_against": {
     "files_scanned": 313,
     "sites_examined": 9770,
-    "findings_total": 481
+    "findings_total": 469
   },
   "undeclared": [
     "assemblyzero/core/capacity.py::parse_reset_time::except_handler::0",
@@ -23,7 +23,6 @@
     "assemblyzero/core/llm_provider.py::_stream_with_idle_timeout._pump_stdout::except_handler::0",
     "assemblyzero/core/llm_provider.py::_stream_with_idle_timeout._pump_stdout::except_handler::1",
     "assemblyzero/core/state_persistence.py::save_state_snapshot::except_handler::0",
-    "assemblyzero/core/tdd_path_tracking.py::cleanup_stale_scaffold::except_handler::0",
     "assemblyzero/core/utf8_console.py::widen::except_handler::0",
     "assemblyzero/core/utf8_console.py::widen::except_handler::1",
     "assemblyzero/core/verdict_schema.py::_loads_lenient::except_handler::0",

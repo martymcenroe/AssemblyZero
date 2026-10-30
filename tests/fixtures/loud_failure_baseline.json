@@ -1,5 +1,5 @@
 {
-  "count": 277,
+  "count": 263,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -12,90 +12,6 @@
       "issue": 3581,
       "kind": "unrouted_error",
       "line": 522
-    },
-    "assemblyzero/core/fail_open_audit.py::_Scanner._exception_text::fail_open_tag::1": {
-      "detail": "# fail-open: this only names the exception type for the report. An",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 610
-    },
-    "assemblyzero/core/fail_open_audit.py::_Scanner._exception_text::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 609
-    },
-    "assemblyzero/core/fail_open_audit.py::scan_file::fail_open_tag::1": {
-      "detail": "# fail-open: one unreadable file must not cost the whole sweep. This is",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 714
-    },
-    "assemblyzero/core/gate_registry.py::renumberings::fail_open_tag::1": {
-      "detail": "# fail-open: a row naming something that is not a site key at all",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 1496
-    },
-    "assemblyzero/core/gate_registry.py::scan_halt_sites::fail_open_tag::1": {
-      "detail": "# fail-open: a file that will not parse is recorded in",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 1283
-    },
-    "assemblyzero/core/halt_evidence.py::_preserved_tail::fail_open_tag::1": {
-      "detail": "# fail-open: one corrupt record in the preservation log",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 86
-    },
-    "assemblyzero/core/halt_evidence.py::_preserved_tail::fail_open_tag::2": {
-      "detail": "# fail-open: the preservation record is evidence ABOUT the run,",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 92
-    },
-    "assemblyzero/core/halt_evidence.py::_sha256::fail_open_tag::1": {
-      "detail": "# fail-open: an unreadable artifact is reported as unreadable in",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 44
-    },
-    "assemblyzero/core/operator_notify.py::send_email::fail_open_tag::1": {
-      "detail": "# fail-open: #2529 \u2014 same ruling as the toast: the backstop email is",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 256
-    },
-    "assemblyzero/core/operator_notify.py::send_email::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 255
-    },
-    "assemblyzero/core/operator_notify.py::show_toast::fail_open_tag::1": {
-      "detail": "# fail-open: #2529 \u2014 a notification must never damage the wait it",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 200
-    },
-    "assemblyzero/core/operator_notify.py::show_toast::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 199
-    },
-    "assemblyzero/core/operator_wait.py::wants_color::fail_open_tag::1": {
-      "detail": "# fail-open: a closed or detached stream is not a terminal, and \"no",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 42
-    },
-    "assemblyzero/core/section_utils.py::drafter_authored::fail_open_tag::1": {
-      "detail": "# fail-open: only in shape -- with no stripper available the caller",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 147
     },
     "assemblyzero/hooks/cascade_action.py::handle_cascade_detection::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

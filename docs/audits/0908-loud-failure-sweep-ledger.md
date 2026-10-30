@@ -562,13 +562,13 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/capacity.py:223` | no ts | available | logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
 | `assemblyzero/core/capacity.py:237` | unchecked | available | logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
 | `assemblyzero/core/capacity.py:264` | unknown provider | available | loud, logged, stops | FIXED in the core batch (#3773): a state file or record that cannot be read, understood or written raises CapacityStateError naming the file; Gemini is reported not checked; an unknown provider raises; test_<line> in test_capacity_loud_failure.py |
-| `assemblyzero/core/operator_notify.py:183` | non-windows | reason | loud, alerts | ERROR |
-| `assemblyzero/core/operator_notify.py:199` | toast spawn | reason | loud, logged, alerts | raise |
-| `assemblyzero/core/operator_notify.py:200` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/operator_notify.py:205` | toast exit | reason | loud, alerts | raise |
-| `assemblyzero/core/operator_notify.py:231` | no sender | reason | loud, stops, alerts | raise |
-| `assemblyzero/core/operator_notify.py:255` | ses | reason | loud, logged, alerts | raise |
-| `assemblyzero/core/operator_notify.py:256` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/operator_notify.py:183` | non-windows | reason | loud, alerts | FIXED in the core batch (#3783): a toast on a host that is not Windows is an ERROR line on stderr and the log naming the title and host, and spawns nothing; test_183 in test_operator_notify_loud_failure.py |
+| `assemblyzero/core/operator_notify.py:199` | toast spawn | reason | loud, logged, alerts | FIXED in the core batch (#3783): a toast that cannot be spawned raises AlertDeliveryError with the cause; test_199 in test_operator_notify_loud_failure.py |
+| `assemblyzero/core/operator_notify.py:200` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3783): the tag is removed, and its handler now raises; test_200_256 in test_operator_notify_loud_failure.py |
+| `assemblyzero/core/operator_notify.py:205` | toast exit | reason | loud, alerts | FIXED in the core batch (#3783): a toast whose PowerShell exits non-zero raises AlertDeliveryError with the exit code and stderr; test_205 in test_operator_notify_loud_failure.py |
+| `assemblyzero/core/operator_notify.py:231` | no sender | reason | loud, stops, alerts | FIXED in the core batch (#3783): an email with no sender raises AlertDeliveryError naming where to set one; test_231 in test_operator_notify_loud_failure.py |
+| `assemblyzero/core/operator_notify.py:255` | ses | reason | loud, logged, alerts | FIXED in the core batch (#3783): a failed SES send raises AlertDeliveryError with the sender, recipient and cause; test_255 in test_operator_notify_loud_failure.py |
+| `assemblyzero/core/operator_notify.py:256` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3783): the tag is removed, and its handler now raises; test_200_256 in test_operator_notify_loud_failure.py |
 | `assemblyzero/core/alert.py:78` | alert.json | raise | compliant | none |
 | `assemblyzero/core/alert.py:164` | email fails | toast skipped | alerts | FIXED in #3581 core batch 1 (#3724): attempt toast |
 | `assemblyzero/core/alert.py:170` | delivery | raise | compliant | none |
@@ -585,16 +585,16 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/retry.py:73` | timeout | stdout, raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
 | `assemblyzero/core/retry.py:95` | exhausted | raise | loud | FIXED in the core batch (#3789): every giving up is an ERROR line on stderr and the log naming the call, the error and the attempts, and is still raised; test_<line> in test_retry_loud_failure.py |
 | `assemblyzero/core/utf8_console.py:76` | tier 1 | tier 2 | compliant | none |
-| `assemblyzero/core/utf8_console.py:83` | both tiers | False | loud, logged | ERROR |
+| `assemblyzero/core/utf8_console.py:83` | both tiers | False | loud, logged | FIXED in the core batch (#3800): a stream that refuses both tiers is an ERROR line on stderr and the log naming the stream and both refusals; test_83 in test_utf8_console_loud_failure.py |
 | `assemblyzero/core/state_persistence.py:42` | serialize | str() | loud, logged, stops | WON'T DO (#3797): the snapshot is HALT's record and is written before HALT alerts, so a raise here would cost the halt its recovery plan and its alert; nothing reads the snapshot back as state (load_state_snapshot has no caller, and the resume contract only hashes the file), so a value's str() is how the record holds what JSON cannot; the docstring says so, pinned by test_42_* in test_state_persistence_loud_failure.py |
 | `assemblyzero/core/state_persistence.py:77` | snapshot | None | all | FIXED in the core batch (#3797): a snapshot that exists and cannot be read or parsed raises naming it; an absent one is still None; test_<line> in test_state_persistence_loud_failure.py |
-| `assemblyzero/core/operator_wait.py:41` | isatty | False | logged | ERROR |
-| `assemblyzero/core/operator_wait.py:42` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/operator_wait.py:41` | isatty | False | logged | FIXED in the core batch (#3784): an isatty that fails on an open stream raises (a closed stream, or one with no isatty, is still quietly not a terminal), where the ledger prescribed an ERROR line, since the painted line is about to be written to the same broken stream, an ERROR line followed by False is the substitute shape the fail-open audit reports, and an alert per painted line would flood; test_41 in test_operator_wait_loud_failure.py |
+| `assemblyzero/core/operator_wait.py:42` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3784): the tag is removed; test_42 in test_operator_wait_loud_failure.py |
 | `assemblyzero/core/retry_mode.py:40` | malformed | REGENERATED | compliant | none |
-| `assemblyzero/core/gate_registry.py:1240` | scan_halt_sites parse failure | files_unparseable, continue | loud, logged, stops, alerts | raise |
-| `assemblyzero/core/gate_registry.py:1241` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/gate_registry.py:1453` | malformed site key | continue | all | raise |
-| `assemblyzero/core/gate_registry.py:1454` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/gate_registry.py:1240` | scan_halt_sites parse failure | files_unparseable, continue | loud, logged, stops, alerts | FIXED in the core batch (#3776): a file the halt-site walker cannot read or parse raises HaltScanError naming it, instead of being listed in files_unparseable and skipped; test_1240 in test_gate_registry_loud_failure.py |
+| `assemblyzero/core/gate_registry.py:1241` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3776): the tag is removed, and its handler now raises HaltScanError; test_1241_1454 in test_gate_registry_loud_failure.py |
+| `assemblyzero/core/gate_registry.py:1453` | malformed site key | continue | all | FIXED in the core batch (#3776): a registry row naming something that is not a site key raises ValueError naming the row, instead of being passed over; test_1453 in test_gate_registry_loud_failure.py |
+| `assemblyzero/core/gate_registry.py:1454` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3776): the tag is removed, and its handler now raises ValueError; test_1241_1454 in test_gate_registry_loud_failure.py |
 | `assemblyzero/core/seats.py:128` | /proc/version | None | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
 | `assemblyzero/core/seats.py:149` | is_dir | True | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
 | `assemblyzero/core/seats.py:173` | lock read | True | loud, logged, alerts | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
@@ -602,11 +602,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/seats.py:564` | mock override | dropped | compliant | none |
 | `assemblyzero/core/seats.py:776` | active_profile | DEFAULT_PROFILE | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
 | `assemblyzero/core/seats.py:777` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3793): the lock reads still fail closed and now alert; /proc/version on Linux and the telemetry profile name raise; test_<line> in test_seats_loud_failure.py |
-| `assemblyzero/core/fail_open_audit.py:595` | unparse | label | all | raise |
-| `assemblyzero/core/fail_open_audit.py:596` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/fail_open_audit.py:699` | read/parse | files_unparseable, [] | all | raise |
-| `assemblyzero/core/fail_open_audit.py:700` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/fail_open_audit.py:739` | missing subdir | continue | all | raise |
+| `assemblyzero/core/fail_open_audit.py:595` | unparse | label | all | FIXED in the core batch (#3775): a handler type ast.unparse cannot render raises instead of being labelled "an exception"; test_595 in test_fail_open_audit_loud_failure.py |
+| `assemblyzero/core/fail_open_audit.py:596` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3775): the tag and its handler are removed; test_596_700 in test_fail_open_audit_loud_failure.py |
+| `assemblyzero/core/fail_open_audit.py:699` | read/parse | files_unparseable, [] | all | FIXED in the core batch (#3775): a file that cannot be read or parsed raises ScanError naming it, instead of being listed in files_unparseable and skipped; test_699 in test_fail_open_audit_loud_failure.py |
+| `assemblyzero/core/fail_open_audit.py:700` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3775): the tag is removed, and its handler now raises ScanError; test_596_700 in test_fail_open_audit_loud_failure.py |
+| `assemblyzero/core/fail_open_audit.py:739` | missing subdir | continue | all | FIXED in the core batch (#3775): a scope directory that does not exist raises ScanError naming it instead of being skipped; test_739 in test_fail_open_audit_loud_failure.py |
 | `assemblyzero/core/validation/test_plan_validator.py:136` | section 3 missing | WARNING, [] | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
 | `assemblyzero/core/validation/test_plan_validator.py:225` | section 10 missing | WARNING, [] | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
 | `assemblyzero/core/validation/test_plan_validator.py:237` | no table | zero scenarios | loud, logged | FIXED in the core batch (#3801): loud at ERROR; every unreadable part of Section 10 is a parse-error violation; test_<line> in test_test_plan_validator_loud_failure.py |
@@ -655,8 +655,8 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/halt_node.py:298` | tag | records the fall-through as a decision | all | FIXED in #3581 core batch 1 (#3724): remove |
 | `assemblyzero/core/halt_node.py:344` | evidence | WARN stdout | loud, logged, alerts | FIXED in #3581 core batch 1 (#3724): ERROR |
 | `assemblyzero/core/halt_node.py:345` | tag | records the fall-through as a decision | all | FIXED in #3581 core batch 1 (#3724): remove |
-| `assemblyzero/core/section_utils.py:146` | import stripper | unstripped | all | propagate |
-| `assemblyzero/core/section_utils.py:147` | tag | records the fall-through as a decision | all | remove |
+| `assemblyzero/core/section_utils.py:146` | import stripper | unstripped | all | FIXED in the core batch (#3794): a stripper that cannot be imported propagates its ImportError instead of handing back the unstripped document; test_146 in test_section_utils_loud_failure.py |
+| `assemblyzero/core/section_utils.py:147` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3794): the tag and its handler are removed; test_147 in test_section_utils_loud_failure.py |
 | `assemblyzero/core/section_utils.py:288` | unmapped feedback | "" | compliant | none |
 | `assemblyzero/core/audit.py:126` | git missing | raise | compliant | none |
 | `assemblyzero/core/audit.py:130` | timeout | raise | logged | FIXED in the core batch (#3771): the timeout is chained as the cause, and the message names the command, the limit and where it ran; test_130 in test_audit_loud_failure.py |
@@ -664,15 +664,15 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/audit.py:242` | history read | [] | all | FIXED in the core batch (#3771): a history that cannot be read raises its OSError; an absent one is still no entries; test_242 in test_audit_loud_failure.py |
 | `assemblyzero/core/audit.py:267` | bad shard line | skip | all | FIXED in the core batch (#3771): a line that is not a JSON object raises ValueError naming the file and its line; test_267 in test_audit_loud_failure.py |
 | `assemblyzero/core/audit.py:270` | shard read | partial | all | FIXED in the core batch (#3771): a shard that cannot be read, or that was removed after it was listed, raises its OSError, so no partial log is returned; test_270 in test_audit_loud_failure.py |
-| `assemblyzero/core/halt_evidence.py:43` | hash artifact | None | loud, logged, alerts | ERROR |
-| `assemblyzero/core/halt_evidence.py:44` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/halt_evidence.py:85` | corrupt record | drop | loud, logged, alerts | ERROR |
-| `assemblyzero/core/halt_evidence.py:86` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/halt_evidence.py:91` | read log | [] | loud, logged, alerts | ERROR |
-| `assemblyzero/core/halt_evidence.py:92` | tag | records the fall-through as a decision | all | remove |
-| `assemblyzero/core/halt_evidence.py:120` | audit_dir missing | empty | loud, logged | ERROR |
-| `assemblyzero/core/scripted_provider.py:136` | no response | "" success | all | raise |
-| `assemblyzero/core/scripted_provider.py:241` | unmatched | failed result | loud, alerts | ERROR |
+| `assemblyzero/core/halt_evidence.py:43` | hash artifact | None | loud, logged, alerts | FIXED in the core batch (#3778): an unreadable lineage artifact alerts with its cause and is named unread in the bundle, where the ledger prescribed an ERROR line, since a raise would cost the halt its whole bundle and an unreadable file in the run's lineage is a defect the operator must hear about away from the terminal; test_43 in test_halt_evidence_loud_failure.py |
+| `assemblyzero/core/halt_evidence.py:44` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3778): the tag is removed; test_44_86_92 in test_halt_evidence_loud_failure.py |
+| `assemblyzero/core/halt_evidence.py:85` | corrupt record | drop | loud, logged, alerts | FIXED in the core batch (#3778): a corrupt record in the tail (bad JSON or not an object) alerts and keeps its place as a corrupt-line marker, where the ledger prescribed an ERROR line, for the reason given at line 43; test_85 in test_halt_evidence_loud_failure.py |
+| `assemblyzero/core/halt_evidence.py:86` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3778): the tag is removed; test_44_86_92 in test_halt_evidence_loud_failure.py |
+| `assemblyzero/core/halt_evidence.py:91` | read log | [] | loud, logged, alerts | FIXED in the core batch (#3778): an unreadable preservation record alerts and is named unread in the bundle, where the ledger prescribed an ERROR line, for the reason given at line 43; test_91 in test_halt_evidence_loud_failure.py |
+| `assemblyzero/core/halt_evidence.py:92` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3778): the tag is removed; test_44_86_92 in test_halt_evidence_loud_failure.py |
+| `assemblyzero/core/halt_evidence.py:120` | audit_dir missing | empty | loud, logged | FIXED in the core batch (#3778): an audit_dir the state names that is not a directory is an ERROR line on stderr and the log, and is named unread in the bundle; test_120 in test_halt_evidence_loud_failure.py |
+| `assemblyzero/core/scripted_provider.py:136` | no response | "" success | all | FIXED in the core batch (#3792): a rule with no response, no fixture and no fail_with raises ValueError naming its stage, instead of answering "" as a success; test_136 in test_scripted_provider_loud_failure.py |
+| `assemblyzero/core/scripted_provider.py:241` | unmatched | failed result | loud, alerts | FIXED in the core batch (#3792): a call no rule answers (no match, two stages matching, or past the scripted rounds) is an ERROR line on stderr and the log, and still the failed result the caller routes to HALT; test_241 in test_scripted_provider_loud_failure.py |
 | `assemblyzero/core/scripted_provider.py:260` | scripted fail | failure | compliant | none |
 | `assemblyzero/core/retry_gate.py:209` | unknown class | full budget | loud, logged, stops | FIXED in the core batch (#3790): an unknown failure class raises naming it and the four known, before fail-fast; test_<line> in test_retry_gate_loud_failure.py |
 | `assemblyzero/core/loud_failure_check.py:173` | source | raises | compliant | none |
@@ -684,10 +684,10 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/resume_contract.py:196` | world changed | print, False | loud, alerts | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
 | `assemblyzero/core/resume_contract.py:223` | delete contract | WARN stdout | loud, alerts | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
 | `assemblyzero/core/resume_contract.py:224` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3788): an unreadable input or contract refuses the resume with an alert; a refusal and an undeletable contract alert; test_<line> in test_resume_contract_loud_failure.py |
-| `assemblyzero/core/tdd_path_tracking.py:124` | delete scaffold | WARNING | loud, stops, alerts | raise |
+| `assemblyzero/core/tdd_path_tracking.py:124` | delete scaffold | WARNING | loud, stops, alerts | FIXED in the core batch (#3798): a scaffold that exists and cannot be removed raises the removal's own OSError naming the file, instead of a WARNING; test_124 in test_tdd_path_tracking_loud_failure.py |
 | `assemblyzero/core/merge_driver.py:69` | no file | reason | compliant | none |
 | `assemblyzero/core/merge_driver.py:160` | start | raise | compliant | none |
-| `assemblyzero/core/merge_driver.py:163` | missing PR/SHA | success | loud, logged, stops | raise |
+| `assemblyzero/core/merge_driver.py:163` | missing PR/SHA | success | loud, logged, stops | FIXED in the core batch (#3781): a landing whose output names no PR number or no squash SHA raises MergeDriverError with the driver's output, and the PR is read from all four lines the driver names it on; test_163 in test_merge_driver_loud_failure.py |
 | `assemblyzero/core/merge_driver.py:164` | nonzero | raise | compliant | none |
 | `assemblyzero/core/github_writes.py:145` | replay | inert | compliant | none |
 | `assemblyzero/core/model_record.py:70` | check_spec | "" | loud, logged, alerts | FIXED in the core batch (#3782): a spec the seat registry refuses raises its ProfileError, and the call that used it stops; test_70 in test_model_record_loud_failure.py |
@@ -695,8 +695,8 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/model_record.py:118` | no record | False | compliant | none |
 | `assemblyzero/core/model_record.py:123` | sink write | False | loud, logged, alerts | FIXED in the core batch (#3782): a run record that cannot take the line alerts with the cause and the call's result is kept; an undelivered alert is raised; test_123 in test_model_record_loud_failure.py |
 | `assemblyzero/core/model_record.py:124` | tag | records the fall-through as a decision | all | FIXED in the core batch (#3782): the tag is removed; test_124 in test_model_record_loud_failure.py |
-| `assemblyzero/core/pr_poll.py:86` | error payload | wait | loud, logged, stops | raise |
-| `assemblyzero/core/text_sanitizer.py:72` | non-str | unstripped | loud, logged, stops | raise |
+| `assemblyzero/core/pr_poll.py:86` | error payload | wait | loud, logged, stops | FIXED in the core batch (#3785): a payload that is not a pull request's state (no boolean merged, no state of open or closed, not an object) raises ValueError naming it instead of reading as wait; test_86 in test_pr_poll_loud_failure.py |
+| `assemblyzero/core/text_sanitizer.py:72` | non-str | unstripped | loud, logged, stops | FIXED in the core batch (#3799): a value that is neither a string nor None raises TypeError naming its type, instead of str() of it unstripped; test_72 in test_text_sanitizer_loud_failure.py |
 | `assemblyzero/core/workspace_context.py:38` | missing path | raise | compliant | none |
 | `assemblyzero/workflows/testing/nodes/verify_phases.py:594` | the directory probe raises OSError | False, falls back to a directory target; coverage may measure the wrong scope | loud, logged, stops, alerts | ERROR and re-raise so N5 halts |
 | `assemblyzero/workflows/testing/nodes/verify_phases.py:767` | pytest-cov not installed | WARN, runs without --cov | loud, logged, stops, alerts | raise or route to HALT: the coverage gate cannot run |
