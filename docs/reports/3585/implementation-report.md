@@ -42,3 +42,7 @@ Compliance: the raise carries what and where (the file) and the cause; stopping 
 - The `ValueError` handler at 282 already raises `LLDVerificationError`; the ledger marks it compliant and it is unchanged.
 
 No caller in `assemblyzero/` or `tools/` calls `run_verification_gate`; `utils/__init__.py` re-exports it.
+
+### utils/lld_path_enforcer.py (1 site, won't do)
+
+- **No Section 2.1 stays an empty spec** (97). The ledger asks for a raise. On a real implementation run the content passed in is the implementation spec (`load_lld` stores it under `lld_content`), whose files table is `## 2. Files to Implement`; it has no Section 2.1 by design. The implementation node adds every path of that table to the allowed set itself. A raise would halt every implementation run, so the empty answer is the contract. The docstring now says so, and a test pins it.

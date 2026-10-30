@@ -31,3 +31,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** none.
 
 **Neighbouring suites:** 23 passed across `test_issue_177.py` and the new file.
+
+## utils/lld_path_enforcer.py
+
+**New: `tests/unit/test_lld_path_enforcer_loud_failure.py` (3).** It pins the kept behaviour: a spec with no Section 2.1 yields no paths and no alert, an LLD with Section 2.1 yields its paths, and the docstring says why the absence is quiet.
+
+**Before the change, measured** against the unchanged module: 1 failed (the docstring test), 2 passed (the behaviour, which is kept).
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 57 passed across `test_lld_path_enforcer.py`, `test_file_write_validator.py`, `test_freeze_tests_symmetry_break.py`, `test_path_advisory.py` and the new file.
