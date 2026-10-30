@@ -12,6 +12,9 @@ hid the other:
   graph.py persisted the state and the run died with `KeyError: 'issue_number'`
   inside save_orchestration_state -- 60 lines of traceback with no mention of
   poetry. Diagnosing the real cause required reproducing the install by hand.
+
+#4238 moved the install into `assemblyzero/workflows/provisioning.py`, shared by
+the orchestrator and the standalone runner; the --no-root rule moved with it.
 """
 
 import subprocess
@@ -20,6 +23,7 @@ from unittest.mock import patch
 
 import pytest
 
+from assemblyzero.workflows import provisioning
 from assemblyzero.workflows.orchestrator import stages
 
 MISSING_ROOT = (
@@ -37,21 +41,27 @@ def _completed(returncode=0, stdout="", stderr=""):
     )
 
 
+@pytest.fixture
+def poetry_project(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "boostgauge"\nversion = "0.1.0"\n', encoding="utf-8",
+    )
+    return tmp_path
+
+
 class TestNoRootFallback:
-    def test_successful_install_is_not_retried(self, tmp_path):
+    def test_successful_install_is_not_retried(self, poetry_project):
         calls = []
 
         def fake(cmd, **kw):
             calls.append(cmd)
             return _completed()
 
-        with patch.object(stages, "run_command", fake):
-            result = stages._provision_worktree_env(tmp_path)
+        provisioning.provision_worktree(poetry_project, run=fake)
 
-        assert result.returncode == 0
         assert calls == [["poetry", "install"]], calls
 
-    def test_absent_root_package_retries_with_no_root(self, tmp_path):
+    def test_absent_root_package_retries_with_no_root(self, poetry_project):
         calls = []
 
         def fake(cmd, **kw):
@@ -60,13 +70,12 @@ class TestNoRootFallback:
                 return _completed()
             return _completed(returncode=1, stderr=MISSING_ROOT)
 
-        with patch.object(stages, "run_command", fake):
-            result = stages._provision_worktree_env(tmp_path)
+        lines = provisioning.provision_worktree(poetry_project, run=fake)
 
-        assert result.returncode == 0
         assert calls[-1] == ["poetry", "install", "--no-root"], calls
+        assert any("--no-root" in line for line in lines), lines
 
-    def test_the_message_is_matched_on_stdout_too(self, tmp_path):
+    def test_the_message_is_matched_on_stdout_too(self, poetry_project):
         """Poetry writes this to stdout in some versions, stderr in others."""
         calls = []
 
@@ -76,12 +85,11 @@ class TestNoRootFallback:
                 return _completed()
             return _completed(returncode=1, stdout=MISSING_ROOT)
 
-        with patch.object(stages, "run_command", fake):
-            stages._provision_worktree_env(tmp_path)
+        provisioning.provision_worktree(poetry_project, run=fake)
 
         assert ["poetry", "install", "--no-root"] in calls
 
-    def test_an_unrelated_failure_is_not_retried(self, tmp_path):
+    def test_an_unrelated_failure_is_not_retried(self, poetry_project):
         """--no-root must not become a blanket retry that masks real breakage."""
         calls = []
 
@@ -89,23 +97,23 @@ class TestNoRootFallback:
             calls.append(cmd)
             return _completed(returncode=1, stderr="Could not parse pyproject.toml")
 
-        with patch.object(stages, "run_command", fake):
-            result = stages._provision_worktree_env(tmp_path)
+        with pytest.raises(provisioning.ProvisioningError, match="exited 1"):
+            provisioning.provision_worktree(poetry_project, run=fake)
 
-        assert result.returncode == 1
         assert calls == [["poetry", "install"]], calls
 
-    def test_a_failing_no_root_retry_still_reports_failure(self, tmp_path):
+    def test_a_failing_no_root_retry_still_reports_failure(self, poetry_project):
         def fake(cmd, **kw):
             if "--no-root" in cmd:
                 return _completed(returncode=2, stderr="lock file is stale")
             return _completed(returncode=1, stderr=MISSING_ROOT)
 
-        with patch.object(stages, "run_command", fake):
-            result = stages._provision_worktree_env(tmp_path)
+        with pytest.raises(provisioning.ProvisioningError) as caught:
+            provisioning.provision_worktree(poetry_project, run=fake)
 
-        assert result.returncode == 2
-        assert "lock file is stale" in result.stderr
+        assert "exited 2" in str(caught.value)
+        assert "poetry install --no-root" in str(caught.value)
+        assert "lock file is stale" in str(caught.value)
 
 
 class TestFailureKeepsTheState:
@@ -124,10 +132,10 @@ class TestFailureKeepsTheState:
         }
 
     def _run_with_failing_install(self, state, tmp_path):
-        # The worktree must NOT pre-exist: run_impl_stage skips creation AND
-        # provisioning when it is already a directory, which would let these
-        # tests pass on a path that never runs. The fake `git worktree add`
-        # materialises it, as the real one would.
+        # The worktree does not pre-exist, so the creation path runs too; the
+        # fake `git worktree add` materialises it, as the real one would, with
+        # the pyproject.toml that calls for the install. Since #4238 a worktree
+        # found on disk is installed as well.
         worktree = tmp_path / "target-19"
 
         def fake(cmd, **kw):
@@ -136,19 +144,17 @@ class TestFailureKeepsTheState:
                 (worktree / "pyproject.toml").write_text(
                     "[tool.poetry]", encoding="utf-8"
                 )
+            if cmd[:2] == ["poetry", "install"]:
+                return _completed(returncode=1, stderr="boom: dependency resolution failed")
             return _completed()
 
-        def failing_env(_path):
-            return _completed(returncode=1, stderr="boom: dependency resolution failed")
-
         with patch.object(stages, "run_command", fake), \
-             patch.object(stages, "_provision_worktree_env", failing_env), \
              patch.object(stages, "worktree_path_for", lambda *a, **k: worktree):
             return stages.run_impl_stage(dict(state))
 
     def test_the_provisioning_path_actually_ran(self, state, tmp_path):
-        """Guards the guard: if the worktree pre-exists, run_impl_stage skips
-        provisioning entirely and the assertions below prove nothing."""
+        """Guards the guard: if the install never ran, the assertions below
+        prove nothing."""
         result = self._run_with_failing_install(state, tmp_path)
 
         blob = str(result.get("stage_results", {}).get("impl", {}))
