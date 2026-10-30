@@ -84,3 +84,47 @@ def _bypass_box_health_preflight():
         module, "check_box_health", lambda *a, **k: BoxHealth(True, [], "")
     ):
         yield
+
+
+def _offline_issue(_repo_root, issue):
+    """An issue as the launcher's preflights read it in a unit test: prose,
+    no decision table, so the form check has nothing to refuse."""
+    return (f"issue {issue}", "A prose issue with no decision table.\n")
+
+
+@pytest.fixture(autouse=True)
+def _preflight_issue_reads_are_offline():
+    """The launcher's form and contract preflights never call GitHub (#3585).
+
+    Since #3585 a preflight that cannot read its issue refuses the launch:
+    under ADR 0236 a check that could not run is a failure. A unit test's
+    target repo has no GitHub remote, so the real ``fetch_issue`` always fails
+    there, and every test that drives ``speedrun_roll.main()`` for some other
+    reason was refused at the form check. This rebinds only those two
+    preflights, and only when they are handed the real reader: a test that
+    patches ``speedrun_roll.fetch_issue`` (the form-gate launcher tests, the
+    retry tests) still passes its own. The checks themselves are tested with
+    explicit fetches in ``test_form_gate*.py`` and ``test_contract_fidelity*.py``.
+    """
+    module = sys.modules.get("speedrun_roll")
+    if module is None:
+        yield
+        return
+
+    real_fetch = module.fetch_issue
+    real_form = module.check_form_at_preflight
+    real_fidelity = module.check_contract_fidelity_at_preflight
+
+    def _reader(fetch):
+        return _offline_issue if fetch is real_fetch else fetch
+
+    def form(repo_root, issues, fetch, *args, **kwargs):
+        return real_form(repo_root, issues, _reader(fetch), *args, **kwargs)
+
+    def fidelity(repo_root, issues, fetch, *args, **kwargs):
+        return real_fidelity(repo_root, issues, _reader(fetch), *args, **kwargs)
+
+    with patch.object(module, "check_form_at_preflight", form), patch.object(
+        module, "check_contract_fidelity_at_preflight", fidelity
+    ):
+        yield

@@ -208,3 +208,13 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** none; exit codes and output are unchanged.
 
 **Neighbouring suites:** 123 passed across `test_check_requirements.py`, `test_check_requirements_form.py` and the new file.
+
+## form_gate.py
+
+**New: `tests/unit/test_form_gate_loud_failure.py` (8).**
+
+**Before the fix, measured** against the unchanged module: 7 failed, 1 passed (a good issue proceeds without an alert).
+
+**Changed tests:** `test_form_gate.py`'s unreadable-issue test expects the refusal and an alert; `test_scope_coverage.py`'s scope-crash test expects the refusal; `tests/unit/conftest.py` gains the offline-preflight fixture.
+
+**Neighbouring suites:** 117 passed across the form-gate, scope and discrimination files; 349 passed and 3 skipped across the 13 launcher files that the refusal had broken (53 failures without the fixture) and five related files.

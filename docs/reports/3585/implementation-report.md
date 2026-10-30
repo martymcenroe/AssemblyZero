@@ -182,3 +182,9 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 ### precheck.py (10 ledger rows, all fixed in its tool)
 
 - **The standalone pre-check alerts.** `precheck.py` already raised for every failed issue read and gate call, and returned an `error` status when no verdict came; `tools/check_requirements.py` exited 2 on both with no alert. It now alerts in its `PrecheckError` handler and, for an `error` status, writes an ERROR line on stderr and alerts. That also settles the tool's own ledger row (line 99). A conflict is the gate's verdict: it prints, exits 1 and alerts nobody.
+
+### form_gate.py (6 ledger rows, all fixed)
+
+- **A form check that could not run refuses the launch.** An issue that cannot be fetched (149), an empty body (153), and a crash in the discrimination (162) or scope (169, 170) extension each write an ERROR line, alert the operator and refuse; the loop stops at the first. They used to print "could not be checked" (or nothing, for a crashed extension) and proceed (193). The findings keep the operator's 2026-08-12 ruling: only a malformed decision table refuses.
+- **The extensions refuse rather than re-raise.** The preflight's contract is `(text, refuse)` and the launcher returns 91 on it; a raise would reach the operator as a traceback instead of a refusal.
+- **The unit suite reads no issue from GitHub.** `tests/unit/conftest.py` gains an autouse fixture that hands the launcher's form and contract preflights a prose issue when they are given the real reader, as the box-health bypass does for memory. Without it, 53 launcher tests were refused, since a test repo has no GitHub remote.

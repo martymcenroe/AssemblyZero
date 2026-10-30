@@ -422,16 +422,19 @@ class TestItRunsAtLauncherPreflight:
         )
         assert "scope coverage: NOT CHECKED" in text
 
-    def test_a_scope_crash_never_costs_the_form_check_its_verdict(
-        self, tmp_path, monkeypatch
+    def test_a_scope_crash_refuses_the_launch(
+        self, tmp_path, monkeypatch, operator_alerts
     ) -> None:
-        """The declared fail-open, exercised rather than asserted about."""
+        """#3585: the fail-open is withdrawn. A crashed scope check is a check
+        that did not run, so it alerts and the preflight refuses."""
         monkeypatch.setattr(
             form_gate, "check_scope_coverage",
             lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
         )
         result = form_gate.check_issue(tmp_path, 331, _fetch(TITLE_331, BODY_331))
         assert result.scope is None
-        assert result.report is not None  # the form check still reached a verdict
-        text, _ = form_gate.render([result])
-        assert "scope coverage" not in text  # absent, never a passing line
+        assert "scope-coverage check crashed: RuntimeError: boom" in result.error
+        assert len(operator_alerts) == 1
+        text, refuse = form_gate.render([result])
+        assert refuse is True
+        assert "scope coverage:" not in text  # never a passing line
