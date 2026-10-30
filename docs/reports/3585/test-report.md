@@ -78,3 +78,8 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
   - `test_call_recording_roll.py`: the LLD's Files Changed table parses, so the roll no longer runs with an empty plan.
 - **Neighbouring suites:** every unit test file that imports the spec workflow ran: 1,014 passed and 8 failed, the 8 being the roll, gate-registry and section-ten tests changed or answered above. After the loop was restructured, the 17 files closest to the node ran again: 501 passed.
 - **Audits:** `audit_loud_failure.py --check` PASS at 280; `audit_fail_open.py --check` PASS, no new fail-open. The fail-open baseline has 11 stale `analyze_codebase` entries, for the parent's regeneration.
+
+## `nodes/finalize_spec.py`
+
+- **Nothing to change.** Every row was settled by #3887 and #3891 (PR #3901).
+- **Added:** `tests/unit/test_finalize_spec_loud_failure.py`, 4 tests, for the rows `test_spec_finalize_halts.py` does not reach: the short draft (137), the temp-file cleanup (219), a failed write (224) and a spec absent after the write (234). They pass before and after, since the module is unchanged.
