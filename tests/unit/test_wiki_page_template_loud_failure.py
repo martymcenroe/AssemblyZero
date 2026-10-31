@@ -5,8 +5,9 @@ LLD with no overview (120) gave a page whose overview read "*Overview not
 extracted from LLD.*"; it now raises ValueError naming the feature, the issue
 and the section headings searched, after an ERROR line, and writes nothing.
 A wiki with no `_Sidebar.md` (169) returned False, the same answer as "the
-page is already linked", and N8 ignored it; it now raises FileNotFoundError
-naming the sidebar, after an ERROR line. False means only "already linked".
+page is already linked", so N8 could not say which. It now returns None, a
+legitimate absence kept quiet (N8's ledger row 289: most repositories have no
+wiki sidebar), and N8 names it; False means only "already linked".
 
 Every test writes under a temporary directory. Line numbers in the names are
 ledger 0908's, at its base `79e18ad1`.
@@ -53,14 +54,15 @@ class TestTheSidebar:
         page.write_text("# New Feature", encoding="utf-8")
         return page
 
-    def test_169_a_wiki_with_no_sidebar_raises_naming_it(self, tmp_path, capsys):
+    def test_169_a_wiki_with_no_sidebar_is_none_not_already_linked(
+        self, tmp_path, capsys, operator_alerts
+    ):
         page = self._page(tmp_path)
 
-        with pytest.raises(FileNotFoundError) as excinfo:
-            wiki_page.update_wiki_sidebar(page)
-
-        assert str(page.parent / "_Sidebar.md") in str(excinfo.value)
-        assert "ERROR" in capsys.readouterr().err
+        assert wiki_page.update_wiki_sidebar(page) is None
+        assert not (page.parent / "_Sidebar.md").exists()
+        assert "ERROR" not in capsys.readouterr().err
+        assert operator_alerts == []
 
     def test_a_page_already_linked_is_false_and_quiet(self, tmp_path, capsys, operator_alerts):
         """Kept: False means the sidebar already links the page."""

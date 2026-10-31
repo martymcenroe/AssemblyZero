@@ -3096,6 +3096,17 @@ class TestAuditModuleExtras:
 class TestDocumentModuleFull:
     """Additional tests for document.py to increase coverage."""
 
+    # #3585: the wiki page, the runbook and the CLI document are written from
+    # the LLD's own sections and commands and raise on an LLD that has none,
+    # so each LLD carries them.
+    DOC_SECTIONS = (
+        "\n\n## 1. Overview\n\nWhat the feature does.\n\n"
+        "## Prerequisites\n\n- Python 3.11\n\n"
+        "## Procedure\n\n1. Run it.\n\n"
+        "```bash\npoetry run python tools/run_workflow.py --issue 42\n```\n\n"
+        "## Verification\n\n- It exits 0.\n"
+    )
+
     def test_document_full_scope_with_wiki(self, tmp_path):
         """document generates wiki page for full scope."""
         from assemblyzero.workflows.testing.nodes.document import document
@@ -3112,7 +3123,8 @@ class TestDocumentModuleFull:
         state: TestingWorkflowState = {
             "issue_number": 42,
             "repo_root": str(tmp_path),
-            "lld_content": "# New Feature\n\nThis is a new feature with architecture changes.",
+            "lld_content": "# New Feature\n\nThis is a new feature with architecture changes."
+            + self.DOC_SECTIONS,
             "audit_dir": str(audit_dir),
             "implementation_files": ["src/workflow.py"],
             "test_files": ["tests/test_workflow.py"],
@@ -3138,7 +3150,8 @@ class TestDocumentModuleFull:
         state: TestingWorkflowState = {
             "issue_number": 42,
             "repo_root": str(tmp_path),
-            "lld_content": "# Workflow Feature\n\nThis workflow handles state transitions.",
+            "lld_content": "# Workflow Feature\n\nThis workflow handles state transitions."
+            + self.DOC_SECTIONS,
             "audit_dir": str(audit_dir),
             "implementation_files": ["tools/run_workflow.py"],
             "test_files": [],
@@ -3162,7 +3175,8 @@ class TestDocumentModuleFull:
         state: TestingWorkflowState = {
             "issue_number": 42,
             "repo_root": str(tmp_path),
-            "lld_content": "# CLI Tool\n\n```bash\npoetry run python tools/tool.py\n```",
+            "lld_content": "# CLI Tool\n\n```bash\npoetry run python tools/tool.py\n```"
+            + self.DOC_SECTIONS,
             "audit_dir": str(audit_dir),
             "implementation_files": ["tools/my_tool.py"],
             "test_files": [],

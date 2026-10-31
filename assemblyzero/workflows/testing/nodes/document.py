@@ -337,18 +337,20 @@ def document(state: TestingWorkflowState) -> dict[str, Any]:
             raise _failed(issue_number, "the wiki page", e) from e
         wiki_path = str(wiki_path_obj)
         print(f"    Wiki page: {wiki_path}")
-        # Ledger 0908, line 289 (kept): False is "no _Sidebar.md in this
-        # wiki" or "the page is already listed", and both are absences, not
-        # failures. generate_wiki_page makes the wiki directory itself, so a
-        # repository with no wiki gets a page and no sidebar. A sidebar that
-        # cannot be read or written raises above.
+        # Ledger 0908, line 289 (kept): None is "no _Sidebar.md in this
+        # wiki" and False is "the page is already listed"; both are absences,
+        # not failures, and each is named. generate_wiki_page makes the wiki
+        # directory itself, so a repository with no wiki gets a page and no
+        # sidebar. A sidebar that cannot be read or written raises above.
         if sidebar_updated:
             print("    Wiki sidebar: updated")
-        else:
+        elif sidebar_updated is None:
             print(
-                f"    Wiki sidebar: not changed (no _Sidebar.md in "
-                f"{wiki_path_obj.parent}, or the page is already listed)"
+                f"    Wiki sidebar: no _Sidebar.md in {wiki_path_obj.parent}, so "
+                f"the page is not linked from a sidebar"
             )
+        else:
+            print("    Wiki sidebar: not changed (the page is already listed)")
 
     # 4. Generate runbook (if operational feature)
     runbook_path = ""

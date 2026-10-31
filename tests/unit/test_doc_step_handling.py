@@ -28,13 +28,22 @@ def _invoke_node(spec, state):
     return runnable(state)
 
 
+# #3585: the runbook is written from the LLD's own sections and raises on an
+# LLD that has none, so the test LLD carries them.
+RUNBOOK_SECTIONS = (
+    "\n\n## Prerequisites\n\n- Python 3.11\n\n"
+    "## Procedure\n\n1. Run the tool.\n\n"
+    "## Verification\n\n- The tool exits 0.\n"
+)
+
+
 def _doc_state(tmp_path, **overrides):
     audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
     audit_dir.mkdir(parents=True, exist_ok=True)
     state = {
         "issue_number": 42,
         "repo_root": str(tmp_path),
-        "lld_content": "# Tool\n\nImplement a CLI tool.",
+        "lld_content": "# Tool\n\nImplement a CLI tool." + RUNBOOK_SECTIONS,
         "audit_dir": str(audit_dir),
         "implementation_files": ["tools/new_tool.py"],  # is_cli_tool -> True
         "test_files": [],
@@ -67,6 +76,7 @@ def test_document_emits_cp_docs_when_not_skipped(tmp_path):
         lld_content=(
             "# Tool\n\nImplement a CLI tool.\n\n```bash\n"
             "poetry run python tools/new_tool.py --issue 42\n```\n"
+            + RUNBOOK_SECTIONS
         ),
     )  # no skip_cp_docs
     result = document(state)

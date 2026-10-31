@@ -174,7 +174,7 @@ def generate_wiki_page(
     return wiki_path
 
 
-def update_wiki_sidebar(wiki_page_path: Path, section: str = "Reference") -> bool:
+def update_wiki_sidebar(wiki_page_path: Path, section: str = "Reference") -> bool | None:
     """Update wiki sidebar to include new page.
 
     Args:
@@ -182,25 +182,19 @@ def update_wiki_sidebar(wiki_page_path: Path, section: str = "Reference") -> boo
         section: Sidebar section to add the page under.
 
     Returns:
-        True if the sidebar was updated; False if it already links the page,
-        which is a legitimate answer and quiet.
-
-    Raises:
-        FileNotFoundError: naming the sidebar, after an ERROR line, when the
-            wiki has no `_Sidebar.md` (ADR 0236). It used to return False,
-            the same answer as "already linked", and N8 ignored it, so a page
-            nothing links to was reported as written.
+        True if the sidebar was updated; False if it already links the page;
+        None if the wiki has no `_Sidebar.md`. False and None are both
+        legitimate answers and quiet (ADR 0236 rule 6; ledger 0908, 169 and
+        N8's 289): `generate_wiki_page` makes the wiki directory itself, so a
+        repository with no wiki gets a page and no sidebar, and most have
+        none. They used to be one answer, False, so N8 could not say which;
+        N8 now names each.
     """
     wiki_dir = wiki_page_path.parent
     sidebar_path = wiki_dir / "_Sidebar.md"
 
     if not sidebar_path.is_file():
-        message = (
-            f"the wiki sidebar {sidebar_path} does not exist, so the page "
-            f"{wiki_page_path.name} cannot be linked from it"
-        )
-        _loud(message)
-        raise FileNotFoundError(message)
+        return None
 
     # Get page name from filename (without .md)
     page_name = wiki_page_path.stem

@@ -19,10 +19,16 @@ import pytest
 # The nodes package re-exports the node FUNCTION under the module's name.
 doc = importlib.import_module("assemblyzero.workflows.testing.nodes.document")
 
+# #3585: the wiki page and the runbook are written from the LLD's own
+# sections and raise on an LLD that has none, so this LLD carries them.
 LLD = (
     "# 99 - Widget workflow\n\n"
     "<!-- doc-scope: full -->\n<!-- update-readme: true -->\n\n"
-    "A new feature: the widget workflow.\n"
+    "A new feature: the widget workflow.\n\n"
+    "## 1. Overview\n\nThe widget workflow turns widgets into reports.\n\n"
+    "## Prerequisites\n\n- Python 3.11\n\n"
+    "## Procedure\n\n1. Run the widget workflow.\n\n"
+    "## Verification\n\n- The report is written.\n"
 )
 
 
