@@ -19,16 +19,23 @@ Performs the cleanup needed between attempts:
 Idempotent: safe to run multiple times. Each step is independently
 guarded — a missing PR / worktree / branch is not an error.
 
+The reset is destructive (#4221, standard 0017): without `--execute` the tool
+prints what it would close, delete and remove, and the phrase that
+authorizes it, and stops. With `--execute` it asks for that phrase on the
+console, naming the repository and the issues.
+
 Usage:
 
     poetry run python tools/speedrun_reset.py \\
         --repo ../boostgauge \\
-        --issue 35
+        --issue 35 \\
+        --execute
 
     # Reset all known speed-run issues at once:
     poetry run python tools/speedrun_reset.py \\
         --repo ../boostgauge \\
-        --all-issues
+        --all-issues \\
+        --execute
 
 The `--all-issues` mode reads `data/speedrun/run-log.jsonl` and resets
 every issue that's appeared in any attempt (covers the full speed-run
@@ -989,6 +996,173 @@ def reset_one_issue(
     reopen_issue(repo, issue)
 
 
+#: The operation token in the typed phrase (`tools/_gate.py`): the phrase is
+#: `approve forbidden reset-issues for <owner/repo> #N #M`.
+RESET_OPERATION = "reset-issues"
+
+
+def reset_target(repo: str, issues: list[int]) -> str:
+    """The repository and issues a reset acts on, as the phrase names them (#4221)."""
+    return f"{repo} " + " ".join(f"#{issue}" for issue in issues)
+
+
+def reset_phrase(repo: str, issues: list[int]) -> str:
+    """The exact phrase the operator types to authorize this reset."""
+    import _gate
+
+    return _gate.gate_phrase(RESET_OPERATION, reset_target(repo, issues))
+
+
+def confirm_reset(repo: str, issues: list[int], *, stream=None) -> bool:
+    """Ask for the typed phrase on this process's console. True only on a match.
+
+    #4221 / standard 0017: a script whose source holds a command the shell
+    guard refuses (here `git push --delete`) puts its mutation behind
+    `--execute` and a typed phrase, never a y/n an auto-answering wrapper can
+    send. `require_confirmation` exits on a wrong phrase or no console; that
+    exit is turned into False here so each caller refuses in its own way,
+    having changed nothing. `stream` is the test seam it offers.
+    """
+    import _gate
+
+    try:
+        _gate.require_confirmation(RESET_OPERATION, reset_target(repo, issues), stream=stream)
+    except SystemExit:
+        return False
+    return True
+
+
+def reset_plan(
+    repo_root: Path, repo: str, issue: int, base: str | None = None,
+) -> list[str]:
+    """What `reset_one_issue` would close, delete and remove for this issue.
+
+    Read from the repository and GitHub; changes nothing (#4221). A thing
+    that cannot be read is named in the plan, never left out of it.
+    """
+    base_ref = base or _default_base_ref(repo_root)
+    active = current_branch(repo_root)
+    lines = [f"Issue #{issue}:"]
+
+    prs = _run([
+        "gh", "pr", "list", "--repo", repo, "--state", "open",
+        "--search", f"Closes #{issue}", "--json", "number,title,headRefName",
+    ])
+    try:
+        listed = json.loads(prs.stdout or "[]") if prs.returncode == 0 else None
+    except json.JSONDecodeError:
+        listed = None
+    if listed is None:
+        lines.append(
+            f"  PRs: could not be listed ({(prs.stderr or 'unreadable output').strip()[:120]})"
+        )
+    for pr in listed or []:
+        head = pr.get("headRefName") or "unknown"
+        if is_pipeline_branch(head, issue):
+            lines.append(f"  close PR #{pr['number']} (head {head}): {pr['title']}")
+        else:
+            lines.append(
+                f"  leave open PR #{pr['number']} (head {head} is not a pipeline "
+                f"branch): {pr['title']}"
+            )
+
+    parent = repo_root.parent
+    for suffix in (f"{issue}", f"{issue}-lld"):
+        for path in (
+            repo_root / "data" / "worktrees" / suffix,
+            parent / f"{repo_root.name}-{suffix}",
+        ):
+            if not path.exists():
+                continue
+            if worktree_is_dirty(path):
+                lines.append(f"  keep worktree {path} (uncommitted work, or unreadable)")
+            else:
+                lines.append(
+                    f"  remove worktree {path} (its ignored files are copied to "
+                    f"data/speedrun/reset-artifacts/issue-{issue}/ first)"
+                )
+
+    def disposition(tip: str, where: str, name: str) -> str:
+        unique = _unique_commit_count(repo_root, tip, base_ref)
+        if unique == 0:
+            return f"on {base_ref}, no graveyard ref needed"
+        count = f"{unique} commit(s)" if unique is not None else "commits (count unavailable)"
+        return f"{count} beyond {base_ref}, kept under {GRAVEYARD_PREFIX}{name}-<stamp>{where}"
+
+    local = _run(
+        ["git", "branch", "--list", "--format=%(refname:short) %(objectname)",
+         f"{issue}-*", f"issue-{issue}"],
+        cwd=repo_root,
+    )
+    if local.returncode != 0:
+        lines.append(f"  local branches: could not be listed ({(local.stderr or '').strip()[:120]})")
+    for entry in local.stdout.splitlines() if local.returncode == 0 else []:
+        name, _, tip = entry.partition(" ")
+        if not name or name.startswith(GRAVEYARD_PREFIX) or name == active:
+            continue
+        verdict = disposition(tip, " (renamed)", name)
+        action = "delete" if verdict.startswith("on ") else "rename"
+        lines.append(f"  {action} local branch {name}: {verdict}")
+
+    remote = _run(["git", "ls-remote", "--heads", "origin"], cwd=repo_root)
+    if remote.returncode != 0:
+        lines.append(f"  origin branches: could not be listed ({(remote.stderr or '').strip()[:120]})")
+    for line in remote.stdout.splitlines() if remote.returncode == 0 else []:
+        if "refs/heads/" not in line:
+            continue
+        tip, ref = line.split(None, 1)
+        name = ref.strip().split("refs/heads/", 1)[1]
+        if name.startswith(GRAVEYARD_PREFIX) or name == active or not is_pipeline_branch(name, issue):
+            continue
+        have = _run(["git", "cat-file", "-e", f"{tip}^{{commit}}"], cwd=repo_root)
+        if have.returncode != 0:
+            lines.append(
+                f"  delete origin's {name}: tip {tip[:12]} is fetched and pushed to "
+                f"{GRAVEYARD_PREFIX}{name}-<stamp> first"
+            )
+        else:
+            lines.append(f"  delete origin's {name}: {disposition(tip, ' on origin', name)}")
+
+    lineage = repo_root / "docs" / "lineage" / "active"
+    for d in sorted(lineage.glob(f"{issue}-*")) if lineage.exists() else []:
+        if d.is_dir():
+            lines.append(f"  archive docs/lineage/active/{d.name} to reset-artifacts")
+
+    state = _run(["gh", "issue", "view", str(issue), "--repo", repo, "--json", "state"])
+    try:
+        issue_state = json.loads(state.stdout)["state"] if state.returncode == 0 else None
+    except (json.JSONDecodeError, KeyError, TypeError):
+        issue_state = None
+    if issue_state is None:
+        lines.append(f"  issue #{issue}: state could not be read")
+    elif issue_state != "OPEN":
+        lines.append(f"  reopen issue #{issue}")
+    return lines
+
+
+def print_reset_plan(
+    repo_root: Path, repo: str, issues: list[int], base: str | None = None,
+    *, execute: bool = False,
+) -> None:
+    """Print what a reset would do (#4221).
+
+    The dry run (`execute=False`) ends by naming `--execute` and the phrase
+    that authorizes it. Under `--execute` the plan is shown just before the
+    prompt, which prints the phrase itself.
+    """
+    print("RESET PLAN (nothing has been changed yet):" if execute
+          else "RESET PLAN (nothing was changed):")
+    for issue in issues:
+        for line in reset_plan(repo_root, repo, issue, base):
+            print(line)
+    if not execute:
+        print(
+            "\nTo carry this out, pass --execute. You will be asked to type this "
+            "exactly:\n"
+            f"  {reset_phrase(repo, issues)}"
+        )
+
+
 def all_logged_issues(repo_root: Path) -> list[int]:
     """Read run-log.jsonl and return unique issue numbers."""
     log_path = repo_root / "data" / "speedrun" / "run-log.jsonl"
@@ -1023,6 +1197,15 @@ def main() -> int:
         "--all-issues", action="store_true",
         help="Reset every issue that has appeared in run-log.jsonl",
     )
+    parser.add_argument(
+        "--execute", action="store_true",
+        help=(
+            "Carry the reset out (#4221). Without it the tool prints what it "
+            "would close, delete and remove, and stops. With it, you are "
+            "asked to type a phrase naming the repository and the issues "
+            "(standard 0017); anything else changes nothing."
+        ),
+    )
     args = parser.parse_args()
 
     repo_root = args.repo.resolve()
@@ -1040,24 +1223,36 @@ def main() -> int:
     # proven against; '' (detached, unreadable) falls back to origin/HEAD.
     base = current_branch(repo_root) or None
 
+    if args.issue:
+        issues = [args.issue]
+    else:
+        issues = all_logged_issues(repo_root)
+        if not issues:
+            print("No issues in run-log.jsonl — nothing to reset.")
+            return 0
+
+    # #4221: the reset closes PRs, deletes branches locally and on origin and
+    # removes worktrees, so it sits behind --execute and a typed phrase
+    # (standard 0017). Without --execute this is the dry run: it prints the
+    # plan and writes nothing.
+    if not args.execute:
+        print_reset_plan(repo_root, repo, issues, base)
+        return 0
+    if not confirm_reset(repo, issues):
+        print("\nREFUSED: the confirmation phrase was not typed. Nothing was changed.")
+        return 1
+
     # #2510: a live orchestrator stops the whole reset, not just its own issue.
     # A sweep that reset four issues and then refused the fifth would have done
     # four issues' worth of irreversible work before saying so.
+    reset_issues = issues
     try:
-        if args.issue:
-            reset_issues = [args.issue]
-            reset_one_issue(repo_root, repo, args.issue, base=base)
-        else:
-            issues = all_logged_issues(repo_root)
-            if not issues:
-                print("No issues in run-log.jsonl — nothing to reset.")
-                return 0
-            for issue in issues:
-                refuse_if_orchestrator_is_live(repo_root, issue)
+        for issue in issues:
+            refuse_if_orchestrator_is_live(repo_root, issue)
+        if not args.issue:
             print(f"Resetting {len(issues)} issue(s) from run-log: {issues}")
-            for issue in issues:
-                reset_one_issue(repo_root, repo, issue, base=base)
-            reset_issues = issues
+        for issue in issues:
+            reset_one_issue(repo_root, repo, issue, base=base)
     except (LiveOrchestratorError, ResetPreservationError) as exc:
         print(f"\nREFUSED: {exc}")
         return 1

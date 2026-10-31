@@ -16,29 +16,31 @@ Use issues the answer-key audit covers where you can (`docs/audits/0907-answer-k
 
 ### 2. Roll under the first profile, from scratch
 
-`--fresh` resets each issue before it rolls. The reset closes the issue's open PRs, deletes its pipeline branches locally and on origin, removes its worktrees, and reopens the issue. It archives the displaced lineage and the LLD and spec working copies under `data/speedrun/reset-artifacts/` (standard 0027). A pipeline branch that was pushed and never landed can lose its commits on that path (#4215). Until that is repaired, run this in boostgauge first, and do not pass `--fresh` while it lists a branch whose work is on no merged PR:
+`--fresh` resets each issue before it rolls. The reset closes the issue's open PRs that come from its own pipeline branches (a PR somebody made by hand that names the issue is listed and left open), deletes its pipeline branches locally and on origin, removes its worktrees, and reopens the issue. Nothing it removes is lost: a branch tip is first proven to be on the base branch, or kept under a `graveyard/` branch (pushed to origin for a branch that is on origin) (#4215); a clean worktree's ignored files, which can hold the run's lineage, are copied to `data/speedrun/reset-artifacts/issue-N/worktree-ignored/` and compared with their sources before it is removed, and a failed copy keeps the worktree (#4219); the displaced lineage and the LLD and spec working copies go under `data/speedrun/reset-artifacts/` too (standard 0027). If a tip cannot be kept, the branch stays, you are alerted, and the reset stops. A reset refuses while another roll of the issue is running, whichever session started it (#4217).
 
-```
-git ls-remote --heads origin issue-2 2-lld issue-4 4-lld
-```
-
-Run one roll at a time: the reset cannot see a roll that is already running (#4217). Without `--fresh`, a relaunch resumes, and a resume keeps the profile the issue was first rolled under.
+Because the reset is destructive, `--fresh` alone only prints what it would close, delete and remove, then the phrase that authorizes it, and stops: no write, no roll (#4221). Read that plan first.
 
 ```
 poetry run python tools/speedrun_roll.py --repo /c/Users/mcwiz/Projects/boostgauge --issue 2 --issue 4 --models gemini --fresh
 ```
 
-Every run's events log opens with `START ... profile=gemini`, and every convergence row and every recorded call names the profile.
+To carry it out, add `--execute`, and type the phrase it prints, naming the repository and every `--issue`, on the console you launched from. It is asked before any `--detach`, because the detached roll has no console to answer; a detached roll that was not confirmed refuses instead of waiting. Anything else typed, or no console, changes nothing and exits 91.
+
+```
+poetry run python tools/speedrun_roll.py --repo /c/Users/mcwiz/Projects/boostgauge --issue 2 --issue 4 --models gemini --fresh --execute
+```
+
+Without `--fresh`, a relaunch resumes, and a resume keeps the profile the issue was first rolled under. Every run's events log opens with `START ... profile=gemini`, and every convergence row and every recorded call names the profile.
 
 ### 3. Roll under the second profile, from scratch
 
 This roll starts nested Claude sessions, so only the operator runs it. While his Claude spend lock is on, it is refused at launch with exit 91, before any reset or spend.
 
 ```
-poetry run python tools/speedrun_roll.py --repo /c/Users/mcwiz/Projects/boostgauge --issue 2 --issue 4 --models claude --fresh
+poetry run python tools/speedrun_roll.py --repo /c/Users/mcwiz/Projects/boostgauge --issue 2 --issue 4 --models claude --fresh --execute
 ```
 
-Leaving out `--fresh` here is refused rather than mixed. When step 2 left resumable state, the roll prints `REFUSED #2: its resumable state was rolled under model profile 'gemini', and this launch asks for 'claude'` and stops with exit 93. When step 2 succeeded, the launch stops earlier, at `ALREADY ROLLED TO SUCCESS ON THIS ARC`, and asks for a typed redraw phrase or `--redraw-completed`. Neither refusal is free for every issue. For boostgauge issues 331 and 332, which carry a visual gate, the launch spends one model call first, under the launcher's default profile. And the launch's sweep, janitor and binding-doc sync can push before either refusal.
+Run it without `--execute` first to read the plan, as in step 2. Leaving out `--fresh` here is refused rather than mixed. When step 2 left resumable state, the roll prints `REFUSED #2: its resumable state was rolled under model profile 'gemini', and this launch asks for 'claude'` and stops with exit 93. When step 2 succeeded, the launch stops earlier, at `ALREADY ROLLED TO SUCCESS ON THIS ARC`, and asks for a typed redraw phrase or `--redraw-completed`. Neither refusal is free for every issue. For boostgauge issues 331 and 332, which carry a visual gate, the launch spends one model call first, under the launcher's default profile. And the launch's sweep, janitor and binding-doc sync can push before either refusal.
 
 ### 4. Compare
 
@@ -65,7 +67,7 @@ It prints one row per profile and writes the same table to `boostgauge/data/spee
 One profile file and one roll. Copy `assemblyzero/profiles/gemini.toml` to `boostgauge/.assemblyzero/new-model.toml` and pass it by path, as below. Never name the copy `boostgauge/.assemblyzero/models.toml`: that file becomes boostgauge's profile for every later roll that passes no `--models`.
 
 ```
-poetry run python tools/speedrun_roll.py --repo /c/Users/mcwiz/Projects/boostgauge --issue 2 --issue 4 --models /c/Users/mcwiz/Projects/boostgauge/.assemblyzero/new-model.toml --fresh
+poetry run python tools/speedrun_roll.py --repo /c/Users/mcwiz/Projects/boostgauge --issue 2 --issue 4 --models /c/Users/mcwiz/Projects/boostgauge/.assemblyzero/new-model.toml --fresh --execute
 ```
 
 Then compare it against the profile it would replace. A mixture is the same: a profile whose `[defaults]` names one vendor and whose `[seats."<name>"]` tables name another for the seats that differ. The seat names are the keys of `SEATS` in `assemblyzero/core/seats.py`.

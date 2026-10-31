@@ -17,12 +17,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
-import speedrun_reset as reset  # noqa: E402
-import speedrun_roll as roll  # noqa: E402
+import speedrun_reset as reset
+import speedrun_roll as roll
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
 
 
 def _must(result: subprocess.CompletedProcess) -> str:
@@ -71,7 +71,7 @@ def gh(monkeypatch) -> Gh:
 def origin(tmp_path: Path) -> Path:
     path = tmp_path / "origin.git"
     _must(subprocess.run(
-        ["git", "init", "--bare", "-b", "main", str(path)], capture_output=True, text=True,
+        ["git", "init", "--bare", "-b", "main", str(path)], capture_output=True, text=True, check=False,
     ))
     return path
 
@@ -115,7 +115,7 @@ def push_branch(repo: Path, branch: str) -> None:
 def remote_heads(origin: Path) -> dict[str, str]:
     out = _must(subprocess.run(
         ["git", "-C", str(origin), "for-each-ref", "--format=%(refname:short) %(objectname)",
-         "refs/heads"], capture_output=True, text=True,
+         "refs/heads"], capture_output=True, text=True, check=False,
     ))
     return {line.split()[0]: line.split()[1] for line in out.splitlines() if line}
 
@@ -228,7 +228,7 @@ class TestNoBranchIsDeletedBeforeItsTipIsRecoverable:
         # The proof a reviewer can run: the tip is reachable from a ref on origin.
         contains = subprocess.run(
             ["git", "-C", str(origin), "branch", "--contains", tip, "--list", "graveyard/*"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         ).stdout
         assert "graveyard/issue-7-" in contains
         # And locally the branch was parked, not deleted.
@@ -292,7 +292,7 @@ class TestNoBranchIsDeletedBeforeItsTipIsRecoverable:
         """Pushed from another clone: this repo has no copy of the commit."""
         other = tmp_path / "other"
         _must(subprocess.run(
-            ["git", "clone", "-q", str(origin), str(other)], capture_output=True, text=True,
+            ["git", "clone", "-q", str(origin), str(other)], capture_output=True, text=True, check=False,
         ))
         git(other, "config", "user.email", "o@example.com")
         git(other, "config", "user.name", "O")
@@ -518,7 +518,8 @@ class TestIgnoredFilesAreCopiedOutBeforeTheWorktreeGoes:
         )
 
         class Log:
-            lines: list[str] = []
+            def __init__(self) -> None:
+                self.lines: list[str] = []
 
             def write(self, line: str) -> None:
                 self.lines.append(line)
@@ -527,6 +528,90 @@ class TestIgnoredFilesAreCopiedOutBeforeTheWorktreeGoes:
 
         assert worktree.exists()
         assert any("worktree for #7 kept" in f and "disk full" in f for f in failures), failures
+
+
+# ---------------------------------------------------------------------------
+# #4221: the standalone reset tool is behind --execute and the typed phrase too
+# ---------------------------------------------------------------------------
+
+
+class TestStandaloneResetNeedsExecute:
+    @pytest.fixture
+    def tool(self, repo: Path, origin: Path, gh: Gh, monkeypatch, tmp_path: Path):
+        import _gate
+        import speedrun_clean_check as gate
+
+        commit_on(repo, "issue-7", "unlanded work")
+        push_branch(repo, "issue-7")
+        monkeypatch.setattr(reset, "_gh_repo", lambda _p: "owner/repo")
+        monkeypatch.setattr(_gate, "GATE_REFUSAL_LOG", tmp_path / "gate-refusals.jsonl")
+        monkeypatch.setattr(gate, "check_repo", lambda *a, **k: [])
+        self.argv_base = ["speedrun_reset.py", "--repo", str(repo), "--issue", "7"]
+        return repo
+
+    def run(self, monkeypatch, *extra, answers=()):
+        queue = list(answers)
+
+        def fake_input(prompt=""):
+            answer = queue.pop(0)
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        monkeypatch.setattr(sys, "argv", [*self.argv_base, *extra])
+        return reset.main()
+
+    def test_without_execute_it_prints_the_plan_and_changes_nothing(
+        self, tool, origin: Path, gh: Gh, monkeypatch, capsys
+    ):
+        refs_before = _must(git(tool, "for-each-ref"))
+        remote_before = remote_heads(origin)
+
+        code = self.run(monkeypatch)
+
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "RESET PLAN" in out and "issue-7" in out
+        assert "approve forbidden reset-issues for owner/repo #7" in out
+        assert _must(git(tool, "for-each-ref")) == refs_before
+        assert remote_heads(origin) == remote_before
+        assert [c for c in gh.commands if c[0] == "gh" and c[1:3] != ["pr", "list"]
+                and c[1:3] != ["issue", "view"]] == []
+
+    def test_with_execute_but_the_wrong_phrase_it_changes_nothing(
+        self, tool, origin: Path, gh: Gh, monkeypatch
+    ):
+        remote_before = remote_heads(origin)
+        for answer in ("yes", EOFError()):
+            assert self.run(monkeypatch, "--execute", answers=[answer]) == 1
+            assert remote_heads(origin) == remote_before
+            assert local_branches(tool).count("issue-7") == 1
+        assert gh.closed == []
+
+    def test_with_execute_and_the_phrase_it_resets(
+        self, tool, origin: Path, gh: Gh, monkeypatch
+    ):
+        phrase = reset.reset_phrase("owner/repo", [7])
+
+        code = self.run(monkeypatch, "--execute", answers=[phrase])
+
+        assert code == 0
+        assert "issue-7" not in remote_heads(origin)
+        assert len(graveyard_heads(origin)) == 1
+
+    def test_the_plan_names_what_the_reset_would_do_to_each_branch(
+        self, tool, origin: Path, gh: Gh
+    ):
+        gh.prs = [
+            {"number": 11, "title": "pipeline", "headRefName": "issue-7"},
+            {"number": 12, "title": "hand-made", "headRefName": "mine"},
+        ]
+        lines = reset.reset_plan(tool, "owner/repo", 7, "main")
+        text = "\n".join(lines)
+        assert "close PR #11" in text and "leave open PR #12" in text
+        assert "rename local branch issue-7: 1 commit(s) beyond main" in text
+        assert "delete origin's issue-7: 1 commit(s) beyond main" in text
 
 
 # ---------------------------------------------------------------------------
