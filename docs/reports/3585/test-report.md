@@ -956,6 +956,10 @@ For `checkpoints.py` (section 3): before the conftest stand-in, 92 unit tests in
 - **The full unit tier again** (`9899db9f`): 1 failed, 12347 passed. The one, `test_tdd_checkpoints.py::test_excludes_workflow_internal_dirs_from_staging`, had a fake git that answered `check-ignore` as "ignored"; corrected in `8e800226`, and the three checkpoint test files pass (44). The full tier runs once more when the package lands, after `origin/main` is merged.
 - **Audits after the last code change:** loud-failure PASS (208 sites); fail-open PASS --strict (10116 sites); halt sites PASS --strict (182 sites, 113 gates, impl rows 50).
 
+## The landing tier
+
+Run on 2026-10-31 on the merge of the requirements and implementation_spec packages (`e8dc5d0f`): 12,955 passed, 66 skipped, 7 deselected and 7 xfailed in 926 s, with no failures. The merge's conflicts beyond the reports and baselines were `tests/unit/conftest.py`, where both sides were kept, and a test file both packages named `test_finalize_loud_failure.py`; testing's is now `tests/unit/test_testing_finalize_loud_failure.py`. Merging `main` afterwards left the tree unchanged, because `main`'s spec squash has no difference from the head already merged. After the merge: loud-failure PASS (154 sites); fail-open PASS --strict (10,194 sites); halt sites PASS --strict (214 sites, 114 gates, impl rows 50).
+
 ---
 
 # Test Report: run-path modules outside the workflow packages under standard 0034 (#3585 step 5)
