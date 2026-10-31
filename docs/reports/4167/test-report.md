@@ -28,6 +28,8 @@ The Windows-branch test (`test_t1_a_windows_client_finds_no_agy_inside_wsl`) pas
 
 ### #4202: no test writes under the start directory's `data/`
 
+The 105 files are every file in `tests/unit/` that names one of `validate_test_plan`, `validate_mechanical`, `validate_lld_mechanical`, `analyze_requirements`, `run_spec_stage`, `narrated`, `validate_completeness`, `record_failure`, `record_stage_enter`, `record_node_enter`, `record_terminal`, `record_hallucination`, `orchestrator.graph` or `orchestrator import graph` (a `grep -rlE` on those words). The before run was at the branch point, `7542e384`; the after run at `f6a64ad5`. They ran with the worktree's environment's `pytest` from an empty directory outside the worktree.
+
 | Run | Result |
 |---|---|
 | 105 unit test files that reach the writers, from an empty directory outside the checkout, before | 2,262 passed, 7 skipped, exit 0; left `data/speedrun/telemetry/prompt-failures.jsonl` there, 9 rows with `"repo": "."` (checks `test-plan` 6, `requirements-conflict` 1, `mechanical` 2) |
