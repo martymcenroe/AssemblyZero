@@ -3900,11 +3900,23 @@ def main(argv: list[str] | None = None) -> int:
     # This is the first preflight check that spends a model call, so it is
     # scoped: only a repo that declares a binding contract for THIS issue in
     # docs/design/visual-gate.json is audited. Every other repo pays nothing.
-    fidelity_text, _ = check_contract_fidelity_at_preflight(
+    #
+    # #4257: the second value is the refuse flag, honoured as the form check's
+    # is. The preflight sets it only when the audit did not run (it has
+    # already alerted the operator and printed why); findings stay
+    # report-only, so a launch that audited and found a defect proceeds.
+    fidelity_text, fidelity_refuses = check_contract_fidelity_at_preflight(
         repo_root, args.issue or [], fetch_issue,
     )
     if fidelity_text:
         print(fidelity_text)
+    if fidelity_refuses:
+        print(
+            "BLOCKED: the contract-fidelity audit did not run, so this launch "
+            "refuses rather than roll unaudited. The cause is printed above "
+            "and the operator has been alerted. Nothing was started."
+        )
+        return 91
 
     # #2191: refuse to redraw an issue this arc has already rolled to success.
     # Here, before the detach, while the operator's console can still answer.
