@@ -59,6 +59,10 @@ No run calls these batch-mode helpers; they keep the standard while they exist.
 
 Callers: N4's validation and, for the pyproject reader, `scaffold_tests.py` (another batch); neither catches.
 
+### routing.py (1 row)
+
+- **62: won't do.** Compliant: a file path that is not a string raises TypeError naming its type. Pinned.
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |
