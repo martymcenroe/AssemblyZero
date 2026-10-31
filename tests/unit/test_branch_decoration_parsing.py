@@ -93,27 +93,24 @@ class TestCleanCheckLocalBranchDebris:
 
 
 class TestResetLocalBranchSweep:
-    def test_worktree_held_branch_named_correctly_in_output(
-        self, tmp_path, capsys
-    ):
-        """The branch cannot be deleted while a worktree holds it — but the
-        name in the report has to be the real one, and the comparison against
+    def test_worktree_held_branch_named_correctly_in_the_failure(self, tmp_path):
+        """The branch cannot be deleted while a worktree holds it -- but the
+        name in the failure has to be the real one, and the comparison against
         the active branch has to be able to match."""
         repo = _make_repo(tmp_path)
         _git(repo, "branch", "issue-7")
         _git(repo, "worktree", "add", str(tmp_path / "wt"), "issue-7")
 
-        srr.delete_local_branches(repo, 7)
-        out = capsys.readouterr().out
-        assert "issue-7" in out
-        assert "+ issue-7" not in out
+        failures = srr.dispose_pipeline_branches(repo, 7, "main")
+        assert any("'issue-7'" in f for f in failures), failures
+        assert not any("+ issue-7" in f for f in failures)
 
     def test_deletable_branch_still_deleted(self, tmp_path):
         """The sweep's actual job keeps working."""
         repo = _make_repo(tmp_path)
         _git(repo, "branch", "7-lld")
 
-        assert srr.delete_local_branches(repo, 7) == 1
+        assert srr.dispose_pipeline_branches(repo, 7, "main") == []
         assert scc.find_local_branch_debris(repo, 7) == []
 
     def test_checked_out_branch_is_skipped_by_matching_name(
@@ -124,7 +121,7 @@ class TestResetLocalBranchSweep:
         repo = _make_repo(tmp_path)
         _git(repo, "checkout", "-b", "issue-8")
 
-        assert srr.delete_local_branches(repo, 8) == 0
+        assert srr.dispose_pipeline_branches(repo, 8, "main") == []
         assert "currently checked out" in capsys.readouterr().out
 
 
@@ -158,19 +155,21 @@ class TestFormatFlagIsPinned:
 
     def test_reset_local_sweep_passes_format(self, monkeypatch, tmp_path):
         calls = self._branch_list_calls(
-            monkeypatch, srr, srr.delete_local_branches, tmp_path, 7
+            monkeypatch, srr, srr.dispose_pipeline_branches, tmp_path, 7
         )
         assert calls, "no branch listing was issued"
         for cmd in calls:
             assert "--format=%(refname:short)" in cmd, cmd
 
-    def test_reset_remote_sweep_passes_format(self, monkeypatch, tmp_path):
+    def test_reset_remote_sweep_reads_origin_not_decorated_local_output(
+        self, monkeypatch, tmp_path
+    ):
+        """The remote sweep asks origin (`ls-remote`), whose lines are bare
+        refnames, and no longer lists local branches at all (#4215)."""
         calls = self._branch_list_calls(
             monkeypatch, srr, srr.delete_remote_branches, tmp_path, 7
         )
-        assert calls, "no branch listing was issued"
-        for cmd in calls:
-            assert "--format=%(refname:short)" in cmd, cmd
+        assert calls == [], "the remote sweep must not parse decorated branch output"
 
 
 class TestSharedParser:

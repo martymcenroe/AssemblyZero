@@ -64,9 +64,10 @@ def _main(repo, issue=19):
     """
     import speedrun_clean_check as gate
 
-    argv = ["speedrun_reset.py", "--repo", str(repo), "--issue", str(issue)]
+    argv = ["speedrun_reset.py", "--repo", str(repo), "--issue", str(issue), "--execute"]
     with patch.object(sys, "argv", argv), \
          patch.object(reset, "_gh_repo", lambda p: "owner/repo"), \
+         patch("builtins.input", lambda prompt="": reset.reset_phrase("owner/repo", [issue])), \
          patch.object(reset, "close_open_prs", lambda *a: 0), \
          patch.object(reset, "delete_remote_branches", lambda *a: 0), \
          patch.object(reset, "reopen_issue", lambda *a: True), \
@@ -91,7 +92,7 @@ class TestVerificationRuns:
         finish. Verification must still be able to SAY so."""
         _git(repo, "branch", "issue-19")
 
-        with patch.object(reset, "delete_local_branches", lambda *a: 0):
+        with patch.object(reset, "dispose_pipeline_branches", lambda *a: []):
             code = _main(repo)
 
         out = capsys.readouterr().out

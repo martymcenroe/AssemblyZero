@@ -368,13 +368,11 @@ def find_checkpoint(repo_root: Path, issue: int) -> str | None:
     Every ref that could carry one is searched, including the worktree's own
     branch, because the checkpointing commit lands wherever the stage ran.
     """
-    refs = [
-        f"{issue}-impl", f"origin/{issue}-impl",
-        f"{issue}-lld", f"origin/{issue}-lld",
-        f"{issue}-spec", f"origin/{issue}-spec",
-        f"{issue}-fix", f"origin/{issue}-fix",
-    ]
-    for ref in refs:
+    #
+    # #4216: the list is `speedrun_reset.checkpoint_search_refs`, the one the
+    # reset's pin reads, and it includes `issue-{N}`, the branch the impl stage
+    # checkpoints on.
+    for ref in reset.checkpoint_search_refs(issue):
         found = _run(
             ["git", "log", "-1", "--format=%h", "--grep=^\\[CP:", ref],
             cwd=repo_root,
@@ -407,7 +405,7 @@ def refuse_with_exits(
         )
     log.write("  exit 1: repair the findings above, then relaunch to resume")
     log.write(
-        "  exit 2: relaunch with --fresh to reset this issue and redraw "
+        "  exit 2: relaunch with --fresh --execute to reset this issue and redraw "
         "(archives, never deletes)"
     )
 
@@ -652,7 +650,7 @@ def ensure_base(
             log.write(f"  {d}")
         log.write(
             f"BASE '{base}' accepted for #{issue} with its work preserved "
-            "(--fresh to reset and redraw)"
+            "(--fresh --execute to reset and redraw)"
         )
         record_heal(
             repo_root, "reset-declined", f"#{issue}", "healed",
@@ -682,7 +680,14 @@ def ensure_base(
         log.write(f"RESET could not determine owner/repo: {err}")
         return None
     preserve = settled_artifact_names(repo_root, issue, log)
-    reset.reset_one_issue(repo_root, repo_slug, issue, preserve)
+    try:
+        reset.reset_one_issue(repo_root, repo_slug, issue, preserve, base=base)
+    except reset.ResetPreservationError as err:
+        # #4215: a branch whose tip could not be preserved was not removed.
+        # The operator was alerted where it failed; the roll does not go on
+        # to build on a half-reset issue.
+        log.write(f"RESET stopped, a branch could not be preserved: {err}")
+        return None
 
     findings = gate.check_repo(repo_root, [issue], base)
     debris = [f for f in findings if not f.startswith("ERROR:")]
@@ -1287,7 +1292,7 @@ def profile_refusal(az_root: Path, issue: int, requested: str) -> str:
     return (
         f"#{issue}: its resumable state was rolled under model profile "
         f"'{recorded}', and this launch asks for '{requested}'. A resume keeps "
-        f"'{recorded}'. Relaunch with --fresh to roll #{issue} under "
+        f"'{recorded}'. Relaunch with --fresh --execute to roll #{issue} under "
         f"'{requested}' from the start, or with --models {recorded} to resume."
     )
 
@@ -1834,8 +1839,18 @@ def detached_argv(
         argv.append("--redraw-completed")
     # #2193: same for a demanded full redraw -- the detached run must not
     # resume the very state the operator asked to discard.
+    #
+    # #4221: the child is told the phrase was already typed, on the console
+    # the launcher ran in. It cannot ask: nothing there can answer, and a child
+    # that stopped at the prompt would sit until someone killed it. `fresh`
+    # reaches this point only through `confirm_fresh_reset`, which sets
+    # `fresh_confirmed`; a launch that was not confirmed refuses in the child.
     if getattr(args, "fresh", False):
         argv.append("--fresh")
+        if getattr(args, "execute", False):
+            argv.append("--execute")
+        if getattr(args, "fresh_confirmed", False):
+            argv.append("--fresh-confirmed")
     return argv + extra
 
 
@@ -2954,18 +2969,24 @@ def restore_repo(
     """
     log.write("RESTORE returning the repo to its default branch")
 
+    failures: list[str] = []
     for issue in issues:
-        reset.remove_worktree(repo_root, issue)
+        try:
+            reset.remove_worktree(repo_root, issue)
+        except reset.ResetPreservationError as err:
+            # #4219: the worktree's ignored files could not be copied out, so
+            # it was kept, and the operator was alerted where it failed.
+            # RESTORE goes on with the other issues and says so at the end.
+            log.write(f"RESTORE kept #{issue}'s worktree: {err}")
+            failures.append(f"worktree for #{issue} kept: {err}")
 
     base = attempt.default_branch(repo_root)
     if not base:
-        return ["cannot resolve origin/HEAD; leaving the checkout as it is"]
+        return [*failures, "cannot resolve origin/HEAD; leaving the checkout as it is"]
 
     checkout = _run(["git", "checkout", base], cwd=repo_root)
     if checkout.returncode != 0:
-        return [f"could not check out {base}: {(checkout.stderr or '').strip()}"]
-
-    failures: list[str] = []
+        return [*failures, f"could not check out {base}: {(checkout.stderr or '').strip()}"]
 
     # #2310: a removed worktree leaves its branch standing. Dispose of it here
     # -- AFTER the checkout has moved to the base, so the branch being freed is
@@ -3663,15 +3684,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--fresh", action="store_true",
         help=(
             "Redraw every stage from scratch, ignoring any resumable state "
-            "(#2193), AND authorize the destructive reset of this issue "
-            "(#2409): closing its open PRs, deleting its branches, removing "
-            "its worktree. Displaced artifacts are archived to "
-            "data/speedrun/reset-artifacts/, never deleted, and any checkpoint "
-            "is pinned to a rescue ref first. Without this flag a launch that "
-            "finds gate findings REFUSES and names both exits rather than "
-            "resetting on its own initiative."
+            "(#2193), AND reset each issue first (#2409): close the pipeline's "
+            "own open PRs, delete its pipeline branches locally and on "
+            "origin, remove its worktrees, reopen the issue. Every deleted "
+            "branch tip is first proven to be on the base branch or kept "
+            "under graveyard/ (pushed, for a branch on origin) (#4215); "
+            "ignored worktree files, displaced lineage and LLD/spec copies "
+            "are archived to data/speedrun/reset-artifacts/ (#4219); any "
+            "checkpoint is pinned to a rescue ref first. The reset is "
+            "destructive, so --fresh alone only PRINTS what it would do and "
+            "stops (#4221): add --execute, and type the phrase it prints. "
+            "Without --fresh a launch that finds gate findings REFUSES and "
+            "names both exits rather than resetting on its own initiative."
         ),
     )
+    parser.add_argument(
+        "--execute", action="store_true",
+        help=(
+            "With --fresh: carry the reset out (#4221, standard 0017). You are "
+            "asked, on this console and before any --detach, to type "
+            "'approve forbidden reset-issues for <owner/repo> #N ...' naming "
+            "the repository and every --issue. Anything else changes nothing. "
+            "Without --fresh it does nothing."
+        ),
+    )
+    # Set by --detach on the relaunch, after the phrase was typed on the
+    # launching console; honoured only together with --detached-stdout, so
+    # typing it by hand skips nothing.
+    parser.add_argument("--fresh-confirmed", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--no-follow", action="store_true",
         help=(
@@ -3703,12 +3743,88 @@ def build_parser() -> argparse.ArgumentParser:
             "Model profile the roll's every seat resolves under: a built-in "
             "name (gemini, claude, mock) or a TOML path (#3562). Forwarded to "
             "every orchestrate.py child. A resume recorded under a different "
-            "profile is refused; --fresh rolls the issue under the new one."
+            "profile is refused; --fresh --execute rolls the issue under the new one."
         ),
     )
     # Set by --detach on the relaunch; not something anyone types.
     parser.add_argument("--detached-stdout", default=None, help=argparse.SUPPRESS)
     return parser
+
+
+def _reset_slug_or_refuse(repo_root: Path) -> str | None:
+    """The target's owner/repo, or None after saying why it cannot be read."""
+    try:
+        return reset._gh_repo(repo_root)
+    except RuntimeError as err:
+        print(
+            f"BLOCKED: cannot name the repository the reset would act on ({err}). "
+            "Nothing was changed."
+        )
+        return None
+
+
+def fresh_dry_run(args: argparse.Namespace, repo_root: Path) -> int:
+    """`--fresh` without `--execute`: print the reset's plan and stop (#4221).
+
+    Read-only: it asks git and GitHub what the reset would close, delete and
+    remove, writes nothing, starts no roll. Exit 0, because a preview that was
+    produced is a success; the output says in capitals that nothing ran, so a
+    caller that expected a roll cannot mistake it for one. A repository whose
+    name cannot be read is exit 91.
+    """
+    slug = _reset_slug_or_refuse(repo_root)
+    if slug is None:
+        return 91
+    reset.print_reset_plan(
+        repo_root, slug, list(args.issue), resolve_attempt_branch(repo_root) or None,
+    )
+    print(
+        "\nNOTHING WAS RESET AND NO ROLL WAS STARTED: --fresh without --execute "
+        "is the dry run."
+    )
+    return 0
+
+
+def confirm_fresh_reset(
+    args: argparse.Namespace, repo_root: Path, *, stream=None,
+) -> int | None:
+    """The typed phrase that authorizes `--fresh --execute`. None to go on, 91 to refuse.
+
+    #4221 / standard 0017. Asked once per launch, on the launching console,
+    before any detach. The scheduled child cannot be asked: with
+    `--detached-stdout` set it proceeds only when its launcher passed
+    `--fresh-confirmed`, and refuses (never prompts) otherwise. A bare
+    `--fresh-confirmed` typed on a console is not honoured: only the child
+    carries `--detached-stdout`.
+    """
+    if getattr(args, "detached_stdout", None):
+        if getattr(args, "fresh_confirmed", False):
+            print("--fresh --execute: confirmed on the launching console.")
+            return None
+        print(
+            "BLOCKED: --fresh --execute reached a detached launch that was not "
+            "confirmed on a console. A scheduled task cannot answer the typed "
+            "phrase, so it refuses instead of waiting. Launch again from a "
+            "console. Nothing was changed."
+        )
+        return 91
+    if not getattr(args, "execute", False):
+        print("BLOCKED: --fresh needs --execute. Nothing was changed.")
+        return 91
+
+    slug = _reset_slug_or_refuse(repo_root)
+    if slug is None:
+        return 91
+    issues = list(args.issue)
+    reset.print_reset_plan(
+        repo_root, slug, issues, resolve_attempt_branch(repo_root) or None,
+        execute=True,
+    )
+    if not reset.confirm_reset(slug, issues, stream=stream):
+        print("\nBLOCKED: the confirmation phrase was not typed. Nothing was changed.")
+        return 91
+    args.fresh_confirmed = True
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -3791,6 +3907,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.issue:
         print("ERROR: --issue is required (repeatable) unless stopping a roll")
         return 91
+
+    # #4221: --fresh without --execute is the dry run. It prints what the reset
+    # would close, delete and remove, and stops: nothing is written, nothing
+    # is spent, no preflight runs. A scheduled child never gets here, because
+    # its launcher stopped at this same point first.
+    if getattr(args, "fresh", False) and not getattr(args, "execute", False):
+        return fresh_dry_run(args, repo_root)
 
     # #2206: automatic retries are deauthorized. Refuse here -- before the
     # detach hand-off and before any gate spends anything -- so the refusal
@@ -3900,11 +4023,23 @@ def main(argv: list[str] | None = None) -> int:
     # This is the first preflight check that spends a model call, so it is
     # scoped: only a repo that declares a binding contract for THIS issue in
     # docs/design/visual-gate.json is audited. Every other repo pays nothing.
-    fidelity_text, _ = check_contract_fidelity_at_preflight(
+    #
+    # #4257: the second value is the refuse flag, honoured as the form check's
+    # is. The preflight sets it only when the audit did not run (it has
+    # already alerted the operator and printed why); findings stay
+    # report-only, so a launch that audited and found a defect proceeds.
+    fidelity_text, fidelity_refuses = check_contract_fidelity_at_preflight(
         repo_root, args.issue or [], fetch_issue,
     )
     if fidelity_text:
         print(fidelity_text)
+    if fidelity_refuses:
+        print(
+            "BLOCKED: the contract-fidelity audit did not run, so this launch "
+            "refuses rather than roll unaudited. The cause is printed above "
+            "and the operator has been alerted. Nothing was started."
+        )
+        return 91
 
     # #2191: refuse to redraw an issue this arc has already rolled to success.
     # Here, before the detach, while the operator's console can still answer.
@@ -3913,6 +4048,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     if completed_refusal is not None:
         return completed_refusal
+
+    # #4221: the destructive reset needs the typed phrase, asked HERE: on the
+    # console the operator launched from, after every preflight has had its
+    # say (so a launch another gate refuses never asks), and before the detach
+    # hand-off, because a scheduled task has no console to answer a prompt.
+    if getattr(args, "fresh", False):
+        fresh_refusal = confirm_fresh_reset(args, repo_root)
+        if fresh_refusal is not None:
+            return fresh_refusal
 
     # #2422: a stop file left by a previous kill would silently stop this roll
     # seconds after it started. Clear it here, in the console the operator is
@@ -4087,7 +4231,7 @@ def main(argv: list[str] | None = None) -> int:
                     return PROFILE_MISMATCH_EXIT
                 print(
                     f"\n#{issue}: resuming from '{resume_from}' -- the passed "
-                    "stages are reused, not redrawn (--fresh for a full redraw)."
+                    "stages are reused, not redrawn (--fresh --execute for a full redraw)."
                 )
             # #2206: one roll per issue. The redraw loop is retired by
             # operator ruling -- a failure halts for diagnosis, and the
