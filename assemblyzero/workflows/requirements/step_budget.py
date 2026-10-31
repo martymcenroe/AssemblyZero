@@ -40,7 +40,12 @@ rewired -- the derivation carries a stated margin. It is not a fudge factor for
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from assemblyzero.core import alert
+
+logger = logging.getLogger(__name__)
 
 #: A clean LLD pass: load, codebase, requirements, draft, ponder, mechanical,
 #: test-plan, review, finalize.
@@ -80,8 +85,13 @@ def recursion_limit(
 
     try:
         iterations = max(0, int(max_iterations))
-    except (TypeError, ValueError):
-        iterations = DEFAULT_MAX_ITERATIONS
+    except (TypeError, ValueError) as exc:
+        # #3585: it used to become 3, so a typo silently sized the run for a
+        # cap nobody chose.
+        raise ValueError(
+            f"max_iterations {max_iterations!r} is not a whole number, so the "
+            f"step budget cannot be sized"
+        ) from exc
 
     return (
         CLEAN_RUN_STEPS
@@ -156,9 +166,21 @@ def invoke_with_budget(
         ):
             last = values
             steps += 1
-    except GraphRecursionError:
+    except GraphRecursionError as exc:
+        # #3585: the HALT node never runs on this path, so this is where the
+        # failure is made loud and reaches the operator.
         halt = describe_budget_exhaustion(last, limit, steps, stage)
         print(halt)
+        logger.error("[step budget] %s", halt.splitlines()[0])
+        issue = last.get("issue_number", state.get("issue_number"))
+        alert.alert_operator(
+            what=f"run the {stage} stage within its graph step budget ({limit} steps)",
+            where="assemblyzero.workflows.requirements.step_budget.invoke_with_budget",
+            cause=f"{type(exc).__name__}: {exc}; {halt.splitlines()[0]}",
+            consequence="the stage ends with error_message and the run exits 1",
+            repo=str(last.get("target_repo") or state.get("target_repo") or ""),
+            issue=issue if isinstance(issue, int) else None,
+        )
         return {**last, "error_message": halt}
 
     return last

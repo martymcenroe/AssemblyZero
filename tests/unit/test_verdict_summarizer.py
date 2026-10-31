@@ -103,13 +103,13 @@ class TestExtractBlockingIssuesText:
 
 
 class TestExtractBlockingIssuesFallback:
-    def test_malformed_json_falls_back_with_warning(self, caplog):
-        """Test ID 095: Malformed JSON falls back to text parsing."""
+    def test_malformed_json_raises_with_an_error_line(self, caplog):
+        """Test ID 095, under #3585: malformed JSON is an ERROR line and a
+        ValueError; it used to be read as prose after a warning."""
         malformed = '{invalid json\n- **[BLOCKING]** Fallback issue found'
-        with caplog.at_level(logging.WARNING):
-            issues = extract_blocking_issues(malformed)
-        assert "Fallback issue found" in issues
-        assert any("falling back to text extraction" in r.message for r in caplog.records)
+        with caplog.at_level(logging.ERROR), pytest.raises(ValueError, match="not valid JSON"):
+            extract_blocking_issues(malformed)
+        assert any(r.levelno == logging.ERROR for r in caplog.records)
 
 
 # ── Test ID 040: Persisting issue flagged across consecutive iterations (REQ-4) ──

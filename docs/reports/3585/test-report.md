@@ -1,3 +1,299 @@
+# Test Report: the requirements workflow under standard 0034 (#3585 step 5)
+
+Each fixed site has a test that fails before its fix and passes after, run first against the unchanged module. Filled in module by module on two branches and assembled on `3585-requirements-landing`: the graph and nodes on `3585-requirements-nodes`, then the support modules on `3585-requirements-support`, each keeping its own sections below.
+
+## nodes/finalize.py
+
+**New: `tests/unit/test_finalize_loud_failure.py` (39).** Each site test is named for its ledger line; the rest pin kept behaviour.
+
+**Before the fix, measured** against HEAD's `finalize.py`: 30 failed, 9 passed. Every site test failed except two:
+- 487, which #3864's router already halts;
+- the whitespace-only case of the empty-LLD test, which the core batch's question scan already refuses.
+
+The other seven pin a well-formed issue URL, an idea that is present and one never declared, a numeric `max_iterations`, a clean LLD, a file outside the repo passing through (297) and a failed filing logging nothing complete.
+
+**Changed tests, each asserting the new behaviour:**
+- `test_failopen_tags_3767.py`, `test_first_pass_tracking.py` and `test_lld_writes_only_worktree.py`: each state now carries an audit_dir that exists, because finalize halts without one. The worktree file's no-audit-dir test asserts the halt.
+- `test_finalize_repair_routing.py`: the no-issue-number message names the repo.
+- `test_orchestrator_lands_through_driver.py`: a failed landing is read from stderr, and `error_message` carries it.
+- `test_requirements_nodes.py`:
+  - three save tests keep the landing out of scope, because their targets are not git repos;
+  - a REVISE LLD halts;
+  - a nonexistent audit_dir halts;
+  - a URL with no issue number halts.
+- `test_requirements_validation.py`: an empty LLD fails validation.
+
+**Neighbouring suites:** 562 passed across 29 files: every file that imports finalize, the mock runs, the graph tests and the gate registry. After the last edits, the 10 affected files ran again: 274 passed.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new and 1 stale, the deleted tag. `audit_fail_open.py --check` reports no new fail-open. Ruff on `finalize.py` finds the same 17 issues as at HEAD.
+
+**The mock issue run (its own commit):** three tests in `TestAMockRunFilesNothing`.
+- **Against the finalize then on the branch:** 2 failed, 1 passed. The failures are that `gh` and `subprocess.run` were called under mock mode, and that a full mock `finalize()` called them. The one that passed is that a real run still files.
+- **After the change:** the 15 files that run the issue workflow, its CLI, the mock runs and the gate registry gave 481 passed.
+
+## graph.py
+
+**New: `tests/unit/test_requirements_graph_loud_failure.py` (30).** One test per ledger line, then:
+- every router given an error, which must halt;
+- every node of the compiled graph, which must have a HALT edge.
+
+**Before the fix, measured:** 8 failed, 22 passed.
+- The 8 failures are the two human-gate routers, which went on to `next_node` with an error set.
+- The 22 that passed are the ledger rows: #3864 had already routed seven of them, and two were compliant.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 424 passed and 1 skipped across 18 files that build or route the requirements graph.
+
+## nodes/generate_draft.py
+
+**New: `tests/unit/test_generate_draft_loud_failure.py` (20).**
+
+**Before the fix, measured:** 15 failed, 5 passed. Every site test failed. The 5 that passed pin kept behaviour:
+- a present audit_dir records the draft;
+- a prompt at the cap is sent whole;
+- a readable prior draft rides in the system prompt;
+- a draft naming no Python files uses the N0b map;
+- a draft with no open-questions section passes.
+
+**Changed tests, each asserting the new behaviour:**
+- `test_prompt_size_awareness.py`: its truncator tests became halt tests.
+- `test_interface_surface.py`: one truncation test became a test that nothing is cut.
+- `test_requirements_validation.py`: an empty draft blocks.
+- `test_requirements_nodes.py`: a missing audit_dir halts. Two other tests gained an audit_dir.
+- `test_lld_edit_script_revision.py`, `test_lld_mock_completes.py` and `test_diff_aware_review.py`: each state now has a target directory or an audit_dir that exists.
+
+**Neighbouring suites (generate_draft):** the first run across 45 files gave 22 failures. Each was a test asserting retired behaviour: a missing audit_dir or target repository tolerated. After those tests were changed, and after the seat-handling change, the run across 47 files gave 987 passed and 1 skipped.
+
+## nodes/analyze_codebase.py
+
+**New: `tests/unit/test_analyze_codebase_loud_failure.py` (19).**
+
+**Before the fix, measured:** 14 failed, 5 passed. Every site test failed except 153, which #3864's router already halts. The other four that passed pin kept behaviour:
+- an empty key file is skipped quietly;
+- a related binary file is skipped quietly;
+- a repo with no Python has an empty surface;
+- a file outside the repo is skipped (460).
+
+**Changed tests:** `test_analyze_codebase.py`. The no-repo-path and missing-repo classes now expect the halt and an ERROR in the log, where they expected an empty context and a warning.
+
+**Neighbouring suites:** 494 passed across 21 files: the analysis tests, the interface surface, the requirements graph, the mock runs, the CLI and the gate registry.
+
+## nodes/analyze_requirements.py
+
+**New: `tests/unit/test_analyze_requirements_loud_failure.py` (19).**
+
+**Before the fix, measured:** 15 failed, 4 passed. Every site test failed. The 4 that passed pin kept behaviour:
+- an empty findings list is a clean verdict;
+- a calm storm probe reads False;
+- a mock run reads nothing;
+- a conflict that does not reproduce proceeds (779, #3767).
+
+**Changed tests, each asserting the new behaviour:**
+- `test_n0c_unarticulated_conflict.py`: an all-unarticulated verdict halts unverified, names the pairing, files nothing and writes no proceeded record.
+- `test_requirements_gate_timeout.py`: the last fail-open path halts and records nothing.
+- `test_requirements_conflict.py`: an empty body halts unverified.
+- `test_requirements_gate_escalation.py`: a broken escalation target halts, naming it, with no re-ask.
+
+**Neighbouring suites:** the first run across 28 files gave 603 passed, 1 skipped and 3 failed.
+- Two of the failures were tests of the retired behaviour, changed above.
+- The third, `test_check_requirements.py::TestConflict::test_report_says_filing_failed_when_it_did`, showed that the standalone pre-check reads "must-resolve filing failed" from the gate's captured stdout. The gate prints that line again, beside the alert.
+
+The 6 files involved then gave 154 passed.
+
+## nodes/review.py
+
+**New: `tests/unit/test_review_loud_failure.py` (18).**
+
+**Before the fix, measured** against the unchanged module, on its first 17 tests: 13 failed, 4 passed. Every site test failed. The 4 that passed pin kept behaviour: a tiered REVISE with no Tier 1 issue is APPROVED, one with an issue is BLOCKED, a self-build needs no target block, and a clean approval goes forward with its verdict saved. The eighteenth, a Tier 1 section without a Tier 2 section read as BLOCKED, was added after the fix to pin the narrowed contract.
+
+**Changed tests, each asserting the new behaviour:**
+- `test_requirements_nodes.py`:
+  - three REVISE responses carry their Tier sections;
+  - two states gain an audit_dir;
+  - `test_reviewer_failure_is_llm_format_error` became `test_reviewer_failure_halts_with_the_providers_cause`.
+- `test_validate_test_plan_node.py::test_review_resets_counter`: a real target and audit_dir.
+- `test_lld_review_reads_template.py`: its scripted provider says its calls succeeded.
+- `test_structured_verdicts.py`: the verdict guesser is read from the parser module, and review's copy is gone.
+
+**Neighbouring suites:** 28 files gave 553 passed, 1 skipped, 4 deselected (e2e) and 2 failed. The 2 are `test_extract_and_discard.py::TestBlockedVerdictExtraction::test_blocked_verdict_stores_summary_not_prose` and `::TestApprovedVerdictExtraction::test_approved_verdict_stores_summary_not_prose`. Both fail identically with HEAD's `review.py` swapped back in, and both test the testing workflow's `review_test_plan`, so they are pre-existing.
+
+## nodes/human_gate.py
+
+**New: `tests/unit/test_human_gate_loud_failure.py` (17).**
+
+**Before the fix, measured:** 12 failed, 5 passed. Every site test failed in both modes. The 5 that passed pin kept behaviour: BLOCKED under the cap revises and APPROVED finalizes, in both modes, and a human who chooses to revise is not capped.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 18 files gave 447 passed and 1 skipped. They cover the interactive gates, the graph, the open-questions loop, the mock runs and the gate registry.
+
+## nodes/load_input.py
+
+**New: `tests/unit/test_load_input_loud_failure.py` (9).**
+
+**Before the fix, measured:** 7 failed, 2 passed. Every site test failed, and so did the mock-run test, since the mock looked up the remote. The 2 that passed pin kept behaviour: an issue with a body loads, and a GitHub remote names the repo.
+
+**Changed tests:** in `test_requirements_nodes.py`, `TestLoadInputRetryLogic`'s two retry tests script the provenance lookup's answer. Their call lists ran out there, and the swallowed StopIteration had read as "unknown/unknown".
+
+**Neighbouring suites:** the first run across 17 files gave 430 passed and 2 failed: the two tests above. After the change, the two affected files gave 107 passed.
+
+## nodes/validate_test_plan.py
+
+**New: `tests/unit/test_validate_test_plan_loud_failure.py` (5).**
+
+**Before the fix, measured:** 4 failed, 1 passed. Every site test failed. The one that passed pins kept behaviour: a failing draft is preserved and loops back.
+
+**Changed tests:** `test_validate_test_plan_node.py::TestNodeRoutesToDraftOnFail::test_node_routes_to_draft_on_fail` gives its failing draft an audit_dir.
+
+**Neighbouring suites:** 17 files gave 316 passed, 1 skipped and 1 failed: the test above. After the change, its file and the new one gave 19 passed.
+
+## nodes/ponder.py
+
+**New: `tests/unit/test_ponder_loud_failure.py` (6).**
+
+**Before the fix, measured:** 3 failed, 3 passed. Every site test failed. The 3 that passed pin kept behaviour: no draft skips to N1.5 (35, compliant), a fixed draft is written back, and a fix record is written.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 14 files gave 321 passed and 1 skipped.
+
+## nodes/validate_mechanical.py
+
+**New: `tests/unit/test_validate_mechanical_loud_failure.py` (24).** Each site test is named for its ledger line; the rest pin kept behaviour.
+
+**Before the fix, measured** against the unchanged module: 15 failed, 9 passed. Every site test failed. The nine that passed pin a good draft passing, an empty similar-file search, a path the base ships and one it does not, no base branch asking git nothing, a lineage record landing, no lineage folder staying quiet, the compliant blocked route (1775) and a passing draft recording nothing.
+
+**Changed tests, each asserting the new behaviour:**
+- `test_validate_mechanical.py`: `test_missing_number_returns_block_error` and `test_no_h1_returns_block_error` expect ERROR; they expected WARNING.
+- `test_prompt_telemetry.py`: `test_telemetry_failure_alerts_and_stops_the_run` expects the raise and one alert; it expected the verdict to come back.
+
+**Neighbouring suites:** 442 passed and 1 skipped across 21 files that run mechanical validation, with only the three tests above failing before they were changed; the three changed files and the new one then gave 136 passed.
+
+**Known failures from the mock drafter's title** (each passes at the base commit; the run prints "Could not extract issue number from title"; the remedy is the mock's title in `llm_provider.py`):
+- `test_lld_mock_completes.py::TestMockFinishesAnLLDRun::test_a_mock_lld_run_reaches_finalize_and_writes_the_lld`;
+- `test_lld_writes_only_worktree.py::TestAMockRunLeavesTheCheckoutClean`, five tests;
+- `test_lld_mock_is_offline.py::TestMockIsOffline`, three tests.
+
+**The mock title, on the landing branch:** with the title above, the three files gave 9 failed and 7 passed, the nine being these. With the mock titled `# 42 - Feature: Mock rehearsal LLD`, they gave 16 passed. The provider, CLI, seat, mechanical-validation and finalize suites that read the mock (11 files) then gave 509 passed.
+
+## audit.py
+
+**New: `tests/unit/test_requirements_audit_loud_failure.py` (25).**
+
+**Before the fix, measured** against the unchanged module: 15 failed, 10 passed. Every site test failed; the ten pin kept behaviour and the compliant row (816).
+
+**Changed tests, each asserting the new behaviour:**
+- `test_lld_cache_pruning.py`: seven tests key a deleted repo's slice by its path (`_dead_key`), since `_repo_key` now raises for a path with no repository behind it.
+- `test_lld_cache_repo_isolation.py`, `test_lld_tracking.py`, `test_requirements_audit.py`: a corrupt, empty, non-object or unreadable cache raises and alerts; a missing or outside context file raises; a nonexistent repo raises from `get_repo_structure`.
+- `test_move_lineage.py`: a missing lineage dir and a failed move alert and raise.
+- `test_lld_edit_script_revision.py`: the fixture creates the target repo it names.
+
+**Neighbouring suites:** 158 passed across the six changed files; 1473 passed across 58 files whose nodes call these functions, with three of the mock-title failures above and two pre-existing failures in `test_extract_and_discard.py` (KeyError 'test_plan_status'), which fail identically with the base `audit.py` and `validate_mechanical.py` swapped in.
+
+## contract_fidelity.py
+
+**New: `tests/unit/test_contract_fidelity_loud_failure.py` (16).**
+
+**Before the fix, measured** with the base module swapped in: 12 failed, 4 passed. The four pin a repo with no contract, an issue the declaration does not cover, an empty findings list, and findings that report without refusing.
+
+**Changed tests, each asserting the new behaviour (`test_contract_fidelity.py`):** an unparseable answer and a missing findings list raise; a fetch failure refuses with an alert; the "never refuses" test is renamed for what it asserts, an audit that reached a verdict.
+
+**Neighbouring suites:** 102 passed across `test_contract_fidelity.py`, the new file and `test_seats.py`.
+
+## precheck.py (fixed in `tools/check_requirements.py`)
+
+**New: `tests/unit/test_precheck_loud_failure.py` (12).** Each test drives the tool's `main` through one failure.
+
+**Before the fix, measured** with the base tool swapped in: 10 failed, 2 passed (a conflict and a clean verdict, which alert nobody).
+
+**Changed tests:** none; exit codes and output are unchanged.
+
+**Neighbouring suites:** 123 passed across `test_check_requirements.py`, `test_check_requirements_form.py` and the new file.
+
+## form_gate.py
+
+**New: `tests/unit/test_form_gate_loud_failure.py` (8).**
+
+**Before the fix, measured** against the unchanged module: 7 failed, 1 passed (a good issue proceeds without an alert).
+
+**Changed tests:** `test_form_gate.py`'s unreadable-issue test expects the refusal and an alert; `test_scope_coverage.py`'s scope-crash test expects the refusal; `tests/unit/conftest.py` gains the offline-preflight fixture.
+
+**Neighbouring suites:** 117 passed across the form-gate, scope and discrimination files; 349 passed and 3 skipped across the 13 launcher files that the refusal had broken (53 failures without the fixture) and five related files.
+
+## best_of_n.py
+
+**New: `tests/unit/test_best_of_n_loud_failure.py` (12, with parameters).** Before the fix: 6 failed, 6 passed (the kept and compliant rows).
+
+**Changed tests (`test_best_of_n.py`):** a crashing gate raises and alerts; a non-numeric count raises.
+
+**Neighbouring suites:** 34 passed (`test_best_of_n.py` and the new file); 28 passed across the draft node's tests.
+
+## parsers/draft_updater.py
+
+**New: `tests/unit/test_draft_updater_loud_failure.py` (6).** Before the fix: 4 failed, 2 passed.
+
+**Changed tests (`test_issue_257.py`):** five tests that expected warnings expect the ValueError.
+
+**Neighbouring suites:** 149 passed across `test_issue_257.py`, the new file and `test_requirements_nodes.py`.
+
+## verdict_summarizer.py
+
+**New: `tests/unit/test_verdict_summarizer_loud_failure.py` (10).** Before the fix: 7 failed, 3 passed (a JSON verdict with its issues, feedback with no verdict line, an empty entry).
+
+**Changed tests:** `test_verdict_summarizer.py`'s malformed-JSON test expects the ValueError and an ERROR line.
+
+**Neighbouring suites:** 44 passed with `test_feedback_window.py`.
+
+## git_operations.py
+
+**New: `tests/unit/test_git_operations_loud_failure.py` (11).** Before the fix: 6 failed, 5 passed (no origin, an origin without the branch, an origin with it, a reused branch on the arc, and the compliant 330).
+
+**Changed tests:** `test_requirements_git_operations.py` and `test_issue_162.py` answer the new `git rev-parse` call; the no-SHA test expects the raise.
+
+**Neighbouring suites:** 225 passed across ten files.
+
+## ownership_check.py and the form verdict
+
+**New: `tests/unit/test_ownership_check_loud_failure.py` (4).** Before the fix: 3 failed, 1 passed (a fully tagged table).
+
+**Changed tests:** seven assertions of `RESULT: PASS` on vacuous runs, in `test_ownership_check.py`, `test_check_requirements_form.py` and `test_scope_coverage.py`, now assert `RESULT: NOT CHECKED` and the parts it names.
+
+**Neighbouring suites:** 309 passed across ten files.
+
+## form_check.py, scope_coverage.py, step_budget.py, parsers/verdict_parser.py
+
+**New:** `test_form_check_loud_failure.py` (3), `test_scope_coverage_loud_failure.py` (4), `test_step_budget_loud_failure.py` (6), `test_verdict_parser_loud_failure.py` (3). Before the fix every site test failed and every kept test passed, except form_check's kept test, which asserts the new `not_checked` attribute and so fails against the base module.
+
+**Changed tests:** two vacuous-scope assertions in `test_scope_coverage.py`, the junk-cap test in `test_step_budget.py`, and two parser tests in `test_issue_257.py`.
+
+**Neighbouring suites:** 220 passed across the module tests; 278 passed across the step budget's callers.
+
+## config.py, discrimination_check.py, table_injection.py
+
+**New:** `test_requirements_config_loud_failure.py` (5), `test_discrimination_check_loud_failure.py` (2), `test_table_injection_loud_failure.py` (4). Before the fix: every site test failed; the kept and compliant tests passed.
+
+**Changed tests:** three invalid-config tests in `test_requirements_config.py` expect the raise at construction.
+
+**Neighbouring suites:** 207 passed.
+
+## The landing branch
+
+The 11 commits of `3585-requirements-nodes` and the 12 of `3585-requirements-support` were picked onto `origin/main` at `21e32f12`, oldest first.
+
+**Conflicts, two:**
+- The first support commit met the nodes half's copy of this report and its sibling, each a whole-file add. Both are kept: one title and preamble for the package, the nodes sections, then the support sections, each unchanged.
+- The audit commit and the drafter commit each wrote a comment over the target-repo `mkdir` in `test_lld_edit_script_revision.py`'s `lld_state` fixture. The one comment now gives both reasons.
+
+**Baselines and audits:**
+- `audit_loud_failure.py --check`: 0 new and 33 stale. `--write-baseline` removed the 33 and nothing else, so the count went from 258 to 225, and `BASELINE_CEILING` is 225.
+- `audit_fail_open.py --check`: no new fail-open. `--strict` reported a moved denominator, so `--write-baseline` ran: 49 entries removed, all in `assemblyzero/workflows/requirements/`, and the counts moved (sites examined 10,022 to 10,081; findings 468 to 408).
+- `audit_halt_sites.py --check --strict`: every site registered; the denominator moved from 162 halt sites to 188, and `--write-baseline` changed only that count. It then passed.
+
+**The full unit tier,** run once, alone on the machine: 12,161 passed, 66 skipped, 7 deselected and 6 xfailed in 637 s, with no failures. Run again at landing on 2026-10-31, on the merge of `main` at `5a979824`, beside other sessions' work: 12,165 passed, 66 skipped, 7 deselected and 6 xfailed in 1,662 s, with no failures.
+
+---
+
 # Test Report: the implementation-spec workflow under standard 0034 (#3585 step 5)
 
 Each fixed site has a test that fails before its fix and passes after, run against the unchanged module first. The package was swept in two halves and assembled on one branch; each half's sections follow in its order.

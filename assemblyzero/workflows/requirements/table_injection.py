@@ -114,10 +114,21 @@ def source_table_text(issue_body: str, table: RawTable) -> str:
     them. Slicing rather than re-rendering is the whole point -- a
     round-trip through parsed cells would normalise the very characters the
     derivation is supposed to preserve.
+
+    A table that does not lie inside the source raises (#3585): a line number
+    before line 1, or rows that run past the end. Both used to be clamped, and
+    the partial slice was injected as "verbatim".
     """
     lines = (issue_body or "").splitlines()
-    start = max(0, table.line_no - 1)
-    end = min(len(lines), start + 2 + len(table.rows))
+    start = table.line_no - 1
+    end = start + 2 + len(table.rows)
+    if start < 0 or end > len(lines):
+        raise ValueError(
+            f"the source table at line {table.line_no} (header, separator and "
+            f"{len(table.rows)} row(s), through line {end}) runs past the end "
+            f"of the issue body's {len(lines)} line(s) or starts before it, so "
+            f"it cannot be sliced verbatim"
+        )
     return "\n".join(lines[start:end])
 
 

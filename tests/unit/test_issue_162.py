@@ -33,9 +33,10 @@ def test_010(tmp_path):
             Mock(returncode=0, stdout="", stderr=""),  # git add file 1
             Mock(returncode=0, stdout="", stderr=""),  # git add file 2
             Mock(returncode=0, stdout="[main abc123] docs: add LLD-162 via requirements workflow\n", stderr=""),  # git commit
+            Mock(returncode=0, stdout="abc123\n", stderr=""),  # git rev-parse (#3585)
             Mock(returncode=0, stdout="", stderr=""),  # git push
         ]
-        
+
         # TDD: Act
         commit_sha = commit_and_push(
             created_files=created_files,
@@ -43,20 +44,23 @@ def test_010(tmp_path):
             target_repo=tmp_path,
             issue_number=162,
         )
-        
+
         # TDD: Assert
         assert commit_sha == "abc123"
-        assert mock_run.call_count == 4
-        
+        assert mock_run.call_count == 5
+
         # Verify git add was called for each file
         assert mock_run.call_args_list[0][0][0] == ["git", "add", "docs/lld/active/LLD-162.md"]
         assert mock_run.call_args_list[1][0][0] == ["git", "add", "docs/lld/lld-status.json"]
-        
+
         # Verify git commit (includes "Ref #N" footer - NOT "Closes" since LLD is design only)
         assert mock_run.call_args_list[2][0][0] == ["git", "commit", "-m", "docs: add LLD-162 via requirements workflow\n\nRef #162"]
-        
+
+        # #3585: the SHA is read from git, not parsed from the summary line
+        assert mock_run.call_args_list[3][0][0] == ["git", "rev-parse", "--short", "HEAD"]
+
         # Verify git push
-        assert mock_run.call_args_list[3][0][0] == ["git", "push"]
+        assert mock_run.call_args_list[4][0][0] == ["git", "push"]
 
 
 def test_020(tmp_path):
@@ -71,6 +75,7 @@ def test_020(tmp_path):
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # git add
             Mock(returncode=0, stdout="[main def456] docs: add lineage for my-feature via requirements workflow\n", stderr=""),  # git commit
+            Mock(returncode=0, stdout="def456\n", stderr=""),  # git rev-parse (#3585)
             Mock(returncode=0, stdout="", stderr=""),  # git push
         ]
         
@@ -181,6 +186,7 @@ def test_070(tmp_path):
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # git add
             Mock(returncode=0, stdout="[main abc123] message\n", stderr=""),  # git commit
+            Mock(returncode=0, stdout="abc123\n", stderr=""),  # git rev-parse (#3585)
             Mock(returncode=1, stdout="", stderr="fatal: unable to access 'https://...': Could not resolve host"),  # git push fails
         ]
         
@@ -212,6 +218,7 @@ def test_080(tmp_path):
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # git add (only our file)
             Mock(returncode=0, stdout="[main abc123] message\n", stderr=""),  # git commit
+            Mock(returncode=0, stdout="abc123\n", stderr=""),  # git rev-parse (#3585)
             Mock(returncode=0, stdout="", stderr=""),  # git push
         ]
         
@@ -289,6 +296,9 @@ def _fake_git(seen: list[list[str]]):
         out.returncode = 0
         if cmd[:2] == ["git", "commit"]:
             out.stdout = "[4-lld abc123] commit message\n"
+        elif cmd[:2] == ["git", "rev-parse"]:
+            # #3585: the SHA is read from git, not parsed from the summary
+            out.stdout = "abc123\n"
         elif cmd[:1] == ["git"] and "remote" in cmd:
             out.stdout = "https://github.com/owner/repo.git\n"
         else:

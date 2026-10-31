@@ -7,6 +7,7 @@ Issue #257: Update draft LLD with:
 
 import logging
 import re
+from dataclasses import replace
 from typing import List, Tuple
 
 from assemblyzero.workflows.requirements.parsers.verdict_parser import (
@@ -29,11 +30,17 @@ def update_draft(
         verdict_result: Parsed verdict with resolutions and suggestions.
         
     Returns:
-        Tuple of (updated_draft, warnings).
-        Warnings list contains any issues encountered during update.
+        Tuple of (updated_draft, warnings). Since #3585 every problem raises,
+        so ``warnings`` is always empty; it stays in the signature for the
+        review node, which still unpacks it.
+
+    Raises:
+        ValueError: the draft is empty, or a resolution or suggestion cannot
+            be applied, naming it (#3585). Each used to become a warning the
+            caller only printed, and the approved draft lost the resolution.
     """
     if not draft:
-        return draft, ["Empty draft provided"]
+        raise ValueError("cannot apply the verdict's resolutions to an empty draft")
     
     warnings = []
     updated_draft = draft
@@ -82,8 +89,10 @@ def _apply_resolutions(
         )
         
         if not oq_section_match:
-            warnings.append("No Open Questions section found in draft")
-            continue
+            raise ValueError(
+                f"the reviewer resolved {resolution.question_text!r}, and the "
+                f"draft has no Open Questions section to record it in"
+            )
         
         section_start = oq_section_match.start()
         section_end = oq_section_match.end()
@@ -103,12 +112,11 @@ def _apply_resolutions(
                 updated_draft[section_end:]
             )
         else:
-            warnings.append(
-                f"Could not find matching question: '{resolution.question_text[:50]}...'"
-                if len(resolution.question_text) > 50
-                else f"Could not find matching question: '{resolution.question_text}'"
+            raise ValueError(
+                f"the reviewer resolved {resolution.question_text!r}, and there "
+                f"is no question in the draft's Open Questions section it matches"
             )
-    
+
     return updated_draft, warnings
 
 
@@ -123,8 +131,18 @@ def _update_question_in_section(
         resolution: The resolution to apply.
         
     Returns:
-        Tuple of (updated_section, found).
+        Tuple of (updated_section, found). ``found`` is also True when the
+        section already carries the question resolved, so applying the same
+        verdict twice is idempotent (#3585: an unmatched question now raises,
+        and an already-resolved one is not unmatched).
     """
+    if "~~" in resolution.question_text:
+        # The reviewer quotes a question struck through (`~~q?~~`); the draft
+        # carries its words without the markup.
+        resolution = replace(
+            resolution, question_text=resolution.question_text.replace("~~", "").strip()
+        )
+
     # Escape special regex characters in the question text
     question_pattern = re.escape(resolution.question_text)
     
@@ -191,8 +209,19 @@ def _update_question_in_section(
                     replacement = f"- [x] {original_question} **RESOLVED:** {resolution.resolution_text}"
                     updated = section.replace(original, replacement, 1)
                     return updated, True
-    
+
+    if _resolved_line_carries(section, clean_question):
+        return section, True
     return section, False
+
+
+def _resolved_line_carries(section: str, question: str) -> bool:
+    """A `- [x]` line in the section already holds this question (#3585)."""
+    wanted = question.lower()
+    return bool(wanted) and any(
+        line.strip().lower().startswith("- [x]") and wanted in line.lower()
+        for line in section.splitlines()
+    )
 
 
 def _is_already_resolved(section: str, match_start: int, match_end: int) -> bool:
@@ -252,11 +281,19 @@ def _add_suggestions_section(
             draft,
             re.MULTILINE | re.DOTALL
         )
-        if existing_match:
-            existing_text = existing_match.group(1)
-            for suggestion in suggestions:
-                if suggestion.suggestion_text in existing_text:
-                    existing_suggestions.add(suggestion.suggestion_text)
+        if existing_match is None:
+            # #3585: the heading matched and its section did not (a heading
+            # that ends the document has no newline), which used to surface as
+            # an AttributeError that the review node then swallowed.
+            raise ValueError(
+                "the draft has a '## Reviewer Suggestions' heading whose "
+                "section cannot be read, so the reviewer's suggestions cannot "
+                "be added to it"
+            )
+        existing_text = existing_match.group(1)
+        for suggestion in suggestions:
+            if suggestion.suggestion_text in existing_text:
+                existing_suggestions.add(suggestion.suggestion_text)
         
         # Only add new suggestions
         new_suggestions = [

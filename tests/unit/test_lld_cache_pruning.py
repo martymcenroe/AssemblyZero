@@ -37,6 +37,16 @@ def _slice(issue: str = "7") -> dict:
     return {"issues": {issue: {"status": "approved", "lld_path": f"docs/lld/LLD-{issue}.md"}}}
 
 
+def _dead_key(path: Path) -> str:
+    """The key a repo that no longer exists was recorded under.
+
+    ``_repo_key`` resolves a live repo's main worktree; a deleted one has none
+    to resolve, and ``_repo_key`` raises for it (#3585) where it used to fall
+    back to this form. Its slice was written while it existed, under its path.
+    """
+    return path.as_posix()
+
+
 # --- "dead slice gone, live slice byte-identical" -----------------------
 
 
@@ -51,14 +61,14 @@ def test_a_dead_slice_is_pruned_and_a_live_one_survives_intact(tmp_path):
     live_slice = _slice("11")
     _write_cache(target, {
         _repo_key(live): live_slice,
-        _repo_key(dead): _slice("99"),
+        _dead_key(dead): _slice("99"),
     })
 
     save_lld_tracking({"version": 1, "last_updated": "x", "issues": {}}, target)
 
     data = json.loads(lld_status_path(target).read_text(encoding="utf-8"))
 
-    assert _repo_key(dead) not in data["repos"], "a path that is gone cannot be a future target"
+    assert _dead_key(dead) not in data["repos"], "a path that is gone cannot be a future target"
     assert data["repos"][_repo_key(live)] == live_slice, "the live slice must be untouched"
 
 
@@ -69,7 +79,7 @@ def test_the_live_slices_approvals_still_load_after_a_prune(tmp_path):
 
     _write_cache(live, {
         _repo_key(live): _slice("11"),
-        _repo_key(dead): _slice("99"),
+        _dead_key(dead): _slice("99"),
     })
 
     save_lld_tracking(load_lld_tracking(live), live)
@@ -85,7 +95,7 @@ def test_legacy_unscoped_is_never_pruned(tmp_path):
     target.mkdir()
     legacy = {"5": {"status": "approved"}}
 
-    _write_cache(target, {_repo_key(tmp_path / "gone"): _slice()}, legacy=legacy)
+    _write_cache(target, {_dead_key(tmp_path / "gone"): _slice()}, legacy=legacy)
 
     save_lld_tracking({"version": 1, "last_updated": "x", "issues": {}}, target)
 
@@ -123,12 +133,12 @@ def test_the_slice_being_written_is_never_pruned(tmp_path):
     """Even if the target somehow fails an existence check mid-run, this run's
     own result must not be discarded underneath it."""
     missing_target = tmp_path / "vanished"
-    raw = {"repos": {_repo_key(missing_target): _slice()}}
+    raw = {"repos": {_dead_key(missing_target): _slice()}}
 
-    pruned = _prune_dead_repo_slices(raw, keep=_repo_key(missing_target))
+    pruned = _prune_dead_repo_slices(raw, keep=_dead_key(missing_target))
 
     assert pruned == []
-    assert _repo_key(missing_target) in raw["repos"]
+    assert _dead_key(missing_target) in raw["repos"]
 
 
 # --- "pruning is logged with the pruned repo path" ----------------------
@@ -136,20 +146,20 @@ def test_the_slice_being_written_is_never_pruned(tmp_path):
 
 def test_pruning_names_the_path_it_removed(tmp_path, caplog):
     dead = tmp_path / "deleted-repo"
-    raw = {"repos": {_repo_key(dead): _slice()}}
+    raw = {"repos": {_dead_key(dead): _slice()}}
 
     with caplog.at_level(logging.INFO):
         pruned = _prune_dead_repo_slices(raw, keep="other")
 
-    assert pruned == [_repo_key(dead)]
+    assert pruned == [_dead_key(dead)]
     assert any(
-        _repo_key(dead) in record.getMessage() for record in caplog.records
+        _dead_key(dead) in record.getMessage() for record in caplog.records
     ), "an operator seeing an unexpected re-review must be able to find out why"
 
 
 def test_the_log_says_why_not_just_what(tmp_path, caplog):
     dead = tmp_path / "deleted-repo"
-    raw = {"repos": {_repo_key(dead): _slice()}}
+    raw = {"repos": {_dead_key(dead): _slice()}}
 
     with caplog.at_level(logging.INFO):
         _prune_dead_repo_slices(raw, keep="other")
@@ -171,7 +181,7 @@ def test_growth_is_actually_bounded(tmp_path):
     target = tmp_path / "target"
     target.mkdir()
 
-    repos = {_repo_key(tmp_path / f"gone-{i}"): _slice(str(i)) for i in range(40)}
+    repos = {_dead_key(tmp_path / f"gone-{i}"): _slice(str(i)) for i in range(40)}
     repos[_repo_key(target)] = _slice("1")
     _write_cache(target, repos)
 

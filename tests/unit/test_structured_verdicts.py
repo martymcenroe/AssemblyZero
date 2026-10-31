@@ -123,10 +123,16 @@ class TestFallbackToRegex:
     """Verify that non-JSON responses fall back to regex parsing."""
 
     def test_fallback_to_regex_on_non_json(self):
-        """review.py's _parse_verdict_status should still work for non-JSON."""
-        from assemblyzero.workflows.requirements.nodes.review import (
+        """The verdict parser's _parse_verdict_status still reads non-JSON.
+
+        #3585: review.py's own copy is deleted; nothing called it.
+        """
+        import assemblyzero.workflows.requirements.nodes.review as review_module
+        from assemblyzero.workflows.requirements.parsers.verdict_parser import (
             _parse_verdict_status,
         )
+
+        assert not hasattr(review_module, "_parse_verdict_status")
 
         # Standard checkbox format
         assert _parse_verdict_status("[X] **APPROVED** - Ready") == "APPROVED"

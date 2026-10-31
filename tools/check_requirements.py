@@ -25,6 +25,9 @@ Exit codes:
 
 There is no fail-open here. In a roll the gate proceeds on a dead provider by
 design; standalone, an analysis that cannot run exits 2 rather than passing.
+#3585 (ADR 0236): it also writes an ERROR line and alerts the operator, both
+when the check cannot run and when the gate returns without a verdict. A
+conflict is a verdict: it prints verbatim and exits 1 without an alert.
 
 On conflict the gate files must-resolve issues on the target repo, exactly as
 it does in a roll. That is the imported behavior, not an addition.
@@ -43,6 +46,7 @@ from assemblyzero.core.utf8_console import install as _install_utf8_console  # n
 
 _install_utf8_console()
 
+from assemblyzero.core import alert
 from assemblyzero.workflows.requirements.precheck import (  # noqa: E402
     DEFAULT_DRAFTER,
     EXIT_ERROR,
@@ -102,10 +106,31 @@ def main(argv: list[str] | None = None) -> int:
             "Nothing about this issue's requirements has been verified.",
             file=sys.stderr,
         )
+        alert.alert_operator(
+            what=f"pre-check issue #{args.issue}'s requirements through the N0c gate",
+            where="tools/check_requirements.py main",
+            cause=f"PrecheckError: {exc}",
+            consequence="the pre-check exits 2; nothing about the issue was verified",
+            repo=str(repo), issue=args.issue, spec=args.drafter,
+        )
         return EXIT_ERROR
 
     print()
     print(render_report(result, repo, args.issue, args.drafter), end="", flush=True)
+    if result.status == "error":
+        # #3585: no verdict is a failure, said on stderr and to the operator,
+        # not only in the report on stdout.
+        print(
+            f"ERROR -- the pre-check reached no verdict: {result.detail}",
+            file=sys.stderr, flush=True,
+        )
+        alert.alert_operator(
+            what=f"pre-check issue #{args.issue}'s requirements through the N0c gate",
+            where="tools/check_requirements.py main",
+            cause=f"the gate reached no verdict: {result.detail}",
+            consequence="the pre-check exits 2; nothing about the issue was verified",
+            repo=str(repo), issue=args.issue, spec=args.drafter,
+        )
     return result.exit_code
 
 

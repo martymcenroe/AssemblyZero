@@ -9,15 +9,35 @@ Handles loading input for both workflow types:
 
 Creates audit directory and saves initial input to audit trail.
 Issue files now include YAML frontmatter with repo provenance.
+
+#3585 (ADR 0236): an issue with no body halts before anything drafts from
+it, and the provenance is looked up or the run halts. A failed lookup used to
+write "unknown/unknown" into the frontmatter without a word. A mock run is an
+offline rehearsal and looks nothing up.
 """
 
 from assemblyzero.utils.shell import run_command
 import datetime
 import json
+import logging
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict
+
+logger = logging.getLogger(__name__)
+
+
+class RepoNameError(RuntimeError):
+    """The target repo's origin remote could not be read (#3585)."""
+
+
+def _loud(message: str) -> str:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[N0] %s", message)
+    print(f"ERROR [N0] {message}", file=sys.stderr, flush=True)
+    return message
 
 from assemblyzero.workflows.requirements.audit import (
     assemble_context,
@@ -204,7 +224,21 @@ def _load_issue(state: RequirementsWorkflowState) -> Dict[str, Any]:
         return {"error_message": last_error}
 
     issue_title = issue_data.get("title", "")
-    issue_body = issue_data.get("body", "")
+    issue_body = issue_data.get("body") or ""
+    # #3585: an empty body went on to drafting, and the drafter designed from
+    # the title alone.
+    if not issue_body.strip():
+        return {"error_message": _loud(
+            f"Issue #{issue_number} has no body in {target_repo}, so there are "
+            f"no requirements to design from"
+        )}
+
+    # Repo provenance for the lineage frontmatter (Issue #169). #3585: a
+    # lookup that fails halts before anything is written.
+    try:
+        repo_name = _get_repo_name(str(target_repo))
+    except RepoNameError as e:
+        return {"error_message": f"Issue #{issue_number}: {e}"}
 
     # Assemble context
     context_content = ""
@@ -228,7 +262,6 @@ def _load_issue(state: RequirementsWorkflowState) -> Dict[str, Any]:
         issue_content += f"\n\n---\n\n# Context Files\n\n{context_content}"
 
     # Add YAML frontmatter with repo provenance
-    repo_name = _get_repo_name(str(target_repo))
     frontmatter = _create_issue_frontmatter(repo_name, issue_number)
     issue_content_with_frontmatter = frontmatter + issue_content
 
@@ -288,8 +321,11 @@ This is a mock issue for testing.
         run_id=run_id,
     )
 
-    # Save to audit with provenance frontmatter (Issue #169)
-    repo_name = _get_repo_name(str(target_repo))
+    # Save to audit with provenance frontmatter (Issue #169). #3585: a mock
+    # run is an offline rehearsal and looks nothing up; its provenance names
+    # the rehearsal, and its lineage lives under the mock output root. The
+    # lookup it used to make fell back to "unknown/unknown" on any failure.
+    repo_name = f"mock/{target_repo.name or 'repo'}"
     frontmatter = _create_issue_frontmatter(repo_name, issue_number)
     issue_content = f"# Issue #{issue_number}: {mock_title}\n\n{mock_body}"
 
@@ -321,7 +357,12 @@ def _get_repo_name(target_repo: str) -> str:
         target_repo: Path to the target repository.
 
     Returns:
-        Repository name in format 'owner/repo', or 'unknown/unknown' on failure.
+        Repository name in format 'owner/repo'; 'unknown/unknown' for an
+        origin that is not on GitHub, whose name this cannot parse.
+
+    Raises:
+        RepoNameError: git exits non-zero (with its stderr) or cannot be run
+            (#3585). Both used to fall through to 'unknown/unknown'.
     """
     try:
         result = run_command(
@@ -331,14 +372,22 @@ def _get_repo_name(target_repo: str) -> str:
             encoding="utf-8",
             timeout=10,
         )
-        if result.returncode == 0:
-            url = result.stdout.strip()
-            # Parse: https://github.com/owner/repo.git or git@github.com:owner/repo.git
-            if "github.com" in url:
-                parts = url.rstrip(".git").split("github.com")[-1]
-                return parts.lstrip("/").lstrip(":")
-    except Exception:
-        pass
+    except Exception as exc:
+        raise RepoNameError(_loud(
+            f"cannot read the origin remote of {target_repo} for the lineage "
+            f"provenance: {type(exc).__name__}: {exc}"
+        )) from exc
+    if result.returncode != 0:
+        raise RepoNameError(_loud(
+            f"cannot read the origin remote of {target_repo} for the lineage "
+            f"provenance: git exited {result.returncode}: "
+            f"{(result.stderr or '').strip()}"
+        ))
+    url = result.stdout.strip()
+    # Parse: https://github.com/owner/repo.git or git@github.com:owner/repo.git
+    if "github.com" in url:
+        parts = url.rstrip(".git").split("github.com")[-1]
+        return parts.lstrip("/").lstrip(":")
     return "unknown/unknown"
 
 

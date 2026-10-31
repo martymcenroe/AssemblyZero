@@ -33,6 +33,19 @@ def write_root_is_target(monkeypatch):
     )
 
 
+@pytest.fixture
+def landing_is_out_of_scope(monkeypatch):
+    """#3585: a landing that fails now halts finalize, and these targets are
+    not git repos. The tests that use this are about what finalize saves, so
+    the landing is a no-op; `TestFinalizeNodeAdditional` tests the landing."""
+    import importlib
+
+    fz = importlib.import_module(
+        "assemblyzero.workflows.requirements.nodes.finalize"
+    )
+    monkeypatch.setattr(fz, "_commit_and_push_files", lambda state: state)
+
+
 class TestLoadInputNode:
     """Tests for load_input node."""
 
@@ -420,9 +433,11 @@ class TestReviewNode:
         import json as _json
 
         mock_provider = Mock()
+        # #3585: a REVISE carries its Tier sections, or N3 halts on the
+        # broken reviewer contract.
         mock_provider.invoke.return_value = Mock(
             success=True,
-            response=_json.dumps({"verdict": "REVISE", "rationale": "Missing tests", "feedback_items": ["Missing tests"], "open_questions": []}),
+            response=_json.dumps({"verdict": "REVISE", "rationale": "## Tier 1: BLOCKING Issues\n- [ ] Missing tests\n## Tier 2: HIGH PRIORITY\n", "feedback_items": ["Missing tests"], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -568,6 +583,10 @@ class TestGenerateDraftNodeAdditional:
             brief_file="brief.md",
         )
         state["brief_content"] = "# Brief"
+        # #3585: N1 checks the audit_dir first; give it one so the template
+        # is what is missing.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = generate_draft(state)
 
@@ -756,6 +775,10 @@ class TestReviewNodeAdditional:
             issue_number=42,
         )
         state["current_draft"] = "# Draft"
+        # #3585: N3 checks the audit_dir first; give it one so the prompt is
+        # what is missing.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = review(state)
 
@@ -964,6 +987,7 @@ class TestFinalizeNode:
         assert result.get("error_message", "") == ""
         assert "github.com" in result.get("issue_url", "")
 
+    @pytest.mark.usefixtures("landing_is_out_of_scope")
     def test_saves_lld_to_target_repo(self, tmp_path):
         """Test saving LLD for LLD workflow."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
@@ -1402,6 +1426,7 @@ class TestFinalizeLineageFiles:
     that path. Supersedes #241 (which originally added the unwanted commit).
     """
 
+    @pytest.mark.usefixtures("landing_is_out_of_scope")
     def test_finalize_excludes_lineage_files_from_created_files(self, tmp_path):
         """Finalize must not enumerate lineage files into created_files."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
@@ -1514,10 +1539,13 @@ class TestFinalizeLineageFiles:
         state["issue_title"] = "Add Feature"
         state["lld_status"] = "REVISE"
         state["audit_dir"] = str(target_repo / "audit")
+        Path(state["audit_dir"]).mkdir()
 
-        finalize(state)
+        result = finalize(state)
 
         mock_commit.assert_not_called()
+        # #3585: and it halts, naming the verdict, instead of ending quietly.
+        assert "'REVISE', not APPROVED" in result["error_message"]
 
     @patch("assemblyzero.workflows.requirements.nodes.finalize._commit_and_push_files")
     def test_finalize_commits_on_approved_lld_verdict(self, mock_commit, tmp_path):
@@ -1540,6 +1568,8 @@ class TestFinalizeLineageFiles:
         state["issue_title"] = "Add Feature"
         state["lld_status"] = "APPROVED"
         state["audit_dir"] = str(target_repo / "audit")
+        # #3585: finalize halts without the run's audit_dir.
+        Path(state["audit_dir"]).mkdir()
 
         finalize(state)
 
@@ -1582,6 +1612,7 @@ class TestFinalizeLineageFiles:
             f"Expected move-before-commit, got: {call_order}"
         )
 
+    @pytest.mark.usefixtures("landing_is_out_of_scope")
     def test_finalize_handles_empty_audit_dir(self, tmp_path):
         """Should handle case where audit_dir exists but is empty."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
@@ -1613,8 +1644,10 @@ class TestFinalizeLineageFiles:
         created_files = result.get("created_files", [])
         assert len(created_files) >= 1
 
-    def test_finalize_handles_nonexistent_audit_dir(self, tmp_path):
-        """Should handle case where audit_dir doesn't exist."""
+    def test_finalize_halts_on_a_nonexistent_audit_dir(self, tmp_path):
+        """#3585: an audit_dir that does not exist halts finalize before the
+        LLD is written. It used to save the LLD and skip the lineage without a
+        word."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -1634,8 +1667,8 @@ class TestFinalizeLineageFiles:
 
         result = finalize(state)
 
-        # Should succeed (LLD gets saved even without lineage)
-        assert result.get("error_message", "") == ""
+        assert "does not exist" in result["error_message"]
+        assert not (target_repo / "docs" / "lld" / "active" / "LLD-077.md").exists()
 
 
 class TestLoadInputRetryLogic:
@@ -1688,11 +1721,14 @@ class TestLoadInputRetryLogic:
         from assemblyzero.workflows.requirements.nodes.load_input import load_input
         from assemblyzero.workflows.requirements.state import create_initial_state
 
-        # First two calls return empty, third succeeds
+        # First two calls return empty, third succeeds. #3585: the fourth is
+        # the provenance lookup, which halts N0 when git cannot answer (the
+        # list ran out there and was swallowed as "unknown/unknown").
         mock_run.side_effect = [
             Mock(returncode=0, stdout=""),
             Mock(returncode=0, stdout=""),
             Mock(returncode=0, stdout='{"title": "Test", "body": "Body"}'),
+            Mock(returncode=0, stdout="https://github.com/o/r.git\n", stderr=""),
         ]
 
         state = create_initial_state(
@@ -1715,10 +1751,12 @@ class TestLoadInputRetryLogic:
         from assemblyzero.workflows.requirements.nodes.load_input import load_input
         from assemblyzero.workflows.requirements.state import create_initial_state
 
-        # First call times out, second succeeds
+        # First call times out, second succeeds; #3585: the third is the
+        # provenance lookup.
         mock_run.side_effect = [
             subprocess.TimeoutExpired("gh", 30),
             Mock(returncode=0, stdout='{"title": "Test", "body": "Body"}'),
+            Mock(returncode=0, stdout="https://github.com/o/r.git\n", stderr=""),
         ]
 
         state = create_initial_state(
@@ -1875,18 +1913,19 @@ class TestReviewNodeCoverage:
         )
         state["current_draft"] = "# Draft"
         state["config_reviewer"] = "invalid:provider"
+        # #3585: N3 checks the audit_dir first.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = review(state)
 
         assert "invalid" in result.get("error_message", "").lower()
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
-    def test_reviewer_failure_is_llm_format_error(self, mock_get_provider, tmp_path):
-        """Reviewer failure surfaces as an LLM-format error (#1766).
-
-        Issue #775: review node no longer checks result.success. Empty content
-        from a failed provider falls through to regex fallback -> UNKNOWN -> BLOCKED.
-        """
+    def test_reviewer_failure_halts_with_the_providers_cause(self, mock_get_provider, tmp_path):
+        """#3585: a failed reviewer call halts with the provider's own error.
+        It used to be parsed as an unreadable answer, re-asked, and reported
+        as a rejected contract, which dropped the cause."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -1914,11 +1953,10 @@ class TestReviewNodeCoverage:
 
         result = review(state)
 
-        # #1766 → standard 0028: empty/failed reviewer content is a rejected
-        # structured contract, not a synthesized review outcome. The stage
-        # retry machinery re-runs the review.
-        assert "rejected" in result.get("error_message", "")
+        assert "API error" in result.get("error_message", "")
+        assert "gave no verdict" in result.get("error_message", "")
         assert "lld_status" not in result
+        assert mock_provider.invoke.call_count == 1
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_verdict_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
@@ -1999,7 +2037,8 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            response=_json.dumps({"verdict": "REVISE", "rationale": "Missing error handling section", "feedback_items": ["Missing error handling section"], "open_questions": []}),
+            # #3585: a REVISE carries its Tier 1 section, or N3 halts.
+            response=_json.dumps({"verdict": "REVISE", "rationale": "## Tier 1: BLOCKING Issues\n- [ ] Missing error handling section\n## Tier 2: HIGH PRIORITY\n", "feedback_items": ["Missing error handling section"], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -2121,14 +2160,18 @@ class TestGenerateDraftNodeCoverage:
         )
         state["brief_content"] = "# Brief"
         state["config_drafter"] = "invalid:provider"
+        # #3585: N1 checks the audit_dir first.
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir()
 
         result = generate_draft(state)
 
         assert "invalid" in result.get("error_message", "").lower()
 
     @patch("assemblyzero.workflows.requirements.nodes.generate_draft.get_provider")
-    def test_draft_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
-        """Test draft_path is None when audit_dir doesn't exist."""
+    def test_a_missing_audit_dir_halts_before_the_drafter_runs(self, mock_get_provider, tmp_path):
+        """#3585: an audit_dir that does not exist halts N1. It used to draft
+        and leave current_draft_path empty, recording nothing."""
         from assemblyzero.workflows.requirements.nodes.generate_draft import generate_draft
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -2157,7 +2200,8 @@ class TestGenerateDraftNodeCoverage:
 
         result = generate_draft(state)
 
-        assert result.get("current_draft_path", "") == ""
+        assert "does not exist" in result["error_message"]
+        mock_provider.invoke.assert_not_called()
 
     @patch("assemblyzero.workflows.requirements.nodes.generate_draft.get_provider")
     def test_lld_with_context_content(self, mock_get_provider, tmp_path):
@@ -2243,8 +2287,9 @@ class TestFinalizeIssueNumberParsing:
     """Tests for issue number parsing in finalize."""
 
     @patch("subprocess.run")
-    def test_handles_invalid_issue_number_in_url(self, mock_run, tmp_path):
-        """Test handles URL with invalid issue number gracefully."""
+    def test_halts_on_invalid_issue_number_in_url(self, mock_run, tmp_path):
+        """#3585: a filed URL with no issue number halts, naming the URL. It
+        used to succeed with filed_issue_number 0."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -2266,8 +2311,7 @@ class TestFinalizeIssueNumberParsing:
 
         result = finalize(state)
 
-        # Should succeed but filed_issue_number stays 0
-        assert result.get("error_message", "") == ""
+        assert "issues/not-a-number" in result["error_message"]
         assert result.get("filed_issue_number") == 0
 
 

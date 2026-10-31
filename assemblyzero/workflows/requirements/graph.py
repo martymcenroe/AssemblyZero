@@ -41,7 +41,8 @@ The errors ride back as revision feedback and are repaired as edit blocks, so
 a blocked finalize no longer fails the stage and costs the whole attempt.
 
 Routing is controlled by:
-- error_message: Non-empty routes to END
+- error_message: Non-empty routes to HALT, which alerts (#486, #3864; the
+  human gates too since #3585)
 - config_gates_*: Whether human gates are enabled
 - next_node: Set by human gate nodes for routing decisions
 - lld_status: Used for auto-routing when gates disabled
@@ -340,7 +341,9 @@ def route_from_human_gate_draft(
     - N1_generate_draft: Revise draft
     - END: Manual handling (normal exit, not error — no HALT needed)
     - HALT: a decision the gate never makes (#3864); it used to end the run
-      as if the human had chosen manual handling
+      as if the human had chosen manual handling. And a gate that stopped
+      with an error (#3585), whatever next_node it names: this router read
+      next_node alone.
 
     Args:
         state: Current workflow state.
@@ -348,6 +351,8 @@ def route_from_human_gate_draft(
     Returns:
         Next node name.
     """
+    if state.get("error_message"):
+        return "HALT"
     next_node = state.get("next_node", "")
 
     if next_node == "N3_review":
@@ -484,7 +489,8 @@ def route_from_human_gate_verdict(
     - N5_finalize: Approve and finalize
     - N1_generate_draft: Revise draft
     - END: Manual handling
-    - HALT: a decision the gate never makes (#3864)
+    - HALT: a decision the gate never makes (#3864), or a gate that stopped
+      with an error, whatever next_node it names (#3585)
 
     Args:
         state: Current workflow state.
@@ -492,6 +498,8 @@ def route_from_human_gate_verdict(
     Returns:
         Next node name.
     """
+    if state.get("error_message"):
+        return "HALT"
     next_node = state.get("next_node", "")
 
     if next_node == "N5_finalize":

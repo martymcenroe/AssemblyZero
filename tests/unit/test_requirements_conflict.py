@@ -106,10 +106,13 @@ class TestN0cGate:
         assert result == {}
         gp.assert_not_called()
 
-    def test_empty_issue_body_skips(self):
+    def test_empty_issue_body_halts_unverified(self):
+        """#3585: a gate with no requirements to read cannot run, so it halts
+        unverified; it used to proceed as if checked."""
         with patch(f"{MODULE}.get_provider") as gp:
             result = analyze_requirements(_state(issue_body="   "))
-        assert result == {}
+        assert result.get("requirements_unverified")
+        assert route_after_analyze_requirements(result) == "HALT"
         gp.assert_not_called()
 
     def test_fenced_json_is_tolerated(self):
