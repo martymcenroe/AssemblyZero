@@ -13,3 +13,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **Kept (72).** A typecheck that exits non-zero is the run's answer and comes back as a failing result.
 - **New in `base_runner.py`** for every runner: `RunnerError`, `loud()` and `output_head()`.
 - **Where the raise goes.** `nodes/verify_phases.py` calls `run_tests` in N3, N5 and the full-suite gate. None of them catches `RunnerError`, so it ends the run through `tools/run_implement_from_lld.py main`, which prints it at ERROR, alerts the operator and exits 1. Catching it beside `CoverageReportError` and returning it as `error_message` would end the run at HALT instead, with its saved state; that file belongs to another batch.
+
+### runners/base_runner.py (4 ledger rows: 4 fixed)
+
+- **A test command that did not run raises.** A timeout (129), a missing command (132) or another OS error (135) raises `RunnerError` naming the framework, the command, the working directory and the cause, after an ERROR line. They came back as exit code -1 with the cause where stderr would be, and the runners parsed that as a run, so a suite that never started read as one that failed.
+- **No scenarios is not 0% (96).** `compute_scenario_coverage` with no scenarios raises ValueError after an ERROR line. It returned 0.0 with a WARNING, which the green phase read as a measured 0%.
+- **Where the raises go.** Both reach `nodes/verify_phases.py`, which catches neither, so each ends the run through the entry point's handler, which alerts. Catching them in N5 and returning them as `error_message` would end the run at HALT instead.

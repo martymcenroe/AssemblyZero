@@ -135,6 +135,13 @@ class BaseTestRunner(ABC):
         self.project_root = project_root
 
     @property
+    def framework_name(self) -> str:
+        """The framework's name for a message: the enum's value, or the
+        string a checkpoint-safe config carries."""
+        framework = self.config.get("framework")
+        return getattr(framework, "value", str(framework))
+
+    @property
     def project_dir(self) -> str:
         """Where the framework's project lives: the project root, or the
         config's `working_directory` beneath it (#3707)."""
@@ -273,11 +280,19 @@ class BaseTestRunner(ABC):
     ) -> float:
         """Compute scenario-based coverage: passed / total_scenarios.
 
-        Returns 0.0 if total_scenarios is 0 to prevent ZeroDivisionError.
+        Raises ValueError after an ERROR line when there are no scenarios
+        (ADR 0236): with nothing to divide by, coverage is unmeasured, and the
+        0.0 it used to return read as a measured 0%.
         """
-        if total_scenarios == 0:
-            logger.warning("total_scenarios is 0; returning 0.0 coverage")
-            return 0.0
+        if total_scenarios <= 0:
+            message = (
+                f"{self.framework_name} scenario coverage in "
+                f"{self.project_dir} cannot be computed: the run has no scenarios "
+                f"(total_scenarios is {total_scenarios}) to divide "
+                f"{result.get('passed')} passed by"
+            )
+            loud(message)
+            raise ValueError(message)
         return result["passed"] / total_scenarios
 
     def _run_subprocess(
@@ -294,15 +309,19 @@ class BaseTestRunner(ABC):
         report broke every JSON parse. A runner that reads human output
         joins them (`combined_output`).
 
-        A timeout, a missing command or an OS error comes back as exit code
-        -1 with its cause in place of stderr, as it did.
+        A command that ran comes back with its exit code, whatever it is. A
+        timeout, a missing command or an OS error raises RunnerError naming
+        the framework, the command, the directory and the cause, after an
+        ERROR line (ADR 0236). They used to come back as exit code -1 with
+        the cause in place of stderr, which the runners parsed as a run, so a
+        suite that never started read as one that failed.
         """
         working_dir = cwd or self.project_root
         if self.config.get("working_directory"):
-            import os
             working_dir = os.path.join(working_dir, self.config["working_directory"])
 
-        logger.info("Running command: %s in %s", " ".join(command), working_dir)
+        shown = " ".join(command)
+        logger.info("Running command: %s in %s", shown, working_dir)
 
         try:
             result = run_command(
@@ -312,13 +331,22 @@ class BaseTestRunner(ABC):
                 timeout=timeout,
                 cwd=working_dir,
             )
-            return result.stdout or "", result.stderr or "", result.returncode
-        except subprocess.TimeoutExpired:
-            logger.error("Command timed out after %ds: %s", timeout, " ".join(command))
-            return "", f"Command timed out after {timeout}s", -1
+        except subprocess.TimeoutExpired as e:
+            raise self._could_not_run(shown, working_dir, f"timed out after {timeout}s") from e
         except FileNotFoundError as e:
-            logger.error("Command not found: %s", e)
-            return "", f"Command not found: {e}", -1
+            raise self._could_not_run(shown, working_dir, f"command not found: {e}") from e
         except OSError as e:
-            logger.error("OS error running command: %s", e)
-            return "", f"OS error: {e}", -1
+            raise self._could_not_run(
+                shown, working_dir, f"OS error: {type(e).__name__}: {e}",
+            ) from e
+        return result.stdout or "", result.stderr or "", result.returncode
+
+    def _could_not_run(self, command: str, working_dir: str, cause: str) -> RunnerError:
+        """The RunnerError for a test command that did not run to an exit
+        code, after its ERROR line."""
+        message = (
+            f"{self.framework_name} could not run `{command}` in "
+            f"{working_dir}: {cause}. The run's outcome is unknown"
+        )
+        loud(message)
+        return RunnerError(message)
