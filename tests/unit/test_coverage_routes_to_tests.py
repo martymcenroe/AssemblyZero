@@ -132,16 +132,19 @@ def test_a_genuine_implementation_loop_is_unaffected() -> None:
 # ------------------------------------------------------------------ the node
 
 
-def test_node_returns_to_verification_when_nothing_to_target(
+def test_node_halts_when_nothing_to_target(
     tmp_path: Path,
 ) -> None:
-    """A MEASURED report naming no uncovered lines: return to N5, change nothing.
+    """A MEASURED report naming no uncovered lines: halt, change nothing.
 
     #2637: this fixture used to be `"23 passed"` -- no coverage report at all --
     and the node read that as "nothing to target" and bounced. That reading is
     the defect, not the contract; an absent report is now a named measurement
     failure, pinned by the test below. What this test is actually about is a
     report that WAS produced and happens to name no missing lines.
+
+    #3585: it returned to N5, which measured the same shortfall and sent it
+    back, uncounted. A shortfall the report cannot locate now halts.
     """
     test_file = tmp_path / "test_x.py"
     test_file.write_text("def test_a():\n    assert 1\n", encoding="utf-8")
@@ -165,7 +168,8 @@ def test_node_returns_to_verification_when_nothing_to_target(
         "coverage_module": "pkg",
     })
 
-    assert result["next_node"] == "N5_verify_green"
+    assert result["next_node"] == "end"
+    assert "names no uncovered line" in result["error_message"]
     assert test_file.read_text(encoding="utf-8") == before
 
 
@@ -191,11 +195,13 @@ def test_absent_report_is_a_named_measurement_failure(tmp_path: Path) -> None:
     assert "not a test gap" in result["error_message"]
 
 
-def test_node_returns_to_verification_with_no_test_file() -> None:
+def test_node_halts_with_no_test_file() -> None:
+    """#3585: it returned to N5 with no reason."""
     result = augment_tests_for_coverage({
         "green_phase_output": COVERAGE_REPORT, "test_files": [],
     })
-    assert result["next_node"] == "N5_verify_green"
+    assert result["next_node"] == "end"
+    assert "no test file" in result["error_message"]
 
 
 def test_node_never_names_an_implementation_file_as_its_output() -> None:

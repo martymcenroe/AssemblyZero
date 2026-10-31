@@ -958,13 +958,29 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.coverage_augment_spent", "impl", JUDGES_BUDGET, ACTION_HALT,
         "Coverage test additions spent",
-        _s(f"{_TS}/graph.py::_stop_after_green::return", 1),
+        _s(f"{_TS}/graph.py::_stop_after_green::return", 1)
+        + _s(f"{_TS}/nodes/augment_tests.py::_halt_augment_spent::return", 0),
         decided_in=f"{_TS}/graph.py::route_after_green",
         created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
         notes="N4c's attempts (MAX_COVERAGE_AUGMENT_ATTEMPTS) did not reach the "
               "coverage target. #2327 made it stop rather than route to "
               "implementation, but it stopped at END with a print, so the "
-              "stage read the empty reason as a pass and no one was told",
+              "stage read the empty reason as a pass and no one was told. "
+              "Inside one N4c call, the same allowance spent: the generation "
+              "attempts, the one repair pass, or every added test failing; "
+              "each returned to N5 with no reason",
+    ),
+    Gate(
+        "impl.coverage_augment_cannot_run", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "N4c cannot add tests",
+        _s(f"{_TS}/nodes/augment_tests.py::_halt_augment_cannot_run::return", 0),
+        decided_in=f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage",
+        created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N4c's own machinery failed: no test file, a report naming no "
+              "uncovered line, an unreadable source, report or test file, no "
+              "audit dir, no seat, a failed model call, or a vetting run that "
+              "ran nothing. Each returned to N5 with no reason, and N5 sent "
+              "the same shortfall back",
     ),
     Gate(
         "impl.budget.cost", "impl", JUDGES_BUDGET, ACTION_HALT,

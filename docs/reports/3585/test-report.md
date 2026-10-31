@@ -25,3 +25,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 27 files that import the module or its functions, the spec workflow's three checks that call the extractor, the answer key and `tests/integration/test_lld_parsing_chain.py`: 670 passed after the fixture updates. The first pass, before them, failed 11, each one of those fixtures.
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new and 2 more stale, the rebuild handler and its tag. `audit_fail_open.py --check` reports no new fail-open, and none is left in the module. `audit_halt_sites.py --check` passes. Ruff finds the module's same three issues as at HEAD; the new test file is clean.
+
+## nodes/augment_tests.py
+
+**New: `tests/unit/test_augment_tests_loud_failure.py` (32).** Each site test is named for its ledger line. The node runs with the model call and the vetting pytest run patched, in a temporary worktree with a small package, a test file and an audit dir; no model is called.
+
+**Before the fix, measured** against HEAD's `augment_tests.py`: 29 failed, 3 passed. The three that passed pin the compliant fallback to bare lines (142), the quiet "nothing to remove" answers of `_without_named_tests`, and the clean success path.
+
+**Changed tests:** in `test_n4c_keeps_the_suite_and_bounds_output.py`, the no-audit-dir test is now `test_no_audit_dir_halts_before_any_call`; the timed-out generation, the vetting run that collects nothing, and no addition passing expect the halt with the file as it was; the dropped-tests tests read the drops at ERROR on stderr, and the one whose repair call fails expects that halt. In `test_coverage_routes_to_tests.py`, the two node tests that returned to N5 are now `test_node_halts_when_nothing_to_target` and `test_node_halts_with_no_test_file`.
+
+**Neighbouring suites:** 12 files that import the module, with the gate registry, the graph halts and the new file: 250 passed and 8 failed on the first pass, each one of the tests above; the three changed files then passed (78).
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new and 3 more stale, the three deleted tags. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff finds the module's same nine issues as at HEAD; the new test file is clean.

@@ -20,6 +20,16 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-graph`, is ba
 - **Kept and pinned (835, 969, 972, 977, 983, 1099, 1136, 1142).** The ADR 0207 default target, and the halts the ledger found compliant.
 - **Structure.** The halts go through `_halt_spec_unusable` and `_halt_input_unreadable`, registered under the existing rows `impl.lld_not_usable` and `impl.input_precondition`; no row is added. The `requirements_empty_reason` state key is no longer written.
 
+### nodes/augment_tests.py (26 ledger rows: 25 fixed, 1 compliant and pinned)
+
+- **Every failure of N4c halts (347, 537, 554, 581, 593, 613, 645, 650, 671, 721, 734, 755, 761).** No test file, a report that names no uncovered line, an unreadable test file, no audit dir, no seat, a failed or empty model call, generation attempts spent, a vetting run that executed nothing, a repair that cannot be made, and no added test passing each used to return to N5 with an empty `error_message`, and N5 sent the same shortfall back. Each now halts with its cause, through `_halt_augment_cannot_run` (the node's machinery failed) or `_halt_augment_spent` (an allowance is spent), which `route_after_augment` sends to HALT. A reply with no code is a rejected attempt, revised like an import problem.
+- **Nothing it reads is skipped (101, 106, 134, 209, 218, 223).** A malformed range in a coverage report raises `CoverageRangeUnreadable`, and an unreadable source raises its `OSError`; the node halts on either before any model call. `_read_lines` reads its ranges through `_line_numbers`, so there is one parser.
+- **Broken invariants raise (317, 318, 389, 390, 735).** An addition that does not parse raises `AugmentInvariantBroken`, and the node restores the suite and re-raises. `_without_named_tests` raises on source that does not parse. The three fail-open tags are gone.
+- **A dropped test is said at ERROR (701).** The passing additions are kept, as #2902 designed, and the node returns to N5 with them; the tests still dropped after the repair pass are counted in one ERROR line.
+- **The suite left on disk always passes.** Before any halt after vetting, the file is what was there plus only the additions that ran and passed.
+- **Kept and pinned (142).** The fallback to bare lines for a source that does not parse.
+- **Structure.** A new registry row, `impl.coverage_augment_cannot_run`, cites the operator's ruling of 2026-10-06, and the impl ratchet goes from 47 to 48; the spent halt joins `impl.coverage_augment_spent`.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT or through the caller's handler.
