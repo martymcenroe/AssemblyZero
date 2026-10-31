@@ -64,7 +64,10 @@ def _payload_sent_by_run_impl_stage(state: dict) -> dict:
         def compile(self):
             return _App()
 
+    # The stubbed git cuts no worktree, so there is nothing to provision;
+    # provisioning a worktree that is not there refuses (ADR 0236, #3585).
     with patch.object(stages, "run_command", _quiet_git), \
+         patch.object(stages, "provision_worktree", return_value=[]), \
          patch.object(Path, "is_dir", return_value=False), \
          patch(
              "assemblyzero.workflows.testing.graph.build_testing_workflow",

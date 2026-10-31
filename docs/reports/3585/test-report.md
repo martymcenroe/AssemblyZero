@@ -84,6 +84,8 @@ Each fixed site has a test that fails before its fix and passes after, run first
 
 **Changed tests:** `test_framework_detector.py::test_nonexistent_directory` now expects `FrameworkResolutionError` naming the path, where it expected an empty list.
 
+**Found later, fixed in a test-only commit:** the commit left 22 tests failing in 6 orchestrator files it had not run. Each drives the implementation stage with git stubbed, so the worktree is never cut, and the stage's provisioning now refuses a worktree that is not there. None of them is about provisioning, so each helper stands `provision_worktree` in, with a comment saying why. The 13 files that reach the stage or provisioning: 215 passed.
+
 **Neighbouring suites:** 576 passed across 21 files: the detector's tests, N0's, provisioning's, the multi-framework and mock runs, and the LLD parsing chain.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.

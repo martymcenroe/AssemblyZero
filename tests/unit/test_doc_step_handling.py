@@ -123,7 +123,12 @@ def _capture_impl_payload(state):
         out.stderr = ""
         out.returncode = 0
         mock_run.return_value = out
+        # The stubbed git cuts no worktree, so there is nothing to provision;
+        # provisioning a worktree that is not there refuses (ADR 0236, #3585).
         with patch(
+            "assemblyzero.workflows.orchestrator.stages.provision_worktree",
+            return_value=[],
+        ), patch(
             "assemblyzero.workflows.testing.graph.build_testing_workflow",
             return_value=_StubGraph(),
         ):
