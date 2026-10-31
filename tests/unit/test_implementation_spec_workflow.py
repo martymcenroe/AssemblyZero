@@ -145,8 +145,28 @@ def _build_complete_spec():
         lines.append(f"class Widget{i}:\n")
         lines.append("    pass\n")
 
+    # #3585: N3 fails a spec with no Section 10, so a complete spec has one,
+    # with a test for TAGGED_LLD's one criterion.
+    lines.append(SECTION_TEN)
+
     return "\n".join(lines)
 
+
+#: Section 10 with one runnable test citing REQ-1.
+SECTION_TEN = (
+    "\n## 10. Test Mapping\n\n```python\nimport math\n\n\n"
+    'def test_the_feature():\n    """REQ-1"""\n'
+    "    assert math.isclose(1 + 1, 2)\n```\n"
+)
+
+#: #3585: N3 halts without an LLD whose pass criteria it can read.
+TAGGED_LLD = textwrap.dedent("""\
+    # LLD
+
+    | ID | Scenario | Pass Criteria |
+    |----|----------|---------------|
+    | 010 | the feature (REQ-1) | works |
+""")
 
 SAMPLE_SPEC_COMPLETE = _build_complete_spec()
 SAMPLE_SPEC_INCOMPLETE = "# Implementation Spec\n\nToo short to pass validation."
@@ -682,17 +702,20 @@ class TestParseLldTable:
         change_types = {f["change_type"] for f in files}
         assert "Add" in change_types or "Modify" in change_types
 
-    def test_empty_content_returns_empty(self):
-        """Empty content → empty list."""
+    def test_empty_content_raises(self):
+        """Empty content → ValueError (#3585); it returned [], which read as
+        a table with no rows."""
         from assemblyzero.workflows.implementation_spec.nodes.load_lld import parse_files_to_modify
 
-        assert parse_files_to_modify("") == []
+        with pytest.raises(ValueError, match="Section 2.1"):
+            parse_files_to_modify("")
 
-    def test_no_table_returns_empty(self):
-        """Content without table → empty list."""
+    def test_no_table_raises(self):
+        """Content without table → ValueError (#3585)."""
         from assemblyzero.workflows.implementation_spec.nodes.load_lld import parse_files_to_modify
 
-        assert parse_files_to_modify("# LLD\n\nNo table here.\n") == []
+        with pytest.raises(ValueError, match="Section 2.1"):
+            parse_files_to_modify("# LLD\n\nNo table here.\n")
 
 
 class TestFindLldPath:
@@ -759,11 +782,13 @@ class TestNormalizeChangeType:
         assert _normalize_change_type("delete") == "Delete"
         assert _normalize_change_type("remove") == "Delete"
 
-    def test_unknown_defaults_to_add(self):
-        """Unknown type → Add."""
+    def test_unknown_raises(self):
+        """Unknown type → ValueError (#3585); it defaulted to Add, so a file
+        meant to be modified or deleted was specified as new."""
         from assemblyzero.workflows.implementation_spec.nodes.load_lld import _normalize_change_type
 
-        assert _normalize_change_type("unknown") == "Add"
+        with pytest.raises(ValueError, match="'unknown'"):
+            _normalize_change_type("unknown")
 
 
 class TestCheckApprovedStatus:
@@ -819,9 +844,14 @@ class TestAnalyzeCodebase:
         assert result["error_message"] == ""
         assert "assemblyzero/workflows/test/graph.py" in result["current_state_snapshots"]
 
-    def test_040_file_not_found_graceful(self, tmp_path):
-        """Scenario 040: Missing file produces warning, not error."""
+    def test_040_file_not_found_halts(self, tmp_path):
+        """Scenario 040: a missing Modify target halts (#3585).
+
+        It used to produce a WARNING on stdout and pass, so the spec was
+        drafted for a file nobody could read.
+        """
         from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import analyze_codebase
+        from assemblyzero.workflows.implementation_spec.graph import route_after_analyze
 
         state = {
             "files_to_modify": [{
@@ -832,17 +862,18 @@ class TestAnalyzeCodebase:
         }
 
         result = analyze_codebase(state)
-        assert result["error_message"] == ""
+        assert "nonexistent/file.py" in result["error_message"]
+        assert route_after_analyze(result) == "HALT"
         assert "nonexistent/file.py" not in result.get("current_state_snapshots", {})
 
-    def test_empty_files_list(self, tmp_path):
-        """No files → empty results."""
+    def test_empty_files_list_halts(self, tmp_path):
+        """No files → a halt (#3585); an empty plan used to pass with a WARNING."""
         from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import analyze_codebase
 
         result = analyze_codebase({
             "files_to_modify": [], "lld_content": "", "repo_root": str(tmp_path),
         })
-        assert result["error_message"] == ""
+        assert "no files to modify" in result["error_message"]
         assert result["current_state_snapshots"] == {}
 
     def test_add_file_verifies_parent(self, tmp_path):
@@ -1082,10 +1113,19 @@ class TestValidateCompleteness:
             validate_completeness,
         )
 
+        # #3585: Section 10 and the LLD it cites are present, because N3
+        # fails a spec with no Section 10 (a fact) and halts without the LLD;
+        # and one implementation fence, so error_paths_have_tests can run (a
+        # spec with none is a check that cannot run, which is not a pass).
+        # Both proxies still fail: the Modify file is never mentioned near a
+        # fence, and two fences are under the threshold of three.
         base_state["spec_draft"] = (
             "# Implementation Spec\n\n## Overview\n\nChanges.\n\n"
             + ("filler content\n" * 20)
+            + "\n```python\ndef build():\n    return None\n```\n"
+            + SECTION_TEN
         )
+        base_state["lld_content"] = TAGGED_LLD
         files = [{
             "path": "assemblyzero/workflows/test/graph.py",
             "change_type": "Modify", "description": "Update graph",
@@ -1133,9 +1173,12 @@ class TestValidateCompleteness:
             + ("filler content\n" * 20)
         )
         base_state["files_to_modify"] = []
+        base_state["lld_content"] = TAGGED_LLD
 
         result = validate_completeness(base_state)
 
+        # #3585: the checks ran; a halt would make the assertions vacuous.
+        assert "completeness_cannot_check" not in result
         assert result["validation_passed"] is False
         assert result["completeness_issues"]
 
@@ -1156,6 +1199,7 @@ class TestValidateCompleteness:
         )
 
         base_state["spec_draft"] = sample_spec_complete
+        base_state["lld_content"] = TAGGED_LLD
         base_state["files_to_modify"] = [{
             "path": "assemblyzero/workflows/test/graph.py",
             "change_type": "Modify", "description": "Update graph",
@@ -1464,19 +1508,22 @@ class TestImportResolvesExtendedSourceLayouts:
         (tmp_path / "my-pkg-root" / "foo" / "bar.py").write_text("")
         assert _import_resolves("foo.bar", tmp_path, set()) is True
 
-    def test_malformed_pyproject_falls_back_silently(self, tmp_path):
-        """Malformed pyproject doesn't raise; static prefixes still work."""
+    def test_malformed_pyproject_cannot_be_read_past(self, tmp_path):
+        """#3585: a malformed pyproject raises, naming the file. It used to be
+        read as declaring no source roots, so a declared src layout went
+        unseen."""
         from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            CompletenessCannotCheck,
             _import_resolves,
         )
         (tmp_path / "pyproject.toml").write_text(
             "this is not [valid toml",
             encoding="utf-8",
         )
-        # Static "src" prefix still resolves
         (tmp_path / "src" / "foo").mkdir(parents=True)
         (tmp_path / "src" / "foo" / "bar.py").write_text("")
-        assert _import_resolves("foo.bar", tmp_path, set()) is True
+        with pytest.raises(CompletenessCannotCheck, match="pyproject.toml"):
+            _import_resolves("foo.bar", tmp_path, set())
 
     def test_missing_pyproject_doesnt_break_static_prefixes(self, tmp_path):
         from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
@@ -1495,16 +1542,20 @@ class TestImportResolvesExtendedSourceLayouts:
 class TestHumanGate:
     """Tests for N4: human_gate node."""
 
-    def test_disabled_gate_auto_routes(self, base_state):
-        """Disabled gate → N5."""
+    def test_disabled_gate_halts_as_misrouted(self, base_state):
+        """Disabled gate reached → a misrouted graph, which halts (#3585).
+
+        It used to route to N5 as a safety fallback, hiding the misrouting.
+        """
+        from assemblyzero.workflows.implementation_spec.graph import route_after_human_gate
         from assemblyzero.workflows.implementation_spec.nodes.human_gate import human_gate
 
         base_state["human_gate_enabled"] = False
         base_state["spec_draft"] = "# Some spec"
 
         result = human_gate(base_state)
-        assert result["next_node"] == "N5_review_spec"
-        assert result["error_message"] == ""
+        assert "human_gate_enabled" in result["error_message"]
+        assert route_after_human_gate(result) == "HALT"
 
     def test_no_spec_returns_end(self, base_state):
         """No spec draft → END."""
@@ -1587,6 +1638,8 @@ class TestGenerateSpec:
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
         base_state["current_state_snapshots"] = {"file.py": "content"}
         base_state["pattern_references"] = []
+        # #3585: N2 halts without a lineage directory to save the draft in.
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
@@ -1605,11 +1658,13 @@ class TestGenerateSpec:
         mock_provider.return_value = drafter
 
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
+        # #3585: with a lineage directory, so the halt is the drafter's.
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
         result = generate_spec(base_state)
-        assert result["error_message"] != ""
+        assert "Drafter failed" in result["error_message"]
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
@@ -1634,8 +1689,11 @@ class TestGenerateSpec:
 
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
         base_state["spec_draft"] = "# Old Draft"
-        base_state["review_feedback"] = "Please fix X"
+        # #3585: a verdict pinning cannot read halts, and so does a missing
+        # lineage directory; "Please fix X" named nothing pinning reads.
+        base_state["review_feedback"] = "Please fix `Old Draft`"
         base_state["review_iteration"] = 0
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import generate_spec
 
@@ -1887,6 +1945,7 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
             }],
             "pattern_references": [],
             "repo_root": str(tmp_path),
+            "lld_content": TAGGED_LLD,
             "review_iteration": 0,
             "prior_completeness_breakdown": [],
         }
@@ -1919,6 +1978,7 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
             }],
             "pattern_references": [],
             "repo_root": str(tmp_path),
+            "lld_content": TAGGED_LLD,
             "review_iteration": 1,
             "prior_completeness_breakdown": prior,
         }
@@ -1949,26 +2009,27 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
         # Easiest: use the existing sample_spec_complete pattern from
         # base_state fixtures. For unit isolation, give it an empty files
         # list and a basic but >100-char draft.
+        # #3585: one implementation fence, as in the specs the error-path
+        # coverage fix updated: a spec with none is a check that cannot run,
+        # which is not a pass. The fence raises nothing, so it needs no test.
         state = {
             "spec_draft": "# Implementation Spec\n\n## Overview\n\n"
                           "This spec does nothing structural; no Modify, "
-                          "no Add. " + ("filler " * 20),
+                          "no Add. " + ("filler " * 20)
+                          + "\n```python\ndef build():\n    return None\n```\n"
+                          + SECTION_TEN,
             "files_to_modify": [],
             "pattern_references": [],
             "repo_root": str(tmp_path),
+            "lld_content": TAGGED_LLD,
             "review_iteration": 1,
             "prior_completeness_breakdown": prior,
         }
         result = validate_completeness(state)
-        # Even if validation_passed varies (it depends on other checks),
-        # the contract is: prior_breakdown is only appended on failure.
-        breakdown = result.get("prior_completeness_breakdown", [])
-        if result["validation_passed"]:
-            assert breakdown == prior
-        else:
-            # On failure the new entry is appended; original prior still present
-            assert breakdown[0] == prior[0]
-            assert len(breakdown) == 2
+        # #3585: this spec passes, so the contract is asserted rather than
+        # branched on: prior_breakdown is only appended on failure.
+        assert result["validation_passed"] is True, result["completeness_issues"]
+        assert result.get("prior_completeness_breakdown", []) == prior
 
 
 class TestPromptProjectContext:
@@ -2026,86 +2087,75 @@ class TestPromptProjectContext:
 
 
 class TestTruncatePrompt:
-    """Tests for Issue #409 Gap 4: section-aware prompt truncation."""
+    """Tests for Issue #409 Gap 4: whole-part prompt trimming.
+
+    #3585 replaced ``_truncate_prompt``, which re-split the joined prompt on
+    ``## `` lines, with ``_fit_to_budget``, which trims the parts the builder
+    appended. The re-split read the LLD's and the draft's own ``##`` sections
+    as unknown sections and dropped them first, and cut a prompt still over
+    budget mid-content; ``_split_into_sections``, which only it used, went
+    with it, and so did its two tests. These three keep #409's intent.
+    """
 
     def test_truncation_drops_sections_not_midstring(self):
-        """Truncation drops whole sections by priority, not mid-string."""
+        """Trimming drops whole optional parts, kept-longest last."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _truncate_prompt,
+            _DROP_CURRENT_STATE,
+            _DROP_PROJECT_CONTEXT,
+            _DROP_TEMPLATE,
             MAX_TOTAL_PROMPT_CHARS,
+            _fit_to_budget,
+            _Part,
         )
 
-        # Build a prompt that exceeds the limit (120K chars)
-        lld = "## LLD Content (Issue #99)\n\n" + "LLD line.\n" * 100
-        context = "## Project Context\n\n" + "Context line padding.\n" * 5000
-        excerpts = "## Current State of Files to Modify\n\n" + "Code excerpt.\n" * 5000
-        template = "## Implementation Spec Template\n\n" + "Template.\n" * 100
-
-        prompt = "\n\n".join([lld, context, excerpts, template])
-        assert len(prompt) > MAX_TOTAL_PROMPT_CHARS
-
-        result = _truncate_prompt(prompt)
+        parts = [
+            _Part("LLD", "## LLD Content (Issue #99)\n\n" + "LLD line.\n" * 100),
+            _Part("project context", "## Project Context\n\n" + "Context line padding.\n" * 5000,
+                  _DROP_PROJECT_CONTEXT),
+            _Part("current state", "## Current State of Files to Modify\n\n" + "Code excerpt.\n" * 5000,
+                  _DROP_CURRENT_STATE),
+            _Part("template", "## Implementation Spec Template\n\n" + "Template.\n" * 100,
+                  _DROP_TEMPLATE),
+        ]
+        result = _fit_to_budget(parts)
         assert len(result) <= MAX_TOTAL_PROMPT_CHARS
-        # LLD should survive (highest priority)
         assert "LLD Content" in result
-        # Template should survive (high priority)
         assert "Implementation Spec Template" in result
+        assert "Context line padding" not in result
+        assert "CONTEXT TRIMMED" in result and "project context" in result
 
     def test_truncation_preserves_lld_and_template(self):
-        """LLD and template survive truncation even at extreme sizes."""
+        """LLD and template survive trimming even at extreme sizes."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _truncate_prompt,
-            MAX_TOTAL_PROMPT_CHARS,
+            _DROP_PATTERNS,
+            _DROP_PROJECT_CONTEXT,
+            _DROP_TEMPLATE,
+            _fit_to_budget,
+            _Part,
         )
 
-        lld = "## LLD Content (Issue #99)\n\nCritical design info."
-        patterns = "## Similar Implementation Patterns\n\n" + "Pattern data.\n" * 6000
-        context = "## Project Context\n\n" + "Context data.\n" * 6000
-        template = "## Implementation Spec Template\n\nFollow this structure."
-
-        prompt = "\n\n".join([lld, patterns, context, template])
-        assert len(prompt) > MAX_TOTAL_PROMPT_CHARS
-
-        result = _truncate_prompt(prompt)
+        parts = [
+            _Part("LLD", "## LLD Content (Issue #99)\n\nCritical design info."),
+            _Part("patterns", "## Similar Implementation Patterns\n\n" + "Pattern data.\n" * 6000,
+                  _DROP_PATTERNS),
+            _Part("project context", "## Project Context\n\n" + "Context data.\n" * 6000,
+                  _DROP_PROJECT_CONTEXT),
+            _Part("template", "## Implementation Spec Template\n\nFollow this structure.",
+                  _DROP_TEMPLATE),
+        ]
+        result = _fit_to_budget(parts)
         assert "Critical design info" in result
         assert "Follow this structure" in result
 
     def test_no_truncation_under_limit(self):
-        """Prompts under the limit are returned unchanged."""
+        """Prompts under the limit are the parts joined, unchanged."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _truncate_prompt,
+            _fit_to_budget,
+            _Part,
         )
 
-        prompt = "## LLD\n\nShort prompt."
-        assert _truncate_prompt(prompt) == prompt
-
-
-class TestSplitIntoSections:
-    """Tests for _split_into_sections helper."""
-
-    def test_splits_by_headers(self):
-        """Sections are split on ## headers."""
-        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _split_into_sections,
-        )
-
-        prompt = "Preamble.\n\n## Section A\n\nContent A.\n\n## Section B\n\nContent B."
-        sections = _split_into_sections(prompt)
-        assert len(sections) == 3
-        assert sections[0]["header"] == ""
-        assert sections[1]["header"] == "Section A"
-        assert sections[2]["header"] == "Section B"
-
-    def test_preserves_order(self):
-        """Sections have incrementing order indices."""
-        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
-            _split_into_sections,
-        )
-
-        prompt = "## A\nContent.\n## B\nContent.\n## C\nContent."
-        sections = _split_into_sections(prompt)
-        orders = [s["order"] for s in sections]
-        assert orders == sorted(orders)
+        parts = [_Part("LLD", "## LLD"), _Part("instructions", "Short prompt.")]
+        assert _fit_to_budget(parts) == "## LLD\n\nShort prompt."
 
 
 class TestStripPreamble:
@@ -2160,6 +2210,8 @@ class TestReviewSpec:
 
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
+        # #3585: N5 halts with no lineage directory to record the verdict in.
+        base_state["audit_dir"] = base_state["repo_root"]
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 
@@ -2188,6 +2240,7 @@ class TestReviewSpec:
 
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
+        base_state["audit_dir"] = base_state["repo_root"]  # #3585
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 
@@ -2220,6 +2273,7 @@ class TestReviewSpec:
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
         base_state["review_iteration"] = 3
         base_state["max_iterations"] = 3
+        base_state["audit_dir"] = base_state["repo_root"]  # #3585
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 
@@ -2320,12 +2374,15 @@ class TestParseReviewVerdict:
         with pytest.raises(StructuredContractError):
             parse_review_verdict("Verdict: APPROVED\n\nGreat work!")
 
-    def test_empty_response_blocked(self):
-        """Empty → BLOCKED (an empty response is an infrastructure signal;
-        the conservative pre-0028 behavior stands)."""
+    def test_empty_response_raises(self):
+        """Empty → StructuredContractError (#3585). It used to return a
+        BLOCKED verdict the reviewer never issued."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        assert parse_review_verdict("")[0] == "BLOCKED"
+        with pytest.raises(StructuredContractError, match="empty"):
+            parse_review_verdict("")
 
     def test_discuss_json_rejects_not_in_enum(self):
         """DISCUSS is not in REVIEW_SPEC_SCHEMA's enum — a contract
@@ -2816,6 +2873,7 @@ class TestEdgeCases:
         )
 
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
+        base_state["lld_content"] = TAGGED_LLD
         base_state["files_to_modify"] = []
         base_state["pattern_references"] = []
 
@@ -3224,12 +3282,17 @@ class TestCheckApiSymbolsExist:
     # Edge cases
     # ------------------------------------------------------------------
 
-    def test_empty_gathered_symbols_skips_check(self):
-        """No gathered symbols → check skips (nothing to compare against)."""
+    def test_empty_gathered_symbols_cannot_judge_a_call_that_needs_them(self):
+        """#3585: no gathered symbols no longer skips. A call the table is
+        needed for, with no repo to say whether the repo has Python of its
+        own, cannot be judged: the check raises instead of passing."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            CompletenessCannotCheck,
+        )
+
         spec = "```python\nfoo.model_dump()\n```\n"
-        result = self._check(spec, [])
-        assert result["passed"] is True
-        assert "skipped" in result["details"].lower()
+        with pytest.raises(CompletenessCannotCheck, match="gathered no symbols"):
+            self._check(spec, [])
 
     def test_no_code_fences_passes(self):
         """Spec with no code fences → no calls to check → passes."""
@@ -3446,8 +3509,11 @@ class TestApiSymbolCheckInValidateCompleteness:
         base_state["pattern_references"] = []
         # gathered_symbols set to non-empty — create_graph is real
         base_state["gathered_symbols"] = ["create_graph"]
+        base_state["lld_content"] = TAGGED_LLD
 
         result = validate_completeness(base_state)
+        # #3585: the checks ran; a halt would make the assertion vacuous.
+        assert "completeness_cannot_check" not in result
         # The sample_spec_complete doesn't call any hallucinated APIs on
         # target-repo objects, so this check should not be the cause of failure
         # (other checks may fail; we only verify the symbol check ran)

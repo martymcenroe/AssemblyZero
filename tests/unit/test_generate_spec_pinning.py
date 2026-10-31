@@ -10,9 +10,22 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
     generate_spec,
 )
+
+#: The lineage directory each test's state names (#3585: generate_spec halts
+#: without one to save the draft in).
+_LINEAGE: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _lineage(tmp_path):
+    _LINEAGE["dir"] = str(tmp_path)
+    yield
+    _LINEAGE.clear()
 
 PREVIOUS = """# Spec
 
@@ -66,6 +79,7 @@ def _run(response: str, *, feedback: str = VERDICT, state_extra: dict | None = N
         "assemblyzero_root": "",
         "repo_root": "",
         "issue_number": 331,
+        "audit_dir": _LINEAGE["dir"],
         "spec_draft": PREVIOUS,
         "review_feedback": feedback,
         "review_iteration": 0,
@@ -105,12 +119,14 @@ class TestTheFullRevisionPathIsPinned:
             for e in out["pinning_events"]
         )
 
-    def test_an_unextractable_verdict_abstains(self):
+    def test_an_unextractable_verdict_halts(self):
         """Locking the whole document on a naming the extractor cannot read
-        would refuse every legitimate fix — unknown is not guilty (#2526)."""
+        would refuse every legitimate fix (#2526), and abstaining, which this
+        used to assert, passed the revision unenforced. #3585: the node halts
+        before the drafter is called."""
         out = _run(REGENERATED, feedback="Please make it better overall.")
-        assert '== "face"' in out["spec_draft"], "abstention passes it through"
-        assert any("names nothing extractable" in e for e in out["pinning_events"])
+        assert "pinning gate" in out["error_message"]
+        assert "spec_draft" not in out
 
     def test_events_accumulate_across_revisions(self):
         out = _run(REGENERATED, state_extra={
@@ -152,6 +168,7 @@ class TestTheEditScriptPathIsPinned:
             "assemblyzero_root": "",
             "repo_root": "",
             "issue_number": 331,
+            "audit_dir": _LINEAGE["dir"],
             "spec_draft": PREVIOUS,
             "review_feedback": VERDICT,
             "review_iteration": 0,
@@ -189,6 +206,7 @@ class TestIterationOneIsUntouched:
             "pattern_references": [],
             "assemblyzero_root": "",
             "repo_root": "",
+            "audit_dir": _LINEAGE["dir"],
         }
         with patch(
             "assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider",

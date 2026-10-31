@@ -304,15 +304,32 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "spec.input_precondition", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "No issue number provided",
-        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 0, 1, 2)
+        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 0, 1, 2, 3)
         + _s(f"{_IS}/nodes/analyze_codebase.py::analyze_codebase::return", 0)
-        + _s(f"{_IS}/nodes/human_gate.py::human_gate::return", 0),
+        + _s(f"{_IS}/nodes/analyze_codebase.py::_halt::return", 0)
+        + _s(f"{_IS}/nodes/human_gate.py::human_gate::return", 0, 1),
+        notes=(
+            "#3585: N4 return 0 is the gate reached while disabled (a misrouted "
+            "graph; it used to proceed to N5), so the no-draft guard moved from "
+            "0 to 1. N0 return 1 is the new repo_root guard (it used to read the "
+            "working directory), so the LLD-not-found and unreadable returns "
+            "moved from 1 and 2 to 2 and 3. N1's _halt is every failure the node "
+            "used to print as a WARNING and pass: an empty plan, a Modify or "
+            "Delete target missing, not a file, unreadable or unparseable, an "
+            "unknown change type, a context file that cannot be read, and a base "
+            "git cannot answer"
+        ),
     ),
     Gate(
         "spec.lld_not_usable", "spec", JUDGES_UPSTREAM, ACTION_HALT,
         "GUARD: LLD content too short",
-        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 3, 4),
-        notes="the LLD is too short or not approved; this stage cannot revise it",
+        _s(f"{_IS}/nodes/load_lld.py::load_lld::return", 4, 5, 6, 7),
+        notes=(
+            "the LLD is too short or not approved; this stage cannot revise it. "
+            "#3585 added returns 6 (no Section 2.1 table, or a change type no "
+            "spelling matches) and 7 (a table that lists no files); the short "
+            "and not-approved returns moved from 3 and 4 to 4 and 5"
+        ),
     ),
     Gate(
         "spec.manifest_uncompilable", "spec", JUDGES_UPSTREAM, ACTION_HALT,
@@ -325,6 +342,16 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "ASSERTION MANIFEST GATE",
         _s(f"{_IS}/nodes/compile_manifest.py::manifest_gate::return", 0),
         created_by="#2533",
+    ),
+    Gate(
+        "spec.manifest_cannot_run", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "N1b assertion manifest cannot run:",
+        _s(f"{_IS}/nodes/compile_manifest.py::_halt_manifest_cannot_run::return", 0),
+        created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N1b lacks an input it must have: a repo root, the contract the "
+              "repo's visual-gate declaration names, or a lineage directory "
+              "for the manifest. It used to compile without the contract, or "
+              "skip the lineage artifact, with a stdout line or none (ADR 0236)",
     ),
     Gate(
         "spec.finalize.draft_guard", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -355,7 +382,14 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "spec.drafter_failed", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Drafter failed",
-        _s(f"{_IS}/nodes/generate_spec.py::generate_spec::return", 0, 4),
+        _s(f"{_IS}/nodes/generate_spec.py::generate_spec::return", 0, 4)
+        + _s(f"{_IS}/nodes/generate_spec.py::_halt::return", 0),
+        notes=(
+            "#3585: N2's _halt is each failure the node used to pass on: a "
+            "missing lineage directory, a verdict the pinning gate cannot read, "
+            "a prompt whose required parts exceed the budget (all before the "
+            "drafter is paid), an empty draft and a draft that cannot be saved"
+        ),
     ),
     Gate(
         "spec.preflight", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -407,7 +441,8 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "spec.review.empty_draft", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "GUARD: Spec draft is empty",
-        _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 1),
+        _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 1)
+        + _s(f"{_IS}/nodes/review_spec.py::_halt::return", 0),
         justified_by="#2723",
         notes=(
             "infrastructure since #2773 (operator ruling 2026-09-04 on "
@@ -415,7 +450,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
             "no span for a revision to cite, and asking the drafter to revise "
             "nothing is regeneration, which #2569 removed from the revision "
             "path. Also saves the paid reviewer call on a draft with no "
-            "content"
+            "content. #3585: N5's _halt is the draft under the minimum or over "
+            "the review limit and the missing lineage directory (before the "
+            "call), and a verdict that cannot be recorded (after it)"
         ),
     ),
     Gate(
@@ -482,10 +519,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     ),
     Gate(
         "spec.conservation_gate", "spec", JUDGES_MODEL_OUTPUT, ACTION_REVISE,
-        "the walked merge",
-        _s(f"{_IS}/revision_pinning.py::_conservation_override::conservation", 0, 1, 2),
+        "the revision removed",
+        _s(f"{_IS}/revision_pinning.py::_conservation_override::conservation", 0),
         created_by="#2559",
-        notes="emits the revision unenforced or the previous draft; never halts",
+        notes=(
+            "emits the previous draft when the revision removed unnamed tests; "
+            "never halts. #3585: the two merge-malfunction cases (tests lost "
+            "that both inputs hold, tests multiplied beyond both) raise "
+            "PinningMergeError, and N2 halts through its _halt site "
+            "(spec.drafter_failed); they were sites 0 and 1 here, emitting the "
+            "revision unenforced"
+        ),
     ),
     # ---- impl: the testing workflow --------------------------------------
     Gate(

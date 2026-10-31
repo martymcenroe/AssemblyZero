@@ -21,6 +21,7 @@ import subprocess
 
 import pytest
 
+from assemblyzero.workflows.implementation_spec.base_tree import BaseTreeError
 from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
     _extract_symbols_from_base,
 )
@@ -80,10 +81,14 @@ class TestBaseSymbolsAreKnown:
         symbols = _extract_symbols_from_base(repo, "origin/hardening-run-14")
         assert "test_helper_not_api" not in symbols
 
-    def test_a_missing_ref_yields_an_empty_set(self, repo):
-        assert _extract_symbols_from_base(repo, "origin/no-such-branch") == set()
+    def test_a_missing_ref_raises(self, repo):
+        """#3585: it used to yield an empty set, so every correct call into
+        the base read as hallucinated."""
+        with pytest.raises(BaseTreeError, match="origin/no-such-branch"):
+            _extract_symbols_from_base(repo, "origin/no-such-branch")
 
-    def test_a_non_repo_yields_an_empty_set(self, tmp_path):
+    def test_a_non_repo_raises(self, tmp_path):
         bare = tmp_path / "empty"
         bare.mkdir()
-        assert _extract_symbols_from_base(bare, "origin/x") == set()
+        with pytest.raises(BaseTreeError):
+            _extract_symbols_from_base(bare, "origin/x")

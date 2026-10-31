@@ -16,6 +16,8 @@ incoherent guard message is retired from every path including the backstop.
 
 from __future__ import annotations
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec import lineage_seed as ls
 from assemblyzero.workflows.implementation_spec.graph import (
     route_after_validation,
@@ -70,6 +72,12 @@ class TestTheOneAuthority:
 class TestTheGraceClauseConsultsTheCeiling:
     """The observed defect path: a completeness failure at the ceiling."""
 
+    @pytest.fixture(autouse=True)
+    def _target_repo(self, tmp_path):
+        # #3585: N3 halts without a repo root or an LLD whose criteria it can
+        # read, so the ceiling is tested with both.
+        self.repo = str(tmp_path)
+
     def _validate(self, iteration: int, shown=()):
         from unittest.mock import patch
 
@@ -81,8 +89,11 @@ class TestTheGraceClauseConsultsTheCeiling:
             "spec_draft": "# Spec\n\n" + ("body line\n" * 40),
             "files_to_modify": [],
             "pattern_references": [],
-            "repo_root": "",
-            "lld_content": "",
+            "repo_root": self.repo,
+            "lld_content": (
+                "# LLD\n\n| ID | Scenario | Pass Criteria |\n|----|----|----|\n"
+                "| 010 | the change (REQ-1) | works |\n"
+            ),
             "review_iteration": iteration,
             "max_iterations": 3,
             "checks_shown_to_drafter": list(shown),

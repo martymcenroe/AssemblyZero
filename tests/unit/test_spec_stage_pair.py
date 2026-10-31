@@ -345,12 +345,14 @@ class TestErrorPathCoverageNegatives:
         assert report.platform_tested is True
         assert report.platform_gap is False
 
-    def test_a_spec_with_no_implementation_fence_is_not_applicable(self):
-        """The #1870 convention: a vacuous check reports so, never a pass."""
+    def test_a_spec_with_no_implementation_fence_cannot_be_checked(self):
+        """The #1870 convention: a vacuous check reports so, never a pass.
+        #3585: it is not ok either; its caller used to record it as passed."""
         report = error_path_coverage("## 10.1\n\n```python\ndef test_a():\n    pass\n```\n")
 
         assert report.ran is False
-        assert "not applicable" in format_report(report)
+        assert report.ok is False
+        assert "cannot be checked" in format_report(report)
 
     def test_test_fences_are_not_read_as_implementation(self):
         """A `raise` inside a test is the test's own setup, not a mandate."""

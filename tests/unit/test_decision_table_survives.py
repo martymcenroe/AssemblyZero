@@ -29,6 +29,8 @@ quantities and each needs its own gate.
 
 from __future__ import annotations
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec.assertion_manifest import (
     compile_manifest,
 )
@@ -216,13 +218,18 @@ class TestTheAbstainCarriesItsDenominator:
 
 
 class TestTheNodeTravelsTheAbsenceForward:
+    @pytest.fixture(autouse=True)
+    def _target_repo(self, tmp_path):
+        # #3585: N1b halts without a repo root to read the contract from.
+        self.repo = str(tmp_path)
+
     def _run(self, lld: str) -> dict:
         from assemblyzero.workflows.implementation_spec.nodes.compile_manifest import (
             compile_assertion_manifest,
         )
 
         return compile_assertion_manifest(
-            {"lld_content": lld, "repo_root": "", "config_mock_mode": True}
+            {"lld_content": lld, "repo_root": self.repo, "config_mock_mode": True}
         )
 
     def test_the_abstain_lands_on_state(self, capsys):
@@ -276,6 +283,8 @@ class TestTheGateRepeatsTheReason:
         manifest_gate({
             "assertion_manifest": "",
             "assertion_manifest_rows": [],
+            # N1b writes both flags on every absence.
+            "assertion_manifest_absent": True,
             "assertion_manifest_abstained": True,
             "assertion_manifest_absence_reason": "15 table(s) parsed, 0 in the criteria shape",
         })
@@ -283,17 +292,29 @@ class TestTheGateRepeatsTheReason:
         assert "ABSTAINED" in printed
         assert "15 table(s) parsed" in printed
 
-    def test_a_bare_pass_through_still_works(self, capsys):
+    def test_a_recorded_absence_passes_through(self, capsys):
         from assemblyzero.workflows.implementation_spec.nodes.compile_manifest import (
             manifest_gate,
         )
 
-        out = manifest_gate(
-            {"assertion_manifest": "", "assertion_manifest_rows": []}
-        )
+        out = manifest_gate({
+            "assertion_manifest": "", "assertion_manifest_rows": [],
+            "assertion_manifest_absent": True,
+        })
         printed = capsys.readouterr().out
         assert "no manifest to gate" in printed
         assert out["error_message"] == ""
+
+    def test_a_bare_state_with_no_recorded_absence_is_a_finding(self):
+        """#3585: N1c passes through only on an absence N1b recorded. A state
+        with no manifest and no record used to pass with "passing through";
+        N1b's output is missing, and nothing says why."""
+        from assemblyzero.workflows.implementation_spec.nodes.compile_manifest import (
+            manifest_gate,
+        )
+
+        out = manifest_gate({"assertion_manifest": "", "assertion_manifest_rows": []})
+        assert "recorded no absence" in out["error_message"]
 
 
 class TestTheRunRecordSurfacesIt:

@@ -71,9 +71,9 @@ class TestGoodFilesAreUnaffected:
         assert gather.unreadable == []
 
     def test_one_broken_file_does_not_cost_the_others(self):
-        """Excluded rather than fatal: a mid-build target repo can hold a
-        broken file, and refusing the whole stage over one would trade a quiet
-        wrong answer for a loud useless one."""
+        """The gather still reads every file that parses and names the one
+        that does not. #3585: the node then halts on the named file, where it
+        used to exclude it and go on."""
         gather = gather_symbols([
             _file("good.py", GOOD),
             _file("broken.py", BROKEN),
@@ -105,10 +105,12 @@ class TestTheExclusionIsReported:
         assert gather_symbols([_file("good.py", GOOD)]).describe() == ""
 
     def test_the_line_names_the_count_and_the_file(self):
+        """#3585: the file is no longer EXCLUDED; the line says the stage halts."""
         line = gather_symbols([_file("broken.py", BROKEN)]).describe()
         assert "1 target-repo .py file(s)" in line
         assert "broken.py" in line
-        assert "EXCLUDED" in line
+        assert "did not parse" in line
+        assert "halts" in line
 
     def test_the_line_says_what_it_costs(self):
         """The consequence is the point: the spec is measured against a
@@ -123,8 +125,12 @@ class TestTheExclusionIsReported:
         assert "6 target-repo .py file(s)" in line
         assert "and 3 more" in line
 
-    def test_the_node_prints_it(self):
-        """The report must reach the run, not merely exist on a dataclass."""
+    def test_the_node_halts_with_it(self):
+        """The report must reach the run, not merely exist on a dataclass.
+
+        #3585: it reaches the run as the node's halt reason; the analysis
+        moved out of ``analyze_codebase`` into ``_analyze``.
+        """
         import importlib
         import inspect
         import types
@@ -139,8 +145,8 @@ class TestTheExclusionIsReported:
         )
         assert isinstance(node, types.ModuleType)
 
-        source = inspect.getsource(node.analyze_codebase)
-        assert "gather.describe()" in source
+        source = inspect.getsource(node._analyze)
+        assert "_halt(issue_number, gather.describe())" in source
 
 
 class TestTheDataclassContract:
