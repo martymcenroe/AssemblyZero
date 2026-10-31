@@ -63,6 +63,10 @@ Callers: N4's validation and, for the pyproject reader, `scaffold_tests.py` (ano
 
 - **62: won't do.** Compliant: a file path that is not a string raises TypeError naming its type. Pinned.
 
+### prompts.py (1 row)
+
+- **The Modify prompt is never built without the file** (153). A Modify file that cannot be read is an ERROR line naming it, and the read error propagates; the model used to be asked to modify a file it was never shown.
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |

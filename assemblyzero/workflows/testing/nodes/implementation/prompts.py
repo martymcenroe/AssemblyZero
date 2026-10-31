@@ -3,6 +3,7 @@
 Builds prompts for single-file generation, diff-based generation, and retries.
 """
 
+import sys
 from pathlib import Path
 
 from assemblyzero.utils.file_type import get_file_type_info
@@ -133,13 +134,22 @@ Description: {description}
 
 """
 
-    # Include existing file content if modifying
+    # Include existing file content if modifying. #3585: a read that fails
+    # stops here with an ERROR line naming the file; it used to be passed
+    # over, and the model was asked to modify a file it was never shown.
     if change_type.lower() == "modify":
         existing_path = repo_root / filepath
         if existing_path.exists():
             try:
                 existing_content = existing_path.read_text(encoding="utf-8")
-                prompt += f"""## Existing File Contents
+            except (OSError, UnicodeDecodeError) as exc:
+                print(
+                    f"ERROR [N4] could not read {existing_path} (the Modify "
+                    f"file the prompt must show): {type(exc).__name__}: {exc}",
+                    file=sys.stderr, flush=True,
+                )
+                raise
+            prompt += f"""## Existing File Contents
 
 The file currently contains:
 
@@ -150,8 +160,6 @@ The file currently contains:
 Modify this file according to the LLD specification.
 
 """
-            except Exception:
-                pass
 
     # Issue #373: Include previously completed files with trimmed context.
     # Only the most recent file (N-1) gets full content for continuity.

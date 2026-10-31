@@ -56,3 +56,10 @@ Each module's new test file was run against the unchanged module first; every si
 
 - New: `tests/unit/test_routing_loud_failure.py`, 2 tests that pin the compliant site; both pass before and after.
 - Neighbouring suite `test_implement_code_routing.py` with the new file: 31 passed.
+
+## prompts.py
+
+- New: `tests/unit/test_prompts_loud_failure.py`, 3 tests. Before the fix: 1 failed, 2 passed. After: 3 passed.
+- Changed existing tests: none.
+- Neighbouring suites (the nine unit files that import the prompt builders, and the orchestrator's new tests): 480 passed.
+- Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
