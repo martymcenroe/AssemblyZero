@@ -19,16 +19,23 @@ Performs the cleanup needed between attempts:
 Idempotent: safe to run multiple times. Each step is independently
 guarded — a missing PR / worktree / branch is not an error.
 
+The reset is destructive (#4221, standard 0017): without `--execute` the tool
+prints what it would close, delete and remove, and the phrase that
+authorizes it, and stops. With `--execute` it asks for that phrase on the
+console, naming the repository and the issues.
+
 Usage:
 
     poetry run python tools/speedrun_reset.py \\
         --repo ../boostgauge \\
-        --issue 35
+        --issue 35 \\
+        --execute
 
     # Reset all known speed-run issues at once:
     poetry run python tools/speedrun_reset.py \\
         --repo ../boostgauge \\
-        --all-issues
+        --all-issues \\
+        --execute
 
 The `--all-issues` mode reads `data/speedrun/run-log.jsonl` and resets
 every issue that's appeared in any attempt (covers the full speed-run
@@ -37,6 +44,7 @@ arc across multiple takes).
 from __future__ import annotations
 
 import argparse
+import filecmp
 import json
 import os
 import shutil
@@ -49,6 +57,10 @@ from pathlib import Path
 # `speedrun_clean_check` exemption, so a parked branch is not later reported
 # as debris.
 GRAVEYARD_PREFIX = "graveyard/"
+
+# The AssemblyZero checkout this tool sits in. The orchestrator runs with it as
+# its working directory (`speedrun_roll.py` Popen cwd), so it holds the locks (#4217).
+AZ_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _rmtree_clearing_readonly(path: Path) -> None:
@@ -99,15 +111,31 @@ def _gh_repo(repo_root: Path) -> str:
     return path
 
 
+def is_pipeline_branch(branch: str, issue: int) -> bool:
+    """True when `branch` is one the pipeline creates for this issue (#4218).
+
+    The impl stage's `issue-{N}` and the per-stage `{N}-*` branches (`{N}-lld`).
+    The same two shapes the branch sweeps list.
+    """
+    return branch == f"issue-{issue}" or branch.startswith(f"{issue}-")
+
+
 def close_open_prs(repo: str, issue: int) -> int:
-    """Close any open PR that closes this issue. Returns count closed."""
+    """Close the pipeline's own open PRs that name this issue. Returns count closed.
+
+    #4218: a search for the closing text also returns a PR somebody made by
+    hand that happens to name the issue. Only a PR whose head branch is one of
+    the issue's pipeline branches is closed; any other is named in the output
+    and left open. (A closed PR can be reopened, so nothing was lost before,
+    but the reset has no business touching work that is not the pipeline's.)
+    """
     # Find PRs that reference the issue in body.
     result = _run([
         "gh", "pr", "list",
         "--repo", repo,
         "--state", "open",
         "--search", f"Closes #{issue}",
-        "--json", "number,title",
+        "--json", "number,title,headRefName",
     ])
     if result.returncode != 0:
         print(f"  WARNING: gh pr list failed: {result.stderr.strip()}")
@@ -119,6 +147,14 @@ def close_open_prs(repo: str, issue: int) -> int:
     closed = 0
     for pr in prs:
         n = pr["number"]
+        head = pr.get("headRefName") or ""
+        if not is_pipeline_branch(head, issue):
+            print(
+                f"  Left open PR #{n}: {pr['title']} "
+                f"(head branch '{head or 'unknown'}' is not a pipeline branch "
+                f"of #{issue})"
+            )
+            continue
         r = _run(["gh", "pr", "close", str(n), "--repo", repo])
         if r.returncode == 0:
             print(f"  Closed PR #{n}: {pr['title']}")
@@ -160,12 +196,112 @@ def remove_worktree(repo_root: Path, issue: int) -> bool:
             parent / f"{repo_root.name}-{suffix}",
         ]
         for worktree_path in candidates:
-            if _remove_worktree_at(repo_root, worktree_path):
+            if _remove_worktree_at(repo_root, worktree_path, issue):
                 removed_any = True
     return removed_any
 
 
-def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
+#: Ignored directories whose contents tooling rebuilds and nobody authored
+#: (#4219). A closed list, authored here: a path with one of these as a
+#: component is counted and named in the output but not copied, because
+#: copying and comparing a `node_modules` tree would make every reset take
+#: minutes and fill the disk with something `npm ci` makes again. Anything
+#: else the worktree ignores is evidence and is copied.
+REGENERABLE_IGNORED_DIRS = frozenset({
+    "node_modules", "__pycache__", ".venv", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache",
+})
+
+
+def preserve_ignored_files(
+    repo_root: Path, worktree_path: Path, issue: int,
+) -> Path | None:
+    """Copy a clean worktree's ignored files out, and compare each copy (#4219).
+
+    Git does not count ignored files as changes, so `git worktree remove`
+    deletes them and nothing says so. The impl stage keeps its lineage,
+    `calls.jsonl` included, inside the worktree, and a target repository may
+    ignore `docs/lineage/`; that record was lost on every reset of a clean
+    worktree. Standard 0027: preserve every emission before restoring.
+
+    Copies land under `data/speedrun/reset-artifacts/issue-{N}/worktree-ignored/
+    <worktree name>/`, at the same relative paths (stamped when an earlier
+    reset already used that directory, so a second reset cannot overwrite the
+    first one's evidence). Each copy is compared byte for byte with its
+    source. Returns the destination, or None when there was nothing to copy.
+
+    Raises `ResetPreservationError`, after alerting the operator, when the
+    ignored files cannot be listed, a copy fails, or a copy differs from its
+    source. The caller then leaves the worktree where it is.
+    """
+    where = "preserve_ignored_files"
+
+    def refuse(cause: str) -> None:
+        _refuse(
+            repo_root, issue, where,
+            f"preserving the ignored files of worktree {worktree_path} (#{issue})",
+            cause,
+            f"the worktree {worktree_path} was not removed",
+        )
+
+    listed = _run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+        cwd=worktree_path,
+    )
+    if listed.returncode != 0:
+        refuse(
+            f"git ls-files exited {listed.returncode}: "
+            f"{(listed.stderr or '').strip()[:200]}"
+        )
+    relatives = [name for name in listed.stdout.split("\0") if name]
+    regenerable = [
+        name for name in relatives
+        if REGENERABLE_IGNORED_DIRS.intersection(Path(name).parts)
+    ]
+    skipped = set(regenerable)
+    wanted = [name for name in relatives if name not in skipped]
+    if regenerable:
+        print(
+            f"  Not copying {len(regenerable)} regenerable ignored file(s) in "
+            f"{worktree_path.name} (under {', '.join(sorted(REGENERABLE_IGNORED_DIRS))})"
+        )
+    if not wanted:
+        return None
+
+    holder = (
+        repo_root / "data" / "speedrun" / "reset-artifacts"
+        / f"issue-{issue}" / "worktree-ignored"
+    )
+    destination = holder / worktree_path.name
+    if destination.exists():
+        destination = holder / f"{worktree_path.name}-{_disposal_stamp()}"
+    for name in wanted:
+        source = worktree_path / name
+        target = destination / name
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_symlink():
+                os.symlink(os.readlink(source), target)
+                same = os.readlink(source) == os.readlink(target)
+            elif source.is_file():
+                shutil.copy2(source, target)
+                same = filecmp.cmp(source, target, shallow=False)
+            else:
+                refuse(f"{name} is neither a regular file nor a symbolic link")
+                same = False
+        except OSError as exc:
+            refuse(f"copying {name} failed: {type(exc).__name__}: {exc}")
+            same = False
+        if not same:
+            refuse(f"the copy of {name} at {target} differs from its source")
+    print(
+        f"  Preserved {len(wanted)} ignored file(s) of {worktree_path.name}: "
+        f"{destination.relative_to(repo_root)}"
+    )
+    return destination
+
+
+def _remove_worktree_at(repo_root: Path, worktree_path: Path, issue: int) -> bool:
     """
     Remove one worktree directory if it exists.
 
@@ -174,9 +310,23 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
     and that refusal is a signal to respect, not to route around: this
     function never force-removes and never deletes a dirty directory. A
     worktree holding work is reported and left for the operator (#1762).
+
+    #4219: a clean worktree's ignored files are copied out and compared
+    before `git worktree remove` runs, because git does not count them as
+    changes and deletes them with the tree. When the copy fails, the
+    worktree stays and `ResetPreservationError` says why (callers that
+    cannot let it propagate catch it).
     """
     if not worktree_path.exists():
         return False
+
+    if worktree_is_dirty(worktree_path):
+        print(f"  SKIPPED worktree {worktree_path} — it holds uncommitted work.")
+        print("    Left in place. Inspect it, then remove it yourself once")
+        print("    you have salvaged anything worth keeping.")
+        return False
+
+    preserve_ignored_files(repo_root, worktree_path, issue)
 
     result = _run(
         ["git", "worktree", "remove", str(worktree_path)],
@@ -185,12 +335,6 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
     if result.returncode == 0:
         print(f"  Removed worktree: {worktree_path}")
         return True
-
-    if worktree_is_dirty(worktree_path):
-        print(f"  SKIPPED worktree {worktree_path} — it holds uncommitted work.")
-        print("    Left in place. Inspect it, then remove it yourself once")
-        print("    you have salvaged anything worth keeping.")
-        return False
 
     # Clean, but git would not remove it — typically a directory that is no
     # longer registered as a worktree. #3518: "clean" is not "nothing at
@@ -232,61 +376,6 @@ def current_branch(repo_root: Path) -> str:
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
-
-
-def delete_local_branches(repo_root: Path, issue: int) -> int:
-    """
-    Safe-delete the pipeline branches for one issue. Returns count deleted.
-
-    Candidates are the per-stage work branches the pipeline creates:
-    `{issue}-*` (e.g. `7-lld`) and the implementation branch `issue-{N}`
-    (e.g. `issue-7`, missed by the glob alone — #1862). The attempt branch
-    itself (the integration branch every pipeline PR targets under the
-    #1755 model) is named for the attempt, not the issue, so it never
-    matches. The checked-out branch is additionally excluded by name, so a
-    reset can never delete the very branch the attempt is standing on
-    (#1762).
-    """
-    # `--format` emits the bare refname — see #1937. Plain output decorates a
-    # worktree-checked-out branch with `+ `, which the old `lstrip('* ')` left
-    # intact, so the name compared against `active` below (and printed in the
-    # skip message) was `+ issue-4` rather than `issue-4`.
-    result = _run(
-        [
-            "git", "branch", "--list", "--format=%(refname:short)",
-            f"{issue}-*", f"issue-{issue}",
-        ],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        return 0
-    branches = [
-        name
-        for name in (line.strip() for line in result.stdout.splitlines())
-        if name
-    ]
-    active = current_branch(repo_root)
-    deleted = 0
-    for branch in branches:
-        if not branch:
-            continue
-        if branch == active:
-            print(f"  Skipped branch {branch} (currently checked out).")
-            continue
-        r = _run(["git", "branch", "-d", branch], cwd=repo_root)
-        if r.returncode == 0:
-            print(f"  Deleted local branch: {branch}")
-            deleted += 1
-        else:
-            # Safe-delete refused: the branch holds commits not reachable
-            # from HEAD. That refusal is the safety net working. Report it
-            # and move on -- never escalate to a force-delete, and never
-            # suggest one, per the banned-commands rule and ADR-0217.
-            print(
-                f"  Skipped branch {branch} (holds unmerged commits; "
-                f"left in place for review)."
-            )
-    return deleted
 
 
 def dispose_pipeline_branches(
@@ -430,61 +519,166 @@ def _unique_commit_count(
         return None
 
 
-def delete_remote_branches(repo_root: Path, issue: int) -> int:
+class ResetPreservationError(RuntimeError):
+    """A branch's tip could not be preserved, so the reset stopped before
+    removing it (#4215). Nothing was removed that was not first recoverable."""
+
+
+def _refuse(repo_root: Path, issue: int, where: str, what: str, cause: str,
+            consequence: str) -> None:
+    """Alert the operator and raise (ADR 0236, standard 0034).
+
+    `alert_operator` writes the ERROR to standard error, emails, and records
+    the failure; the raise stops every step that depends on this one.
+    """
+    from assemblyzero.core import alert
+
+    alert.alert_operator(
+        what=what, where=f"tools/speedrun_reset.py {where}", cause=cause,
+        consequence=consequence, repo=str(repo_root), issue=issue,
+    )
+    raise ResetPreservationError(f"{what}: {cause}")
+
+
+def _secure_remote_tip(
+    repo_root: Path, issue: int, branch: str, tip: str, base_ref: str,
+) -> str | None:
+    """Make `tip` recoverable before origin's `branch` is deleted (#4215).
+
+    Returns the graveyard ref now holding it on origin, or None when the tip
+    is proven to be on `base_ref` (the same proof `dispose_pipeline_branches`
+    uses: no commits beyond the base, and a count that cannot be established
+    is not a proof). Raises `ResetPreservationError` when it can do neither.
+    The graveyard ref is verified on origin before this returns, so the caller
+    deletes the branch only once the tip has another home.
+    """
+    where = "delete_remote_branches"
+    have = _run(["git", "cat-file", "-e", f"{tip}^{{commit}}"], cwd=repo_root)
+    if have.returncode != 0:
+        # Pushed from another clone, or this one's remote-tracking ref is
+        # stale: the object is not here yet. A graveyard push needs it here.
+        _run(["git", "fetch", "origin", branch], cwd=repo_root)
+        have = _run(["git", "cat-file", "-e", f"{tip}^{{commit}}"], cwd=repo_root)
+        if have.returncode != 0:
+            _refuse(
+                repo_root, issue, where,
+                f"reading the tip of origin's '{branch}' for #{issue}",
+                f"commit {tip[:12]} is not in this repository and could not be "
+                f"fetched: {(have.stderr or '').strip()[:200]}",
+                f"origin's '{branch}' was not deleted and the reset stopped",
+            )
+
+    unique = _unique_commit_count(repo_root, tip, base_ref)
+    if unique == 0:
+        print(
+            f"  Remote branch {branch} is on {base_ref}; "
+            f"no graveyard ref needed"
+        )
+        return None
+
+    graveyard = f"{GRAVEYARD_PREFIX}{branch}-{_disposal_stamp()}"
+    pushed = _run(
+        ["git", "push", "origin", f"{tip}:refs/heads/{graveyard}"], cwd=repo_root,
+    )
+    if pushed.returncode != 0:
+        _refuse(
+            repo_root, issue, where,
+            f"pushing a graveyard ref for origin's '{branch}' (#{issue})",
+            f"git push exited {pushed.returncode}: "
+            f"{(pushed.stderr or '').strip()[:200]}",
+            f"origin's '{branch}' was not deleted and the reset stopped",
+        )
+    # Read it back from origin: a push that reported success is not the
+    # evidence, the ref being there with this tip is.
+    verify = _run(
+        ["git", "ls-remote", "--heads", "origin", graveyard], cwd=repo_root,
+    )
+    on_origin = verify.stdout.split()[:1] if verify.returncode == 0 else []
+    if on_origin != [tip]:
+        _refuse(
+            repo_root, issue, where,
+            f"verifying the graveyard ref for origin's '{branch}' (#{issue})",
+            f"origin does not hold {graveyard} at {tip[:12]} after the push "
+            f"(ls-remote exited {verify.returncode}, said "
+            f"{verify.stdout.strip()[:120]!r})",
+            f"origin's '{branch}' was not deleted and the reset stopped",
+        )
+    detail = (
+        f"{unique} commit(s)" if unique is not None
+        else f"commits (count against '{base_ref}' unavailable)"
+    )
+    print(f"  Preserved remote branch {branch} -> {graveyard} ({detail} kept)")
+    return graveyard
+
+
+def delete_remote_branches(
+    repo_root: Path, issue: int, base: str | None = None,
+) -> int:
     """Delete the pipeline's pushed branches on origin. Returns count deleted.
 
     The local sweep alone left `issue-{N}` and `{N}-lld` on origin after every
     roll of the 2026-07-28 campaign, so the wipe was one forgotten command away
     from leaving debris that collides with the next roll's push (#1885).
 
-    Deletes each ref independently: a single `git push --delete a b` aborts the
-    whole push when either ref is already gone, which is the common case on a
-    partially-cleaned repo. The attempt branch is never a candidate — the same
-    exclusion the local sweep honours (#1762).
+    #4215: a branch is deleted on origin only after its tip is recoverable.
+    The merge driver pushes every pipeline branch with `-u`, and a branch that
+    was pushed and never landed holds commits that no other branch, rescue ref
+    or (when its PR was never opened) PR holds. Deleting it dropped them to
+    unreferenced objects, which breaks standard 0027. Each tip is pushed to
+    `graveyard/<branch>-<stamp>` and read back from origin first, unless it is
+    proven to be on `base` (see `_secure_remote_tip`). If it cannot be, the
+    branch stays, the operator is alerted, and the reset stops.
+
+    Which branches: whatever origin has that is `issue-{N}` or `{N}-*`, the
+    shape the PR filter and the clean-check use, asked of origin itself rather
+    than of local state. The attempt branch is never a candidate: it is named
+    for the attempt, and the checked-out branch is excluded by name (#1762).
+    Each ref is handled independently: a single `git push --delete a b` aborts
+    the whole push when either is already gone, the common case on a
+    partially-cleaned repo.
+
+    `base` is the branch the pipeline cut from; it falls back to `origin/HEAD`
+    as `dispose_pipeline_branches` does.
     """
-    candidates = [f"issue-{issue}"]
-    result = _run(
-        ["git", "branch", "--list", "--format=%(refname:short)", f"{issue}-*"],
-        cwd=repo_root,
-    )
-    if result.returncode == 0:
-        # Bare refnames only (#1937): a `+ `-decorated name here would be
-        # pushed to origin as a nonexistent ref and silently skipped.
-        candidates.extend(
-            name
-            for name in (line.strip() for line in result.stdout.splitlines())
-            if name
-        )
-    # Whatever the local sweep already deleted still needs removing on origin,
-    # so ask origin what it actually has rather than trusting local state.
     ls_remote = _run(["git", "ls-remote", "--heads", "origin"], cwd=repo_root)
     if ls_remote.returncode != 0:
-        print("  WARNING: could not list remote branches; skipping remote sweep")
-        return 0
-    remote_names = {
-        line.split("refs/heads/", 1)[1].strip()
-        for line in ls_remote.stdout.splitlines()
-        if "refs/heads/" in line
-    }
-    for suffix in (f"{issue}-lld",):
-        candidates.append(suffix)
+        _refuse(
+            repo_root, issue, "delete_remote_branches",
+            f"listing origin's branches for #{issue}",
+            f"git ls-remote exited {ls_remote.returncode}: "
+            f"{(ls_remote.stderr or '').strip()[:200]}",
+            "no branch was deleted on origin and the reset stopped",
+        )
+    remote_tips = {}
+    for line in ls_remote.stdout.splitlines():
+        if "refs/heads/" not in line:
+            continue
+        tip, ref = line.split(None, 1)
+        remote_tips[ref.strip().split("refs/heads/", 1)[1]] = tip
 
+    base_ref = base or _default_base_ref(repo_root)
     active = current_branch(repo_root)
     deleted = 0
-    for branch in dict.fromkeys(candidates):  # de-dupe, keep order
-        if not branch or branch == active or branch not in remote_names:
+    for branch, tip in remote_tips.items():
+        if branch.startswith(GRAVEYARD_PREFIX) or not is_pipeline_branch(branch, issue):
             continue
+        if branch == active:
+            continue
+        _secure_remote_tip(repo_root, issue, branch, tip, base_ref)
         r = _run(
             ["git", "push", "origin", "--delete", branch], cwd=repo_root
         )
-        if r.returncode == 0:
-            print(f"  Deleted remote branch: {branch}")
-            deleted += 1
-        else:
-            print(
-                f"  WARNING: could not delete remote branch {branch}: "
-                f"{(r.stderr or '').strip()[:120]}"
+        if r.returncode != 0:
+            _refuse(
+                repo_root, issue, "delete_remote_branches",
+                f"deleting origin's '{branch}' (#{issue})",
+                f"git push --delete exited {r.returncode}: "
+                f"{(r.stderr or '').strip()[:200]}",
+                "the reset stopped; the branch is still on origin and its tip "
+                "is preserved",
             )
+        print(f"  Deleted remote branch: {branch}")
+        deleted += 1
     return deleted
 
 
@@ -539,6 +733,34 @@ def archive_lineage_dirs(repo_root: Path, issue: int) -> int:
     return archived
 
 
+#: The branches, as formats over the issue number, a checkpoint commit can sit
+#: on (#4216). `issue-{issue}` is the branch the impl stage commits its
+#: checkpoints on (`stages.py`; `testing/checkpoints.py`) and comes first.
+#: Nothing in the pipeline creates `{issue}-impl`; it stays for a branch an
+#: older roll left. The pin below and `speedrun_roll.find_checkpoint` both
+#: read this one list, so they cannot disagree about where a checkpoint lives.
+CHECKPOINT_BRANCH_FORMATS = (
+    "issue-{issue}",
+    "{issue}-impl",
+    "{issue}-lld",
+    "{issue}-spec",
+    "{issue}-fix",
+)
+
+
+def checkpoint_search_refs(issue: int) -> list[str]:
+    """Every ref a checkpoint for this issue could be on, in search order.
+
+    Each branch is searched locally and then as `origin/<branch>`, so a
+    checkpoint that was pushed, and whose local branch is gone, is still found.
+    """
+    refs: list[str] = []
+    for branch_format in CHECKPOINT_BRANCH_FORMATS:
+        branch = branch_format.format(issue=issue)
+        refs.extend((branch, f"origin/{branch}"))
+    return refs
+
+
 def pin_checkpoint(repo_root: Path, issue: int) -> str | None:
     """Stamp a rescue ref over this issue's newest checkpoint, before branches go.
 
@@ -550,12 +772,7 @@ def pin_checkpoint(repo_root: Path, issue: int) -> str | None:
 
     Returns the rescue ref name, or None when there was no checkpoint to pin.
     """
-    for ref in (
-        f"{issue}-impl", f"origin/{issue}-impl",
-        f"{issue}-lld", f"origin/{issue}-lld",
-        f"{issue}-spec", f"origin/{issue}-spec",
-        f"{issue}-fix", f"origin/{issue}-fix",
-    ):
+    for ref in checkpoint_search_refs(issue):
         found = _run(
             ["git", "log", "-1", "--format=%H", "--grep=^\\[CP:", ref],
             cwd=repo_root,
@@ -688,7 +905,9 @@ class LiveOrchestratorError(RuntimeError):
     """Raised when a reset is asked to run under a live orchestrator (#2510)."""
 
 
-def refuse_if_orchestrator_is_live(repo_root: Path, issue: int) -> None:
+def refuse_if_orchestrator_is_live(
+    repo_root: Path, issue: int, az_root: Path | None = None,
+) -> None:
     """Refuse -- not warn -- while this issue's lock names a live process.
 
     On 2026-09-02 at 19:20 the follower announced `The roll is done: FAILED`
@@ -703,23 +922,30 @@ def refuse_if_orchestrator_is_live(repo_root: Path, issue: int) -> None:
     `git clean` in someone else's checkout, so this raises rather than printing.
     The lock has carried the pid the whole time -- nothing needed to be recorded
     that was not already there, only read.
-    """
-    from assemblyzero.workflows.orchestrator.resume import live_orchestrator_pid
 
-    previous = Path.cwd()
-    try:
-        # The lock directory is repo-relative, so it is read from the repo the
-        # reset is about rather than from wherever the operator invoked this.
-        os.chdir(repo_root)
-        pid = live_orchestrator_pid(issue)
-    finally:
-        os.chdir(previous)
+    #4217: the lock is read where the orchestrator WRITES it. Its lock
+    directory is relative to its working directory, and `speedrun_roll.py`
+    starts it with the AssemblyZero root as that directory, so the lock lives
+    under the AssemblyZero root and not in the target repository, which may
+    have no `.assemblyzero` directory at all. This used to read the target
+    repo's copy, which nothing writes, so the refusal could not see a roll
+    started by `speedrun_roll.py`. The path comes from the orchestrator's own
+    `orchestration_lock_path`, the function its writer calls.
+    """
+    from assemblyzero.workflows.orchestrator.resume import (
+        live_orchestrator_pid,
+        orchestration_lock_path,
+    )
+
+    az_root = AZ_ROOT if az_root is None else Path(az_root)
+    pid = live_orchestrator_pid(issue, az_root)
     if pid is None:
         return
     raise LiveOrchestratorError(
         f"issue #{issue} has a live orchestrator: the lock at "
-        f"{repo_root / '.assemblyzero' / 'orchestrator' / 'locks' / f'{issue}.lock'} "
-        f"names pid {pid}, and that process is running. Refusing to reset.\n"
+        f"{orchestration_lock_path(issue, az_root)} "
+        f"names pid {pid}, and that process is running. Refusing to reset "
+        f"{repo_root}.\n"
         f"A reset here closes the run's PRs, deletes its branches locally and "
         f"on origin, and archives the lineage the run is still writing (#2510).\n"
         f"The wrapper's own pid file can name a DEAD process while the "
@@ -729,7 +955,8 @@ def refuse_if_orchestrator_is_live(repo_root: Path, issue: int) -> None:
 
 
 def reset_one_issue(
-    repo_root: Path, repo: str, issue: int, preserve: set[str] | None = None
+    repo_root: Path, repo: str, issue: int, preserve: set[str] | None = None,
+    base: str | None = None,
 ) -> None:
     """Run all reset steps for one issue.
 
@@ -741,17 +968,199 @@ def reset_one_issue(
 
     #2510: the live-orchestrator refusal comes before the pin, because the pin
     is already a write and everything after it is destructive.
+
+    #4215: branches go by the proof `dispose_pipeline_branches` uses, never by
+    `git branch -d` alone. Locally a branch with work of its own is renamed
+    under `graveyard/`; on origin its tip is pushed to a `graveyard/` ref and
+    read back first. Either way a branch is removed only when its tip is
+    recoverable or proven to be on ``base``, the branch the pipeline cut from
+    (`origin/HEAD` when not given). A branch that cannot be secured stops the
+    reset with `ResetPreservationError`, after alerting the operator.
     """
     refuse_if_orchestrator_is_live(repo_root, issue)
     print(f"\nResetting issue #{issue}:")
     pin_checkpoint(repo_root, issue)
     close_open_prs(repo, issue)
     remove_worktree(repo_root, issue)
-    delete_local_branches(repo_root, issue)
-    delete_remote_branches(repo_root, issue)
+    failures = dispose_pipeline_branches(repo_root, issue, base)
+    if failures:
+        _refuse(
+            repo_root, issue, "reset_one_issue",
+            f"disposing of #{issue}'s local pipeline branches",
+            "; ".join(failures),
+            "the reset stopped before it touched origin's branches",
+        )
+    delete_remote_branches(repo_root, issue, base)
     archive_lineage_dirs(repo_root, issue)
     relocate_lld_artifacts(repo_root, issue, preserve)
     reopen_issue(repo, issue)
+
+
+#: The operation token in the typed phrase (`tools/_gate.py`): the phrase is
+#: `approve forbidden reset-issues for <owner/repo> #N #M`.
+RESET_OPERATION = "reset-issues"
+
+
+def reset_target(repo: str, issues: list[int]) -> str:
+    """The repository and issues a reset acts on, as the phrase names them (#4221)."""
+    return f"{repo} " + " ".join(f"#{issue}" for issue in issues)
+
+
+def reset_phrase(repo: str, issues: list[int]) -> str:
+    """The exact phrase the operator types to authorize this reset."""
+    import _gate
+
+    return _gate.gate_phrase(RESET_OPERATION, reset_target(repo, issues))
+
+
+def confirm_reset(repo: str, issues: list[int], *, stream=None) -> bool:
+    """Ask for the typed phrase on this process's console. True only on a match.
+
+    #4221 / standard 0017: a script whose source holds a command the shell
+    guard refuses (here `git push --delete`) puts its mutation behind
+    `--execute` and a typed phrase, never a y/n an auto-answering wrapper can
+    send. `require_confirmation` exits on a wrong phrase or no console; that
+    exit is turned into False here so each caller refuses in its own way,
+    having changed nothing. `stream` is the test seam it offers.
+    """
+    import _gate
+
+    try:
+        _gate.require_confirmation(RESET_OPERATION, reset_target(repo, issues), stream=stream)
+    except SystemExit:
+        return False
+    return True
+
+
+def reset_plan(
+    repo_root: Path, repo: str, issue: int, base: str | None = None,
+) -> list[str]:
+    """What `reset_one_issue` would close, delete and remove for this issue.
+
+    Read from the repository and GitHub; changes nothing (#4221). A thing
+    that cannot be read is named in the plan, never left out of it.
+    """
+    base_ref = base or _default_base_ref(repo_root)
+    active = current_branch(repo_root)
+    lines = [f"Issue #{issue}:"]
+
+    prs = _run([
+        "gh", "pr", "list", "--repo", repo, "--state", "open",
+        "--search", f"Closes #{issue}", "--json", "number,title,headRefName",
+    ])
+    try:
+        listed = json.loads(prs.stdout or "[]") if prs.returncode == 0 else None
+    except json.JSONDecodeError:
+        listed = None
+    if listed is None:
+        lines.append(
+            f"  PRs: could not be listed ({(prs.stderr or 'unreadable output').strip()[:120]})"
+        )
+    for pr in listed or []:
+        head = pr.get("headRefName") or "unknown"
+        if is_pipeline_branch(head, issue):
+            lines.append(f"  close PR #{pr['number']} (head {head}): {pr['title']}")
+        else:
+            lines.append(
+                f"  leave open PR #{pr['number']} (head {head} is not a pipeline "
+                f"branch): {pr['title']}"
+            )
+
+    parent = repo_root.parent
+    for suffix in (f"{issue}", f"{issue}-lld"):
+        for path in (
+            repo_root / "data" / "worktrees" / suffix,
+            parent / f"{repo_root.name}-{suffix}",
+        ):
+            if not path.exists():
+                continue
+            if worktree_is_dirty(path):
+                lines.append(f"  keep worktree {path} (uncommitted work, or unreadable)")
+            else:
+                lines.append(
+                    f"  remove worktree {path} (its ignored files are copied to "
+                    f"data/speedrun/reset-artifacts/issue-{issue}/ first)"
+                )
+
+    def disposition(tip: str, where: str, name: str) -> str:
+        unique = _unique_commit_count(repo_root, tip, base_ref)
+        if unique == 0:
+            return f"on {base_ref}, no graveyard ref needed"
+        count = f"{unique} commit(s)" if unique is not None else "commits (count unavailable)"
+        return f"{count} beyond {base_ref}, kept under {GRAVEYARD_PREFIX}{name}-<stamp>{where}"
+
+    local = _run(
+        ["git", "branch", "--list", "--format=%(refname:short) %(objectname)",
+         f"{issue}-*", f"issue-{issue}"],
+        cwd=repo_root,
+    )
+    if local.returncode != 0:
+        lines.append(f"  local branches: could not be listed ({(local.stderr or '').strip()[:120]})")
+    for entry in local.stdout.splitlines() if local.returncode == 0 else []:
+        name, _, tip = entry.partition(" ")
+        if not name or name.startswith(GRAVEYARD_PREFIX) or name == active:
+            continue
+        verdict = disposition(tip, " (renamed)", name)
+        action = "delete" if verdict.startswith("on ") else "rename"
+        lines.append(f"  {action} local branch {name}: {verdict}")
+
+    remote = _run(["git", "ls-remote", "--heads", "origin"], cwd=repo_root)
+    if remote.returncode != 0:
+        lines.append(f"  origin branches: could not be listed ({(remote.stderr or '').strip()[:120]})")
+    for line in remote.stdout.splitlines() if remote.returncode == 0 else []:
+        if "refs/heads/" not in line:
+            continue
+        tip, ref = line.split(None, 1)
+        name = ref.strip().split("refs/heads/", 1)[1]
+        if name.startswith(GRAVEYARD_PREFIX) or name == active or not is_pipeline_branch(name, issue):
+            continue
+        have = _run(["git", "cat-file", "-e", f"{tip}^{{commit}}"], cwd=repo_root)
+        if have.returncode != 0:
+            lines.append(
+                f"  delete origin's {name}: tip {tip[:12]} is fetched and pushed to "
+                f"{GRAVEYARD_PREFIX}{name}-<stamp> first"
+            )
+        else:
+            lines.append(f"  delete origin's {name}: {disposition(tip, ' on origin', name)}")
+
+    lineage = repo_root / "docs" / "lineage" / "active"
+    for d in sorted(lineage.glob(f"{issue}-*")) if lineage.exists() else []:
+        if d.is_dir():
+            lines.append(f"  archive docs/lineage/active/{d.name} to reset-artifacts")
+
+    state = _run(["gh", "issue", "view", str(issue), "--repo", repo, "--json", "state"])
+    try:
+        issue_state = json.loads(state.stdout)["state"] if state.returncode == 0 else None
+    except (json.JSONDecodeError, KeyError, TypeError):
+        issue_state = None
+    if issue_state is None:
+        lines.append(f"  issue #{issue}: state could not be read")
+    elif issue_state != "OPEN":
+        lines.append(f"  reopen issue #{issue}")
+    return lines
+
+
+def print_reset_plan(
+    repo_root: Path, repo: str, issues: list[int], base: str | None = None,
+    *, execute: bool = False,
+) -> None:
+    """Print what a reset would do (#4221).
+
+    The dry run (`execute=False`) ends by naming `--execute` and the phrase
+    that authorizes it. Under `--execute` the plan is shown just before the
+    prompt, which prints the phrase itself.
+    """
+    print("RESET PLAN (nothing has been changed yet):" if execute
+          else "RESET PLAN (nothing was changed):")
+    for issue in issues:
+        for line in reset_plan(repo_root, repo, issue, base):
+            print(line)
+    if not execute:
+        print(
+            "\nTo carry this out, pass --execute. You will be asked to type this "
+            "exactly:\n"
+            f"  {reset_phrase(repo, issues)}"
+        )
 
 
 def all_logged_issues(repo_root: Path) -> list[int]:
@@ -788,6 +1197,15 @@ def main() -> int:
         "--all-issues", action="store_true",
         help="Reset every issue that has appeared in run-log.jsonl",
     )
+    parser.add_argument(
+        "--execute", action="store_true",
+        help=(
+            "Carry the reset out (#4221). Without it the tool prints what it "
+            "would close, delete and remove, and stops. With it, you are "
+            "asked to type a phrase naming the repository and the issues "
+            "(standard 0017); anything else changes nothing."
+        ),
+    )
     args = parser.parse_args()
 
     repo_root = args.repo.resolve()
@@ -801,25 +1219,41 @@ def main() -> int:
         print(f"ERROR: {e}")
         return 1
 
+    # #4215: the branch the attempt stands on is the base a pipeline branch is
+    # proven against; '' (detached, unreadable) falls back to origin/HEAD.
+    base = current_branch(repo_root) or None
+
+    if args.issue:
+        issues = [args.issue]
+    else:
+        issues = all_logged_issues(repo_root)
+        if not issues:
+            print("No issues in run-log.jsonl — nothing to reset.")
+            return 0
+
+    # #4221: the reset closes PRs, deletes branches locally and on origin and
+    # removes worktrees, so it sits behind --execute and a typed phrase
+    # (standard 0017). Without --execute this is the dry run: it prints the
+    # plan and writes nothing.
+    if not args.execute:
+        print_reset_plan(repo_root, repo, issues, base)
+        return 0
+    if not confirm_reset(repo, issues):
+        print("\nREFUSED: the confirmation phrase was not typed. Nothing was changed.")
+        return 1
+
     # #2510: a live orchestrator stops the whole reset, not just its own issue.
     # A sweep that reset four issues and then refused the fifth would have done
     # four issues' worth of irreversible work before saying so.
+    reset_issues = issues
     try:
-        if args.issue:
-            reset_issues = [args.issue]
-            reset_one_issue(repo_root, repo, args.issue)
-        else:
-            issues = all_logged_issues(repo_root)
-            if not issues:
-                print("No issues in run-log.jsonl — nothing to reset.")
-                return 0
-            for issue in issues:
-                refuse_if_orchestrator_is_live(repo_root, issue)
+        for issue in issues:
+            refuse_if_orchestrator_is_live(repo_root, issue)
+        if not args.issue:
             print(f"Resetting {len(issues)} issue(s) from run-log: {issues}")
-            for issue in issues:
-                reset_one_issue(repo_root, repo, issue)
-            reset_issues = issues
-    except LiveOrchestratorError as exc:
+        for issue in issues:
+            reset_one_issue(repo_root, repo, issue, base=base)
+    except (LiveOrchestratorError, ResetPreservationError) as exc:
         print(f"\nREFUSED: {exc}")
         return 1
 

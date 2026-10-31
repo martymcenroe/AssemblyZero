@@ -101,6 +101,21 @@ def determine_resume_stage(
     return resume_from
 
 
+def orchestration_lock_path(issue_number: int, root: Path | None = None) -> Path:
+    """Where the lock for this issue lives (#4217).
+
+    `LOCK_DIR` is relative, so the lock sits under the orchestrator's working
+    directory, which `speedrun_roll.py` sets to the AssemblyZero root and not
+    to the target repository. The writer calls this with no `root` and gets
+    the cwd-relative path it always used; a reader that runs from somewhere
+    else (`speedrun_reset.py`) passes the AssemblyZero root and gets the file
+    the writer made. Both go through this function, so the layout is defined
+    once and the two cannot drift.
+    """
+    lock_dir = LOCK_DIR if root is None else Path(root) / LOCK_DIR
+    return lock_dir / f"{issue_number}.lock"
+
+
 def _is_pid_alive(pid: int) -> bool:
     """Check if a process with given PID is alive."""
     try:
@@ -118,8 +133,8 @@ def acquire_orchestration_lock(issue_number: int) -> bool:
 
     Returns True if lock acquired, False if already locked by live process.
     """
-    LOCK_DIR.mkdir(parents=True, exist_ok=True)
-    lock_path = LOCK_DIR / f"{issue_number}.lock"
+    lock_path = orchestration_lock_path(issue_number)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     if lock_path.exists():
         # Check if lock is stale
@@ -150,11 +165,11 @@ def acquire_orchestration_lock(issue_number: int) -> bool:
 
 def release_orchestration_lock(issue_number: int) -> None:
     """Release lock file for an issue. No-op if lock doesn't exist."""
-    lock_path = LOCK_DIR / f"{issue_number}.lock"
+    lock_path = orchestration_lock_path(issue_number)
     lock_path.unlink(missing_ok=True)
 
 
-def live_orchestrator_pid(issue_number: int) -> int | None:
+def live_orchestrator_pid(issue_number: int, root: Path | None = None) -> int | None:
     """The pid of an orchestrator currently holding this issue's lock, or None.
 
     The same two facts `acquire_orchestration_lock` reads, exposed so a
@@ -165,8 +180,12 @@ def live_orchestrator_pid(issue_number: int) -> int | None:
 
     A missing, corrupt or stale lock returns None -- there is no live run to
     protect. A lock naming a live pid returns that pid, and the caller refuses.
+
+    `root` is the directory the orchestrator ran from (the AssemblyZero root
+    for a roll); without it the lock is read relative to this process's cwd
+    (#4217).
     """
-    lock_path = LOCK_DIR / f"{issue_number}.lock"
+    lock_path = orchestration_lock_path(issue_number, root)
     if not lock_path.exists():
         return None
     try:

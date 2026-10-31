@@ -171,7 +171,7 @@ class TestEnsureBaseDecides:
         _git(repo, "branch", "issue-4")
         healed = {}
 
-        def fake_reset(repo_root, slug, issue, preserve=None):
+        def fake_reset(repo_root, slug, issue, preserve=None, base=None):
             healed["called"] = issue
             healed["preserve"] = preserve
             _git(repo_root, "branch", "-d", "issue-4")
@@ -198,7 +198,7 @@ class TestEnsureBaseDecides:
 
         with _no_network(), \
              patch.object(sr.reset, "reset_one_issue",
-                          lambda *a: called.append("reset")), \
+                          lambda *a, **k: called.append("reset")), \
              patch.object(sr.reset, "_gh_repo", lambda p: "o/r"):
             base = sr.ensure_base(repo, 4, log)
 
@@ -211,7 +211,7 @@ class TestEnsureBaseDecides:
         _git(repo, "branch", "issue-4")
 
         with _no_network(), \
-             patch.object(sr.reset, "reset_one_issue", lambda *a: None), \
+             patch.object(sr.reset, "reset_one_issue", lambda *a, **k: None), \
              patch.object(sr.reset, "_gh_repo", lambda p: "o/r"):
             base = sr.ensure_base(repo, 4, log, True)
 
