@@ -28,4 +28,4 @@ The tests drive `main()`, which `tests/tools/test_verify_encrypted_secret.py` do
 
 The adversarial tier was not run: it holds one opt-in test that needs live Gemini access and is skipped without it, and nothing here touches the adversarial node.
 
-The first unit run had 20 failures. One was the stale fail-open baseline entry, five were the N7 halt site with no registry row, and thirteen were fixtures with a lineage outside `active/`; each is repaired here. After the first fix a further two came from the halt-row ratchet, which is why the site went onto an existing row.
+The first unit run had 20 failures. One was the stale fail-open baseline entry, six were the N7 halt site with no registry row, and thirteen were fixtures with a lineage outside `active/`; each is repaired here. After the first fix a further two came from the halt-row ratchet, which is why the site went onto an existing row.
