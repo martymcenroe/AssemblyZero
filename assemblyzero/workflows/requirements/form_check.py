@@ -165,7 +165,31 @@ class FormReport:
 
     @property
     def ok(self) -> bool:
+        """No violation. Whether every part was examined is ``not_checked``."""
         return not self.violations
+
+    @property
+    def not_checked(self) -> list[str]:
+        """The parts of the form this run could not examine, in words (#3585).
+
+        A run that examined nothing of a part used to render PASS: no
+        requirements section, no table of the checked kind, or no variable
+        table whose owners can be joined to criteria. Under ADR 0236 a check
+        that did not run is not a pass, so ``render_report`` renders such a
+        run NOT CHECKED, a failing verdict.
+        """
+        missing = []
+        if not self.ears_ran:
+            missing.append("EARS (no '## Requirements' section)")
+        if self.vacuous_tables:
+            missing.append(
+                f"decision tables ({self.non_decision_tables} present, none of the checked kind)"
+            )
+        if not self.ownership.table_found:
+            missing.append("variable ownership (no variable table)")
+        elif not self.ownership.joinable:
+            missing.append("variable ownership (every owner named in prose, none joinable)")
+        return missing
 
     @property
     def vacuous_tables(self) -> bool:
@@ -382,7 +406,14 @@ def worn_criterion_id(sentence: str) -> str | None:
 
 
 def check_ears(body: str, report: FormReport) -> None:
-    """Validate the marked requirements section. Absence is a vacuous pass."""
+    """Validate the marked requirements section.
+
+    Absence means the EARS check could not run. Since #3585 that is not a
+    pass: ``FormReport.not_checked`` names it and the verdict renders NOT
+    CHECKED. It is not a violation, because the fleet's one converted issue
+    (boostgauge #7, ruled 2026-08-12) carries its requirements in decision
+    tables and no ``## Requirements`` section, and a violation would fail it.
+    """
     lines = section_lines(body, REQUIREMENTS_HEADING)
     if lines is None:
         report.ears_ran = False
@@ -811,18 +842,16 @@ def render_report(report: FormReport, label: str) -> str:
     # line is what an operator reads. A body disclosure eleven lines above a
     # bare PASS is what this issue measured and is not enough.
     #
-    # Scoped to the TABLE branch deliberately. Vacuous EARS and vacuous
-    # ownership state themselves in the body and do not qualify the verdict;
-    # making them do so would extend the fleet-wide vacuity invariant by
-    # implementation, and that invariant is a standing proposal for the
-    # operator to ratify rather than something to decree from a print
-    # statement.
-    if report.ok:
-        out.append("RESULT: PASS -- 0 violations of the ADR 0226 form." + (
-            f" VACUOUS on tables: {report.non_decision_tables} present, "
-            f"0 examined."
-            if report.vacuous_tables else ""
-        ))
+    # #3585: the vacuity the comment here once called a standing proposal is
+    # ADR 0236's rule, accepted 2026-10-06: a part of the form that was not
+    # examined is NOT CHECKED, a failing verdict, never a PASS.
+    if report.ok and not report.not_checked:
+        out.append("RESULT: PASS -- 0 violations of the ADR 0226 form.")
+    elif report.ok:
+        out.append(
+            "RESULT: NOT CHECKED -- 0 violations in what was examined; not "
+            "examined: " + "; ".join(report.not_checked) + "."
+        )
     else:
         out.append(f"RESULT: FAIL -- {len(report.violations)} violation(s)." + (
             f" VACUOUS on tables: {report.non_decision_tables} present, "

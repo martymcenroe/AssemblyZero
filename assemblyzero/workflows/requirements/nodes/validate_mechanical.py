@@ -18,6 +18,12 @@ and save validation errors to lineage for audit trail.
 Issue #600: Integrate AST-based import sentinel to catch missing imports in
 existing Python files referenced by the LLD before Gemini review.
 
+#3585 (ADR 0236, standard 0034): a check that cannot run is a failure. A title
+the issue-number check cannot read blocks the draft; a git probe of the base
+that cannot answer raises ``GitOperationError``; a similar-file search or an
+AST sentinel that crashes raises naming the file; a lineage record or a
+telemetry record that cannot be written stops the run.
+
 This node validates LLD content deterministically without LLM calls:
 - Mandatory sections exist (2.1, 11, 12)
 - File paths are valid (Modify/Delete exist, Add parents exist)
@@ -27,7 +33,7 @@ This node validates LLD content deterministically without LLM calls:
 - LLD title issue number matches workflow issue number
 - Target repo validation (None, empty, non-existent paths are blocking errors)
 - Change type normalization (handles parenthetical suffixes like "Add (Directory)")
-- AST-based import sentinel on existing Python files (warning only)
+- AST-based import sentinel on existing Python files (findings warn; a crash raises)
 """
 
 import logging
@@ -38,6 +44,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict
 
+from assemblyzero.core import alert
 from assemblyzero.core.seats import resolve
 from assemblyzero.utils.ast_sentinel import analyze_file as ast_analyze_file
 
@@ -536,52 +543,62 @@ def extract_title_issue_number(content: str) -> int | None:
         content: Full LLD markdown content
         
     Returns:
-        Extracted issue number as int, or None if not found/parseable.
+        Extracted issue number as int, or None when the title carries none.
+        The number is group 1, which is digits only, so ``int`` cannot fail:
+        #3585 removed a handler that implied it could.
     """
     match = TITLE_ISSUE_NUMBER_PATTERN.search(content)
     if not match:
         return None
-    
-    try:
-        # Group 1 is the number without leading zeros
-        return int(match.group(1))
-    except (ValueError, IndexError):
-        return None
+    # Group 1 is the number without leading zeros
+    return int(match.group(1))
 
 
 def validate_title_issue_number(content: str, issue_number: int) -> list[ValidationError]:
     """Verify the LLD title contains the correct issue number.
-    
+
+    A title the check cannot read (no H1, or no number in it) is an ERROR
+    (#3585): it used to be a WARNING, so a draft whose issue could not be
+    checked passed N1.5 as if it had been, and the drafter was never told.
+
     Args:
         content: Full LLD markdown content
         issue_number: Expected issue number from workflow context
-        
+
     Returns:
         List of ValidationError dicts. Empty if valid.
     """
     errors = []
-    
+
     # Check if H1 heading exists
     h1_match = re.search(r'^#\s+', content, re.MULTILINE)
     if not h1_match:
         errors.append(
             ValidationError(
-                severity=ValidationSeverity.WARNING,
+                severity=ValidationSeverity.ERROR,
                 section="Title",
-                message="No H1 title found in LLD",
+                message=(
+                    f"No H1 title found in LLD, so its issue number cannot be "
+                    f"checked; the first line must be '# {issue_number} - "
+                    f"Feature: <title>'"
+                ),
             )
         )
         return errors
-    
+
     # Extract issue number from title
     extracted_number = extract_title_issue_number(content)
-    
+
     if extracted_number is None:
         errors.append(
             ValidationError(
-                severity=ValidationSeverity.WARNING,
+                severity=ValidationSeverity.ERROR,
                 section="Title",
-                message="Could not extract issue number from title",
+                message=(
+                    f"Could not extract issue number from title, so it cannot "
+                    f"be checked against issue {issue_number}; the title must "
+                    f"read '# {issue_number} - Feature: <title>'"
+                ),
             )
         )
         return errors
@@ -1019,7 +1036,13 @@ def find_similar_files(filename: str, repo_root: Path, max_results: int = 3) -> 
         max_results: Maximum number of suggestions to return.
 
     Returns:
-        List of relative paths to similar files.
+        List of relative paths to similar files; empty when the search ran
+        and found none.
+
+    Raises:
+        OSError, ValueError: the search itself failed (#3585). It used to
+            skip the directory, so the drafter got a shorter list of
+            suggestions and nobody knew why.
     """
     suggestions = []
 
@@ -1053,8 +1076,13 @@ def find_similar_files(filename: str, repo_root: Path, max_results: int = 3) -> 
                             suggestions.append(rel_path)
                             if len(suggestions) >= max_results:
                                 return suggestions
-            except (OSError, ValueError):
-                continue
+            except (OSError, ValueError) as exc:
+                logger.error(
+                    "[N1.5] the similar-file search for %s failed in %s "
+                    "(pattern %s): %s: %s; mechanical validation stops",
+                    filename, dir_path, pattern, type(exc).__name__, exc,
+                )
+                raise
 
     return suggestions
 
@@ -1063,23 +1091,44 @@ def _exists_on_base(repo_root: Path, base_branch: str, path: str) -> bool:
     """Does the integration branch ship this path? (#2056)
 
     Resolved against origin/<base> -- the local attempt ref is never
-    fast-forwarded (#2021), so a bare name would read a stale tree. Empty
-    base or any git trouble reads as "no", which restores the old behavior.
+    fast-forwarded (#2021), so a bare name would read a stale tree.
+
+    An empty base is an answer: the run declared no integration branch, so
+    there is nothing to ask git, and the path is "not on a base".
+
+    ``git ls-tree`` answers on a base that resolves: an entry when the base
+    ships the path, nothing when it does not. Any other outcome raises
+    ``GitOperationError`` naming the repo, the ref and the path (#3585): git
+    that cannot be run, a base that does not resolve, a directory that is not
+    a repository. ``git cat-file -e`` used to be asked instead, and every one
+    of those read as "the base does not ship this path", which told the
+    drafter a correct Modify was wrong.
     """
     if not base_branch:
         return False
     import subprocess as _sp
 
+    from assemblyzero.workflows.requirements.git_operations import GitOperationError
+
     ref = base_branch if base_branch.startswith("origin/") else f"origin/{base_branch}"
     normalised = path.replace("\\", "/")
+    argv = [
+        "git", "--literal-pathspecs", "ls-tree", "--full-tree", "-z",
+        "--name-only", ref, "--", normalised,
+    ]
+    subject = f"whether {ref} in {repo_root} ships {normalised}"
     try:
-        probe = _sp.run(
-            ["git", "cat-file", "-e", f"{ref}:{normalised}"],
-            cwd=str(repo_root), capture_output=True, text=True,
+        probe = _sp.run(argv, cwd=str(repo_root), capture_output=True, text=True)
+    except OSError as exc:
+        raise GitOperationError(
+            f"cannot ask {subject}: git could not be run: {type(exc).__name__}: {exc}"
+        ) from exc
+    if probe.returncode != 0:
+        raise GitOperationError(
+            f"cannot ask {subject}: git ls-tree rc={probe.returncode}, "
+            f"stderr: {probe.stderr.strip() or '(empty)'}"
         )
-    except OSError:
-        return False
-    return probe.returncode == 0
+    return bool(probe.stdout.strip("\0").strip())
 
 
 def validate_file_paths(
@@ -1485,6 +1534,10 @@ def run_ast_sentinel_on_modify_files(
     Returns warnings (not errors) since sentinel findings are advisory and
     should not block the LLD workflow.
 
+    A sentinel that crashes is not a finding: it is a check that did not run.
+    It raises, after an ERROR line naming the file (#3585); it used to log at
+    DEBUG and count the file as checked.
+
     Args:
         files: List of file dicts with path and change_type.
         repo_root: Path to repository root.
@@ -1510,9 +1563,13 @@ def run_ast_sentinel_on_modify_files(
 
         try:
             result = ast_analyze_file(full_path)
-        except Exception as e:
-            logger.debug(f"AST sentinel failed on {path}: {e}")
-            continue
+        except Exception as exc:
+            logger.error(
+                "[N1.5] the AST import sentinel crashed on %s: %s: %s; "
+                "mechanical validation stops",
+                full_path, type(exc).__name__, exc,
+            )
+            raise
 
         if not result.ok:
             for err in result.errors:
@@ -1534,6 +1591,33 @@ def run_ast_sentinel_on_modify_files(
 # =============================================================================
 # Main Validation Node
 # =============================================================================
+
+
+def _save_errors_to_lineage(state: dict[str, Any], error_messages: list[str]) -> None:
+    """Write the blocked draft's errors to the run's lineage folder (#334).
+
+    No lineage folder in the state is an answer, not a failure: the caller
+    asked for no audit trail (the answer-key replay calls the node with none),
+    so nothing is written.
+
+    A write that fails raises after an ERROR line naming the issue, the repo,
+    the draft and the folder (#3585). It used to be a WARNING, and the run
+    went on without the audit record of why the draft was blocked.
+    """
+    lineage_path = state.get("lineage_path")
+    if not lineage_path:
+        return
+    draft_number = state.get("draft_number", 1)
+    try:
+        save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
+    except Exception as exc:
+        logger.error(
+            "[N1.5] cannot save the mechanical validation errors of issue #%s "
+            "(repo %s, draft %s) to the lineage folder %s: %s: %s; the run stops",
+            state.get("issue_number"), state.get("target_repo", ""), draft_number,
+            lineage_path, type(exc).__name__, exc,
+        )
+        raise
 
 
 def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -1568,20 +1652,14 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     lld_content = state.get("current_draft", "")
     target_repo = state.get("target_repo", "")
     issue_number = state.get("issue_number")
-    lineage_path = state.get("lineage_path")
-    draft_number = state.get("draft_number", 1)
 
     # Handle empty draft
     if not lld_content or not lld_content.strip():
         error_messages = ["LLD content is empty"]
-        
-        # Issue #334: Save errors to lineage if path provided
-        if lineage_path:
-            try:
-                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
-            except Exception as e:
-                logger.warning(f"Failed to save validation errors to lineage: {e}")
-        
+
+        # Issue #334: Save errors to lineage if path provided (#3585: or stop)
+        _save_errors_to_lineage(state, error_messages)
+
         # Issue #334: Print errors to console
         print_validation_errors(error_messages)
         
@@ -1609,12 +1687,8 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
         # Fail fast on missing sections - can't validate further
         error_messages = [e.message for e in all_errors]
         
-        # Issue #334: Save errors to lineage
-        if lineage_path:
-            try:
-                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
-            except Exception as e:
-                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        # Issue #334: Save errors to lineage (#3585: or stop)
+        _save_errors_to_lineage(state, error_messages)
         
         # Issue #334: Print errors to console
         print_validation_errors(error_messages)
@@ -1645,12 +1719,8 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
         # Can't continue validation without file list
         error_messages = [e.message for e in all_errors]
         
-        # Issue #334: Save errors to lineage
-        if lineage_path:
-            try:
-                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
-            except Exception as e:
-                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        # Issue #334: Save errors to lineage (#3585: or stop)
+        _save_errors_to_lineage(state, error_messages)
         
         # Issue #334: Print errors to console
         print_validation_errors(error_messages)
@@ -1686,12 +1756,8 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     if not path_validation_ran and path_errors:
         error_messages = [e.message for e in all_errors]
         
-        # Issue #334: Save errors to lineage
-        if lineage_path:
-            try:
-                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
-            except Exception as e:
-                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        # Issue #334: Save errors to lineage (#3585: or stop)
+        _save_errors_to_lineage(state, error_messages)
         
         # Issue #334: Print errors to console
         print_validation_errors(error_messages)
@@ -1758,12 +1824,8 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     warning_messages = [w.message for w in all_warnings]
 
     if all_errors:
-        # Issue #334: Save errors to lineage
-        if lineage_path:
-            try:
-                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
-            except Exception as e:
-                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        # Issue #334: Save errors to lineage (#3585: or stop)
+        _save_errors_to_lineage(state, error_messages)
         
         # Issue #334: Print errors to console
         print_validation_errors(error_messages)
@@ -1802,11 +1864,16 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     added later would silently escape per-site instrumentation, and this node is
     exactly where new checks get added. Wrapping means a new check is counted
     the day it ships.
+
+    A failure to record the telemetry alerts the operator and raises (#3585).
+    It used to print a line to stdout and go on, so the counts the prompt
+    revision ranks drafts by silently lost the roll's failures.
     """
     result = _validate_lld_mechanical_inner(state)
 
     errors = result.get("validation_errors") or []
     if errors:
+        issue = state.get("issue_number")
         try:
             from assemblyzero.speedrun.must_resolve import run_context
             from assemblyzero.speedrun.prompt_telemetry import record_failures
@@ -1822,7 +1889,21 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
                 drafter_model=resolve(state, "requirements.draft").spec,
                 run_id=run_id,
             )
-        except Exception as exc:  # noqa: BLE001 - telemetry never breaks a roll
-            print(f"  [telemetry] validation-failure telemetry skipped: {exc}")
+        except Exception as exc:
+            alert.alert_operator(
+                what=(
+                    f"record {len(errors)} mechanical-validation failure(s) to "
+                    f"prompt telemetry"
+                ),
+                where=(
+                    "assemblyzero.workflows.requirements.nodes.validate_mechanical."
+                    "validate_lld_mechanical (requirements workflow, N1.5)"
+                ),
+                cause=f"{type(exc).__name__}: {exc}",
+                consequence="the LLD run stops; the draft's verdict is not returned",
+                repo=str(state.get("target_repo") or ""),
+                issue=issue if isinstance(issue, int) else None,
+            )
+            raise
 
     return result

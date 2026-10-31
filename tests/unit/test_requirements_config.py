@@ -171,30 +171,19 @@ class TestWorkflowConfig:
 
     def test_validate_invalid_drafter_spec(self):
         """Test validation catches invalid drafter spec."""
-        config = WorkflowConfig(
-            workflow_type="lld",
-            drafter="invalid-no-colon",
-        )
-        errors = config.validate()
-        assert any("drafter spec" in e for e in errors)
+        # #3585: the config validates itself when built, and raises.
+        with pytest.raises(ValueError, match="drafter spec"):
+            WorkflowConfig(workflow_type="lld", drafter="invalid-no-colon")
 
     def test_validate_invalid_reviewer_spec(self):
         """Test validation catches invalid reviewer spec."""
-        config = WorkflowConfig(
-            workflow_type="lld",
-            reviewer="invalid-no-colon",
-        )
-        errors = config.validate()
-        assert any("reviewer spec" in e for e in errors)
+        with pytest.raises(ValueError, match="reviewer spec"):
+            WorkflowConfig(workflow_type="lld", reviewer="invalid-no-colon")
 
     def test_validate_invalid_max_iterations(self):
         """Test validation catches invalid max_iterations."""
-        config = WorkflowConfig(
-            workflow_type="lld",
-            max_iterations=0,
-        )
-        errors = config.validate()
-        assert any("max_iterations" in e for e in errors)
+        with pytest.raises(ValueError, match="max_iterations"):
+            WorkflowConfig(workflow_type="lld", max_iterations=0)
 
 
 class TestCreateIssueConfig:

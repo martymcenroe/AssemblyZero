@@ -124,6 +124,8 @@ class TestMockFinishesAnLLDRun:
             drafter="mock:draft",
         )
         state["issue_text"] = "# Issue"
+        # #3585: N1 halts on an audit_dir that does not exist.
+        (tmp_path / "audit").mkdir()
         state["audit_dir"] = str(tmp_path / "audit")
 
         provider = Mock()
@@ -148,6 +150,8 @@ class TestMockFinishesAnLLDRun:
             target_repo=str(tmp_path), issue_number=42, mock_mode=True,
         )
         state["issue_text"] = "# Issue"
+        # #3585: N1 halts on an audit_dir that does not exist.
+        (tmp_path / "audit").mkdir()
         state["audit_dir"] = str(tmp_path / "audit")
 
         provider = Mock()

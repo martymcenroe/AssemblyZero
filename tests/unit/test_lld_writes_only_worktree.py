@@ -173,6 +173,11 @@ class TestARealRunWritesIntoTheWorktree:
         state["lld_status"] = "APPROVED"
         state["verdict_count"] = 1
         state["open_questions_status"] = "NONE"
+        # #3585: N5 refuses to write without the run's audit_dir, which N0
+        # makes. Outside the checkout, so its porcelain stays the measure.
+        audit = target.parent / "audit"
+        audit.mkdir(exist_ok=True)
+        state["audit_dir"] = str(audit)
         return state
 
     def test_the_lld_and_status_land_in_the_worktree_not_the_checkout(
@@ -212,11 +217,13 @@ class TestARealRunWritesIntoTheWorktree:
         cwd.mkdir()
         monkeypatch.chdir(cwd)
         state = self._state(target)
-        assert not state.get("audit_dir")
+        state["audit_dir"] = ""
 
-        fz._save_lld_file(state)
+        out = fz._save_lld_file(state)
 
         assert list(cwd.iterdir()) == []
+        # #3585: and it halts, where it used to save the LLD without its record.
+        assert "no audit_dir" in out["error_message"]
 
     def test_mirror_passes_through_a_file_already_in_the_worktree(self, tmp_path):
         fz = importlib.import_module(

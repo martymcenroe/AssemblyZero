@@ -148,10 +148,12 @@ class TestTheRetryEscalates:
         assert asked == ["fake:model"]
         assert len(provider.calls) == 2
 
-    def test_a_broken_escalation_target_falls_back_rather_than_losing_the_retry(
+    def test_a_broken_escalation_target_halts_naming_it(
         self, tmp_path, specs, calm, monkeypatch
     ):
-        """A bad map entry must not cost the run the attempt #2290 gave it."""
+        """#3585: a bad escalation seat is a configuration error and halts
+        unverified, naming it. It used to warn and re-ask the model that had
+        just timed out, the call #2375 measured as useless."""
         # The package re-exports `analyze_requirements` as a FUNCTION, so a
         # dotted setattr target resolves to it rather than to the module.
         from importlib import import_module
@@ -164,10 +166,12 @@ class TestTheRetryEscalates:
         )
         asked, provider = specs(TIMEOUT, OK, raises_for=("bogus:spec",))
 
-        analyze_requirements(_state(tmp_path, "claude:sonnet"))
+        update = analyze_requirements(_state(tmp_path, "claude:sonnet"))
 
         assert asked == ["claude:sonnet", "bogus:spec"]
-        assert len(provider.calls) == 2, "the retry must still happen"
+        assert len(provider.calls) == 1, "no re-ask of the model that timed out"
+        assert update.get("requirements_unverified")
+        assert "bogus:spec" in update["error_message"]
 
 
 class TestWhatEscalationDoesNotChange:

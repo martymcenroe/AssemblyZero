@@ -694,7 +694,9 @@ class TestScope:
 
         out = finalize(state)
 
-        assert out["error_message"] == "No issue number for LLD finalization"
+        # #3585: the message names the repo it could not finalize in.
+        assert "the state has no issue number" in out["error_message"]
+        assert state["target_repo"] in out["error_message"]
         assert not out.get("finalize_repair_pending")
         assert route_after_finalize(out) == "HALT"
 

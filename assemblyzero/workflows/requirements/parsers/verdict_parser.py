@@ -68,18 +68,26 @@ def parse_verdict(verdict_content: str) -> VerdictParseResult:
         
     Returns:
         VerdictParseResult with extracted information.
+
+    Raises:
+        ValueError: the verdict is empty, or its status cannot be read
+            (#3585). Both used to read as UNKNOWN, after which the review node
+            applied no resolutions and the approved draft kept its open
+            questions without a word.
     """
-    if not verdict_content:
-        return VerdictParseResult(
-            verdict_status="UNKNOWN",
-            raw_verdict="",
-            parse_warnings=["Empty verdict content"]
-        )
-    
+    if not verdict_content or not verdict_content.strip():
+        raise ValueError("the reviewer's verdict is empty, so no resolution can be read from it")
+
     result = VerdictParseResult(raw_verdict=verdict_content)
-    
+
     # Parse verdict status
     result.verdict_status = _parse_verdict_status(verdict_content)
+    if result.verdict_status == "UNKNOWN":
+        raise ValueError(
+            "the reviewer's verdict states no status this parser can read "
+            "(a ticked APPROVED/REVISE/DISCUSS/REJECTED box, or a 'Verdict:' "
+            f"line); it begins {verdict_content.strip()[:200]!r}"
+        )
     
     # Only extract resolutions for APPROVED verdicts
     if result.verdict_status == "APPROVED":

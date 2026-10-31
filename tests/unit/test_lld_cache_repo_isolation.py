@@ -190,19 +190,25 @@ class TestFileLevelRobustness:
     def test_missing_file_yields_empty(self, repo_a):
         assert load_lld_tracking(repo_a)["issues"] == {}
 
-    def test_corrupt_file_yields_empty(self, repo_a):
+    def test_corrupt_file_raises(self, repo_a, operator_alerts):
+        """#3585: read as empty, a corrupt file was then overwritten by the
+        next save, taking every repo's approvals with it."""
         path = repo_a / LLD_STATUS_RELATIVE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("not json {", encoding="utf-8")
 
-        assert load_lld_tracking(repo_a)["issues"] == {}
+        with pytest.raises(ValueError, match="cannot be read"):
+            load_lld_tracking(repo_a)
+        assert len(operator_alerts) == 1
 
-    def test_non_dict_file_yields_empty(self, repo_a):
+    def test_non_dict_file_raises(self, repo_a, operator_alerts):
         path = repo_a / LLD_STATUS_RELATIVE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("[1, 2, 3]", encoding="utf-8")
 
-        assert load_lld_tracking(repo_a)["issues"] == {}
+        with pytest.raises(ValueError, match="not a JSON object"):
+            load_lld_tracking(repo_a)
+        assert len(operator_alerts) == 1
 
     def test_save_creates_the_directory(self, repo_a):
         assert not (repo_a / LLD_STATUS_RELATIVE).exists()

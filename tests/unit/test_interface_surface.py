@@ -385,20 +385,23 @@ class TestPromptIntegration:
         prompt = _build_prompt(state, "TEMPLATE", "lld")
         assert prompt.count(INTERFACE_SECTION_TITLE) == 1
 
-    def test_truncation_sacrifices_codebase_context_not_the_surface(self, repo):
-        from assemblyzero.workflows.requirements.nodes.generate_draft import (
-            MAX_TOTAL_PROMPT_CHARS,
-            _truncate_prompt,
-        )
+    def test_an_oversized_prompt_is_never_cut_so_the_surface_survives(self, repo):
+        """#3585: the truncator that sacrificed codebase context to keep the
+        surface is gone. An over-cap prompt halts in generate_draft (pinned in
+        test_generate_draft_loud_failure.py), so nothing is cut, the surface
+        included."""
+        import importlib
 
-        surface_section = format_interface_map_section(build_interface_map(repo))
-        oversized = (
-            "## Issue\nDo the thing.\n\n"
-            + surface_section
-            + "\n\n## Codebase Analysis\n"
-            + ("filler " * (MAX_TOTAL_PROMPT_CHARS // 6))
+        gd = importlib.import_module(
+            "assemblyzero.workflows.requirements.nodes.generate_draft"
         )
-        assert len(oversized) > MAX_TOTAL_PROMPT_CHARS
-        result = _truncate_prompt(oversized)
-        assert INTERFACE_SECTION_TITLE in result
-        assert "## Codebase Analysis" not in result
+        state = self._lld_state(
+            repo,
+            codebase_context={
+                "project_description": "filler " * (gd.MAX_TOTAL_PROMPT_CHARS // 6)
+            },
+        )
+        prompt = gd._build_prompt(state, "TEMPLATE", "lld")
+        assert len(prompt) > gd.MAX_TOTAL_PROMPT_CHARS
+        assert INTERFACE_SECTION_TITLE in prompt
+        assert not hasattr(gd, "_truncate_prompt")

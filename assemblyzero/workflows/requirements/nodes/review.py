@@ -7,10 +7,20 @@ Issue #775: Replace regex LLM output parsing with structured JSON schema
 
 Uses the configured reviewer LLM to review the current draft.
 Saves verdict to audit trail and updates verdict history.
+
+#3585 (ADR 0236): a review that cannot reach a usable verdict returns
+``error_message``, which routes to HALT, and HALT alerts. A failed reviewer
+call is reported with the provider's own cause, never as an unreadable
+response. The audit_dir and the target repository's structure are settled
+before the reviewer is paid for. A REVISE verdict without its Tier sections
+breaks the reviewer contract and halts. An APPROVED draft whose resolutions
+cannot be applied stops rather than going forward without them.
 """
 
 import difflib
+import logging
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +41,52 @@ from assemblyzero.workflows.requirements.audit import (
     save_audit_file,
 )
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
+
+logger = logging.getLogger(__name__)
+
+
+class ReviewerCallError(RuntimeError):
+    """The reviewer provider call itself failed (#3585).
+
+    Distinct from ``StructuredContractError``, which is an answer that broke
+    the contract: this is no answer at all, and its cause is the provider's.
+    """
+
+
+class DraftUpdateError(RuntimeError):
+    """An APPROVED verdict's resolutions could not be applied (#3585)."""
+
+
+def _loud(message: str) -> str:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[N3] %s", message)
+    print(f"ERROR [N3] {message}", file=sys.stderr, flush=True)
+    return message
+
+
+def _audit_dir_problem(state: RequirementsWorkflowState) -> str:
+    """Why the run's audit_dir cannot take the verdict, or "" when it can.
+
+    N0 makes every run's audit_dir; one that is unset or absent here meant the
+    verdict was paid for and then not saved to lineage, without a word (#3585).
+    """
+    audit_dir = str(state.get("audit_dir", "") or "")
+    if not audit_dir:
+        return "the run has no audit_dir"
+    if not Path(audit_dir).is_dir():
+        return f"the audit_dir {audit_dir} does not exist"
+    return ""
+
+
+def _require_success(result: Any, which: str) -> None:
+    """Raise ReviewerCallError when a reviewer call did not succeed (#3585).
+
+    The failed call's empty response used to be parsed as an unreadable
+    answer and re-asked, so the provider's own error never reached the halt.
+    """
+    if not getattr(result, "success", False):
+        cause = getattr(result, "error_message", "") or "the provider gave no error message"
+        raise ReviewerCallError(f"the {which} failed: {cause}")
 
 
 # Closes #1511: lines under "## Tier 1: BLOCKING Issues" that mean "no
@@ -85,7 +141,12 @@ def _invoke_reviewer_with_feedback_schema(
 
     Issue #775: Uses response_schema for Gemini, json_schema for all other
     providers (including FallbackProvider which wraps ClaudeCLIProvider).
-    Falls back to regex if structured parse fails (logs WARNING).
+    An answer in neither the JSON contract nor the review template is
+    re-asked once, then rejected.
+
+    Raises:
+        ReviewerCallError: the first call or the re-ask failed (#3585).
+        StructuredContractError: both answers were unreadable.
     """
     from assemblyzero.core.llm_provider import GeminiProvider
 
@@ -96,6 +157,7 @@ def _invoke_reviewer_with_feedback_schema(
         schema_kwargs["json_schema"] = FEEDBACK_SCHEMA
 
     result = provider.invoke(system, prompt, **schema_kwargs)
+    _require_success(result, "reviewer call")
     # Issue #1843: the payload lives on .response — `.content` never existed,
     # so parses ran against the stringified dataclass and always fell back.
     raw = getattr(result, "response", None) or ""
@@ -119,6 +181,7 @@ def _invoke_reviewer_with_feedback_schema(
             "review template; asking once more for the JSON object (#2835)."
         )
         retry = provider.invoke(system + _REASK_FOR_JSON, prompt, **schema_kwargs)
+        _require_success(retry, "reviewer re-ask")
         raw_retry = getattr(retry, "response", None) or ""
         try:
             return parse_structured_feedback(raw_retry)
@@ -175,6 +238,14 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     verdict_count = state.get("verdict_count", 0) + 1
     print(f"\n[N3] Reviewing draft (review #{verdict_count})...")
 
+    # #3585: before anything is spent; the verdict save used to be skipped.
+    problem = _audit_dir_problem(state)
+    if problem:
+        return {"error_message": _loud(
+            f"Reviewer not called: {problem}, so the verdict could not be "
+            f"recorded in the run's lineage"
+        )}
+
     # Determine review prompt path based on workflow type
     if workflow_type == "issue":
         prompt_path = Path("docs/skills/0701c-Issue-Review-Prompt.md")
@@ -218,10 +289,16 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     previous_draft = state.get("previous_draft", "")
     # #1441: Inject target_repo context so reviewer doesn't grade the LLD
     # against AssemblyZero's structure (cwd-bleed via Gemini CLI).
-    target_repo_context = _build_target_repo_context(
-        target_repo=state.get("target_repo", ""),
-        assemblyzero_root=state.get("assemblyzero_root", ""),
-    )
+    try:
+        target_repo_context = _build_target_repo_context(
+            target_repo=state.get("target_repo", ""),
+            assemblyzero_root=state.get("assemblyzero_root", ""),
+        )
+    except OSError as e:
+        return {"error_message": _loud(
+            f"Reviewer not called: the target repository's structure cannot be "
+            f"listed for the reviewer ({type(e).__name__}: {e})"
+        )}
     review_content = _build_review_content(
         current_draft=current_draft,
         review_prompt=review_prompt,
@@ -248,6 +325,8 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         msg = f"Reviewer response rejected: {e}"
         print(f"    ERROR: {msg}")
         return {"error_message": msg}
+    except ReviewerCallError as e:
+        return {"error_message": _loud(f"Reviewer {reviewer_spec} gave no verdict: {e}")}
 
     node_cost_usd = get_cumulative_cost() - cost_before
 
@@ -276,13 +355,24 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     # items. When REVISE has zero Tier 1 issues AND the rationale is
     # well-formed (has both Tier sections), treat as APPROVED — Tier 2
     # feedback stays in the review log as known-issues but does not
-    # block the spec stage. Empty / malformed rationales (API failures,
-    # unparseable responses that map UNKNOWN → REVISE) stay BLOCKED.
+    # block the spec stage.
+    #
+    # #3585: a REVISE whose rationale has no Tier 1 section breaks the
+    # reviewer's contract, and halts naming it. It used to be set to BLOCKED
+    # and looped back with no message, so the drafter revised against
+    # feedback that did not say whether anything blocks. A Tier 1 section
+    # with no Tier 2 section still says that much, so it is read as before:
+    # BLOCKED, since approving needs the whole template (#1511).
     rationale_text = feedback_result.get("rationale", "")
-    well_formed_rationale = (
-        "## Tier 1: BLOCKING Issues" in rationale_text
-        and "## Tier 2:" in rationale_text
-    )
+    has_tier1 = "## Tier 1: BLOCKING Issues" in rationale_text
+    well_formed_rationale = has_tier1 and "## Tier 2:" in rationale_text
+    if verdict_status == "REVISE" and not has_tier1:
+        return {"error_message": _loud(
+            f"Reviewer response rejected: {reviewer_spec} returned REVISE "
+            f"without the '## Tier 1: BLOCKING Issues' section the review "
+            f"contract requires, so whether anything blocks cannot be told "
+            f"(rationale: {rationale_text[:200]!r})"
+        )}
     if verdict_status == "APPROVED":
         lld_status = "APPROVED"
     elif verdict_status == "REVISE":
@@ -294,16 +384,12 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
                 "treating as APPROVED (#1511). Tier 2 feedback retained "
                 "in review log as known issues."
             )
-        elif well_formed_rationale:
+        else:
             lld_status = "BLOCKED"
             print(
                 f"    [VERDICT] REVISE with {tier1_count} Tier 1 "
                 f"BLOCKING issue(s) — BLOCKED."
             )
-        else:
-            # Malformed rationale (API failure, parser fallback): stay
-            # conservative — BLOCKED rather than silently approving.
-            lld_status = "BLOCKED"
     elif verdict_status == "DISCUSS":
         lld_status = "BLOCKED"
     else:
@@ -325,12 +411,8 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         audit_content += "\n## Feedback Items\n"
         for item in feedback_result["feedback_items"]:
             audit_content += f"- {item}\n"
-    if audit_dir.exists():
-        verdict_path = save_audit_file(
-            audit_dir, file_num, "verdict.md", audit_content
-        )
-    else:
-        verdict_path = None
+    # #3585: the audit_dir was checked before the reviewer was called.
+    verdict_path = save_audit_file(audit_dir, file_num, "verdict.md", audit_content)
 
     # Issue #248: Check open questions resolution status
     # #2199: hand over the structured verdict — audit_content is rendered
@@ -343,7 +425,14 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     # Issue #257: Update draft with resolutions if APPROVED
     updated_draft = current_draft
     if lld_status == "APPROVED":
-        updated_draft = _update_draft_with_verdict(current_draft, audit_content)
+        try:
+            updated_draft = _update_draft_with_verdict(current_draft, audit_content)
+        except DraftUpdateError as e:
+            return {"error_message": _loud(
+                f"Reviewer APPROVED the draft, but its resolutions could not be "
+                f"applied, so the draft would go forward without them: {e} "
+                f"(verdict saved at {verdict_path})"
+            )}
         if updated_draft != current_draft:
             print("    Draft updated with resolved open questions")
 
@@ -356,8 +445,7 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     feedback_lines = len(actionable_feedback.splitlines()) if actionable_feedback else 0
     print(f"    Verdict: {lld_status} ({feedback_lines} lines in feedback)")
     print(f"    Open Questions: {open_questions_status}")
-    if verdict_path:
-        print(f"    Saved: {verdict_path.name}")
+    print(f"    Saved: {verdict_path.name}")
 
     # Issue #506: Store extracted feedback in verdict_history, not full prose
     verdict_history.append(actionable_feedback)
@@ -375,7 +463,7 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
 
     return {
         "current_verdict": actionable_feedback,  # Issue #506: structured feedback only
-        "current_verdict_path": str(verdict_path) if verdict_path else "",
+        "current_verdict_path": str(verdict_path),
         "verdict_count": verdict_count,
         "verdict_history": verdict_history,
         "file_counter": file_num,
@@ -415,6 +503,12 @@ def _build_target_repo_context(
     Returns:
         Markdown block for prepending to review content, or empty string
         when no context override is needed.
+
+    Raises:
+        NotADirectoryError: the target is not a directory (#3585).
+        OSError: the target cannot be listed (#3585). Both used to put
+            "structure could not be enumerated" in front of the reviewer and
+            review on; an empty target is said to be empty.
     """
     if not target_repo or target_repo == assemblyzero_root:
         return ""
@@ -424,22 +518,21 @@ def _build_target_repo_context(
 
     # Compute top-level structure of the target repo (dirs + key root files).
     # This grounds the reviewer in the actual target, not the cwd.
+    if not target_path.is_dir():
+        raise NotADirectoryError(
+            f"the target repository {target_path} is not a directory"
+        )
     structure_lines: list[str] = []
-    if target_path.is_dir():
-        try:
-            entries = sorted(target_path.iterdir())
-            for entry in entries:
-                if entry.name.startswith("."):
-                    continue
-                if entry.is_dir():
-                    structure_lines.append(f"- `{entry.name}/`")
-                elif entry.suffix in (".md", ".toml", ".yaml", ".yml", ".cfg", ".ini", ".txt"):
-                    structure_lines.append(f"- `{entry.name}`")
-        except OSError:
-            pass
+    for entry in sorted(target_path.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        if entry.is_dir():
+            structure_lines.append(f"- `{entry.name}/`")
+        elif entry.suffix in (".md", ".toml", ".yaml", ".yml", ".cfg", ".ini", ".txt"):
+            structure_lines.append(f"- `{entry.name}`")
 
     structure_block = (
-        "\n".join(structure_lines) if structure_lines else "_(structure could not be enumerated)_"
+        "\n".join(structure_lines) if structure_lines else "_(no top-level entries)_"
     )
 
     return (
@@ -542,54 +635,31 @@ def _update_draft_with_verdict(draft: str, verdict_content: str) -> str:
 
     Returns:
         Updated draft content.
-    """
-    try:
-        from assemblyzero.workflows.requirements.parsers.verdict_parser import parse_verdict
-        from assemblyzero.workflows.requirements.parsers.draft_updater import update_draft
 
+    Raises:
+        DraftUpdateError: a resolution or suggestion could not be applied, or
+            the parser or updater raised (#3585). They used to print a warning
+            (or nothing, for a missing parser module) and hand back the
+            unmodified draft, which then went on as APPROVED.
+    """
+    from assemblyzero.workflows.requirements.parsers.draft_updater import update_draft
+    from assemblyzero.workflows.requirements.parsers.verdict_parser import parse_verdict
+
+    try:
         verdict_result = parse_verdict(verdict_content)
         updated_draft, warnings = update_draft(draft, verdict_result)
-
-        for warning in warnings:
-            print(f"    Warning: {warning}")
-
-        return updated_draft
-    except ImportError:
-        # Parsers not available (shouldn't happen in production)
-        return draft
     except Exception as e:
-        print(f"    Warning: Could not update draft with verdict: {e}")
-        return draft
+        raise DraftUpdateError(
+            f"applying the verdict to the draft raised {type(e).__name__}: {e}"
+        ) from e
+    if warnings:
+        raise DraftUpdateError("; ".join(warnings))
+    return updated_draft
 
 
-def _parse_verdict_status(verdict_content: str) -> str:
-    """Parse LLD status from verdict content.
-
-    Args:
-        verdict_content: The reviewer's verdict text.
-
-    Returns:
-        One of: "APPROVED", "BLOCKED"
-    """
-    verdict_upper = verdict_content.upper()
-
-    # Check for checked APPROVED checkbox
-    if re.search(r"\[X\]\s*\**APPROVED\**", verdict_upper):
-        return "APPROVED"
-    # Check for checked REVISE checkbox (maps to BLOCKED for workflow purposes)
-    elif re.search(r"\[X\]\s*\**REVISE\**", verdict_upper):
-        return "BLOCKED"
-    # Check for checked DISCUSS checkbox (maps to BLOCKED, needs human)
-    elif re.search(r"\[X\]\s*\**DISCUSS\**", verdict_upper):
-        return "BLOCKED"
-    # Fallback: Look for explicit keywords (legacy/simple responses)
-    elif "VERDICT: APPROVED" in verdict_upper:
-        return "APPROVED"
-    elif "VERDICT: BLOCKED" in verdict_upper or "VERDICT: REVISE" in verdict_upper:
-        return "BLOCKED"
-    else:
-        # Default to BLOCKED if we can't determine status (safe choice)
-        return "BLOCKED"
+# #3585: `_parse_verdict_status` is gone. It defaulted to BLOCKED on a verdict
+# it could not read, and nothing in the package called it; the verdict parser
+# module keeps its own.
 
 
 def _extract_actionable_feedback(

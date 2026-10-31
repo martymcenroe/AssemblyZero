@@ -10,15 +10,43 @@ new helpers `lld_worktree_path_for`, `setup_lld_worktree`, and
 issue-workflow path which still commits to the operator's checkout.
 """
 
+import os
+
 from assemblyzero.core import merge_driver
 from assemblyzero.utils.shell import run_command
 from pathlib import Path
 from typing import Optional
 
+#: What git writes, under LC_ALL=C, when origin does not carry the branch:
+#: "fatal: couldn't find remote ref <branch>". An answer, not a failure: the
+#: arc may not be pushed yet, and the local branch is the start point (#2684).
+_NO_REMOTE_REF = "couldn't find remote ref"
+
 
 class GitOperationError(Exception):
     """Raised when a git operation fails."""
     pass
+
+
+def _head_sha(repo: Path | str) -> str:
+    """The commit just made, read with ``git rev-parse --short HEAD`` (#3585).
+
+    It used to be parsed out of ``git commit``'s summary line, which a root
+    commit writes as ``[main (root-commit) abc1234]``, and left "" when the
+    summary did not parse.
+    """
+    probe = run_command(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=str(repo),
+        capture_output=True, text=True,
+    )
+    sha = (probe.stdout or "").strip()
+    if probe.returncode != 0 or not sha:
+        raise GitOperationError(
+            f"committed in {repo}, and git rev-parse HEAD cannot name the "
+            f"commit: rc={probe.returncode}, stderr: "
+            f"{(probe.stderr or '').strip() or '(empty)'}"
+        )
+    return sha
 
 
 def format_commit_message(workflow_type: str, issue_number: Optional[int] = None, slug: Optional[str] = None) -> str:
@@ -109,14 +137,37 @@ def lld_start_point(target_repo: Path | str, base_branch: str) -> str:
     else the local ``<base>`` (#2684). Fetches the branch first so the cut is
     the arc as it is now, not as the checkout last saw it.
 
+    A repo with no ``origin`` remote has nothing to fetch, and an origin that
+    does not carry the branch is answered by the local one (#2684); both are
+    answers. A fetch that fails otherwise raises with git's stderr (#3585): it
+    used to be ignored, and the worktree was cut from whatever stale
+    ``origin/<base>`` was on disk.
+
     Raises:
-        GitOperationError: If neither ref resolves.
+        GitOperationError: If neither ref resolves, or the fetch fails.
     """
     target_repo = Path(target_repo)
-    run_command(
-        ["git", "-C", str(target_repo), "fetch", "origin", base_branch],
-        capture_output=True, text=True,
+    remotes = run_command(
+        ["git", "-C", str(target_repo), "remote"], capture_output=True, text=True,
     )
+    if remotes.returncode != 0:
+        raise GitOperationError(
+            f"cannot list the remotes of {target_repo}: git remote "
+            f"rc={remotes.returncode}, stderr: {(remotes.stderr or '').strip() or '(empty)'}"
+        )
+    if "origin" in (remotes.stdout or "").split():
+        fetched = run_command(
+            ["git", "-C", str(target_repo), "fetch", "origin", base_branch],
+            capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"},
+        )
+        stderr = (fetched.stderr or "").strip()
+        if fetched.returncode != 0 and _NO_REMOTE_REF not in stderr:
+            raise GitOperationError(
+                f"cannot fetch the base branch '{base_branch}' from origin in "
+                f"{target_repo}: git fetch rc={fetched.returncode}, stderr: "
+                f"{stderr or '(empty)'}; the LLD worktree is not cut from a "
+                f"stale ref"
+            )
     for candidate in (f"origin/{base_branch}", base_branch):
         probe = run_command(
             ["git", "-C", str(target_repo), "rev-parse", "--verify", "--quiet",
@@ -178,7 +229,12 @@ def setup_lld_worktree(
         text=True,
     )
     if result.returncode != 0:
-        # Branch may already exist from a prior aborted run; try without -b
+        # Branch may already exist from a prior aborted run; try without -b.
+        # #3585: the reuse ignores the start point, so a reused branch must
+        # already carry the arc, or the worktree would be cut from wherever
+        # that branch happens to be.
+        if start_point:
+            _require_branch_on_arc(target_repo, branch_name, start_point[0], result.stderr)
         result2 = run_command(
             ["git", "-C", str(target_repo), "worktree", "add", "--relative-paths",
              str(worktree_path), branch_name],
@@ -191,6 +247,37 @@ def setup_lld_worktree(
                 f"{result.stderr or result2.stderr}"
             )
     return worktree_path, branch_name
+
+
+def _require_branch_on_arc(
+    target_repo: Path, branch_name: str, start_point: str, first_stderr: str,
+) -> None:
+    """Refuse to reuse ``branch_name`` unless it descends from ``start_point``.
+
+    ``git merge-base --is-ancestor`` answers 0 (it does) or 1 (it does not);
+    anything else, such as a branch that does not exist, is a git failure.
+    Either refusal names the first ``worktree add`` failure too, since that is
+    why a reuse was tried.
+    """
+    probe = run_command(
+        ["git", "-C", str(target_repo), "merge-base", "--is-ancestor",
+         start_point, branch_name],
+        capture_output=True, text=True,
+    )
+    if probe.returncode == 0:
+        return
+    first = (first_stderr or "").strip() or "(empty)"
+    if probe.returncode == 1:
+        raise GitOperationError(
+            f"the LLD branch {branch_name} already exists and does not descend "
+            f"from the arc {start_point}, so a worktree reusing it would not "
+            f"carry the arc; remove or rebase that branch (worktree add said: {first})"
+        )
+    raise GitOperationError(
+        f"cannot tell whether {branch_name} descends from {start_point}: git "
+        f"merge-base rc={probe.returncode}, stderr: "
+        f"{(probe.stderr or '').strip() or '(empty)'} (worktree add said: {first})"
+    )
 
 
 def commit_and_pr(
@@ -261,11 +348,7 @@ def commit_and_pr(
             f"Failed to commit in worktree {worktree_path}: {result.stderr}"
         )
 
-    commit_sha = ""
-    if result.stdout:
-        parts = result.stdout.split()
-        if len(parts) >= 2:
-            commit_sha = parts[1].rstrip("]")
+    commit_sha = _head_sha(worktree_path)
 
     # #3704: land through the fleet merge driver. This machine's gh wrapper
     # refuses `gh pr create` from anything that is not the driver, and the
@@ -390,13 +473,8 @@ def commit_and_push(
     if result.returncode != 0:
         raise GitOperationError(f"Failed to commit: {result.stderr}")
     
-    # Extract commit SHA from output (format: "[branch sha] message")
-    commit_sha = ""
-    if result.stdout:
-        parts = result.stdout.split()
-        if len(parts) >= 2:
-            commit_sha = parts[1].rstrip("]")
-    
+    commit_sha = _head_sha(target_repo)
+
     # Push to remote
     result = run_command(
         ["git", "push"],

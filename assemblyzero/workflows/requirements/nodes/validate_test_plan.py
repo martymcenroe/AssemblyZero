@@ -7,18 +7,30 @@ assemblyzero.core.validation to ensure consistency with testing workflow.
 Routes:
 - PASS → N2 (human gate) or N3 (Gemini review)
 - FAIL → N1 (draft) with structured feedback
-- MAX_ATTEMPTS → END (prevent infinite loops)
+- MAX_ATTEMPTS → HALT (prevent infinite loops)
+
+#3585 (ADR 0236): a failing draft is preserved in the run's lineage or the
+run stops. An unset audit_dir halts, and a write that fails alerts the
+operator and raises; both used to be skipped as best-effort. A telemetry
+record that cannot be made alerts and raises, where it printed "skipped".
 """
 
+import logging
+import sys
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core import alert
 from assemblyzero.core.seats import resolve
 from assemblyzero.core.validation.test_plan_validator import (
     MAX_VALIDATION_ATTEMPTS,
     validate_test_plan,
 )
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
+
+logger = logging.getLogger(__name__)
+
+_WHERE = "assemblyzero.workflows.requirements.nodes.validate_test_plan.validate_test_plan_node (N1b)"
 
 
 def describe_validation_failure(result: dict | None, limit: int = 3) -> str:
@@ -136,8 +148,21 @@ def validate_test_plan_node(state: RequirementsWorkflowState) -> dict[str, Any]:
             drafter_model=resolve(state, "requirements.draft").spec,
             run_id=run_id,
         )
-    except Exception as exc:  # noqa: BLE001 - telemetry never breaks a roll
-        print(f"    [telemetry] test-plan failure telemetry skipped: {exc}")
+    except Exception as exc:
+        # #3585: it used to print "skipped" and go on, so a failure rate was
+        # computed from missing rows.
+        alert.alert_operator(
+            what=(
+                f"record the test-plan failure telemetry for issue "
+                f"#{state.get('issue_number') or '?'} in {state.get('target_repo') or '.'}"
+            ),
+            where=_WHERE,
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="the run stops; the validation failure is not recorded",
+            repo=str(state.get("target_repo") or ""),
+            issue=int(state.get("issue_number") or 0) or None,
+        )
+        raise
 
     # Build feedback for drafter
     feedback = _build_validation_feedback(result)
@@ -148,20 +173,42 @@ def validate_test_plan_node(state: RequirementsWorkflowState) -> dict[str, Any]:
     # -- the worktree is removed on restore, so the document the validator
     # rejected was unrecoverable and the drafter's regression (a table that
     # parsed as 8 scenarios in one iteration and 0 in the next) could not be
-    # inspected at all. Best-effort: never fail validation over archiving.
+    # inspected at all. #3585: so it is never best-effort. No audit_dir halts;
+    # a write that fails alerts and raises.
     new_iteration = state.get("iteration_count", 0) + 1
-    audit_dir = state.get("audit_dir", "")
-    if audit_dir:
-        try:
-            keep = Path(audit_dir) / f"failed-draft-iter{new_iteration}.md"
-            keep.parent.mkdir(parents=True, exist_ok=True)
-            keep.write_text(
-                lld_content + "\n\n<!-- validation feedback -->\n" + feedback,
-                encoding="utf-8",
-            )
-            print(f"    [KEEP] failing draft preserved: {keep}")
-        except OSError as exc:
-            print(f"    [KEEP] could not preserve failing draft: {exc}")
+    audit_dir = state.get("audit_dir", "") or ""
+    if not audit_dir:
+        message = (
+            f"the failing draft (iteration {new_iteration}) cannot be preserved: "
+            f"the run has no audit_dir"
+        )
+        logger.error("[N1b] %s", message)
+        print(f"ERROR [N1b] {message}", file=sys.stderr, flush=True)
+        return {
+            "test_plan_validation_result": result,
+            "test_plan_validation_attempts": new_attempts,
+            "iteration_count": new_iteration,
+            "lld_status": "BLOCKED",
+            "error_message": message,
+        }
+    keep = Path(audit_dir) / f"failed-draft-iter{new_iteration}.md"
+    try:
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        keep.write_text(
+            lld_content + "\n\n<!-- validation feedback -->\n" + feedback,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        alert.alert_operator(
+            what=f"preserve the failing draft at {keep}",
+            where=_WHERE,
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="the run stops; the draft the validator rejected would be lost",
+            repo=str(state.get("target_repo") or ""),
+            issue=int(state.get("issue_number") or 0) or None,
+        )
+        raise
+    print(f"    [KEEP] failing draft preserved: {keep}")
 
     updates = {
         "test_plan_validation_result": result,

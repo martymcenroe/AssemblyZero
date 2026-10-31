@@ -7,10 +7,25 @@ in both requirements and testing workflow finalize nodes.
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 
 
 class TestRequirementsFirstPass:
     """Test first-pass tracking in requirements finalize."""
+
+    @pytest.fixture(autouse=True)
+    def _audit_dir(self, tmp_path, monkeypatch):
+        """#3585: finalize halts when the run's audit_dir is gone. These tests
+        are about the completion record, so the dir is real and the lineage
+        move is a no-op."""
+        import importlib
+
+        # The nodes package re-exports the `finalize` function under the
+        # module's name, so the module is imported by path.
+        fz = importlib.import_module("assemblyzero.workflows.requirements.nodes.finalize")
+        self.audit_dir = tmp_path / "audit"
+        self.audit_dir.mkdir()
+        monkeypatch.setattr(fz, "move_lineage_to_done", lambda *args, **kwargs: None)
 
     def _run_finalize(self, state_overrides: dict) -> dict:
         """Run finalize with given state overrides and return the state."""
@@ -23,7 +38,7 @@ class TestRequirementsFirstPass:
             "lld_status": "APPROVED",
             "verdict_count": 1,
             "draft_count": 1,
-            "audit_dir": str(Path("/tmp/audit")),
+            "audit_dir": str(self.audit_dir),
             "created_files": [],
         }
         base_state.update(state_overrides)

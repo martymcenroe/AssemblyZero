@@ -400,33 +400,34 @@ class TestAssembleContext:
         assert "def hello()" in context
         assert "Documentation" in context
 
-    def test_skips_missing_files(self, tmp_path):
-        """Test skips files that don't exist."""
+    def test_raises_on_missing_files(self, tmp_path):
+        """A named file that does not exist raises (#3585).
+
+        It used to be skipped, so the draft was built without context the
+        operator had asked for.
+        """
         from assemblyzero.workflows.requirements.audit import assemble_context
 
         (tmp_path / "exists.py").write_text("content")
 
-        context = assemble_context(
-            context_files=[
-                str(tmp_path / "exists.py"),
-                str(tmp_path / "missing.py"),
-            ],
-            target_repo=tmp_path,
-        )
-
-        assert "content" in context
+        with pytest.raises(ValueError, match="does not exist"):
+            assemble_context(
+                context_files=[
+                    str(tmp_path / "exists.py"),
+                    str(tmp_path / "missing.py"),
+                ],
+                target_repo=tmp_path,
+            )
 
     def test_validates_paths_within_repo(self, tmp_path):
-        """Test rejects paths outside target_repo."""
+        """Test rejects paths outside target_repo, by raising (#3585)."""
         from assemblyzero.workflows.requirements.audit import assemble_context
 
-        context = assemble_context(
-            context_files=["/etc/passwd"],
-            target_repo=tmp_path,
-        )
-
-        # Should skip the invalid path and return empty or warning
-        assert "/etc/passwd" not in context
+        with pytest.raises(ValueError, match="outside the target repo"):
+            assemble_context(
+                context_files=["/etc/passwd"],
+                target_repo=tmp_path,
+            )
 
 
 class TestUpdateLLDStatus:
@@ -612,21 +613,21 @@ class TestAssembleContextEdgeCases:
 class TestLoadLLDTrackingErrors:
     """Tests for load_lld_tracking error handling."""
 
-    def test_returns_empty_cache_for_json_decode_error(self, tmp_path):
-        """Test returns empty cache when JSON is invalid."""
+    def test_raises_for_json_decode_error(self, tmp_path, operator_alerts):
+        """Invalid JSON alerts and raises (#3585; it returned an empty cache,
+        which the next save wrote over the file)."""
         from assemblyzero.workflows.requirements.audit import load_lld_tracking
 
         status_file = tmp_path / "data" / "assemblyzero" / "lld-status.json"
         status_file.parent.mkdir(parents=True)
         status_file.write_text("not valid json {")
 
-        tracking = load_lld_tracking(tmp_path)
+        with pytest.raises(ValueError, match="JSONDecodeError"):
+            load_lld_tracking(tmp_path)
+        assert len(operator_alerts) == 1
 
-        assert tracking["issues"] == {}
-        assert "version" in tracking
-
-    def test_returns_empty_cache_for_oserror(self, tmp_path):
-        """Test returns empty cache when file can't be read."""
+    def test_raises_for_oserror(self, tmp_path, operator_alerts):
+        """A file that can't be read alerts and raises (#3585)."""
         from assemblyzero.workflows.requirements.audit import load_lld_tracking
 
         # Create a directory where the status file should be
@@ -634,9 +635,9 @@ class TestLoadLLDTrackingErrors:
         status_file.parent.mkdir(parents=True)
         status_file.mkdir()  # Directory, not file - will cause OSError
 
-        tracking = load_lld_tracking(tmp_path)
-
-        assert tracking["issues"] == {}
+        with pytest.raises(ValueError, match="IsADirectoryError"):
+            load_lld_tracking(tmp_path)
+        assert len(operator_alerts) == 1
 
 
 class TestUpdateLLDStatusPathHandling:
@@ -1164,13 +1165,13 @@ class TestGetRepoStructure:
         assert "docs/" not in result
         assert "scripts/" not in result
 
-    def test_handles_nonexistent_path(self, tmp_path):
-        """Should return error message for nonexistent path."""
+    def test_raises_for_nonexistent_path(self, tmp_path):
+        """A nonexistent path raises (#3585); its placeholder text used to
+        reach the drafter's prompt as the repository structure."""
         from assemblyzero.workflows.requirements.audit import get_repo_structure
 
-        result = get_repo_structure(tmp_path / "nonexistent")
-
-        assert "not found" in result.lower()
+        with pytest.raises(FileNotFoundError, match="does not exist"):
+            get_repo_structure(tmp_path / "nonexistent")
 
     def test_prioritizes_src_and_tests(self, tmp_path):
         """Should show src/ and tests/ first when no focus_dirs."""

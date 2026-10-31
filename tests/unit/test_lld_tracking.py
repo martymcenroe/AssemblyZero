@@ -286,8 +286,9 @@ class TestLoadLLDTracking:
         assert isinstance(result, dict)
         assert result["issues"] == {}
 
-    def test_corrupt_json(self, tmp_path: Path) -> None:
-        """T140: Corrupt JSON returns empty cache (exercises JSONDecodeError branch)."""
+    def test_corrupt_json(self, tmp_path: Path, operator_alerts) -> None:
+        """T140: Corrupt JSON alerts and raises (#3585; it returned an empty
+        cache, which the next save wrote over every repo's approvals)."""
         status_dir = tmp_path / "data" / "assemblyzero"
         status_dir.mkdir(parents=True)
         # Write intentionally corrupt JSON (from fixture)
@@ -296,20 +297,23 @@ class TestLoadLLDTracking:
         ).read_text(encoding="utf-8")
         (status_dir / "lld-status.json").write_text(corrupt_content, encoding="utf-8")
 
-        result = load_lld_tracking(tmp_path)
-        # Function handles JSONDecodeError by returning empty cache
-        assert isinstance(result, dict)
-        assert result["issues"] == {}
+        with pytest.raises(ValueError, match="JSONDecodeError"):
+            load_lld_tracking(tmp_path)
+        assert len(operator_alerts) == 1
 
-    def test_empty_file(self, tmp_path: Path) -> None:
-        """T150: Empty file returns empty cache (exercises empty-input branch)."""
+    def test_empty_file(self, tmp_path: Path, operator_alerts) -> None:
+        """T150: An empty file is not JSON, so it alerts and raises (#3585).
+
+        Nothing writes an empty cache; one is a truncated write, and reading
+        it as "nothing approved" hid that.
+        """
         status_dir = tmp_path / "data" / "assemblyzero"
         status_dir.mkdir(parents=True)
         (status_dir / "lld-status.json").write_text("", encoding="utf-8")
 
-        result = load_lld_tracking(tmp_path)
-        assert isinstance(result, dict)
-        assert result["issues"] == {}
+        with pytest.raises(ValueError, match="cannot be read"):
+            load_lld_tracking(tmp_path)
+        assert len(operator_alerts) == 1
 
     def test_multiple_entries(self, tmp_path: Path) -> None:
         """T160: Tracking file with 3 entries returns all entries correctly."""
