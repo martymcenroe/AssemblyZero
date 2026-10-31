@@ -82,7 +82,6 @@ def _git_said(result: subprocess.CompletedProcess) -> str:
 # Named once: the standalone finish (#4150) reads this to tell a deliberate
 # exclusion from work the final checkpoint failed to commit.
 EXCLUDED_PATHS = (".assemblyzero", "data/lineage", "data/hourglass")
-_EXCLUDE_PATHSPECS = tuple(f":!{path}" for path in EXCLUDED_PATHS)
 
 _GIT_TIMEOUT_S = 30
 
@@ -134,8 +133,24 @@ def commit_checkpoint(worktree_path: str | Path | None,
                 f"{type(e).__name__}: {e}",
             ) from e
 
-    # Stage everything except workflow-internal dirs
-    add = git("add", "-A", "--", ".", *_EXCLUDE_PATHSPECS)
+    # Stage everything except workflow-internal dirs. An excluded path the
+    # repository already ignores needs no exclusion: `-A` never stages an
+    # ignored file, and naming an ignored path in a pathspec makes `git add`
+    # exit 1 ("The following paths are ignored") with nothing wrong, which
+    # since the raise above halted every run on a target that ignores data/
+    # (#3585, found when the testing batches were joined).
+    excludes: list[str] = []
+    for path in EXCLUDED_PATHS:
+        ignored = git("check-ignore", "-q", "--", path)
+        if ignored.returncode == 1:
+            excludes.append(f":!{path}")
+        elif ignored.returncode != 0:
+            raise _failed(
+                tag,
+                f"checkpoint {name} in {wt}: `git check-ignore {path}` failed "
+                f"(exit {ignored.returncode}): {_git_said(ignored)}",
+            )
+    add = git("add", "-A", "--", ".", *excludes)
     if add.returncode != 0:
         raise _failed(
             tag,
