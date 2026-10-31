@@ -70,3 +70,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **A check that cannot run raises.** A module of the target's own that cannot be read or parsed (71, 152), and a test source that does not parse (137), raise `SymbolCheckError`, a ValueError, naming the file and the cause after an ERROR line. They returned None or an empty list, the same answer as "every import resolves".
 - **Not the repository's own is still quiet.** An import from the standard library or a third-party package is not this check's to make.
 - **Where the raise goes.** N4c (`nodes/augment_tests.py`) does not catch it, so the run ends through the entry point's handler, which alerts. Catching it at N4c's two calls and returning it as `error_message` would end the run at HALT instead.
+
+### knowledge/patterns.py (2 ledger rows: 2 fixed)
+
+- **The knowledge base is read or refused.** A missing types.yaml (24) raises FileNotFoundError naming it. One that cannot be read, does not parse, or holds no `test_types` mapping (30) raises `KnowledgeBaseError`, a ValueError. Each comes after an ERROR line.
+- **The stand-in is deleted.** Both failures fell back, silently, to a shorter inline copy of the definitions that differed from the file. It existed only for those failures.
+- **Where the raise goes.** N0 and N1 read the knowledge base outside any handler, so a broken install ends the run at the first node, through the entry point's handler, which alerts.

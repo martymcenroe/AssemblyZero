@@ -4,84 +4,75 @@ Provides detection logic for inferring which types of tests are needed
 based on LLD content. This becomes the retrieval corpus when RAG is implemented.
 """
 
+import logging
+import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+logger = logging.getLogger(__name__)
 
-# Load test type definitions from YAML
+#: The test-type knowledge base, shipped beside this module.
+TYPES_YAML = Path(__file__).parent / "types.yaml"
+
+
+class KnowledgeBaseError(ValueError):
+    """types.yaml cannot be read, does not parse, or holds no `test_types`
+    mapping (ADR 0236). Names the file and the cause."""
+
+
+def _loud(message: str) -> None:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[KNOWLEDGE] %s", message)
+    print(f"ERROR [KNOWLEDGE] {message}", file=sys.stderr, flush=True)
+
+
 def load_test_types() -> dict[str, Any]:
-    """Load test type definitions from types.yaml.
+    """Load test type definitions from types.yaml (`TYPES_YAML`).
 
     Returns:
         Dict of test type definitions.
-    """
-    yaml_path = Path(__file__).parent / "types.yaml"
 
-    if not yaml_path.exists():
-        # Fallback to inline definitions
-        return _default_test_types()
+    Raises:
+        FileNotFoundError: when the file is missing, after an ERROR line.
+        KnowledgeBaseError: when it cannot be read, does not parse, or holds
+            no `test_types` mapping, after an ERROR line.
+
+    ADR 0236: both used to fall back, silently, to a shorter inline copy of
+    the definitions, so test types were detected and guidance written from
+    data nobody had chosen. That copy, which existed only to stand in for
+    these failures, is deleted. The file ships in the package.
+    """
+    yaml_path = TYPES_YAML
+    if not yaml_path.is_file():
+        message = (
+            f"the test-type knowledge base {yaml_path} is missing, so test "
+            f"types cannot be detected"
+        )
+        _loud(message)
+        raise FileNotFoundError(message)
 
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
-            return data.get("test_types", {})
-    except Exception:
-        return _default_test_types()
+    except (OSError, ValueError, yaml.YAMLError) as e:
+        message = (
+            f"the test-type knowledge base {yaml_path} cannot be read: "
+            f"{type(e).__name__}: {e}"
+        )
+        _loud(message)
+        raise KnowledgeBaseError(message) from e
 
-
-def _default_test_types() -> dict[str, Any]:
-    """Default test type definitions if YAML not available."""
-    return {
-        "unit": {
-            "name": "Unit Tests",
-            "description": "Test individual functions/classes in isolation",
-            "tools": ["pytest"],
-            "coverage_target": 80,
-            "detection_patterns": ["function", "class", "method", "utility"],
-            "mock_guidance": "Mock external dependencies (APIs, DB, filesystem)",
-        },
-        "integration": {
-            "name": "Integration Tests",
-            "description": "Test component interactions",
-            "tools": ["pytest", "docker-compose"],
-            "coverage_target": 60,
-            "detection_patterns": ["database", "api", "workflow", "service", "integration"],
-        },
-        "e2e": {
-            "name": "End-to-End Tests",
-            "description": "Test complete user flows",
-            "tools": ["pytest", "playwright"],
-            "coverage_target": 40,
-            "detection_patterns": ["user flow", "end-to-end", "e2e", "complete flow"],
-        },
-        "browser": {
-            "name": "Browser/UI Tests",
-            "description": "Test web UI interactions",
-            "tools": ["playwright", "selenium"],
-            "detection_patterns": ["html", "frontend", "ui", "web", "browser", "button", "form"],
-            "mock_guidance": "Real browser required, mock backend APIs",
-        },
-        "terminal": {
-            "name": "Terminal/CLI Tests",
-            "description": "Test command-line interfaces",
-            "tools": ["pytest", "pexpect"],
-            "detection_patterns": ["cli", "argparse", "input()", "command line", "terminal"],
-        },
-        "performance": {
-            "name": "Performance Tests",
-            "description": "Test speed and resource usage",
-            "tools": ["locust", "pytest-benchmark"],
-            "detection_patterns": ["latency", "throughput", "load", "performance", "benchmark"],
-        },
-        "security": {
-            "name": "Security Tests",
-            "description": "Test security controls",
-            "tools": ["bandit", "safety", "pytest"],
-            "detection_patterns": ["auth", "password", "token", "credential", "security", "permission"],
-        },
-    }
+    types = data.get("test_types") if isinstance(data, dict) else None
+    if not isinstance(types, dict) or not types:
+        message = (
+            f"the test-type knowledge base {yaml_path} holds no `test_types` "
+            f"mapping, so test types cannot be detected"
+        )
+        _loud(message)
+        raise KnowledgeBaseError(message)
+    return types
 
 
 def detect_test_types(content: str) -> list[str]:

@@ -135,3 +135,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 129 passed across 8 files: the validator's tests and N4c's.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
+
+## knowledge/patterns.py
+
+**New: `tests/unit/test_knowledge_patterns_loud_failure.py` (10).**
+
+**Before the fix, measured:** 8 failed, 2 passed. The eight site tests failed. The two that passed pin the shipped file, loaded quietly, and detection reading it.
+
+**Changed tests:** `test_testing_workflow.py::test_load_test_types_yaml_missing` now expects FileNotFoundError, where it called the deleted inline copy.
+
+**Neighbouring suites:** 325 passed across 5 files: the workflow tests, N0's and N1's.
+
+**Audits:** 0 new loud-failure sites, and this module's swallowed handler is now stale in the baseline; no new fail-open; halt sites pass. Ruff finds one fewer issue than at HEAD in the module and in the workflow tests.

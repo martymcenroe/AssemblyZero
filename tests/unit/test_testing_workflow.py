@@ -2916,15 +2916,15 @@ class TestE2EValidationModule:
 class TestPatternsModule:
     """Tests for patterns.py module."""
 
-    def test_load_test_types_yaml_missing(self, tmp_path):
-        """load_test_types uses defaults when YAML missing."""
-        from assemblyzero.workflows.testing.knowledge.patterns import _default_test_types
+    def test_load_test_types_yaml_missing(self, tmp_path, monkeypatch):
+        """A missing types.yaml raises (ADR 0236); the inline defaults that
+        stood in for it are gone."""
+        from assemblyzero.workflows.testing.knowledge import patterns
 
-        result = _default_test_types()
+        monkeypatch.setattr(patterns, "TYPES_YAML", tmp_path / "types.yaml")
 
-        assert "unit" in result
-        assert "integration" in result
-        assert "browser" in result
+        with pytest.raises(FileNotFoundError, match="types.yaml"):
+            patterns.load_test_types()
 
     def test_get_test_type_info(self):
         """get_test_type_info returns type definition."""
