@@ -5366,16 +5366,17 @@ class TestWikiPageGaps:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
 
+        # ADR 0236: the page is written from the LLD's own overview; an LLD
+        # with none raises (test_wiki_page_template_loud_failure.py).
         result = generate_wiki_page(
             feature_name="Very Long Feature Name That Describes A Complex Implementation",
-            lld_content="# Feature\n\nDetailed description here.",
+            lld_content="# Feature\n\n## Overview\n\nDetailed description here.\n",
             issue_number=42,
             repo_root=tmp_path,
         )
 
-        # May return None if wiki dir doesn't exist in expected location
-        # or return a path if successful
-        assert result is None or result.exists()
+        assert result.name == "Very-Long-Feature-Name-That-Describes-A-Complex-Implementation.md"
+        assert result.exists()
 
 
 class TestFinalizeCoverageMore:

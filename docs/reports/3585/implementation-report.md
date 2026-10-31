@@ -82,3 +82,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **No invented sections.** An LLD with no prerequisites (172), no procedure (200) or no verification steps (210) raises ValueError naming the feature, the issue and every missing section, after an ERROR line and before anything is written. The template wrote invented ones in their place, and the runbook read as written from the LLD.
 - **The caller still swallows it.** N8 (`nodes/document.py`) catches every exception from the runbook and prints "SKIPPED" on stdout. That handler is its own ledger row, `document.py:308`, in another batch.
 - **A defect that row's fix will expose.** The section patterns allow one digit before a heading, so "## 10. Verification" and "## 2.2 Dependencies" are not found. On such an LLD the runbook now raises where it used to be invented.
+
+### templates/wiki_page.py (2 ledger rows: 2 fixed)
+
+- **No placeholder overview (120).** An LLD with no overview raises ValueError naming the feature, the issue and the headings searched, after an ERROR line and before anything is written.
+- **A missing sidebar is said (169).** `update_wiki_sidebar` raises FileNotFoundError naming `_Sidebar.md`, after an ERROR line. It returned False, the same answer as "already linked", and N8 ignored it. False now means only "already linked".
+- **The caller still swallows both.** N8 catches every exception from the wiki step and prints "SKIPPED" on stdout: ledger rows `document.py:289` and `document.py:292`, in another batch.

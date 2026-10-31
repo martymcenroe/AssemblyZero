@@ -164,3 +164,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 288 passed across the runbook and workflow tests.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
+
+## templates/wiki_page.py
+
+**New: `tests/unit/test_wiki_page_template_loud_failure.py` (5).**
+
+**Before the fix, measured:** 2 failed, 3 passed. The two site tests failed. The three that passed pin a page written from the LLD's own overview, an already-linked page as False, and a new page linked.
+
+**Changed tests:** `test_testing_workflow.py::test_generate_wiki_page_with_long_feature_name` gains an overview in its LLD and asserts the page, where it accepted None or the placeholder.
+
+**Neighbouring suites:** 301 passed across 4 files: the wiki tests, the workflow tests and N8's.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds nothing in the module or the new test file.
