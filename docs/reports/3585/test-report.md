@@ -1,3 +1,9 @@
+# Test Reports: the testing workflow under standard 0034 (#3585 step 5)
+
+The package was swept in five batches from `fc1b2b0f` and merged on one branch. Each batch's report follows whole, under its own title, in merge order: C, B, D, E, A.
+
+---
+
 # Test Report: the testing graph and three of its nodes under standard 0034 (#3585 step 5, batch C)
 
 Each fixed site has a test that fails before its fix and passes after, run first against the unchanged module. Filled in module by module on `3585-testing-graph`. No test makes a model call, and no workflow is run against a repository; routers and nodes are called directly with built state, the one graph roll stubs every node it passes through, and alerts are asserted through the `operator_alerts` fixture.
@@ -434,3 +440,49 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 299 passed across 4 files: the c/p doc tests, the workflow tests and N8's.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds nothing in the module or the new test file.
+
+
+---
+
+# 3585 - Test Report: loud failure in the testing workflow, batch A
+
+## 1. Metadata
+
+| Field | Value |
+|-------|-------|
+| **Issue** | #3585 (step 5); module issue #3810 for `checkpoints.py` |
+| **Implementation Report** | `docs/reports/3585/implementation-report.md` |
+| **Date** | 2026-10-31 |
+
+## 2. Method
+
+For each module the new test file was written first and run against the unchanged module with `-rA`: every site test had to fail, and every test pinning kept behaviour had to pass. The module was then fixed until all passed, and every test file that imports the module or a changed function was run.
+
+## 3. `assemblyzero/workflows/testing/checkpoints.py`
+
+| Run | Result |
+|---|---|
+| `tests/unit/test_checkpoints_loud_failure.py` against the unchanged module (26 tests) | 20 failed, 6 passed: every site test failed; the 6 kept-behaviour tests passed |
+| The same file after the fix (30 tests, with N5's halt) | 30 passed |
+| `test_tdd_checkpoints`, `test_impl_resume_prefers_best_measured`, `test_impl_lands_through_driver`, `test_doc_step_handling`, `test_post_finalize_checkpoint`, `test_gate_registry` with the new file | 140 passed |
+| The 23 files that reach N5 and failed before the conftest stand-in and the registry row | 631 passed |
+| The 17 files reaching `run_impl_stage`, `_best_measured_attempt` or `finish_standalone_run` | 302 passed |
+| `tools/audit_loud_failure.py --check` | 0 new, 3 stale (the fixed `fail_open_tag` entries) |
+| `tools/audit_fail_open.py --check` | no new fail-open |
+| `tools/audit_halt_sites.py --check` | PASS, 163 halt sites, every one registered |
+
+## 4. `verify_phases.py`, `cleanup_helpers.py`, `cleanup.py`
+
+| Run | Result |
+|---|---|
+| `test_verify_phases_loud_failure.py` against the unchanged module (69 tests) | 42 failed, 27 passed (9 kept-behaviour pins, 18 compliant-row pins) |
+| The same file after the fix | 69 passed |
+| Every file naming verify_phases, its entry points, the testing graph, augment_tests or run_pytest | first 80 failures from the change (minimal states with no coverage target, full-suite gates outside a git repository, retired behaviour); after updating those tests, 593 and then 55 passed in the affected files |
+| `test_cleanup_helpers_loud_failure.py` against HEAD's module (10 tests) | 5 failed, 5 passed |
+| It and `test_cleanup_helpers.py` after the fix | 35 passed |
+| `test_cleanup_loud_failure.py` against HEAD's module (12 tests) | 10 failed, 2 passed |
+| It, `test_cleanup.py`, `test_cleanup_stage.py`, `test_node_modules_supply_nodes.py` | 45 passed |
+| `test_adversarial_review_halts`, `test_doc_step_handling`, `test_testing_workflow`, `test_orchestrator_stages`, `test_post_finalize_checkpoint` | 377 passed |
+| The three audits after the last commit | loud-failure 0 new (13 stale); fail-open no new; halt sites PASS, 164 sites |
+
+For `checkpoints.py` (section 3): before the conftest stand-in, 92 unit tests in 23 files halted at N5: they stub the test run and point `repo_root` at a plain directory, so the measurement note git cannot write became their halt.

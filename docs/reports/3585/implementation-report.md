@@ -1,3 +1,9 @@
+# Implementation Reports: the testing workflow under standard 0034 (#3585 step 5)
+
+The package was swept in five batches from `fc1b2b0f` and merged on one branch. Each batch's report follows whole, under its own title, in merge order: C (the graph and three nodes), B (the implementation subpackage), D (the remaining nodes), E (runners, templates and top-level modules), A (checkpoints, verify_phases and cleanup).
+
+---
+
 # Implementation Report: the testing graph and three of its nodes under standard 0034 (#3585 step 5, batch C)
 
 The rule is ADR 0236 and standard 0034. This branch, `3585-testing-graph`, is batch C of the testing workflow's sweep: `assemblyzero/workflows/testing/graph.py` with its routers, and the nodes `load_lld.py`, `augment_tests.py` and `e2e_validation.py`. One commit per module, each ledger 0908 row fixed and tested, or kept and pinned. The other batches of the testing workflow are on their own branches. When the branches meet, each keeps its own sections of this file and its sibling.
@@ -300,3 +306,73 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 
 - **No invented commands (137, 159).** An LLD that shows no command raises ValueError naming the tool, the issue and what was searched, after an ERROR line and before anything is written. The CLI document carried an invented reference row and usage block, neither of them the tool's.
 - **The caller still swallows it.** N8 catches every exception from the c/p docs and prints "SKIPPED": ledger row `document.py:338`, in another batch. The CLI document is written first, so no prompt document is written without it.
+
+
+---
+
+# 3585 - Implementation Report: loud failure in the testing workflow, batch A
+
+## 1. Metadata
+
+| Field | Value |
+|-------|-------|
+| **Issue** | #3585 (step 5, the #3581 sweep); module issue #3810 for `checkpoints.py` |
+| **LLD** | None: the work order is #3585, and each site's prescription is its row in `docs/audits/0908-loud-failure-sweep-ledger.md` |
+| **Test Report** | `docs/reports/3585/test-report.md` |
+| **Implementer** | Claude Opus 5.5 via Claude Code |
+| **Date** | 2026-10-31 |
+| **Branch** | `3585-testing-verify` |
+
+## 2. Summary
+
+Batch A brings four modules of the testing workflow under ADR 0236 and standard 0034: every failure is loud, logged with details, stops what depends on it, and alerts the operator. Each module is one commit. The ledger's line numbers are from commit `79e18ad1`.
+
+### 2.1 `assemblyzero/workflows/testing/checkpoints.py` (#3810, 14 rows fixed)
+
+`commit_checkpoint`, `record_measurement` and `read_measurement` used to be best-effort: every git failure printed "(non-fatal)" to stdout and returned False or None, which callers read as "nothing to commit" or "no measurement". Each failure now writes one ERROR line to stderr, logs it, and raises `CheckpointError` naming the worktree or commit, the git command, its exit code and git's stderr. Only exit 1 of `git diff --cached --quiet` reads as staged, and only git's "no note found" (exit 1, nothing on stdout) reads as an unmeasured commit. A note is parsed field by field, so a corrupt note and numbers that do not convert are both live, named failures. The three `# fail-open:` tags are gone.
+
+The module alerts no one itself; the caller that can stop does. N5 now notes its measurement through `_note_measurement` in `verify_phases.py`, which turns `CheckpointError` into N5's halt; `route_after_green` sends it to HALT, which alerts. The halt site is the new gate `impl.measurement_not_noted`, and the impl halt-row ratchet rises from 44 to 45.
+
+### 2.2 `assemblyzero/workflows/testing/nodes/verify_phases.py` (33 rows fixed, 18 compliant rows pinned)
+
+Every step N3 and N5 depend on raises `PhaseStepError` after an ERROR line: pytest that times out, cannot start or lacks pytest-cov for a coverage run; a red marker, test file, spec suite or audit directory that cannot be read or written; a snapshot, restore, dropping removal or visual sample that fails; a failed `git status`; a coverage target nothing names (the hard-coded default is gone) or that lies outside the repository; a runner that crashed or exited non-zero with no failure; an unknown coverage_type; a passing leg with no coverage figure; a critical skipped test. The two entry points turn it into one registered halt, gate `impl.phase_step_failed` (impl ratchet 46). A run with no framework, or naming an unknown one, halts through `FrameworkLegError`; a full suite whose exit contradicts its parse halts at the gate. A state with no `audit_dir` still writes no trail (only a direct call omits it); a named directory that is gone halts.
+
+### 2.3 `assemblyzero/workflows/testing/nodes/cleanup_helpers.py` (4 fixed, 2 compliant)
+
+A failed `git worktree list` raises `CalledProcessError`; only git's not-found message for this branch reads as already deleted; an unreadable lineage artifact or an unparsable coverage figure raises `LineageReadError`.
+
+### 2.4 `assemblyzero/workflows/testing/nodes/cleanup.py` (N9, 8 fixed)
+
+Every N9 failure writes an ERROR line and raises `CleanupError`, because N9's edge to END is unconditional; N9 reads the declared keys (`coverage_achieved`, `coverage_target`, `workflow_status`) and refuses when one, or `repo_root`, is absent; `route_after_document` raises when N8 leaves no issue_number. The graph changes that would let N8 and N9 route to HALT instead belong to `graph.py`.
+
+## 3. Files Created
+
+| File | Description |
+|------|-------------|
+| `tests/unit/test_checkpoints_loud_failure.py` | One test per ledger site, the kept behaviours, and N5's halt on a note it cannot write |
+| `tests/unit/test_verify_phases_loud_failure.py` | One test per site, kept behaviours, and the 18 compliant rows (69 tests) |
+| `tests/unit/test_cleanup_helpers_loud_failure.py` | One test per site and the two compliant rows (10 tests) |
+| `tests/unit/test_cleanup_loud_failure.py` | One test per site and the kept behaviours (12 tests) |
+
+## 4. Files Modified
+
+| File | Description |
+|------|-------------|
+| `assemblyzero/workflows/testing/checkpoints.py` | `CheckpointError`; every git failure raises after an ERROR line; field parser for the note |
+| `assemblyzero/workflows/testing/nodes/verify_phases.py` | `_note_measurement`: a note N5 cannot write is N5's halt |
+| `assemblyzero/core/gate_registry.py` | Gate `impl.measurement_not_noted` |
+| `tests/fixtures/gate_registry_baseline.json` | impl halt rows 44 to 45 |
+| `tests/unit/conftest.py` | Autouse stand-in for the name N5 calls through (`verify_phases.record_measurement`); N5's unit tests measure fake runs in plain directories |
+| `tests/unit/test_tdd_checkpoints.py`, `tests/unit/test_impl_resume_prefers_best_measured.py`, `tests/unit/test_impl_lands_through_driver.py` | Tests that asserted the retired best-effort behaviour now assert the raise |
+
+## 5. Deviations from the ledger
+
+None for `checkpoints.py`. Two defects found and not fixed (not ledger sites): `record_measurement` still returns False for a path that is not a directory, and `orchestrator/stages.py::_best_measured_attempt` reads every grave as unmeasured when `target_repo` is "".
+
+## 6. Compliance with standard 0034
+
+| Failure path | Loud | Logged | Stops | Alerts |
+|---|---|---|---|---|
+| A checkpoint commit fails (any git step, timeout, missing worktree) | ERROR line on stderr | `logger.error` and the exception message: worktree, command, exit code, stderr | `CheckpointError` raised | By the caller: the standalone finish's entry-point handler; the graph's checkpoint wrapper is batch C's row `graph.py:128` |
+| N5's measurement note cannot be written | ERROR line on stderr | as above, plus the note | N5 returns `error_message`, routed to HALT | HALT alerts |
+| A measurement note cannot be read or is corrupt | ERROR line on stderr | commit, repository, note text | `CheckpointError` raised out of the impl stage | The orchestrator entry point's handler |
