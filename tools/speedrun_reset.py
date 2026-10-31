@@ -103,15 +103,31 @@ def _gh_repo(repo_root: Path) -> str:
     return path
 
 
+def is_pipeline_branch(branch: str, issue: int) -> bool:
+    """True when `branch` is one the pipeline creates for this issue (#4218).
+
+    The impl stage's `issue-{N}` and the per-stage `{N}-*` branches (`{N}-lld`).
+    The same two shapes the branch sweeps list.
+    """
+    return branch == f"issue-{issue}" or branch.startswith(f"{issue}-")
+
+
 def close_open_prs(repo: str, issue: int) -> int:
-    """Close any open PR that closes this issue. Returns count closed."""
+    """Close the pipeline's own open PRs that name this issue. Returns count closed.
+
+    #4218: a search for the closing text also returns a PR somebody made by
+    hand that happens to name the issue. Only a PR whose head branch is one of
+    the issue's pipeline branches is closed; any other is named in the output
+    and left open. (A closed PR can be reopened, so nothing was lost before,
+    but the reset has no business touching work that is not the pipeline's.)
+    """
     # Find PRs that reference the issue in body.
     result = _run([
         "gh", "pr", "list",
         "--repo", repo,
         "--state", "open",
         "--search", f"Closes #{issue}",
-        "--json", "number,title",
+        "--json", "number,title,headRefName",
     ])
     if result.returncode != 0:
         print(f"  WARNING: gh pr list failed: {result.stderr.strip()}")
@@ -123,6 +139,14 @@ def close_open_prs(repo: str, issue: int) -> int:
     closed = 0
     for pr in prs:
         n = pr["number"]
+        head = pr.get("headRefName") or ""
+        if not is_pipeline_branch(head, issue):
+            print(
+                f"  Left open PR #{n}: {pr['title']} "
+                f"(head branch '{head or 'unknown'}' is not a pipeline branch "
+                f"of #{issue})"
+            )
+            continue
         r = _run(["gh", "pr", "close", str(n), "--repo", repo])
         if r.returncode == 0:
             print(f"  Closed PR #{n}: {pr['title']}")

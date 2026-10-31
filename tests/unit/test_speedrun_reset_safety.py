@@ -234,3 +234,47 @@ class TestLockLayoutIsShared:
         stray.mkdir(parents=True)
         (stray / "7.lock").write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
         reset.refuse_if_orchestrator_is_live(repo, 7)
+
+
+# ---------------------------------------------------------------------------
+# #4218: only the pipeline's own PRs are closed
+# ---------------------------------------------------------------------------
+
+
+class TestOnlyPipelinePrsAreClosed:
+    def test_a_hand_made_pr_naming_the_issue_is_listed_and_left_open(
+        self, gh: Gh, capsys
+    ):
+        """T1 (R1, R2)."""
+        gh.prs = [
+            {"number": 11, "title": "the pipeline's PR", "headRefName": "issue-7"},
+            {"number": 12, "title": "somebody's hand-made PR", "headRefName": "my-own-work"},
+        ]
+
+        closed = reset.close_open_prs("owner/repo", 7)
+
+        assert closed == 1
+        assert gh.closed == [11]
+        out = capsys.readouterr().out
+        assert "Closed PR #11" in out
+        assert "Left open PR #12" in out and "my-own-work" in out
+
+    def test_a_per_stage_branch_of_the_issue_is_the_pipelines_own(self, gh: Gh):
+        gh.prs = [{"number": 21, "title": "lld", "headRefName": "7-lld"}]
+        assert reset.close_open_prs("owner/repo", 7) == 1
+        assert gh.closed == [21]
+
+    def test_another_issues_branch_is_not_this_issues(self, gh: Gh):
+        """`17-lld` starts with `1` and `7`, but it is issue 17's branch."""
+        gh.prs = [
+            {"number": 31, "title": "other", "headRefName": "17-lld"},
+            {"number": 32, "title": "other impl", "headRefName": "issue-17"},
+        ]
+        assert reset.close_open_prs("owner/repo", 7) == 0
+        assert gh.closed == []
+
+    def test_a_pr_with_no_head_branch_reported_is_left_open(self, gh: Gh, capsys):
+        gh.prs = [{"number": 41, "title": "no head"}]
+        assert reset.close_open_prs("owner/repo", 7) == 0
+        assert gh.closed == []
+        assert "Left open PR #41" in capsys.readouterr().out
