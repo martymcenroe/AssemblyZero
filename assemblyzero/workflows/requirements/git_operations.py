@@ -172,7 +172,7 @@ def setup_lld_worktree(
         start_point = [lld_start_point(target_repo, base_branch)]
 
     result = run_command(
-        ["git", "-C", str(target_repo), "worktree", "add",
+        ["git", "-C", str(target_repo), "worktree", "add", "--relative-paths",
          str(worktree_path), "-b", branch_name, *start_point],
         capture_output=True,
         text=True,
@@ -180,7 +180,7 @@ def setup_lld_worktree(
     if result.returncode != 0:
         # Branch may already exist from a prior aborted run; try without -b
         result2 = run_command(
-            ["git", "-C", str(target_repo), "worktree", "add",
+            ["git", "-C", str(target_repo), "worktree", "add", "--relative-paths",
              str(worktree_path), branch_name],
             capture_output=True,
             text=True,

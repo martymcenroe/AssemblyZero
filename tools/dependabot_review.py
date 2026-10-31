@@ -542,7 +542,7 @@ def create_audit_worktree(
     worktree = target_repo.parent / f"{target_repo.name}-dependabot-{pr_number}"
     branch = f"dependabot-audit-{pr_number}"
     result = run(["git", "-C", str(target_repo), "worktree", "add",
-                  str(worktree), "-b", branch, "main"])
+                  "--relative-paths", str(worktree), "-b", branch, "main"])
     if result.returncode != 0:
         print(
             f"  ERROR: could not create worktree at {worktree}: "

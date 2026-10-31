@@ -164,7 +164,10 @@ def create_worktree(
                 f"{worktree_path} already exists. A mock run cuts a fresh "
                 "detached worktree and never reuses one."
             )
-        add_cmd = ["git", "worktree", "add", "--detach", str(worktree_path)]
+        add_cmd = [
+            "git", "worktree", "add", "--relative-paths", "--detach",
+            str(worktree_path),
+        ]
         if start_point:
             add_cmd.append(start_point)
         result = subprocess.run(
@@ -205,8 +208,12 @@ def create_worktree(
             worktree_path.rename(aside)
             print(f"    [WARN] {worktree_path} was not a worktree; moved aside to {aside}")
 
-    # Create worktree (from start_point if given, else current HEAD)
-    add_cmd = ["git", "worktree", "add", str(worktree_path), "-b", branch_name]
+    # Create worktree (from start_point if given, else current HEAD).
+    # #4241: --relative-paths, so the other side of WSL can open it.
+    add_cmd = [
+        "git", "worktree", "add", "--relative-paths", str(worktree_path),
+        "-b", branch_name,
+    ]
     if start_point:
         add_cmd.append(start_point)
     result = subprocess.run(
@@ -221,7 +228,10 @@ def create_worktree(
     if result.returncode != 0:
         # Maybe branch already exists - try without -b
         result = subprocess.run(
-            ["git", "worktree", "add", str(worktree_path), branch_name],
+            [
+                "git", "worktree", "add", "--relative-paths",
+                str(worktree_path), branch_name,
+            ],
             cwd=str(repo_path),
             capture_output=True,
             text=True,
@@ -347,6 +357,62 @@ def landing_preflight(args) -> str | None:
     from assemblyzero.core import merge_driver
 
     return merge_driver.check_configured()
+
+
+def issue_branch_refusal(args, repo_root: Path) -> str | None:
+    """Why a real run cannot start from this checkout's branch, or None (#4158).
+
+    A real run that succeeds lands its worktree through the merge driver, and
+    the finish runs only for a worktree this run cut or found from the
+    integration branch. Started from a checkout already on the issue's own
+    work branch (typically inside that worktree), it used to report SUCCESS,
+    exit 0 and land nothing. So it refuses, before any model call, and says
+    where to start: the integration branch's checkout finds this worktree and
+    reuses it. A run that lands nothing (dry, mock, scaffold-only,
+    --no-worktree) is not asked.
+    """
+    if args.dry_run or args.mock or args.scaffold_only or args.no_worktree:
+        return None
+    current = get_current_branch(repo_root)
+    if not is_issue_work_branch(current, args.issue):
+        return None
+    return (
+        f"{repo_root} is on {current}, issue #{args.issue}'s own work branch. "
+        f"A real run lands through the merge driver only when it starts from "
+        f"the integration branch it was carved from: run it from that "
+        f"branch's checkout (for example the primary checkout on main), which "
+        f"finds this worktree and reuses it"
+    )
+
+
+#: The legacy flag this entry point maps onto seats (#1072, #3563).
+LEGACY_SEAT_FLAGS = {"reviewer": ("impl.test_plan.review", "impl.test_plan.revise")}
+
+
+def transport_preflight(args, repo_root: Path) -> str | None:
+    """Why this run's model transport cannot answer, or None (#4239).
+
+    Every seat the run's profile names, resolved as the run will resolve it,
+    goes through ``preflight_for_specs``: one real call through agy when any
+    seat is a Gemini seat, nothing when none is. It used to run only inside
+    the LLD and spec drafters, so an implementation run with agy missing or
+    logged out cut its worktree and branch and found out at its first model
+    call. A mock run and a dry run call no model and are not asked.
+    """
+    if args.dry_run or args.mock:
+        return None
+    from assemblyzero.core.preflight import preflight_for_specs
+    from assemblyzero.core.seats import profile_from_args, seat_table
+
+    try:
+        profile = profile_from_args(args, repo_root, LEGACY_SEAT_FLAGS)
+    except ValueError as exc:
+        return f"model profile: {exc}"
+    specs = [seat.spec for seat in seat_table(profile).values()]
+    result = preflight_for_specs(*specs)
+    if result is None or result.passed:
+        return None
+    return "the model transport did not answer: " + "; ".join(result.warnings)
 
 
 def _run_completed(values: dict, scaffold_only: bool) -> bool:
@@ -1142,6 +1208,37 @@ def main():
         )
         sys.exit(1)
 
+    # #4158: a real run on its own work branch would succeed and land
+    # nothing; it refuses before any model call, the transport probe included.
+    reason = issue_branch_refusal(args, repo_root)
+    if reason:
+        print(f"[implement] ERROR: {reason}", file=sys.stderr)
+        alert.alert_operator(
+            what="the implementation run refused to start",
+            where="tools/run_implement_from_lld.py main, issue branch check",
+            cause=reason,
+            consequence="nothing ran: no model was called and nothing was landed",
+            repo=str(repo_root), issue=args.issue,
+        )
+        sys.exit(1)
+
+    # #4239: the transport every seat needs answers before the run touches
+    # anything: no resume contract consumed, no worktree or branch cut.
+    reason = transport_preflight(args, repo_root)
+    if reason:
+        print(f"[implement] ERROR: {reason}", file=sys.stderr)
+        alert.alert_operator(
+            what="the implementation run refused to start",
+            where="tools/run_implement_from_lld.py main, transport preflight",
+            cause=reason,
+            consequence=(
+                "nothing ran: no resume contract was consumed and no worktree "
+                "or branch was cut"
+            ),
+            repo=str(repo_root), issue=args.issue,
+        )
+        sys.exit(1)
+
     # #2570: a resume finds the world the halt described, or refuses by
     # name -- before the worktree is touched and any token is spent. A
     # fresh run has no contract and passes silently.
@@ -1326,10 +1423,7 @@ def main():
     from assemblyzero.core.seats import describe, profile_from_args, seat_in
 
     try:
-        profile = profile_from_args(
-            args, original_repo_root,
-            {"reviewer": ("impl.test_plan.review", "impl.test_plan.revise")},
-        )
+        profile = profile_from_args(args, original_repo_root, LEGACY_SEAT_FLAGS)
     except ValueError as e:
         print(f"[implement] ERROR: model profile: {e}")
         record.finish("fail", f"model profile: {e}")

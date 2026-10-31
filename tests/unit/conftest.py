@@ -3,7 +3,7 @@
 import os
 import sys
 from dataclasses import dataclass, field
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -26,18 +26,24 @@ class _FakePreflightResult:
 
 
 @pytest.fixture(autouse=True)
-def _bypass_gemini_preflight():
+def _bypass_gemini_preflight(monkeypatch):
     """Unit tests never depend on real Gemini credentials, and never make the
     real agy probe call (#3506's transport check). The per-process memo is
-    reset so no test inherits another's answer."""
+    reset so no test inherits another's answer.
+
+    The stand-in goes through `monkeypatch`, not `patch()`: a test that sets
+    `check_gemini_transport` again with `monkeypatch` is then undone in the
+    same stack, in reverse order. With `patch()` the context exited first and
+    `monkeypatch` then put the stand-in back for every later test in the
+    process (#4239)."""
     from assemblyzero.core import preflight
 
-    preflight._TRANSPORT_RESULT = None
-    with patch(
-        "assemblyzero.core.preflight.check_gemini_transport",
-        return_value=_FakePreflightResult(),
-    ):
-        yield
+    monkeypatch.setattr(preflight, "_TRANSPORT_RESULT", None)
+    monkeypatch.setattr(
+        preflight, "check_gemini_transport",
+        MagicMock(return_value=_FakePreflightResult()),
+    )
+    yield
     preflight._TRANSPORT_RESULT = None
 
 

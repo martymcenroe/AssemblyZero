@@ -1018,7 +1018,8 @@ def sync_binding_docs_to_arc(
         if sync_tree.exists():
             _run(["git", "worktree", "remove", str(sync_tree)], cwd=repo_root)
         add = _run(
-            ["git", "worktree", "add", str(sync_tree), base], cwd=repo_root
+            ["git", "worktree", "add", "--relative-paths", str(sync_tree), base],
+            cwd=repo_root,
         )
         if add.returncode != 0:
             return [
