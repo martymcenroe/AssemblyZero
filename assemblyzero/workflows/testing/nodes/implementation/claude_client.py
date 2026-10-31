@@ -44,27 +44,33 @@ CLI_TIMEOUT = 600  # 10 minutes base (historical; no longer the floor)
 FILE_TIMEOUT_FLOOR = 3600
 FILE_TIMEOUT_CAP = 3600
 
-#: Override names. Values are whole seconds. A missing, unparseable, or
-#: non-positive value falls back to the default rather than failing the call:
-#: an operator reaching for these is usually unblocking a stalled run, and a
-#: typo must not turn a slow call into a dead one.
+#: Override names. Values are whole seconds. An unset (or empty) variable is
+#: the default. An unparseable or non-positive value raises, naming the
+#: variable (#3585): it used to fall back to the default with a stdout line,
+#: so a typo ran the call on a limit nobody chose.
 ENV_TIMEOUT_FLOOR = "AZ_FILE_TIMEOUT_FLOOR"
 ENV_TIMEOUT_CAP = "AZ_FILE_TIMEOUT_CAP"
 
 
 def _env_seconds(name: str, default: int) -> int:
-    """Read a positive whole-second count from the environment."""
+    """Read a positive whole-second count from the environment.
+
+    Unset is the default. A value that is not a positive whole number is an
+    ERROR line naming the variable and the value, then ValueError.
+    """
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
     try:
         value = int(raw)
     except ValueError:
-        print(f"    [TIMEOUT] {name}={raw!r} is not an integer; using {default}s")
-        return default
+        message = f"{name}={raw!r} is not an integer number of seconds"
+        print(f"ERROR [TIMEOUT] {message}", file=sys.stderr, flush=True)
+        raise ValueError(message) from None
     if value <= 0:
-        print(f"    [TIMEOUT] {name}={value} is not positive; using {default}s")
-        return default
+        message = f"{name}={value} is not positive; give a whole number of seconds above 0"
+        print(f"ERROR [TIMEOUT] {message}", file=sys.stderr, flush=True)
+        raise ValueError(message)
     return value
 
 
@@ -248,7 +254,11 @@ def call_claude_for_file(
     # Issue #643: Use provided stable system prompt, fall back to per-file prompt
     effective_system_prompt = system_prompt or build_system_prompt(file_path)
 
-    # Issue #783: Use unified provider — respects API policy gate
+    # Issue #783: Use unified provider — respects API policy gate.
+    # An exception from the seat, the gate or the transport is returned as
+    # the call's error (this function's contract: the caller retries, then
+    # raises ImplementationError, which the runner alerts on), after an ERROR
+    # line naming its type, the seat and the file (#3585).
     try:
         resolved = resolve_active(seat or CODE_SEAT)
         if model:
@@ -273,5 +283,10 @@ def call_claude_for_file(
             if not result.retryable:
                 return "", f"[NON-RETRYABLE] {error_msg}"
             return "", error_msg
-    except Exception as e:
-        return "", f"Provider error: {e}"
+    except Exception as e:  # noqa: BLE001 - returned as the call's error, after the ERROR line
+        print(
+            f"ERROR [N4] provider call raised {type(e).__name__} for seat "
+            f"{seat or CODE_SEAT}, file {file_path or '(none)'}: {e}",
+            file=sys.stderr, flush=True,
+        )
+        return "", f"Provider error: {type(e).__name__}: {e}"

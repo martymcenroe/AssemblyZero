@@ -45,6 +45,13 @@ No run calls these batch-mode helpers; they keep the standard while they exist.
 - **No invented paths** (190): a code block that names no file is an ERROR line and a ValueError; it used to be written as `implementation_N.py`.
 - **No partial write** (218): an entry with no path or no content is refused before anything is written.
 
+### claude_client.py (4 rows)
+
+- **A timeout override that cannot be used raises** (61, 64). `AZ_FILE_TIMEOUT_FLOOR` or `AZ_FILE_TIMEOUT_CAP` set to something that is not a positive whole number is an ERROR line naming the variable and value, then ValueError, as `AZ_LLM_IDLE_TIMEOUT` does since #3780. Unset or empty is the default.
+- **A provider exception is an ERROR line** (270) naming its type, the seat and the file, and the returned error carries the type. It is still returned as the call's error, which is the function's contract: the retry loop raises after its budget and the runner alerts.
+- **250: won't do.** Compliant: a model that is not a provider spec is a non-retryable error the retry loop raises on. Pinned.
+- `ImplementationError` writes its ERROR line at construction (see orchestrator.py above).
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |

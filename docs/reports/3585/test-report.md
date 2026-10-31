@@ -37,3 +37,10 @@ Each module's new test file was run against the unchanged module first; every si
 - Changed existing tests in `test_testing_workflow.py`: two `parse_implementation_response` tests that relied on an invented `implementation_N.py` now assert the ValueError.
 - Neighbouring suites (`test_testing_workflow.py`, `test_implement_code_shim_exports.py` and the new file): 294 passed and 2 failed, the two tests above; after the change they pass.
 - Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
+
+## claude_client.py
+
+- New: `tests/unit/test_claude_client_loud_failure.py`, 5 tests. Before the fix: 3 failed, 2 passed. After: 5 passed.
+- Changed existing test: `test_llm_idle_timeout.py::test_a_bad_override_falls_back_rather_than_failing_the_call` becomes `test_a_bad_override_raises_naming_the_variable`, and an empty value is pinned as the default in `test_an_empty_override_is_the_default`.
+- Neighbouring suites (the 21 unit files that import the module or its functions): 578 passed and 3 failed, the three parametrised cases above; after the change, 27 passed in the two files.
+- Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
