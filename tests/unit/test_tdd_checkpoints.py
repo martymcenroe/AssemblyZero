@@ -187,6 +187,10 @@ def test_excludes_workflow_internal_dirs_from_staging(tmp_path):
         cmds.append(cmd)
         if "diff" in cmd and "--quiet" in cmd:
             return _mk_completed(returncode=1)
+        if "check-ignore" in cmd:
+            # #3585: none of the internal dirs is ignored by this repository,
+            # so each must be excluded (an ignored one needs no exclusion).
+            return _mk_completed(returncode=1)
         return _mk_completed(returncode=0)
 
     with patch.object(checkpoints.subprocess, "run", side_effect=fake_run):
