@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
 
 from assemblyzero.utils.ast_sentinel import (
+    SentinelCannotRun,
     SentinelResult,
     analyze_file,
     analyze_source,
@@ -117,14 +119,14 @@ class TestExtraCoverage:
         assert main([str(f2)]) == 0
 
     def test_analyze_file_io_error(self):
-        result = analyze_file("non_existent_file_999.py")
-        assert not result.ok
-        assert result.errors[0].name == "<io>"
+        # #3585: a file that cannot be read was never checked, so it raises.
+        with pytest.raises(SentinelCannotRun):
+            analyze_file("non_existent_file_999.py")
 
     def test_syntax_error(self):
-        result = _analyze("if x:")
-        assert not result.ok
-        assert result.errors[0].name == "<syntax>"
+        # #3585: a source that does not parse was never checked, so it raises.
+        with pytest.raises(SentinelCannotRun):
+            _analyze("if x:")
         
     def test_async_for_with(self):
         # y and ctx are undefined

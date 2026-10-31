@@ -40,17 +40,61 @@ class WorkflowTimeoutError(SystemExit):
 class WorkflowTimeout:
     """Context manager that enforces a global wall-clock timeout.
 
-    Uses a daemon thread timer that interrupts the main thread via
-    SystemExit after the specified duration. The daemon thread ensures
-    cleanup even if the main thread is stuck.
+    Uses a daemon thread timer that ends the process with ``os._exit(42)``
+    after the specified duration. The daemon thread ensures cleanup even if
+    the main thread is stuck.
+
+    When the timer fires it alerts the operator first (ADR 0236, #3585): the
+    banner alone reached only a watched console. The exit happens even when
+    the alert cannot be delivered; the alert path writes that failure to
+    stderr itself.
 
     Args:
         minutes: Timeout in minutes. 0 disables the timeout.
+        issue: The issue the run is working, for the alert.
+        workflow: The workflow's name (e.g. ``"lld"``), for the alert.
     """
 
-    def __init__(self, minutes: int = 30):
+    def __init__(self, minutes: int = 30, *, issue: int | None = None, workflow: str = ""):
         self.minutes = minutes
+        self.issue = issue
+        self.workflow = workflow
         self._timer: threading.Timer | None = None
+
+    def _expire(self) -> None:
+        """What the timer thread runs: banner, alert, then ``os._exit(42)``."""
+        print(
+            f"\n{'=' * 70}\n"
+            f"[TIMEOUT] Workflow exceeded {self.minutes}-minute wall-clock limit.\n"
+            f"Forcing shutdown to prevent resource waste.\n"
+            f"{'=' * 70}\n",
+            file=sys.stderr,
+            flush=True,
+        )
+        # os._exit is the nuclear option — it bypasses all cleanup.
+        # We use it because the main thread may be stuck in a blocking call
+        # (subprocess, network I/O) that won't respond to exceptions. The
+        # `finally` holds that even when the alert itself raises.
+        import os
+
+        from assemblyzero.core import alert
+
+        try:
+            alert.alert_operator(
+                what="the workflow ran out of wall clock",
+                where=(
+                    "assemblyzero/utils/workflow_timeout.py WorkflowTimeout "
+                    f"(workflow {self.workflow or 'unnamed'})"
+                ),
+                cause=f"exceeded its {self.minutes}-minute wall-clock limit",
+                consequence=(
+                    "the process exits 42 now, bypassing cleanup; the run's "
+                    "current node did not finish"
+                ),
+                issue=self.issue,
+            )
+        finally:
+            os._exit(42)
 
     def __enter__(self) -> "WorkflowTimeout":
         if self.minutes <= 0:
@@ -58,22 +102,7 @@ class WorkflowTimeout:
 
         seconds = self.minutes * 60
 
-        def _timeout_handler():
-            print(
-                f"\n{'=' * 70}\n"
-                f"[TIMEOUT] Workflow exceeded {self.minutes}-minute wall-clock limit.\n"
-                f"Forcing shutdown to prevent resource waste.\n"
-                f"{'=' * 70}\n",
-                file=sys.stderr,
-                flush=True,
-            )
-            # os._exit is the nuclear option — it bypasses all cleanup.
-            # We use it because the main thread may be stuck in a blocking call
-            # (subprocess, network I/O) that won't respond to exceptions.
-            import os
-            os._exit(42)
-
-        self._timer = threading.Timer(seconds, _timeout_handler)
+        self._timer = threading.Timer(seconds, self._expire)
         self._timer.daemon = True
         self._timer.start()
 

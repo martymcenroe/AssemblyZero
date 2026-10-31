@@ -6,6 +6,7 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 
 from assemblyzero.utils.speedrun import (
     HALT_CLASSIFICATIONS,
@@ -207,8 +208,9 @@ def test_run_logger_read_all_handles_missing_log(tmp_path: Path):
     assert logger.read_all() == []
 
 
-def test_run_logger_skips_malformed_lines(tmp_path: Path, caplog):
-    """read_all skips invalid JSONL lines and logs a warning."""
+def test_run_logger_refuses_malformed_lines(tmp_path: Path, operator_alerts):
+    """#3585: read_all alerts and raises on an invalid JSONL line, naming it;
+    it used to skip the line with a WARNING and return a shorter history."""
     log_path = tmp_path / "data" / "speedrun" / "run-log.jsonl"
     log_path.parent.mkdir(parents=True)
     log_path.write_text(
@@ -218,8 +220,6 @@ def test_run_logger_skips_malformed_lines(tmp_path: Path, caplog):
         encoding="utf-8",
     )
     logger = RunLogger(tmp_path)
-    entries = logger.read_all()
-    # Two valid lines kept; one malformed silently skipped (with WARNING).
-    assert len(entries) == 2
-    assert entries[0]["valid"] == 1
-    assert entries[1]["valid"] == 2
+    with pytest.raises(ValueError, match=":2:"):
+        logger.read_all()
+    assert len(operator_alerts) == 1

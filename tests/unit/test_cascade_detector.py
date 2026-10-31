@@ -211,14 +211,15 @@ class TestEmptyInput:
 
 
 class TestCorruptConfigFallback:
-    """T070: Corrupt config falls back gracefully (REQ-8)."""
+    """T070: a corrupt config stops detection rather than dropping the
+    operator's overrides (REQ-8, superseded by ADR 0236, #3585)."""
 
-    def test_corrupt_config_fallback(self, tmp_path: Path) -> None:
+    def test_corrupt_config_raises_naming_it(self, tmp_path: Path) -> None:
         corrupt_file = tmp_path / "cascade_block_patterns.json"
         corrupt_file.write_text("{invalid json!!!", encoding="utf-8")
 
-        user_patterns = load_user_patterns(config_path=corrupt_file)
-        assert user_patterns == []
+        with pytest.raises(ValueError, match="cannot be loaded"):
+            load_user_patterns(config_path=corrupt_file)
 
         # Verify defaults still work
         defaults = load_default_patterns()

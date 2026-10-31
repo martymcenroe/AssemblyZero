@@ -26,6 +26,7 @@ from typing import Any
 from assemblyzero.core.interface_surface import build_interface_map
 from assemblyzero.utils.codebase_reader import (
     BINARY_EXTENSIONS,
+    CodebaseReadError,
     FileReadResult,
     is_sensitive_file,
     parse_project_metadata,
@@ -99,8 +100,9 @@ def _unread_selected(
     file has nothing to read: all three stay quiet. A file after the total
     budget ran out is a designed cap: it is returned so the caller names it in
     the log. Anything else could not be read, and the drafter would design
-    without it. The reader logs that at DEBUG and returns nothing, so this is
-    the only place it is seen, and it raises.
+    without it. The reader raises ``CodebaseReadError`` on a read it cannot
+    make, which the caller halts on; this catches a file with content that
+    came back with none, and it raises too.
 
     Raises:
         UnreadableSelectedFile: naming the first selected file that could not
@@ -254,16 +256,16 @@ def analyze_codebase(state: dict) -> dict:
             f"LLD analysis cannot list the key files of {repo_path}: "
             f"{type(exc).__name__}: {exc}"
         )}
-    key_read_results = read_files_within_budget(
-        key_files,
-        total_budget=_TOTAL_TOKEN_BUDGET,
-        per_file_budget=_PER_FILE_TOKEN_BUDGET,
-    )
     try:
+        key_read_results = read_files_within_budget(
+            key_files,
+            total_budget=_TOTAL_TOKEN_BUDGET,
+            per_file_budget=_PER_FILE_TOKEN_BUDGET,
+        )
         budget_dropped = _unread_selected(
             key_files, key_read_results, _TOTAL_TOKEN_BUDGET
         )
-    except UnreadableSelectedFile as exc:
+    except (CodebaseReadError, UnreadableSelectedFile) as exc:
         return {"error_message": _loud(
             f"LLD analysis cannot read a selected key file in {repo_path}: {exc}"
         )}
@@ -288,7 +290,12 @@ def analyze_codebase(state: dict) -> dict:
     # ------------------------------------------------------------------
     # Step 2: Parse project metadata
     # ------------------------------------------------------------------
-    metadata = parse_project_metadata(repo_path)
+    try:
+        metadata = parse_project_metadata(repo_path)
+    except CodebaseReadError as exc:
+        return {"error_message": _loud(
+            f"LLD analysis cannot read the project metadata of {repo_path}: {exc}"
+        )}
     dependency_summary = metadata.get("dependencies", "")
     dep_list = [
         d.strip() for d in dependency_summary.split(",") if d.strip()
@@ -355,20 +362,20 @@ def analyze_codebase(state: dict) -> dict:
             p for p in related_paths if p.name not in already_read
         ]
 
-        related_results = (
-            read_files_within_budget(
-                related_paths,
-                total_budget=remaining_budget,
-                per_file_budget=_PER_FILE_TOKEN_BUDGET,
-            )
-            if related_paths and remaining_budget > 0
-            else []
-        )
         try:
+            related_results = (
+                read_files_within_budget(
+                    related_paths,
+                    total_budget=remaining_budget,
+                    per_file_budget=_PER_FILE_TOKEN_BUDGET,
+                )
+                if related_paths and remaining_budget > 0
+                else []
+            )
             budget_dropped = _unread_selected(
                 related_paths, related_results, remaining_budget
             )
-        except UnreadableSelectedFile as exc:
+        except (CodebaseReadError, UnreadableSelectedFile) as exc:
             return {"error_message": _loud(
                 f"LLD analysis cannot read a related file in {repo_path}: {exc}"
             )}

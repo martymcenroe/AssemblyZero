@@ -28,13 +28,16 @@ The ledger is append-only JSONL under the target repo's gitignored
 ``data/speedrun/runs/``, one object per preserved branch, next to the run logs
 the archiver already reads.
 
-Recording never fails a caller
-------------------------------
+A lost record is a failure (ADR 0236, #3585)
+--------------------------------------------
 
-Every writer here is in the middle of preserving someone's work. A ledger that
-could raise would turn a bookkeeping problem into lost evidence, which is the
-exact inversion of what it exists to prevent. `record_preserved` swallows its
-own errors and says so.
+`record_preserved` used to swallow its own errors and return False, which both
+writers ignored, so a branch could be preserved and never reach the archive's
+record. It now raises naming the ledger. Both writers (the worktree sweep and
+the file janitor) catch it after the branch already holds the work, alert the
+operator, and report the entry as failed, so no evidence is lost to the raise.
+`read_ledger` alerts and raises on a ledger it cannot read and on a line that
+is not a record, rather than hand the archiver a shorter list.
 """
 
 from __future__ import annotations
@@ -43,6 +46,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+from assemblyzero.core import alert
 
 LEDGER_NAME = "preserved-branches.jsonl"
 
@@ -73,13 +78,15 @@ def record_preserved(
     source: str = "",
     detail: str = "",
 ) -> bool:
-    """Append one preserved branch to the ledger. Never raises.
+    """Append one preserved branch to the ledger. True once it is on disk.
 
-    Returns whether the record landed, so a caller that wants to say so can,
-    and a caller in the middle of saving work can ignore it.
+    A line that cannot be written raises `OSError` naming the ledger, and an
+    empty branch raises `ValueError`: there is nothing to record. Each caller
+    has already put the work on the branch, so it alerts the operator and
+    reports a failed entry; the raise never costs the preserved content.
     """
     if not branch:
-        return False
+        raise ValueError("record_preserved needs a branch name; got an empty one")
 
     record = {
         "branch": branch,
@@ -88,44 +95,72 @@ def record_preserved(
         "detail": detail,
         "at": datetime.now().strftime(_TS_FMT),
     }
+    path = ledger_path(repo)
     try:
-        path = ledger_path(repo)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
-        return True
-    except OSError:
-        return False
+    except (OSError, ValueError) as exc:
+        raise OSError(
+            f"cannot append {branch} to the preserved-branch ledger {path}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    return True
+
+
+def _unreadable(path: Path, cause: str) -> None:
+    alert.alert_operator(
+        what="read the preserved-branch ledger",
+        where="assemblyzero/speedrun/preserved.py read_ledger",
+        cause=cause,
+        consequence=(
+            "the branches it records cannot be attributed, so the archive or "
+            "report reading it stops rather than bundle a shorter list"
+        ),
+        repo=str(path.parents[3]),
+    )
+
+
+def _bad_line(path: Path, lineno: int, why: str) -> ValueError:
+    """Alert about one ledger line that is not a record; the error to raise."""
+    cause = f"{path}:{lineno} {why}"
+    _unreadable(path, cause)
+    return ValueError(f"the preserved-branch ledger line {cause}")
 
 
 def read_ledger(repo: Path | str) -> list[Preserved]:
-    """Every recorded preservation, oldest first. A bad line is skipped.
+    """Every recorded preservation, oldest first.
 
-    One malformed line must not hide the other sixty-three. The archiver's
-    discovery pass covers whatever a skipped line would have named, so a
-    partial read degrades to the pre-ledger behaviour rather than to nothing.
+    An absent ledger is the legitimate answer "nothing recorded yet" and
+    returns ``[]``. A ledger that exists but cannot be read, or a line that is
+    not a JSON object naming a branch, alerts the operator and raises: the
+    archiver would otherwise bundle a shorter list and could not say which
+    branch it lost the attribution of.
     """
     path = ledger_path(repo)
-    if not path.is_file():
+    if not path.exists():
         return []
 
-    records: list[Preserved] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
+    except (OSError, UnicodeDecodeError) as exc:
+        _unreadable(path, f"{type(exc).__name__}: {exc} ({path})")
+        raise
 
-    for line in lines:
+    records: list[Preserved] = []
+    for lineno, line in enumerate(lines, start=1):
         line = line.strip()
         if not line:
             continue
         try:
             data = json.loads(line)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise _bad_line(path, lineno, f"is not JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise _bad_line(path, lineno, "is not a JSON object")
         branch = data.get("branch")
         if not isinstance(branch, str) or not branch:
-            continue
+            raise _bad_line(path, lineno, f"names no branch: {branch!r}")
         records.append(
             Preserved(
                 branch=branch,

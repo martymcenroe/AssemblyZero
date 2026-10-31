@@ -2,7 +2,6 @@
 
 import json
 import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -94,11 +93,17 @@ class TestWriteToBuffer:
                 lines = f.readlines()
             assert len(lines) == 2
 
-    def test_never_raises(self, tmp_path):
-        """Buffer write failures are silently swallowed."""
-        with patch.object(emitter, "_BUFFER_DIR", Path("/nonexistent/path/buffer")):
-            # Should not raise
+    def test_a_buffer_write_failure_alerts_and_raises(self, tmp_path, operator_alerts):
+        """#3585: a buffer that cannot take the event loses it entirely, so the
+        failure alerts and raises; it used to be swallowed."""
+        blocker = tmp_path / "blocker"
+        blocker.write_text("x", encoding="utf-8")
+        with (
+            patch.object(emitter, "_BUFFER_DIR", blocker / "buffer"),
+            pytest.raises(OSError),
+        ):
             _write_to_buffer({"event_type": "test"})
+        assert len(operator_alerts) == 1
 
 
 class TestEmit:
@@ -122,11 +127,15 @@ class TestEmit:
             files = list((tmp_path / "buffer").glob("*.jsonl"))
             assert len(files) == 1
 
-    def test_never_raises_on_any_error(self):
-        """emit() must never raise, even with catastrophic failures."""
-        with patch.object(emitter, "_build_event", side_effect=RuntimeError("boom")):
-            # Should not raise
+    def test_an_event_that_cannot_be_built_alerts_and_raises(self, operator_alerts):
+        """#3585: emit() used to swallow every failure; an event that cannot be
+        built is not recorded, so it alerts and raises."""
+        with (
+            patch.object(emitter, "_build_event", side_effect=RuntimeError("boom")),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
             emit("test.event")
+        assert len(operator_alerts) == 1
 
 
 class TestTrackTool:

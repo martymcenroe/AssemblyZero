@@ -15,9 +15,11 @@ Two sinks, both written per event:
   the AssemblyZero root — machine-local, gitignored, the one-grep query
   index.
 
-Record-only contract: nothing here may alter workflow control flow. Every
-sink failure degrades to a printed warning. A run with zero detections
-still records events (``passed: true``) — absence of evidence must be
+A sink that was asked for and cannot be written is a failure (ADR 0236,
+#3585): each one alerts the operator, both sinks are still attempted, and the
+first failure is raised. It used to print a WARNING to stdout and go on, so the
+baseline lost events with nothing said. A run with zero detections still
+records events (``passed: true``) — absence of evidence must be
 distinguishable from absence of instrumentation.
 """
 
@@ -28,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core import alert
 from assemblyzero.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
@@ -90,35 +93,68 @@ def record_hallucination_event(
     audit_dir: Path | None,
     assemblyzero_root: Path | None,
 ) -> None:
-    """Write one event to both sinks. Never raises.
+    """Write one event to both sinks.
 
-    Either sink may be unavailable (fresh checkout, missing audit dir,
-    permissions); each failure is reported as a warning and swallowed.
-    Telemetry must never break the pipeline it observes.
+    A sink given as None is not part of this run and is skipped, quietly. A
+    sink that was given and cannot be written -- an audit directory that does
+    not exist, or a write that fails -- alerts the operator. Both sinks are
+    always attempted; the first failure is then raised.
 
     Args:
         event: Event from :func:`build_hallucination_event`.
         audit_dir: The run's audit directory, or None to skip that sink.
         assemblyzero_root: AssemblyZero repo root anchoring the JSONL
             sink, or None to skip it.
+
+    Raises:
+        OSError: the first sink that could not be written (FileNotFoundError
+            for an audit directory that does not exist).
     """
-    if audit_dir is not None and audit_dir.exists():
-        try:
-            file_num = next_file_number(audit_dir)
-            save_audit_file(
-                audit_dir,
-                file_num,
-                AUDIT_SUFFIX,
-                json.dumps(event, indent=2) + "\n",
-            )
-        except OSError as e:
-            print(f"    [telemetry] WARNING: audit sink failed: {e}")
+    failures: list[OSError] = []
+
+    if audit_dir is not None:
+        if not audit_dir.exists():
+            missing = FileNotFoundError(f"audit directory {audit_dir} does not exist")
+            _sink_failed(event, "audit sink", audit_dir, missing)
+            failures.append(missing)
+        else:
+            try:
+                file_num = next_file_number(audit_dir)
+                save_audit_file(
+                    audit_dir,
+                    file_num,
+                    AUDIT_SUFFIX,
+                    json.dumps(event, indent=2) + "\n",
+                )
+            except OSError as e:
+                _sink_failed(event, "audit sink", audit_dir, e)
+                failures.append(e)
 
     if assemblyzero_root is not None:
+        jsonl_path = assemblyzero_root / JSONL_RELATIVE_PATH
         try:
-            jsonl_path = assemblyzero_root / JSONL_RELATIVE_PATH
             jsonl_path.parent.mkdir(parents=True, exist_ok=True)
             with jsonl_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(event) + "\n")
         except OSError as e:
-            print(f"    [telemetry] WARNING: JSONL sink failed: {e}")
+            _sink_failed(event, "JSONL sink", jsonl_path, e)
+            failures.append(e)
+
+    if failures:
+        raise failures[0]
+
+
+def _sink_failed(event: dict[str, Any], sink: str, where: Path, exc: OSError) -> None:
+    issue = event.get("issue")
+    alert.alert_operator(
+        what=f"write the hallucination-event {sink}",
+        where="assemblyzero/workflows/telemetry/hallucination_log.py record_hallucination_event",
+        cause=f"{type(exc).__name__}: {exc} ({where})",
+        consequence=(
+            f"the {event.get('artifact', '')} hallucination check of iteration "
+            f"{event.get('iteration', '')} is missing from the baseline; the "
+            f"write is raised"
+        ),
+        repo=str(event.get("repo", "")),
+        issue=issue if isinstance(issue, int) and issue else None,
+    )

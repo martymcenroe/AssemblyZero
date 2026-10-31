@@ -3845,10 +3845,16 @@ def main(argv: list[str] | None = None) -> int:
     # is created, and a batch is refused as a whole rather than partly rolled.
     blocking, gh_error = open_must_resolve_issues(repo_root)
     if gh_error:
-        # Offline is not a reason to brick a local roll; the auto-filer (#2072)
-        # is the enforcement backstop.
-        print(f"WARNING: could not check for unresolved questions ({gh_error}); proceeding.")
-    elif blocking:
+        # ADR 0236 (#3585): a check that cannot run is a failure, never a
+        # pass. The operator has been alerted with the cause.
+        print(
+            "BLOCKED: could not check this repository for unanswered questions "
+            f"about its issue text ({gh_error}). This launch refuses rather "
+            "than roll past a check that did not run. Fix the GitHub access "
+            "and launch again."
+        )
+        return 91
+    if blocking:
         print(refusal_message(blocking))
         return 91
 

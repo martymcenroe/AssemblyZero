@@ -8,6 +8,7 @@ import hashlib
 import os
 import platform
 import subprocess
+import sys
 
 
 def detect_actor() -> str:
@@ -23,30 +24,54 @@ def detect_actor() -> str:
     return "human"
 
 
+def _detection_failed(cause: str) -> None:
+    """The ERROR line for a detection that fell back to "unknown" (#3585).
+
+    Never echoes gh's output. Not an alert or a raise: every telemetry event
+    calls this, and the unit tier runs in CI with no gh login.
+    """
+    print(
+        f"ERROR [TELEMETRY] GitHub user not detected ({cause}); events are "
+        f"labelled 'unknown' for this process",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def detect_github_user() -> str:
     """Detect the current GitHub user via gh CLI.
 
-    Returns the GitHub username, or "unknown" if detection fails.
-    Caches the result for the process lifetime.
+    Returns the GitHub username, or "unknown" if detection fails; "unknown" is
+    the declared label, and a failed detection writes an ERROR line to stderr
+    naming the cause first (#3585). Caches the result for the process
+    lifetime. gh is not asked for the token: the username line does not need
+    it, and a captured token is one more place for it to leak.
     """
     if not hasattr(detect_github_user, "_cached"):
         try:
             result = subprocess.run(
-                ["gh", "auth", "status", "--show-token"],
+                ["gh", "auth", "status"],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
-            for line in result.stdout.splitlines() + result.stderr.splitlines():
-                if "Logged in to github.com account" in line:
-                    # Format: "  ✓ Logged in to github.com account USERNAME ..."
-                    parts = line.split("account")
-                    if len(parts) > 1:
-                        username = parts[1].strip().split()[0].strip("()")
-                        detect_github_user._cached = username
-                        return username
-        except Exception:
-            pass
+        except (OSError, subprocess.SubprocessError) as exc:
+            _detection_failed(f"gh could not run: {type(exc).__name__}")
+            detect_github_user._cached = "unknown"
+            return detect_github_user._cached
+        if result.returncode != 0:
+            _detection_failed(f"gh auth status exited {result.returncode}")
+            detect_github_user._cached = "unknown"
+            return detect_github_user._cached
+        for line in result.stdout.splitlines() + result.stderr.splitlines():
+            if "Logged in to github.com account" in line:
+                # Format: "  ✓ Logged in to github.com account USERNAME ..."
+                parts = line.split("account")
+                if len(parts) > 1 and parts[1].strip():
+                    username = parts[1].strip().split()[0].strip("()")
+                    detect_github_user._cached = username
+                    return username
+        _detection_failed("gh auth status named no github.com account")
         detect_github_user._cached = "unknown"
     return detect_github_user._cached
 

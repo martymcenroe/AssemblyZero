@@ -4,13 +4,17 @@ Issue #358: Auto-Approve Safety — Prevent Cascading Task Execution
 
 Writes newline-delimited JSON (JSONL) for measurement and tuning
 of cascade detection accuracy over time.
+
+A lost event, or a log line the stats cannot read, makes those measurements
+wrong (ADR 0236, #3585): a write that fails logs at ERROR naming the log and
+raises, for its caller to alert on, and `get_cascade_stats` raises naming the
+log and the line instead of skipping it.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -59,6 +63,11 @@ def log_cascade_event(
         log_path: Path to JSONL log file. If None, uses the absolute
                   default at ~/.claude/assemblyzero/cascade-events.jsonl
                   (#1134: deliberately outside any git-tracked tree).
+
+    Raises:
+        OSError: naming the log, after an ERROR log line, when the event
+            cannot be written. The caller alerts (``handle_cascade_detection``
+            does, with the session id, and still blocks).
     """
     if log_path is None:
         path = _DEFAULT_LOG_PATH
@@ -70,8 +79,9 @@ def log_cascade_event(
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, default=str) + "\n")
     except OSError as exc:
-        # Log to stderr but don't raise — telemetry must never block
-        print(f"[cascade_events] Failed to write event: {exc}", file=sys.stderr)
+        cause = f"cannot append the cascade event to {path}: {type(exc).__name__}: {exc}"
+        logger.error("[cascade_events] %s", cause)
+        raise OSError(cause) from exc
 
 
 def create_cascade_event(
@@ -125,6 +135,12 @@ def get_cascade_stats(
 
     Returns:
         Dict with keys: total_checks, detections, blocks, allowed.
+
+    An absent log is zero stats: nothing has been recorded. A log that cannot
+    be read logs at ERROR and re-raises; a line that is not a JSON object, or
+    (with a window) whose timestamp is not a timezone-aware ISO-8601 instant,
+    raises ValueError naming ``path:line``. Each used to be skipped, so the
+    stats undercounted.
     """
     if log_path is None:
         path = _DEFAULT_LOG_PATH
@@ -142,32 +158,47 @@ def get_cascade_stats(
         cutoff = None
 
     try:
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue  # Skip corrupt lines
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.error(
+            "[cascade_events] cannot read the cascade event log %s: %s: %s",
+            path, type(exc).__name__, exc,
+        )
+        raise
 
-                # Time filter
-                if cutoff is not None:
-                    try:
-                        ts = datetime.fromisoformat(event.get("timestamp", ""))
-                        if ts < cutoff:
-                            continue
-                    except (ValueError, TypeError):
-                        continue  # Skip events with bad timestamps
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise _bad_line(path, lineno, f"is not JSON: {exc}") from exc
+        if not isinstance(event, dict):
+            raise _bad_line(path, lineno, "is not a JSON object")
 
-                stats["total_checks"] += 1
-                if event.get("auto_approve_blocked", False):
-                    stats["detections"] += 1
-                    stats["blocks"] += 1
-                else:
-                    stats["allowed"] += 1
-    except OSError as exc:
-        logger.warning("Failed to read cascade event log: %s", exc)
+        # Time filter
+        if cutoff is not None:
+            stamp = event.get("timestamp", "")
+            try:
+                too_old = datetime.fromisoformat(stamp) < cutoff
+            except (ValueError, TypeError) as exc:
+                raise _bad_line(
+                    path, lineno,
+                    f"has a timestamp that is not a timezone-aware ISO-8601 instant: {stamp!r}",
+                ) from exc
+            if too_old:
+                continue
+
+        stats["total_checks"] += 1
+        if event.get("auto_approve_blocked", False):
+            stats["detections"] += 1
+            stats["blocks"] += 1
+        else:
+            stats["allowed"] += 1
 
     return stats
+
+
+def _bad_line(path: Path, lineno: int, why: str) -> ValueError:
+    return ValueError(f"the cascade event log line {path}:{lineno} {why}")

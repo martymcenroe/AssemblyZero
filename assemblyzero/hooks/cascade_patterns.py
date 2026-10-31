@@ -20,6 +20,19 @@ logger = logging.getLogger(__name__)
 _DEFAULT_CONFIG_PATH = Path("data/unleashed/cascade_block_patterns.json")
 
 
+class CascadePatternError(ValueError):
+    """A cascade pattern, or the user pattern config, cannot be used (#3585).
+
+    Detection with a pattern dropped can answer "allow" for output that
+    pattern exists to block, so a pattern or config that cannot be used
+    stops detection rather than shrinking it (ADR 0236).
+    """
+
+
+def _bad_config(path: Path, why: str) -> CascadePatternError:
+    return CascadePatternError(f"the user cascade pattern config {path} {why}")
+
+
 class CascadePattern(TypedDict):
     """A single pattern definition for cascade detection."""
 
@@ -204,7 +217,16 @@ def load_user_patterns(
 
     Returns:
         Merged list of patterns (user overrides take precedence).
-        Returns empty list if file not found or invalid.
+        Returns empty list if the file is absent, or present with
+        ``"enabled": false``: both are the operator saying "no overrides".
+
+    Raises:
+        CascadePatternError: naming the config, for a config that cannot be
+            read, is not a JSON object, or has a ``patterns`` field that is
+            not a list, and naming the entry, for an entry that is not an
+            object, lacks a required key, or has a regex that does not
+            compile. These used to be dropped with a WARNING or nothing, and
+            detection ran without the operator's overrides (ADR 0236).
     """
     if config_path is None:
         config_path = _DEFAULT_CONFIG_PATH
@@ -218,15 +240,13 @@ def load_user_patterns(
     try:
         raw = config_path.read_text(encoding="utf-8")
         config = json.loads(raw)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning(
-            "Failed to load user cascade patterns from %s: %s", config_path, exc
-        )
-        return []
+    except (OSError, ValueError) as exc:
+        raise _bad_config(
+            config_path, f"cannot be loaded: {type(exc).__name__}: {exc}"
+        ) from exc
 
     if not isinstance(config, dict):
-        logger.warning("Invalid cascade pattern config format at %s", config_path)
-        return []
+        raise _bad_config(config_path, f"is not a JSON object: {type(config).__name__}")
 
     if not config.get("enabled", True):
         logger.debug("User cascade patterns disabled in config")
@@ -234,24 +254,30 @@ def load_user_patterns(
 
     patterns = config.get("patterns", [])
     if not isinstance(patterns, list):
-        logger.warning("Invalid patterns field in %s", config_path)
-        return []
+        raise _bad_config(
+            config_path, f"has a patterns field that is not a list: {type(patterns).__name__}"
+        )
 
     # Validate each pattern has required fields
     valid_patterns: list[CascadePattern] = []
     required_keys = {"id", "category", "regex", "description", "risk_weight"}
-    for pattern in patterns:
+    for index, pattern in enumerate(patterns):
         if not isinstance(pattern, dict):
-            continue
-        if not required_keys.issubset(pattern.keys()):
-            logger.warning("Skipping invalid pattern (missing keys): %s", pattern.get("id", "unknown"))
-            continue
+            raise _bad_config(
+                config_path, f"has patterns[{index}] that is not an object: {pattern!r}"
+            )
+        missing = sorted(required_keys - pattern.keys())
+        if missing:
+            name = pattern.get("id", f"at patterns[{index}]")
+            raise _bad_config(config_path, f"has pattern {name!r} without {missing}")
         # Validate regex compiles
         try:
             re.compile(pattern["regex"])
-        except re.error as exc:
-            logger.warning("Skipping pattern %s with invalid regex: %s", pattern["id"], exc)
-            continue
+        except (re.error, TypeError) as exc:
+            raise _bad_config(
+                config_path,
+                f"has pattern {pattern['id']!r} whose regex does not compile: {exc}",
+            ) from exc
         # Set defaults for optional fields
         if "examples" not in pattern:
             pattern["examples"] = []

@@ -127,7 +127,9 @@ class TestNodeRoutesToDraftOnFail:
     def test_node_routes_to_draft_on_fail(self, tmp_path):
         """T120: Failing LLD sets validation result and feedback."""
         # #3585: a failing draft is preserved in the audit_dir, or N1b halts.
-        state = _make_state(current_draft=LLD_FAILING, audit_dir=str(tmp_path))
+        state = _make_state(
+            current_draft=LLD_FAILING, audit_dir=str(tmp_path), target_repo=str(tmp_path),
+        )
         result = validate_test_plan_node(state)
         assert result["test_plan_validation_result"]["passed"] is False
         assert "user_feedback" in result

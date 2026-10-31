@@ -362,8 +362,7 @@ class TestARecordedRollReplaysExactly:
 
         # And the same claim read back off the terminal records themselves,
         # rather than off the two dictionaries this test happens to be holding.
-        records, bad = read_records(tmp_path)
-        assert bad == 0
+        records = read_records(tmp_path)  # #3585: raises on a line that is not a record
         terminals = terminals_by_run(records)
         assert terminals["pass-one"]["gate_key"] == terminals["pass-two"]["gate_key"]
         assert terminals["pass-one"]["outcome"] == terminals["pass-two"]["outcome"]

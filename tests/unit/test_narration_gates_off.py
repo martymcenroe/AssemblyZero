@@ -99,8 +99,10 @@ class TestUnknownIsNotOff:
         assert _line_for("N3_review", ATLAS, TOTAL_STEPS, state)
 
 
-class TestNarrationStillNeverCostsARun:
-    def test_a_node_still_runs_when_narration_explodes(self, capsys):
+class TestNarrationFailureIsLoud:
+    def test_a_node_does_not_run_when_narration_explodes(self, capsys, operator_alerts):
+        """#3585: narration that cannot be built alerts and stops the node; it
+        used to be swallowed and the node ran anyway."""
         class _Exploding:
             def __contains__(self, _key):
                 raise RuntimeError("state is on fire")
@@ -109,11 +111,12 @@ class TestNarrationStillNeverCostsARun:
         wrapped = narrated(
             "N3_review", lambda s: ran.append(s) or {"ok": True}, ATLAS, TOTAL_STEPS
         )
-        out = wrapped(_Exploding())
+        with pytest.raises(RuntimeError, match="state is on fire"):
+            wrapped(_Exploding())
         capsys.readouterr()
 
-        assert out == {"ok": True}
-        assert len(ran) == 1
+        assert ran == []
+        assert len(operator_alerts) == 1
 
     def test_the_node_still_narrates_normally(self, capsys):
         wrapped = narrated("N3_review", lambda s: {}, ATLAS, TOTAL_STEPS)

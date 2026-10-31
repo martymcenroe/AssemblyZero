@@ -29,10 +29,14 @@ write time destroys the rate this exists to measure -- and the rate is the whole
 point, because "this failed twice today" and "this failed forty times today" are
 different problems with the same fingerprint.
 
-## Writing telemetry never changes a roll's outcome
+## A store that cannot be written or read is a failure
 
-A failure to append is logged loudly and swallowed. Telemetry that can break the
-thing it measures is worse than no telemetry.
+Each loss makes the measured rate lower than the real one (ADR 0236, #3585). A
+failed append alerts the operator and raises; the callers in the workflows catch
+it so the halt they are recording is unchanged, but the operator has been told.
+A store that exists and cannot be read, and a line that is not a record, alert
+and raise rather than read as fewer failures. A failure with an empty detail is
+recorded under the fingerprint `<stage>:<check>:empty-detail`, not dropped.
 """
 
 from __future__ import annotations
@@ -43,11 +47,17 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.core import alert
+
 TELEMETRY_REL = Path("data/speedrun/telemetry")
 FAILURES_FILENAME = "prompt-failures.jsonl"
 
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+#: The detail a failure is fingerprinted under when it arrives with none: still
+#: a failure, still counted (#3585).
+EMPTY_DETAIL = "empty detail"
 
 #: Markers the pipeline prefixes onto validation messages. Stripped before
 #: normalization so the fingerprint names the DEFECT, not the announcement --
@@ -124,19 +134,21 @@ def record_failure(
     drafter_model: str = "",
     run_id: str = "",
     duration_seconds: float | None = None,
-    log=print,
-) -> PromptFailure | None:
-    """Append one record. Never raises; returns None if the write failed."""
-    if not (detail or "").strip():
-        return None
+) -> PromptFailure:
+    """Append one record and return it.
 
+    A detail that is empty or blank is fingerprinted as ``EMPTY_DETAIL``; the
+    raw text is kept as given. A write that fails alerts the operator with the
+    store path, the fingerprint and the cause, and raises.
+    """
+    detail = detail or ""
     record = PromptFailure(
         ts_local=datetime.now().strftime(_TS_FMT),
         repo=str(repo_root),
         issue=issue,
         stage=stage,
         check=check,
-        fingerprint=fingerprint(stage, check, detail),
+        fingerprint=fingerprint(stage, check, detail if detail.strip() else EMPTY_DETAIL),
         draft_number=draft_number,
         drafter_model=drafter_model or "",
         run_id=run_id or "",
@@ -144,14 +156,31 @@ def record_failure(
         duration_seconds=duration_seconds,
     )
 
+    path: Path | None = None
     try:
         path = telemetry_path(repo_root)
+        line = json.dumps(asdict(record), ensure_ascii=False) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
-    except OSError as exc:
-        log(f"  [telemetry] could not record a validation failure: {exc}")
-        return None
+            fh.write(line)
+    except (OSError, TypeError, ValueError) as exc:
+        store = path if path is not None else f"under {str(repo_root)!r}"
+        alert.alert_operator(
+            what="record a prompt-failure telemetry row",
+            where="assemblyzero/speedrun/prompt_telemetry.py record_failure",
+            cause=(
+                f"{type(exc).__name__}: {exc} (store {store}, fingerprint "
+                f"{record.fingerprint})"
+            ),
+            consequence=(
+                "the validation failure is not counted, so the failure rate "
+                "would read lower than it is; the write is raised"
+            ),
+            repo=str(repo_root),
+            issue=issue,
+            spec=drafter_model or "",
+        )
+        raise
     return record
 
 
@@ -159,12 +188,10 @@ def record_failures(
     repo_root: Path | str, details: list[str], **kwargs
 ) -> list[PromptFailure]:
     """One record per failure. N failures in one roll produce N records."""
-    written = []
-    for detail in details or []:
-        entry = record_failure(repo_root, detail=detail, **kwargs)
-        if entry is not None:
-            written.append(entry)
-    return written
+    return [
+        record_failure(repo_root, detail=detail, **kwargs)
+        for detail in details or []
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -172,21 +199,54 @@ def record_failures(
 # ---------------------------------------------------------------------------
 
 
+def _read_failure(path: Path, cause: str, repo_root: Path | str, problem: str) -> None:
+    alert.alert_operator(
+        what="read the prompt-failure telemetry",
+        where="assemblyzero/speedrun/prompt_telemetry.py read_failures",
+        cause=cause,
+        consequence=(
+            f"{problem}; no failure count is reported from it until the store "
+            f"at {path} is repaired"
+        ),
+        repo=str(repo_root),
+    )
+
+
+def _corrupt_line(path: Path, lineno: int, problem: str, repo_root: Path | str) -> ValueError:
+    """Alert on one line that is not a record and return the error to raise."""
+    message = f"{path}:{lineno}: {problem}"
+    _read_failure(path, message, repo_root, "a line of the store is corrupt")
+    return ValueError(message)
+
+
 def read_failures(repo_root: Path | str, *, since: str = "") -> list[dict]:
-    """Every recorded failure, oldest first. A malformed line is skipped."""
+    """Every recorded failure, oldest first.
+
+    An absent store returns ``[]``: no failure has been recorded. A store that
+    exists but cannot be read, and a line that is not a JSON object, alert the
+    operator and raise; either would otherwise read as fewer failures (#3585).
+    """
     path = telemetry_path(repo_root)
+    if not path.exists():
+        return []
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
+    except (OSError, UnicodeDecodeError) as exc:
+        _read_failure(
+            path, f"{type(exc).__name__}: {exc} (store {path})", repo_root,
+            "the store cannot be read",
+        )
+        raise
     rows = []
-    for line in raw.splitlines():
+    for lineno, line in enumerate(raw.splitlines(), start=1):
         if not line.strip():
             continue
         try:
             row = json.loads(line)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise _corrupt_line(path, lineno, f"not JSON ({exc})", repo_root) from exc
+        if not isinstance(row, dict):
+            raise _corrupt_line(path, lineno, "not a JSON object", repo_root)
         if since and str(row.get("ts_local", "")) < since:
             continue
         rows.append(row)

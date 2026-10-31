@@ -140,7 +140,12 @@ def test_unrelated_sibling_directories_are_never_touched(repo):
 # --- "a dirty worktree is committed to graveyard/* before removal" --------
 
 
-def test_dirty_worktree_is_preserved_on_a_graveyard_branch(repo):
+def test_dirty_worktree_is_preserved_on_a_graveyard_branch(repo, tmp_path):
+    # #3585: a bare origin, so the graveyard push succeeds; a failed push
+    # keeps the worktree (test_dirty_worktree_content_survives_a_failed_push).
+    bare = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    _git(repo, "remote", "add", "origin", str(bare))
     path = pipeline_worktree_path(repo, 5)
     _git(repo, "worktree", "add", "-q", str(path), "-b", "issue-5")
     (path / "wip.py").write_text("half_done = True\n", encoding="utf-8")
@@ -166,10 +171,11 @@ def test_dirty_worktree_is_preserved_on_a_graveyard_branch(repo):
     assert edited.strip() == "edited"
 
 
-def test_dirty_worktree_content_survives_a_failed_push(repo):
+def test_dirty_worktree_content_survives_a_failed_push(repo, operator_alerts):
     # No origin is configured, so the push inside the sweep fails. The content
-    # is already on the local branch, so the sweep must proceed rather than
-    # strand the worktree for a reason unrelated to its content.
+    # is on the local branch either way. ADR 0236 (#3585): a branch that exists
+    # only in this checkout is not preserved against the checkout going, so the
+    # worktree is kept, the entry is a problem, and the operator is alerted.
     path = pipeline_worktree_path(repo, 6)
     _git(repo, "worktree", "add", "-q", str(path), "-b", "issue-6")
     (path / "wip.py").write_text("value = 42\n", encoding="utf-8")
@@ -177,8 +183,10 @@ def test_dirty_worktree_content_survives_a_failed_push(repo):
     result = sweep_pipeline_worktrees(repo)
 
     entry = result.entries[0]
-    assert entry.ok and entry.action == "preserved-and-removed"
+    assert not entry.ok and entry.action == "reported"
+    assert path.exists()
     assert _git(repo, "show", f"{entry.branch}:wip.py").stdout.strip() == "value = 42"
+    assert len(operator_alerts) == 1
 
 
 # --- "an unregistered on-disk directory is relocated, never deleted" ------

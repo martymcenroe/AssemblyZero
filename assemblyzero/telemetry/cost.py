@@ -3,8 +3,10 @@
 Issue #774: Per-model token cost lookup and estimate calculation.
 
 Cost table covers all Claude models known at time of implementation.
-Unknown models return 0.0 and log a warning.
-Gemini cost estimation is deferred to a separate issue.
+A model with no entry has no cost estimate: ``estimate_cost`` returns None,
+never 0.0, which read exactly like a call that cost nothing (ADR 0236, #3585).
+Gemini cost estimation is deferred to a separate issue, so a Gemini model is
+one of those.
 """
 
 import logging
@@ -62,16 +64,20 @@ def estimate_cost(
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     thinking_tokens: int = 0,
-) -> float:
-    """Return estimated USD cost. Returns 0.0 for unknown models (logs warning).
+) -> float | None:
+    """Return estimated USD cost, or None when the model has no price here.
+
+    None is the declared answer for an unpriced model, and the call record's
+    ``cost_usd_estimate`` field is Optional for it: the record says "no
+    estimate" rather than "free", and a sum that meets it fails instead of
+    counting it as zero. Callers must not substitute 0.0.
 
     Thinking tokens are billed at the output token rate.
     """
     canonical = normalize_model_id(model)
     costs = TOKEN_COSTS.get(canonical)
     if costs is None:
-        logger.warning("Unknown model '%s' for cost estimation, returning 0.0", model)
-        return 0.0
+        return None
 
     inp_rate, out_rate, cr_rate, cw_rate = costs
 

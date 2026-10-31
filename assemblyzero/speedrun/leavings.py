@@ -21,17 +21,29 @@ pushed graveyard ref. Commit or push failure leaves the file exactly where it
 was, reported. The preserving commit is built through a TEMPORARY index
 (`GIT_INDEX_FILE`), so the checkout's HEAD, real index, and working tree are
 never touched by the preservation itself.
+
+## Every failure reaches the operator (ADR 0236, #3585)
+
+A `git status` that fails alerts and raises: it used to read as "no untracked
+files", or as one line of operator dirt. A preservation step that fails, a
+branch the preserved-branch ledger cannot record, and a file that cannot be
+removed each alert the operator with the cause. With no log passed, every
+line goes to stderr.
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.core import alert
 from assemblyzero.speedrun.preserved import record_preserved
+
+_WHERE = "assemblyzero/speedrun/leavings.py"
 
 #: Where the pipeline writes files into a target repo's main checkout.
 #: Grounded in the actual write sites: `workflows/requirements/audit.py`
@@ -167,18 +179,43 @@ def _is_evidence(rel_path: str) -> bool:
     return any(normalized.startswith(p) for p in _EVIDENCE_PREFIXES)
 
 
+class LeavingsError(RuntimeError):
+    """git could not say what is in the target repo's working tree."""
+
+
+def _status_failed(repo: Path | str, result, where: str) -> LeavingsError:
+    """Alert that the tree could not be read; the error to raise."""
+    cause = (
+        f"git -C {repo} status --porcelain -uall exited {result.returncode}: "
+        f"{(result.stderr or '').strip()}"
+    )
+    alert.alert_operator(
+        what="read the target repo's working tree for pipeline file leavings",
+        where=f"{_WHERE} {where}",
+        cause=cause,
+        consequence=(
+            "no file is classified, preserved or cleared, and nothing that "
+            "depends on knowing the tree's state goes on"
+        ),
+        repo=str(repo),
+    )
+    return LeavingsError(cause)
+
+
 def untracked_files(repo: Path | str) -> list[str]:
     """Repo-relative untracked files, individually (-uall expands dirs).
 
     Evidence under data/speedrun/ never appears: usually because data/ is
     gitignored, and structurally even when it is not (the exemption must
-    not depend on a convention a target repo might miss).
+    not depend on a convention a target repo might miss). A `git status`
+    that fails alerts and raises `LeavingsError`; it used to read as "no
+    untracked files".
     """
     result = _run(
         ["git", "-C", str(repo), "status", "--porcelain", "-uall"]
     )
     if result.returncode != 0:
-        return []
+        raise _status_failed(repo, result, "untracked_files")
     return [
         path
         for line in result.stdout.splitlines()
@@ -208,10 +245,14 @@ def classify_dirt(
     the pipeline's own input at the path every stage and every resume
     reads, and appear in neither list. Every other issue's file at those
     paths is still leavings.
+
+    A `git status` that fails alerts and raises `LeavingsError`. It used to
+    come back as one line of operator dirt, which blocked as dirt and was
+    never reported as the failure it was.
     """
     result = _run(["git", "-C", str(repo), "status", "--porcelain", "-uall"])
     if result.returncode != 0:
-        return [], [f"git status failed: {result.stderr.strip()}"]
+        raise _status_failed(repo, result, "classify_dirt")
 
     machinery: list[str] = []
     operator: list[str] = []
@@ -242,9 +283,14 @@ def preserve_and_clear(
     unpreserved. Removal never uses git (the files are untracked); it is a
     plain unlink plus pruning of directories the removals emptied, bounded to
     the allowlist so an operator's directory is never rmdir'd.
+
+    Every failure alerts the operator (ADR 0236): a preservation step, a
+    branch the preserved-branch ledger cannot record (the files are still
+    cleared, because the pushed branch holds them), and each file that cannot
+    be removed. With no `log`, every line goes to stderr.
     """
     repo = Path(repo).resolve()
-    log = log or (lambda _msg: None)
+    log = log or _log_to_stderr
     result = LeavingsResult()
     if not files:
         return result
@@ -260,7 +306,17 @@ def preserve_and_clear(
                 LeavingsEntry(f, "reported", ok=False,
                               detail=f"{stage} failed: {detail}")
             )
-        log(f"  file janitor: {stage} failed -- nothing cleared ({detail})")
+        log(f"  ERROR: file janitor: {stage} failed -- nothing cleared ({detail})")
+        alert.alert_operator(
+            what=f"preserve {len(files)} pipeline file leaving(s) on {branch}",
+            where=f"{_WHERE} preserve_and_clear",
+            cause=f"git {stage} failed: {detail}",
+            consequence=(
+                "nothing is cleared: every file stays where it was, and a tree "
+                "dirty with them can refuse the next launch"
+            ),
+            repo=str(repo),
+        )
         index.unlink(missing_ok=True)
         return result
 
@@ -309,9 +365,24 @@ def preserve_and_clear(
 
     # #2355: the archiver reads this record. `graveyard/leavings-<stamp>`
     # carries no run prefix, so the old bundle rule could never find it.
-    record_preserved(
-        repo, branch, source="leavings", detail=f"{len(files)} file(s)"
-    )
+    try:
+        record_preserved(
+            repo, branch, source="leavings", detail=f"{len(files)} file(s)"
+        )
+    except (OSError, ValueError) as exc:
+        cause = f"{type(exc).__name__}: {exc}"
+        log(f"  ERROR: file janitor: {branch} is pushed but not recorded: {cause}")
+        alert.alert_operator(
+            what=f"record graveyard branch {branch} in the preserved-branch ledger",
+            where=f"{_WHERE} preserve_and_clear",
+            cause=cause,
+            consequence=(
+                "the files are still cleared, since the pushed branch holds them; "
+                "the archive finds the branch only by its graveyard/ prefix, with "
+                "no attribution"
+            ),
+            repo=str(repo),
+        )
 
     result.branch = branch
     for f in files:
@@ -319,6 +390,16 @@ def preserve_and_clear(
         try:
             target.unlink()
         except OSError as exc:
+            alert.alert_operator(
+                what=f"remove pipeline leaving {f} after preserving it on {branch}",
+                where=f"{_WHERE} preserve_and_clear",
+                cause=f"{type(exc).__name__}: {exc}",
+                consequence=(
+                    "the file stays in the working tree, where it can refuse the "
+                    "next launch; its content is on the pushed branch"
+                ),
+                repo=str(repo),
+            )
             result.entries.append(
                 LeavingsEntry(f, "reported", ok=False,
                               detail=f"preserved on {branch} but not removed: {exc}")
@@ -331,6 +412,11 @@ def preserve_and_clear(
         log(f"  {entry.describe()}")
     log(f"  {result.summary()}")
     return result
+
+
+def _log_to_stderr(msg: str) -> None:
+    """The janitor's log when the caller passes none: never a no-op (ADR 0236)."""
+    sys.stderr.write(f"{msg}\n")
 
 
 def _prune_empty_dirs(repo: Path, start: Path) -> None:

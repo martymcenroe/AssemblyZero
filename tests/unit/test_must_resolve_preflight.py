@@ -137,10 +137,12 @@ def test_no_open_must_resolve_lets_the_roll_proceed(launcher, monkeypatch, targe
     assert launcher["rolls"] == [4]
 
 
-# --- "with gh erroring, the launcher warns and proceeds" -----------------
+# --- "with gh erroring, the launcher refuses" (ADR 0236, #3585) -----------
 
 
-def test_gh_failure_warns_and_proceeds(launcher, monkeypatch, target_repo, capsys):
+def test_gh_failure_refuses_the_launch(launcher, monkeypatch, target_repo, capsys):
+    """A check that cannot run is a failure, never a pass. The operator was
+    alerted by open_must_resolve_issues; the launcher spends nothing."""
     monkeypatch.setattr(
         speedrun_roll, "open_must_resolve_issues",
         lambda _r: ([], "could not connect to github.com"),
@@ -148,9 +150,10 @@ def test_gh_failure_warns_and_proceeds(launcher, monkeypatch, target_repo, capsy
 
     code = speedrun_roll.main(_argv(target_repo, 4))
 
-    assert code == 0, "GitHub being unreachable must not brick a local roll"
-    assert launcher["rolls"] == [4]
-    assert "WARNING" in capsys.readouterr().out
+    assert code == 91
+    assert launcher["rolls"] == []
+    out = capsys.readouterr().out
+    assert "BLOCKED" in out and "github.com" in out
 
 
 def test_offline_gh_is_reported_as_an_error_not_an_empty_list(tmp_path):

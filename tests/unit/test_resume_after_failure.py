@@ -216,8 +216,10 @@ def test_restore_artifact_from_lld_branch(repo):
 
 
 def test_restore_artifact_outside_repo_refuses(repo, tmp_path):
+    """#3585: refused with a ValueError; it used to return False."""
     outside = tmp_path / "elsewhere" / "LLD-005.md"
-    assert speedrun_roll._restore_artifact(repo, 5, str(outside)) is False
+    with pytest.raises(ValueError, match="outside the repo"):
+        speedrun_roll._restore_artifact(repo, 5, str(outside))
 
 
 # ---------------------------------------------------------------------------

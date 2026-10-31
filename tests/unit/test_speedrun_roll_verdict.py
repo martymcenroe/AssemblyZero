@@ -85,7 +85,10 @@ def _main(repo, issues, rolls, *, questions=None, gh_error=None, extra_argv=()):
             patch.object(sr, "open_must_resolve_issues", _must_resolve), \
             patch.object(sr, "roll_issue", _roll), \
             patch.object(sr, "restore_repo", lambda *a: []), \
+            patch.object(sr, "untracked_files", lambda *_a: []), \
             patch.object(sr.time, "sleep", lambda s: None):
+        # #3585: the baseline `untracked_files` read is patched too, since a
+        # `git status` that fails now raises instead of reading as "none".
         code = sr.main(argv)
     return code, counts
 
