@@ -168,7 +168,7 @@ def test_232_the_strict_halt_is_recorded_by_n1(monkeypatch, capsys):
 
 
 def test_232_a_strict_halt_reaches_halt_and_alerts(
-    monkeypatch, state_dir, operator_alerts
+    monkeypatch, state_dir, operator_alerts, tmp_path
 ):
     """The whole graph, N0 to HALT: the alert carries N1's recorded reason."""
     monkeypatch.setattr(graph, "load_lld", lambda state: {"error_message": ""})
@@ -182,7 +182,9 @@ def test_232_a_strict_halt_reaches_halt_and_alerts(
         },
     )
     app = graph.build_testing_workflow().compile()
-    final = app.invoke({"issue_number": 31, "test_plan_policy": "strict"})
+    final = app.invoke({
+        "issue_number": 31, "test_plan_policy": "strict", "repo_root": str(tmp_path),
+    })
 
     assert final.get("workflow_status") == "halted"
     assert final.get("recovery_plan_path")

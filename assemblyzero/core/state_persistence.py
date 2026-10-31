@@ -9,6 +9,13 @@ Used by the HALT node to persist state on errors, enabling later resumption.
 import json
 from pathlib import Path
 
+from assemblyzero.core.halt_paths import (
+    halt_directory,
+    run_key,
+    state_is_mock,
+    state_repo_root,
+)
+
 STATE_DIR = Path.home() / ".assemblyzero" / "workflow_state"
 
 
@@ -34,10 +41,20 @@ def save_state_snapshot(
 
     Returns:
         Path to the saved state file.
+
+    Raises:
+        UnkeyableRun: the state names no repository, or neither an issue nor
+            a brief (#4292). The file lives in the run's repository's own
+            directory, a mock run's in its ``mock`` subdirectory, named by the
+            run key; it used to be ``{workflow}-{issue}.json`` in one
+            directory for the whole machine.
     """
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    filename = f"{workflow}-{issue_number}.json"
-    state_path = STATE_DIR / filename
+    directory = halt_directory(
+        state_repo_root(state), state_is_mock(state), STATE_DIR
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = f"{workflow}-{run_key(state, issue_number)}.json"
+    state_path = directory / filename
 
     # Filter out non-serializable values
     serializable_state = {}
@@ -61,12 +78,17 @@ def save_state_snapshot(
     return state_path
 
 
-def load_state_snapshot(workflow: str, issue_number: int) -> dict | None:
-    """Load the most recent state snapshot for a workflow/issue.
+def load_state_snapshot(
+    workflow: str, issue_number: int, *, repo_root: Path | str, mock: bool = False
+) -> dict | None:
+    """Load the most recent state snapshot for a workflow/issue of a repository.
 
     Args:
         workflow: Workflow name.
         issue_number: The issue number.
+        repo_root: The repository the run was against (#4292): a worktree or
+            its primary checkout. Issue numbers are per repository.
+        mock: Whether the run was a ``--mock`` run, which halts apart.
 
     Returns:
         The saved state dict, or None when no snapshot was written.
@@ -76,7 +98,7 @@ def load_state_snapshot(workflow: str, issue_number: int) -> dict | None:
             (#3797). It used to read as "no snapshot".
     """
     filename = f"{workflow}-{issue_number}.json"
-    state_path = STATE_DIR / filename
+    state_path = halt_directory(repo_root, mock, STATE_DIR) / filename
 
     if not state_path.exists():
         return None
