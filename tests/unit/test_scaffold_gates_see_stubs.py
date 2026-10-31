@@ -196,7 +196,8 @@ def test_validator_reports_but_allows_a_hollow_suite_with_no_spec_bodies(
     assert validation["real_test_count"] == 0, (
         "the count must stop calling placeholders real tests"
     )
-    assert "[HOLLOW SCAFFOLD]" in capsys.readouterr().out
+    # Ledger 0908, line 676: named at ERROR on stderr, not on stdout.
+    assert "ERROR [N2.5] [HOLLOW SCAFFOLD]" in capsys.readouterr().err
 
 
 def test_red_phase_passes_a_legitimate_suite() -> None:

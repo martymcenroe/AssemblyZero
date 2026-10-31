@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Literal
 
+from assemblyzero.core import alert
 from assemblyzero.workflows.testing.audit import gate_log
 from assemblyzero.workflows.testing.framework_detector import TestFramework
 from assemblyzero.workflows.testing.framework_ownership import (
@@ -102,6 +103,11 @@ def count_stub_tests(test_content: str) -> tuple[int, int, list[str]]:
     that merely mentions one of those strings (a test asserting on the text
     "not implemented", for instance). That imprecision is part of why the
     detection was blanket-disabled by #386 rather than made accurate.
+
+    Text that does not parse counts (0, 0, []): there is no function to
+    count, and this is a count, not the parse check. N2.5 hands the same text
+    to `validate_test_structure`, which records the syntax error as a
+    validation error in the same pass (ledger 0908, lines 101 and 418).
     """
     try:
         tree = ast.parse(test_content)
@@ -486,6 +492,21 @@ def validate_test_structure(
     return errors
 
 
+class HelperSourceUnreadable(Exception):
+    """A helper file the test imports is beside it and cannot be read or
+    parsed (ledger 0908, line 522). Carries the file, the imported name and
+    the cause; N2.5 halts on it through `_halt_validation_cannot_run`."""
+
+    def __init__(self, path: Path, name: str, cause: str) -> None:
+        super().__init__(
+            f"helper file {path}, which the tests import '{name}' from, "
+            f"cannot be read or parsed: {cause}"
+        )
+        self.path = path
+        self.name = name
+        self.cause = cause
+
+
 def imported_helper_sources(
     test_content: str, module_dir: Path | str
 ) -> dict[str, ast.AST]:
@@ -497,20 +518,27 @@ def imported_helper_sources(
     deliberately NOT followed, because production code's `raise` is not the
     test's assertion.
 
-    Every failure is silent and returns fewer entries, never an exception: an
-    unreadable neighbour must cost the checker a helper, not cost the run.
+    Two answers are empty by contract, not by failure. A helper matters only
+    to a test function, which is all `validate_test_structure` checks, so text
+    with no test function `count_stub_tests` can read has nothing to follow:
+    none were written, or the text does not parse, and every caller hands
+    the same text to `validate_test_structure`, which reports the syntax
+    error (ledger 0908, line 499). A module with no file beside the test (an
+    installed package, the code under test) is not a neighbour, so there is
+    nothing to follow either.
+
+    A neighbour that IS there and cannot be read or parsed raises
+    `HelperSourceUnreadable` naming the file and the cause (ADR 0236, ledger
+    0908 line 522). Dropping it quietly refused a test whose assertion lives
+    in that file with a message that never named the file; the test file
+    imports it, so the suite cannot run while it is broken either.
     """
     directory = Path(module_dir)
-    try:
-        tree = ast.parse(test_content)
-    except SyntaxError:
-        # fail-open: returning no helpers is strictly more conservative than
-        # returning some -- fewer helpers can only make the assertion check
-        # REFUSE more, never accept more, so an unreadable file cannot be used
-        # to sneak a stub past the gate. The caller has already parsed this
-        # same text and reported the syntax error itself, so the halt is not
-        # lost; it is raised once, by the check that owns it.
+    total_tests, _, _ = count_stub_tests(test_content)
+    if not total_tests:
         return {}
+    # count_stub_tests read at least one test function, so the text parses.
+    tree = ast.parse(test_content)
 
     wanted: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -526,14 +554,10 @@ def imported_helper_sources(
             continue
         try:
             helper_tree = ast.parse(candidate.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, SyntaxError):
-            # fail-open: one unreadable neighbour drops one helper and the loop
-            # continues, in the same direction as the handler above -- a shorter
-            # helper list makes the check stricter, never laxer. Halting here
-            # would let any unrelated broken file in the test directory end a
-            # run, which is a far worse failure than declining to follow one
-            # call into it.
-            continue
+        except (OSError, SyntaxError) as e:
+            raise HelperSourceUnreadable(
+                candidate, local_name, f"{type(e).__name__}: {e}",
+            ) from e
         for name, node in _module_functions(helper_tree).items():
             if name == local_name:
                 found[local_name] = node
@@ -554,7 +578,10 @@ def validate_scenario_coverage(
         scenarios: List of test scenario dicts with test_id and test_name.
 
     Returns:
-        List of error messages for missing test functions.
+        List of error messages for missing test functions. Text that does not
+        parse adds none: every scenario would read as missing, burying the one
+        real error, which `validate_test_structure` already records for the
+        same text (ledger 0908, line 557).
     """
     errors = []
 
@@ -562,7 +589,7 @@ def validate_scenario_coverage(
     try:
         tree = ast.parse(test_content)
     except SyntaxError:
-        return []  # Don't add coverage errors if file doesn't parse
+        return []
 
     test_functions = set()
     for node in ast.walk(tree):
@@ -613,6 +640,7 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     parsed_scenarios = state.get("parsed_scenarios", {})
     scenarios = parsed_scenarios.get("scenarios", [])
     scaffold_attempts = state.get("scaffold_attempts", 0)
+    issue = state.get("issue_number")
 
     # Issue #381: Framework-aware validation branch. #4244: every framework
     # of the run has a scaffold, and each is validated by its own framework's
@@ -667,32 +695,29 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # reject and say so. The spec ships none: this is the best the scaffolder
     # can do, name it loudly and let the red phase judge it, which it now
     # does, because nothing skips that phase any more.
+    #
+    # "Loudly" was a stdout print (ledger 0908, line 676). It is now an ERROR
+    # on stderr naming the issue and the placeholders, and an alert: nothing
+    # stops here, so the operator hears of it from this node (ADR 0236).
     total_tests, stub_count, stub_names = count_stub_tests(generated_tests)
     hollow = total_tests > 0 and stub_count == total_tests
     spec_has_bodies = bool(
         (state.get("spec_test_suite") or {}).get("functions")
     )
+    hollow_description = ""
     if hollow:
         shown = ", ".join(stub_names[:3])
         more = f" (and {stub_count - 3} more)" if stub_count > 3 else ""
         # ASCII only: this string is printed, and per #1493 a non-ASCII
         # character raises UnicodeEncodeError mid-stream on Windows cp1252.
-        description = (
+        hollow_description = (
             f"all {total_tests} generated test(s) fail unconditionally "
             f"({shown}{more}) -- no implementation can make this suite green"
         )
         if spec_has_bodies:
             all_errors.append(
-                f"{description}. The spec supplies executable Section 10 test "
-                f"functions that were not used; regenerate from those."
-            )
-        else:
-            print(f"    [HOLLOW SCAFFOLD] {description}")
-            print(
-                "    The spec supplies no executable test bodies, so "
-                "re-scaffolding cannot improve on this. Proceeding to the red "
-                "phase, which is no longer skipped (#2331), so this suite gets "
-                "the same checks as any other."
+                f"{hollow_description}. The spec supplies executable Section "
+                f"10 test functions that were not used; regenerate from those."
             )
 
     # Step 2: Validate structure with AST (imports, test functions exist)
@@ -700,14 +725,22 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # #2737: an assertion helper beside the test file counts. The test files
     # are on disk by now, so the directory they sit in is where an imported
     # helper is looked for; when there is no such file the checker falls back
-    # to same-module helpers and says nothing, because a missing neighbour must
-    # cost a helper and never cost the run.
+    # to same-module helpers and says nothing, because a module with no file
+    # beside the test is not a neighbour. A neighbour that is there and cannot
+    # be read or parsed halts the run naming the file (ledger 0908, line 522):
+    # the assertion check cannot follow into it, so it cannot run, and the
+    # suite that imports it cannot run either.
     test_files_on_disk = [str(p) for p in (state.get("test_files") or [])]
     imported_sources: dict[str, ast.AST] = {}
     if test_files_on_disk:
-        imported_sources = imported_helper_sources(
-            generated_tests, Path(test_files_on_disk[0]).parent
-        )
+        try:
+            imported_sources = imported_helper_sources(
+                generated_tests, Path(test_files_on_disk[0]).parent
+            )
+        except HelperSourceUnreadable as e:
+            return _halt_validation_cannot_run(
+                "pytest", f"issue #{issue}: {e}", scaffold_attempts,
+            )
     structure_errors = validate_test_structure(
         generated_tests, scenarios, imported_sources
     )
@@ -722,6 +755,11 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Build validation result
     is_valid = len(all_errors) == 0
+
+    if hollow_description and not spec_has_bodies:
+        _report_hollow_scaffold(
+            state, hollow_description, stub_names, proceeds=is_valid,
+        )
 
     # #2317: `real` now excludes placeholders. It previously could not --
     # stub_count was pinned at 0, so every stub was reported as a real test
@@ -807,6 +845,55 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
         ).hexdigest()
 
     return result_dict
+
+
+def _report_hollow_scaffold(
+    state: dict[str, Any],
+    description: str,
+    stub_names: list[str],
+    *,
+    proceeds: bool,
+) -> None:
+    """A suite made only of placeholders, from a spec with no test bodies.
+
+    Ledger 0908, line 676: this was a stdout print. It is an ERROR on stderr
+    naming the issue and every placeholder. When the suite otherwise passed
+    and goes on to the red phase, nothing stops the run here (#386, #2331),
+    so the operator is alerted from this node. When the suite was rejected
+    for other errors, the rejection routes it back to the scaffolder or, out
+    of attempts, to HALT, which alerts; a second alert here would repeat it.
+    """
+    issue = state.get("issue_number")
+    names = ", ".join(stub_names)
+    if proceeds:
+        consequence = (
+            "the spec supplies no executable test bodies, so re-scaffolding "
+            "cannot improve on this; the run proceeds to the red phase "
+            "(#2331), and the suite goes green only if the implementation "
+            "stage rewrites these tests"
+        )
+    else:
+        consequence = (
+            "the suite is also rejected for the validation errors listed "
+            "with it, and goes back to the scaffolder"
+        )
+    print(
+        f"ERROR [N2.5] [HOLLOW SCAFFOLD] issue #{issue}: {description}. "
+        f"Placeholders: {names}. Consequence: {consequence}.",
+        file=sys.stderr,
+    )
+    if proceeds:
+        alert.alert_operator(
+            what="the scaffold is placeholders only",
+            where=(
+                "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py "
+                "validate_tests_mechanical_node (testing workflow, N2.5)"
+            ),
+            cause=f"{description}; placeholders: {names}",
+            consequence=consequence,
+            repo=str(state.get("repo_root") or ""),
+            issue=issue,
+        )
 
 
 class _ValidatorUnavailable(Exception):
@@ -1109,6 +1196,24 @@ def _halt_if_exhausted(
     return reason
 
 
+class ScaffoldExhausted(RuntimeError):
+    """Mechanical generation is out of moves and state names no halt (ledger
+    0908, line 1043). Raised by the router, so the run stops with the reason
+    instead of ending at ``end`` as if nothing failed; the entry point that
+    runs the graph reports and alerts it."""
+
+
+def _raise_exhausted(reason: str) -> None:
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [N2.5] the generated test suite is out of "
+        f"regenerations ({reason}), and state carries no error_message for "
+        f"HALT to report, so the router stops the run here (ADR 0236). "
+        f"Repair the spec's Section 10 test functions, then resume."
+    )
+    print(f"ERROR [N2.5] {message}", file=sys.stderr)
+    raise ScaffoldExhausted(message)
+
+
 def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue", "escalate"]:
     """Conditional edge: return routing decision based on validation.
 
@@ -1126,6 +1231,12 @@ def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue"
     lives in `exhausted_reason` so this function and the node that writes the
     halt message cannot disagree about when it holds.
 
+    "escalate" is returned only when state carries the node's error_message,
+    which sends the run to HALT. Out of moves with no recorded reason (the
+    legacy fallback, or a carried route whose reason is gone) raises
+    `ScaffoldExhausted` instead: `route_after_validate` maps "escalate" to
+    `end`, and ending there read as success (ledger 0908, line 1043).
+
     Args:
         state: Workflow state with validation_result and scaffold_attempts.
 
@@ -1141,6 +1252,11 @@ def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue"
     carried = state.get("scaffold_route", "")
     if carried in ("continue", "regenerate", "escalate"):
         if carried == "escalate":
+            if not (state.get("error_message") or "").strip():
+                _raise_exhausted(
+                    "the validation node's carried route is escalate and "
+                    "state records no reason"
+                )
             print("    [EXHAUSTED] per the validation node's carried route; "
                   "the halt is named in error_message")
         elif carried == "regenerate":
@@ -1165,6 +1281,11 @@ def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue"
         state.get("scaffold_attempts", 0),
     )
     if reason:
+        if not (state.get("error_message") or "").strip():
+            # Ledger 0908, line 1043: "escalate" with no error_message
+            # routed to `end`, which ended the run as if nothing failed. A
+            # router cannot write the reason into state, so it raises it.
+            _raise_exhausted(reason)
         print(f"    [EXHAUSTED] {reason}")
         return "escalate"
 
