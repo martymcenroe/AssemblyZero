@@ -290,4 +290,4 @@ The 11 commits of `3585-requirements-nodes` and the 12 of `3585-requirements-sup
 - `audit_fail_open.py --check`: no new fail-open. `--strict` reported a moved denominator, so `--write-baseline` ran: 49 entries removed, all in `assemblyzero/workflows/requirements/`, and the counts moved (sites examined 10,022 to 10,081; findings 468 to 408).
 - `audit_halt_sites.py --check --strict`: every site registered; the denominator moved from 162 halt sites to 188, and `--write-baseline` changed only that count. It then passed.
 
-**The full unit tier,** run once, alone on the machine: 12,161 passed, 66 skipped, 7 deselected and 6 xfailed in 637 s, with no failures.
+**The full unit tier,** run once, alone on the machine: 12,161 passed, 66 skipped, 7 deselected and 6 xfailed in 637 s, with no failures. Run again at landing on 2026-10-31, on the merge of `main` at `5a979824`, beside other sessions' work: 12,165 passed, 66 skipped, 7 deselected and 6 xfailed in 1,662 s, with no failures.
