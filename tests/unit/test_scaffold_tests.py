@@ -41,7 +41,10 @@ class TestParseLLDTestSection:
         assert "sum" in result["scenarios"][0]["expected_behavior"].lower()
 
     def test_parse_missing_section_10(self):
-        """Returns empty list for LLD without Section 10.0."""
+        """Raises for an LLD without Section 10 (ledger 0908, line 105).
+
+        It returned no scenarios, which read the same as an empty test plan.
+        """
         from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             parse_lld_test_section,
         )
@@ -56,9 +59,8 @@ Some content without a test section.
 More content.
 """
 
-        result = parse_lld_test_section(lld_content)
-
-        assert result["scenarios"] == []
+        with pytest.raises(ValueError, match="no Section 10 test plan"):
+            parse_lld_test_section(lld_content)
 
     def test_parse_extracts_input_output(self):
         """Extracts input/output patterns from description."""

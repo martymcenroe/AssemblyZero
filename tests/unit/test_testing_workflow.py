@@ -1983,22 +1983,26 @@ class TestReviewTestPlanModule:
         assert "Custom Review Prompt" in result
 
     def test_load_review_prompt_file_missing(self, tmp_path):
-        """load_review_prompt uses default when file missing."""
+        """load_review_prompt raises naming the file when it is missing.
+
+        Ledger 0908, line 156: it returned a built-in default without a word.
+        """
+        import pytest
+
         from assemblyzero.workflows.testing.nodes.review_test_plan import load_review_prompt
 
-        result = load_review_prompt(tmp_path)
-
-        # Should return default prompt
-        assert "Coverage Analysis" in result
-        assert "Test Reality Check" in result
+        with pytest.raises(FileNotFoundError, match="0706c-Test-Plan-Review-Prompt.md"):
+            load_review_prompt(tmp_path)
 
     def test_default_review_prompt(self):
-        """_default_review_prompt returns valid content."""
-        from assemblyzero.workflows.testing.nodes.review_test_plan import _default_review_prompt
+        """With no root, the prompt is AssemblyZero's own file, which the
+        built-in default (deleted with the swallow, ledger 0908 line 156)
+        used to stand in for."""
+        from assemblyzero.workflows.testing.nodes.review_test_plan import load_review_prompt
 
-        result = _default_review_prompt()
+        result = load_review_prompt()
 
-        assert "Coverage Analysis" in result
+        assert "Test Plan Review Prompt" in result
         assert "APPROVED" in result
         assert "BLOCKED" in result
 
@@ -2091,16 +2095,20 @@ class TestReviewTestPlanModule:
 """
         result = _extract_feedback(verdict)
 
-        assert "Missing coverage" in result or "See full verdict" in result
+        # The list must follow the BLOCKED line directly; after a blank line
+        # nothing is extracted. Ledger 0908, line 710: that is "", no longer
+        # the "See full verdict" placeholder this test used to accept.
+        assert result == ""
 
     def test_extract_feedback_fallback(self):
-        """_extract_feedback returns fallback for unclear feedback."""
+        """_extract_feedback finds nothing in unclear feedback (ledger 0908,
+        line 710: it returned a placeholder the reviser read as feedback)."""
         from assemblyzero.workflows.testing.nodes.review_test_plan import _extract_feedback
 
         verdict = "BLOCKED but no clear feedback"
         result = _extract_feedback(verdict)
 
-        assert "See full verdict" in result
+        assert result == ""
 
     def test_review_test_plan_no_scenarios(self, tmp_path):
         """review_test_plan blocks when no test scenarios."""
@@ -2757,7 +2765,13 @@ class TestDocumentModule:
         assert "New Feature" in content
 
     def test_update_readme_no_readme(self, tmp_path):
-        """update_readme returns False when no README."""
+        """update_readme raises naming the README when there is none.
+
+        Ledger 0908, line 182: it returned False, reported as "no update
+        needed".
+        """
+        import pytest
+
         from assemblyzero.workflows.testing.nodes.document import update_readme
 
         state: TestingWorkflowState = {
@@ -2765,9 +2779,8 @@ class TestDocumentModule:
             "lld_content": "# Feature",
         }
 
-        result = update_readme(state, tmp_path)
-
-        assert result is False
+        with pytest.raises(FileNotFoundError, match="README.md"):
+            update_readme(state, tmp_path)
 
     def test_update_readme_already_mentioned(self, tmp_path):
         """update_readme skips when feature already mentioned."""
@@ -3773,7 +3786,9 @@ class TestFinalizeFullCoverage:
             "coverage_target": 90,
             "iteration_count": 1,
             "lld_path": str(lld_file),
-            "green_phase_output": "",
+            # Ledger 0908, line 152: an output with no test counts now stops
+            # N7, so this archival test carries a green phase that ran.
+            "green_phase_output": "3 passed in 0.10s",
             "e2e_output": "",
             "skip_e2e": True,
             "workflow_success": True,
@@ -5057,7 +5072,12 @@ class TestExtractFeedbackCoverageGaps:
         assert "REQ-3" in feedback or "assertion" in feedback.lower() or "Add tests" in feedback
 
     def test_extract_feedback_default_message(self):
-        """_extract_feedback returns default message when no patterns match."""
+        """_extract_feedback returns "" when no patterns match.
+
+        Ledger 0908, line 710: it returned "See full verdict for details.",
+        which the reviser read as feedback; the node now falls back to the
+        verdict's rationale, or rejects a BLOCKED verdict naming no change.
+        """
         from assemblyzero.workflows.testing.nodes.review_test_plan import _extract_feedback
 
         # Verdict with no extractable feedback
@@ -5068,7 +5088,7 @@ Please review the test plan carefully.
 """
         feedback = _extract_feedback(verdict_content)
 
-        assert feedback == "See full verdict for details."
+        assert feedback == ""
 
 
 class TestAuditCoverageGaps:

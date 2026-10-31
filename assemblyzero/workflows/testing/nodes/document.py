@@ -11,6 +11,7 @@ Auto-generates documentation artifacts after successful implementation:
 """
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +168,15 @@ def extract_feature_name(state: TestingWorkflowState) -> str:
     return f"Feature-{issue_number}"
 
 
+class DocumentationError(RuntimeError):
+    """A documentation artifact N8 set out to write could not be written.
+
+    Raised, never reported as "SKIPPED" (ledger 0908, lines 292, 308, 338,
+    350): N8 has no route to HALT, so the raise reaches the run's entry
+    point, which reports and alerts it.
+    """
+
+
 def update_readme(state: TestingWorkflowState, repo_root: Path) -> bool:
     """Update README.md with new feature entry.
 
@@ -175,11 +185,33 @@ def update_readme(state: TestingWorkflowState, repo_root: Path) -> bool:
         repo_root: Repository root path.
 
     Returns:
-        True if README was updated.
+        True if README was updated; False when the README already names the
+        feature, or keeps no Features section to add it to (see
+        `_readme_update`).
+
+    Raises:
+        FileNotFoundError: there is no README.md, naming it (ledger 0908,
+            line 182). It used to return False, reported as "no update
+            needed".
+    """
+    return _readme_update(state, repo_root)[0]
+
+
+def _readme_update(state: TestingWorkflowState, repo_root: Path) -> tuple[bool, str]:
+    """`update_readme`, with what happened in words for N8 to print.
+
+    A README with no "## Features" section keeps no feature list, so there
+    is no list to add the entry to, and it is left alone (ledger 0908, line
+    215, kept): most READMEs in the fleet, AssemblyZero's among them, have
+    none, and N8 decides to update one from keywords in the LLD. It is said
+    as that, never as "no update needed".
     """
     readme_path = repo_root / "README.md"
-    if not readme_path.exists():
-        return False
+    if not readme_path.is_file():
+        raise FileNotFoundError(
+            f"N8 decided the README needs a feature entry, and {readme_path} "
+            f"does not exist"
+        )
 
     feature_name = extract_feature_name(state)
     issue_number = state.get("issue_number", 0)
@@ -188,7 +220,7 @@ def update_readme(state: TestingWorkflowState, repo_root: Path) -> bool:
 
     # Check if feature already mentioned
     if feature_name.lower() in readme_content.lower():
-        return False
+        return False, "no update needed"
 
     # Find Features section and add entry
     features_pattern = r"(##\s*Features\s*\n)(.*?)(?=\n##|\Z)"
@@ -210,9 +242,19 @@ def update_readme(state: TestingWorkflowState, repo_root: Path) -> bool:
             features_header + new_features_content,
         )
         readme_path.write_text(readme_content, encoding="utf-8")
-        return True
+        return True, "updated"
 
-    return False
+    return False, f"{readme_path} has no Features section, so no entry was added"
+
+
+def _failed(issue_number: int, artifact: str, exc: Exception) -> DocumentationError:
+    """The ERROR line for an artifact N8 could not write, and the error to raise."""
+    message = (
+        f"[N8] issue #{issue_number}: {artifact} could not be written: "
+        f"{type(exc).__name__}: {exc}. N8 stops; the documentation is not complete."
+    )
+    print(f"ERROR {message}", file=sys.stderr)
+    return DocumentationError(message)
 
 
 def document(state: TestingWorkflowState) -> dict[str, Any]:
@@ -276,6 +318,10 @@ def document(state: TestingWorkflowState) -> dict[str, Any]:
 
     feature_name = extract_feature_name(state)
 
+    # Ledger 0908, lines 292, 308, 338, 350: an artifact N8 set out to write
+    # that raises stops the node, named, instead of printing "SKIPPED" and
+    # going on.
+
     # 3. Generate wiki page (if full scope and appropriate)
     wiki_path = ""
     if doc_scope == "full" and should_generate_wiki(state):
@@ -286,11 +332,23 @@ def document(state: TestingWorkflowState) -> dict[str, Any]:
                 issue_number=issue_number,
                 repo_root=repo_root,
             )
-            update_wiki_sidebar(wiki_path_obj)
-            wiki_path = str(wiki_path_obj)
-            print(f"    Wiki page: {wiki_path}")
+            sidebar_updated = update_wiki_sidebar(wiki_path_obj)
         except Exception as e:
-            print(f"    Wiki page: SKIPPED ({e})")
+            raise _failed(issue_number, "the wiki page", e) from e
+        wiki_path = str(wiki_path_obj)
+        print(f"    Wiki page: {wiki_path}")
+        # Ledger 0908, line 289 (kept): False is "no _Sidebar.md in this
+        # wiki" or "the page is already listed", and both are absences, not
+        # failures. generate_wiki_page makes the wiki directory itself, so a
+        # repository with no wiki gets a page and no sidebar. A sidebar that
+        # cannot be read or written raises above.
+        if sidebar_updated:
+            print("    Wiki sidebar: updated")
+        else:
+            print(
+                f"    Wiki sidebar: not changed (no _Sidebar.md in "
+                f"{wiki_path_obj.parent}, or the page is already listed)"
+            )
 
     # 4. Generate runbook (if operational feature)
     runbook_path = ""
@@ -303,10 +361,10 @@ def document(state: TestingWorkflowState) -> dict[str, Any]:
                 repo_root=repo_root,
                 implementation_files=implementation_files,
             )
-            runbook_path = str(runbook_path_obj)
-            print(f"    Runbook: {runbook_path}")
         except Exception as e:
-            print(f"    Runbook: SKIPPED ({e})")
+            raise _failed(issue_number, "the runbook", e) from e
+        runbook_path = str(runbook_path_obj)
+        print(f"    Runbook: {runbook_path}")
 
     # 5. Generate c/p docs (if new CLI tool). Issue #1627: the 907/908 c/p docs
     # are AZ-internal boilerplate (they assume an AssemblyZero context and target
@@ -334,21 +392,18 @@ def document(state: TestingWorkflowState) -> dict[str, Any]:
                 implementation_files=implementation_files,
             )
             cp_paths.append(str(prompt_path))
-            print(f"    c/p docs: {len(cp_paths)} files")
         except Exception as e:
-            print(f"    c/p docs: SKIPPED ({e})")
+            raise _failed(issue_number, "the c/p docs", e) from e
+        print(f"    c/p docs: {len(cp_paths)} files")
 
     # 6. Update README (if major feature)
     readme_updated = False
     if should_update_readme(state):
         try:
-            readme_updated = update_readme(state, repo_root)
-            if readme_updated:
-                print("    README: updated")
-            else:
-                print("    README: no update needed")
+            readme_updated, readme_note = _readme_update(state, repo_root)
         except Exception as e:
-            print(f"    README: SKIPPED ({e})")
+            raise _failed(issue_number, "the README entry", e) from e
+        print(f"    README: {readme_note}")
 
     # Log completion
     log_workflow_execution(
