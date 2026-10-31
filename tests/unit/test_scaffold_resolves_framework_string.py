@@ -92,9 +92,16 @@ def test_resolve_framework_reads_the_enum_and_its_string(framework):
     assert resolve_framework({"framework": framework.value}) is framework
 
 
-@pytest.mark.parametrize("config", [{"framework": "nonsense"}, {"framework": None}, {}, None])
-def test_resolve_framework_is_none_for_anything_else(config):
+@pytest.mark.parametrize("config", [{"framework": None}, {}, None])
+def test_resolve_framework_is_none_when_no_framework_is_named(config):
     assert resolve_framework(config) is None
+
+
+def test_resolve_framework_refuses_a_framework_it_does_not_know():
+    """ADR 0236: an unknown framework raises; it used to be None, which a
+    one-framework run reads as pytest."""
+    with pytest.raises(ValueError, match="nonsense"):
+        resolve_framework({"framework": "nonsense"})
 
 
 TESTING_PACKAGE = (

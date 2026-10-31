@@ -159,8 +159,14 @@ class TestShouldRegenerate:
         assert result == "continue"
 
     def test_escalate_after_max_attempts(self):
-        """Routes to escalate after 3 failed attempts."""
+        """Routes to escalate after 3 failed attempts, with the halt named.
+
+        Ledger 0908, line 1043: without a recorded reason it raises instead,
+        because "escalate" with no error_message ended the run at `end`."""
+        import pytest
+
         from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+            ScaffoldExhausted,
             should_regenerate,
         )
 
@@ -172,7 +178,10 @@ class TestShouldRegenerate:
             "scaffold_attempts": 3,
         }
 
-        result = should_regenerate(state)
+        with pytest.raises(ScaffoldExhausted):
+            should_regenerate(state)
+
+        result = should_regenerate({**state, "error_message": "out of attempts"})
 
         assert result == "escalate"
 

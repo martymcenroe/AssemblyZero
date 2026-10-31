@@ -30,47 +30,51 @@ def test_route_default_revise_policy_routes_to_revise_node():
 
 
 def test_route_revise_policy_exhausts_after_max_cycles():
-    """BLOCKED + revise policy + count==MAX → end."""
+    """BLOCKED + revise policy + count==MAX → HALT (#3585; it ended at END)."""
     state: dict[str, Any] = {
         "test_plan_status": "BLOCKED",
         "test_plan_policy": "revise",
         "test_plan_revision_count": MAX_REVISION_CYCLES,
         "auto_mode": False,
     }
-    assert route_after_review(state) == "end"
+    assert route_after_review(state) == "HALT"
 
 
 def test_route_strict_policy_ends_immediately():
-    """BLOCKED + strict policy → end (legacy behavior)."""
+    """BLOCKED + strict policy → HALT at once (#3585; it ended at END)."""
     state: dict[str, Any] = {
         "test_plan_status": "BLOCKED",
         "test_plan_policy": "strict",
         "test_plan_revision_count": 0,
         "auto_mode": False,
     }
-    assert route_after_review(state) == "end"
+    assert route_after_review(state) == "HALT"
 
 
-def test_route_auto_policy_continues_to_scaffold():
-    """BLOCKED + auto policy → N2_scaffold_tests (legacy auto bypass)."""
+def test_route_auto_policy_revises_like_revise():
+    """BLOCKED + auto policy → N1_5_revise_test_plan (#3585).
+
+    The auto policy used to continue to scaffold past the BLOCKED verdict,
+    a failed gate read as a pass (ADR 0236). It now revises.
+    """
     state: dict[str, Any] = {
         "test_plan_status": "BLOCKED",
         "test_plan_policy": "auto",
         "test_plan_revision_count": 0,
         "auto_mode": False,
     }
-    assert route_after_review(state) == "N2_scaffold_tests"
+    assert route_after_review(state) == "N1_5_revise_test_plan"
 
 
-def test_route_legacy_auto_mode_overrides_revise_policy():
-    """auto_mode=True forces auto path even when policy=revise."""
+def test_route_legacy_auto_mode_no_longer_bypasses_a_blocked_plan():
+    """auto_mode=True revises a BLOCKED plan like the default policy (#3585)."""
     state: dict[str, Any] = {
         "test_plan_status": "BLOCKED",
         "test_plan_policy": "revise",
         "test_plan_revision_count": 0,
         "auto_mode": True,
     }
-    assert route_after_review(state) == "N2_scaffold_tests"
+    assert route_after_review(state) == "N1_5_revise_test_plan"
 
 
 def test_route_approved_goes_straight_to_scaffold_regardless_of_policy():
@@ -89,8 +93,8 @@ def test_route_error_with_no_auto_mode_halts():
     """error_message + auto_mode=False → HALT (#2756).
 
     Still a stop; the destination changed so the reason is written down by
-    the node that owns halting. The two policy stops above keep going to END:
-    they carry no error_message, so there is nothing to record.
+    the node that owns halting. Since #3585 the two policy stops above halt
+    too; N1's stop wrapper records their reason.
     """
     state: dict[str, Any] = {
         "error_message": "something blew up",

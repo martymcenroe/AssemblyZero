@@ -4,8 +4,12 @@ Issue #289: Prevents directory traversal, secret file exposure,
 and oversized file injection into LLM prompts.
 """
 
+import logging
 import re
+import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Secret file patterns (case-insensitive)
 SECRET_PATTERNS = [
@@ -152,7 +156,15 @@ def load_context_files(
 
     Returns:
         Tuple of (concatenated_content, error_list).
-        Content is empty string if all files fail validation.
+
+    ADR 0236: every file is checked, so the errors name every file that
+    failed, and each failure is an ERROR line naming the file and the cause
+    at the moment it is found. When any file fails, the content is empty:
+    the operator named every file the prompts should carry, so a context
+    missing one is never returned in its place. A non-empty error list is a
+    failed result, and a caller must not go on: the one caller,
+    `tools/run_implement_from_lld.py`, refuses to start the run on it, and
+    its handler alerts the operator.
     """
     project_root = Path(project_root).resolve()
     contents: list[str] = []
@@ -161,7 +173,7 @@ def load_context_files(
     for raw_path in paths:
         valid, error = validate_context_path(raw_path, project_root)
         if not valid:
-            errors.append(f"[CONTEXT] REJECTED: {raw_path} — {error}")
+            errors.append(_context_failure(f"REJECTED: {raw_path} — {error}"))
             continue
 
         # Resolve path for reading
@@ -173,8 +185,22 @@ def load_context_files(
 
         try:
             text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            errors.append(_context_failure(
+                f"Read error: {raw_path} — {type(e).__name__}: {e}"
+            ))
+        else:
             contents.append(f"# Context: {path.name}\n\n{text}")
-        except Exception as e:
-            errors.append(f"[CONTEXT] Read error: {raw_path} — {e}")
 
+    if errors:
+        return "", errors
     return "\n\n---\n\n".join(contents), errors
+
+
+def _context_failure(detail: str) -> str:
+    """One context file's failure as the error list carries it, after its
+    ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    message = f"[CONTEXT] {detail}"
+    logger.error("%s", message)
+    print(f"ERROR {message}", file=sys.stderr, flush=True)
+    return message

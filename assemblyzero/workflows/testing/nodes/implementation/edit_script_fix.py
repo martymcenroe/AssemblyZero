@@ -57,13 +57,16 @@ reviewer feedback.
 Every failure at every step -- no blocks, a SEARCH that does not match, a
 SEARCH that matches twice, an empty result -- returns None, and the caller
 falls back to the existing full-file path. That is the same contract #1528
-wrote for the spec stage, and it is what makes this safe to switch on.
+wrote for the spec stage, and it is what makes this safe to switch on. The
+caller, `orchestrator.try_edit_script_fix`, alerts the operator on every
+fallback (#3585).
 """
 
 from __future__ import annotations
 
 import ast
 import re
+import sys
 from pathlib import Path
 
 # One format, one parser (see the module docstring). These are pure text
@@ -257,6 +260,37 @@ _FRAME = re.compile(r"^(\S+?\.py):\d+: in (\S+)")
 _MIN_NAME_LEN = 4
 
 
+def _python_tree(path: Path, what: str) -> ast.Module | None:
+    """The parsed file the #2861 rule reads, or None when it has nothing to read.
+
+    None is an answer: a file that is not on disk, or not Python, defines and
+    uses no names this rule can see, and the frame rule and the whole-corpus
+    fallback decide. A Python file that cannot be read or does not parse is
+    a failure (standard 0034): attributing around it would be a guess, so an
+    ERROR line names the file and the exception propagates (#3585).
+    """
+    if path.suffix != ".py" or not path.is_file():
+        return None
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(
+            f"ERROR [N4] could not read {path} ({what}) to attribute failures "
+            f"(#2861): {type(exc).__name__}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        raise
+    try:
+        return ast.parse(source)
+    except (SyntaxError, ValueError) as exc:
+        print(
+            f"ERROR [N4] {path} ({what}) does not parse, so failures cannot be "
+            f"attributed by its names (#2861): {type(exc).__name__}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        raise
+
+
 def _names_defined_in(path: Path) -> tuple[set[str], dict[str, set[str]]]:
     """(top-level classes and functions, {method name: classes defining it}).
 
@@ -266,14 +300,12 @@ def _names_defined_in(path: Path) -> tuple[set[str], dict[str, set[str]]]:
     the failing tests' `collector.collect()` matched the `collect` method of a
     `DummyCollector` test double in two planned test files, and both were
     sent for a fix that was not theirs.
+
+    A planned file not on disk, or not Python, defines nothing; one that
+    cannot be read or parsed raises (see `_python_tree`).
     """
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, ValueError):
-        # fail-open: a planned file that cannot be parsed defines nothing
-        # this rule can see, so the block stays unattributed to it and the
-        # frame rule and the whole-corpus fallback decide -- which is exactly
-        # the behaviour before #2861. Attributing on a guess is the failure.
+    tree = _python_tree(path, "a planned file")
+    if tree is None:
         return set(), {}
 
     def _ok(name: str) -> bool:
@@ -297,12 +329,14 @@ def _names_defined_in(path: Path) -> tuple[set[str], dict[str, set[str]]]:
 
 
 def _names_used_by_test(path: Path, func: str) -> set[str]:
-    """Every Name and Attribute the named test function's body refers to."""
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, ValueError):
-        # fail-open: same reasoning as `_names_defined_in` -- an unreadable
-        # test attributes nothing by this rule, and the earlier rules stand.
+    """Every Name and Attribute the named test function's body refers to.
+
+    A test file not on disk (a frame path that is not under the repository
+    root) uses nothing; one that cannot be read or parsed raises (see
+    `_python_tree`).
+    """
+    tree = _python_tree(path, "the failing test's file")
+    if tree is None:
         return set()
     for node in ast.walk(tree):
         if (

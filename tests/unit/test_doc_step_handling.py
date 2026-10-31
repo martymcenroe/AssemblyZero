@@ -28,13 +28,22 @@ def _invoke_node(spec, state):
     return runnable(state)
 
 
+# #3585: the runbook is written from the LLD's own sections and raises on an
+# LLD that has none, so the test LLD carries them.
+RUNBOOK_SECTIONS = (
+    "\n\n## Prerequisites\n\n- Python 3.11\n\n"
+    "## Procedure\n\n1. Run the tool.\n\n"
+    "## Verification\n\n- The tool exits 0.\n"
+)
+
+
 def _doc_state(tmp_path, **overrides):
     audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
     audit_dir.mkdir(parents=True, exist_ok=True)
     state = {
         "issue_number": 42,
         "repo_root": str(tmp_path),
-        "lld_content": "# Tool\n\nImplement a CLI tool.",
+        "lld_content": "# Tool\n\nImplement a CLI tool." + RUNBOOK_SECTIONS,
         "audit_dir": str(audit_dir),
         "implementation_files": ["tools/new_tool.py"],  # is_cli_tool -> True
         "test_files": [],
@@ -60,7 +69,16 @@ def test_document_suppresses_cp_docs_when_skip_flag_set(tmp_path):
 def test_document_emits_cp_docs_when_not_skipped(tmp_path):
     """Default (skip_cp_docs unset) still emits c/p docs for a CLI tool — AZ
     self-builds keep them."""
-    state = _doc_state(tmp_path)  # no skip_cp_docs
+    # ADR 0236 (#3585): the CLI document is written from the commands the LLD
+    # shows, so the LLD shows one; an LLD with none gives no c/p docs.
+    state = _doc_state(
+        tmp_path,
+        lld_content=(
+            "# Tool\n\nImplement a CLI tool.\n\n```bash\n"
+            "poetry run python tools/new_tool.py --issue 42\n```\n"
+            + RUNBOOK_SECTIONS
+        ),
+    )  # no skip_cp_docs
     result = document(state)
     assert len(result.get("doc_cp_paths", [])) == 2, (
         "a CLI tool must still get its c/p docs when not skipped"
@@ -123,7 +141,12 @@ def _capture_impl_payload(state):
         out.stderr = ""
         out.returncode = 0
         mock_run.return_value = out
+        # The stubbed git cuts no worktree, so there is nothing to provision;
+        # provisioning a worktree that is not there refuses (ADR 0236, #3585).
         with patch(
+            "assemblyzero.workflows.orchestrator.stages.provision_worktree",
+            return_value=[],
+        ), patch(
             "assemblyzero.workflows.testing.graph.build_testing_workflow",
             return_value=_StubGraph(),
         ):

@@ -18,6 +18,7 @@ which turns an Add whose file the base ships into a Modify.
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -35,7 +36,12 @@ RUN_26_PLAN = [
 
 @pytest.fixture
 def seed_base(tmp_path):
-    """hardening-run-20's shape: config, telltale, a skin, no collector."""
+    """hardening-run-20's shape: config, telltale, a skin, no collector.
+
+    A git repository, as N4's worktree always is: since #3585 `came_from_base`
+    raises when git cannot answer, instead of reading "not a repository" as
+    "untracked"."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
     (tmp_path / "src" / "boostgauge" / "skins").mkdir(parents=True)
     (tmp_path / "tests" / "unit").mkdir(parents=True)
     for rel in ("src/boostgauge/__init__.py", "src/boostgauge/config.py",

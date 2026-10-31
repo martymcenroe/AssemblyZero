@@ -128,16 +128,22 @@ class TestTheNote:
 
         assert read_measurement(repo, sha) is None
 
-    def test_a_note_that_does_not_parse_reads_as_none(self, repo):
+    def test_a_note_that_does_not_parse_raises_naming_the_commit(self, repo):
+        """#3810: a corrupt note is not an unmeasured commit; reading it as
+        one let a resume pass over a better attempt without a word."""
         sha = _commit(repo, "work.txt")
         _git(repo, "notes", f"--ref={checkpoints.MEASURE_NOTES_REF}",
              "add", "-f", "-m", "not a measurement", sha)
 
-        assert read_measurement(repo, sha) is None
+        with pytest.raises(checkpoints.CheckpointError, match=sha):
+            read_measurement(repo, sha)
 
-    def test_recording_outside_a_repo_is_a_non_fatal_false(self, tmp_path, capsys):
-        assert record_measurement(tmp_path, 1, 1, 100.0) is False
-        assert "non-fatal" in capsys.readouterr().out
+    def test_recording_outside_a_repo_raises(self, tmp_path, capsys):
+        """#3810: a note git cannot write raises; it used to be a non-fatal
+        False on stdout."""
+        with pytest.raises(checkpoints.CheckpointError, match="git notes add"):
+            record_measurement(tmp_path, 1, 1, 100.0)
+        assert "ERROR [N5]" in capsys.readouterr().err
 
     def test_recording_into_nothing_is_false(self, tmp_path):
         assert record_measurement(None, 1, 1, 100.0) is False

@@ -11,7 +11,7 @@ from assemblyzero.workflows.testing.framework_detector import (
     FrameworkConfig,
     TestFramework,
 )
-from assemblyzero.workflows.testing.runners.base_runner import BaseTestRunner
+from assemblyzero.workflows.testing.runners.base_runner import BaseTestRunner, loud
 
 logger = logging.getLogger(__name__)
 
@@ -110,20 +110,41 @@ def checkpoint_safe(config: FrameworkConfig | dict) -> dict:
 _FRAMEWORKS_BY_VALUE: dict[str, TestFramework] = {fw.value: fw for fw in TestFramework}
 
 
+class UnknownFrameworkError(ValueError):
+    """A framework configuration names something that is not a framework
+    this workflow runs (ADR 0236). Names the value and the frameworks."""
+
+
 def resolve_framework(framework_config: FrameworkConfig | dict | None) -> TestFramework | None:
     """The `TestFramework` a framework configuration names, or None (#3732).
 
     The one place the state's framework is read back. The checkpoint carries
     the string value (#3708); a checkpoint written before that still carries
-    the enum. Both resolve. An unknown string, a missing key or no config at
-    all is None, which every caller treats as "not a recognised framework".
+    the enum. Both resolve.
+
+    None means the configuration names no framework: no config at all, no
+    `framework` key, or a key holding None. That absence is a legitimate
+    answer, which every caller reads as the pytest default, so it is quiet.
+
+    Anything else -- a string that is no framework's value, or a value of
+    another type -- raises UnknownFrameworkError after an ERROR line (ADR
+    0236). It used to be None too, and `framework_ownership.run_frameworks`
+    reads None on a one-framework run as pytest, so a run whose state named
+    a framework this workflow cannot run was tested as a pytest run.
     """
     fw = (framework_config or {}).get("framework")
+    if fw is None:
+        return None
     if isinstance(fw, TestFramework):
         return fw
-    if isinstance(fw, str):
-        return _FRAMEWORKS_BY_VALUE.get(fw)
-    return None
+    if isinstance(fw, str) and fw in _FRAMEWORKS_BY_VALUE:
+        return _FRAMEWORKS_BY_VALUE[fw]
+    message = (
+        f"the framework configuration names {fw!r}, which is not a test "
+        f"framework this workflow runs ({', '.join(_FRAMEWORKS_BY_VALUE)})"
+    )
+    loud(message)
+    raise UnknownFrameworkError(message)
 
 
 def get_runner(

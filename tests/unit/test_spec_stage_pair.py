@@ -64,14 +64,26 @@ def spec_0007() -> str:
 
 class TestEscalationHalts:
     def test_an_exhausted_scaffold_no_longer_reaches_implementation(self):
-        """The defect itself. This used to return N4_implement_code."""
+        """The defect itself. This used to return N4_implement_code.
+
+        #3585, ledger 0908, line 1043 (ADR 0236): it then routed to `end`
+        with no error_message, which alerts no one and read as success. With
+        no recorded reason the router now raises it; with the node's reason
+        the run halts."""
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+            ScaffoldExhausted,
+        )
+
         state = {
             "validation_result": {"is_valid": False},
             "scaffold_attempts": MAX_SCAFFOLD_ATTEMPTS,
             "generated_tests": HOLLOW,
         }
-        assert should_regenerate(state) == "escalate"
-        assert route_after_validate(state) == "end"
+        with pytest.raises(ScaffoldExhausted):
+            route_after_validate(state)
+        named = {**state, "error_message": f"{DETERMINISTIC_FAILURE}: out of moves"}
+        assert should_regenerate(named) == "escalate"
+        assert route_after_validate(named) == "HALT"
 
     def test_a_valid_suite_still_goes_to_the_red_phase(self):
         state = {"validation_result": {"is_valid": True}, "scaffold_attempts": 0}

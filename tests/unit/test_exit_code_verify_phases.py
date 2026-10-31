@@ -40,7 +40,11 @@ def _make_state(**overrides):
         "iteration_count": 0,
         "max_iterations": 10,
         "coverage_target": 90,
-        "implementation_files": [],
+        # #3585: N5 halts when nothing names a coverage target, and the
+        # full-suite gate's `git status` halts outside a repository, which
+        # /tmp/repo is not; the gate is not this file's subject.
+        "implementation_files": ["/tmp/repo/pkg/mod.py"],
+        "full_suite_validated": True,
         "skip_e2e": True,
     }
     base.update(overrides)
@@ -135,6 +139,9 @@ class TestRedPhaseExitCodeRouting:
                 {"path": "src/chiron/provenance.py", "change_type": "Add"},
                 {"path": "tests/test_issue_4.py", "change_type": "Add"},
             ],
+            # #3585: the hollow-suite check reads the scaffold; the test file
+            # this state names is not on disk, and an unreadable one halts.
+            generated_tests="def test_provenance():\n    assert provenance() == 1\n",
         )
         result = verify_red_phase(state)
 

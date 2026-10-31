@@ -57,7 +57,10 @@ def _payload(state, worktree_exists: bool):
         def compile(self):
             return _App()
 
+    # The stubbed git cuts no worktree, so there is nothing to provision;
+    # provisioning a worktree that is not there refuses (ADR 0236, #3585).
     with patch.object(stages, "run_command", _quiet_git), \
+         patch.object(stages, "provision_worktree", return_value=[]), \
          patch.object(Path, "is_dir", return_value=worktree_exists), \
          patch.object(Path, "is_file", return_value=False), \
          patch(

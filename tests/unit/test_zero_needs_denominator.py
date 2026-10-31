@@ -22,6 +22,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.core.recovery_plan import _build_recommendation
 from assemblyzero.workflows.testing.nodes.implementation.parsers import (
     validate_code_response,
@@ -59,7 +61,8 @@ def _state(tmp_path: Path, **overrides: object) -> dict:
         "issue_number": 331,
         "audit_dir": "",
         "test_files": [],
-        "implementation_files": [],
+        # #3585: N5 halts when nothing names a coverage target.
+        "implementation_files": [str(tmp_path / "pkg" / "mod.py")],
         "files_to_modify": [],
         "coverage_target": 95,
         "iteration_count": 0,
@@ -222,10 +225,12 @@ class TestConftestOptionValidation:
         )
         assert ok is True
 
-    def test_unparseable_new_code_abstains_here(self, tmp_path: Path) -> None:
-        """Syntax is the syntax check's finding; this check judges options."""
+    def test_unparseable_new_code_stops_here(self, tmp_path: Path) -> None:
+        """#3585: options cannot be compared in code that does not parse, and
+        a check that cannot run is not a pass. (validate_code_response checks
+        syntax first, so a run never reaches this with unparsed code.)"""
         repo = self._repo(tmp_path)
-        ok, _ = validate_conftest_options(
-            "def broken(:", "tests/visual/conftest.py", repo
-        )
-        assert ok is True
+        with pytest.raises(SyntaxError):
+            validate_conftest_options(
+                "def broken(:", "tests/visual/conftest.py", repo
+            )

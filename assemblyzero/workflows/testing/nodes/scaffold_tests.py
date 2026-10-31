@@ -90,6 +90,11 @@ def parse_lld_test_section(lld_content: str) -> ParsedLLDTests:
 
     Returns:
         ParsedLLDTests with scenarios and module info.
+
+    Raises:
+        ValueError: the LLD has no Section 10 test plan any pattern matches,
+            naming the patterns (ledger 0908, line 105). It used to return
+            no scenarios, which reads the same as a plan with an empty table.
     """
     result: ParsedLLDTests = {
         "module_path": "",
@@ -112,8 +117,13 @@ def parse_lld_test_section(lld_content: str) -> ParsedLLDTests:
             section_content = match.group(1)
             break
 
-    if not section_content:
-        return result
+    if section_content is None:
+        raise ValueError(
+            "the LLD has no Section 10 test plan to scaffold from: no heading "
+            "matched '### 10.0 ... Test Plan', '### 10.1 ... Test Scenarios' or "
+            "'## 10 Verification / Test / Testing' (the patterns: "
+            + "; ".join(section_patterns) + ")"
+        )
 
     # Parse the test table
     # Format: | Test ID | Test Description | Expected Behavior | Req ID | Status |
@@ -316,7 +326,10 @@ def _generate_assertion_from_expected(expected: str) -> str:
         expected: Expected behavior string from LLD.
 
     Returns:
-        Python assertion statement.
+        Python assertion statement. When no assertion can be derived, a
+        failing one that names the expected behaviour (ledger 0908, lines 325
+        and 342): it used to be `assert True`, a test that passes with no
+        implementation at all, so a scaffold no one replaced read as green.
     """
     # Pattern: input -> output (arrow notation)
     arrow_match = re.search(r'["\']?([^"\']+)["\']?\s*->\s*(.+)', expected)
@@ -331,8 +344,11 @@ def _generate_assertion_from_expected(expected: str) -> str:
             func_name = func_match.group(1)
             return f'assert {func_name}("{input_val}") == {output_val}'
 
-        # Generic comparison
-        return f'# Input: "{input_val}" Expected: {output_val}\n    assert True  # TODO: Implement assertion'
+        # No function to call: the comparison cannot be written.
+        return (
+            f'# Input: "{input_val}" Expected: {output_val}\n'
+            f"    {_underived_assertion(expected)}"
+        )
 
     # Pattern: func(args) returns/equals value
     returns_match = re.search(
@@ -346,10 +362,17 @@ def _generate_assertion_from_expected(expected: str) -> str:
         result = returns_match.group(3).strip()
         return f"assert {func_name}({args}) == {result}"
 
-    # Pattern: simple description
-    # Can't generate real assertion, but at least don't use assert False
-    # Generate a placeholder that requires implementation
-    return f'# Expected: {expected}\n    assert True  # TODO: Replace with real assertion'
+    # Pattern: simple description. No assertion can be derived from it.
+    return f"# Expected: {expected}\n    {_underived_assertion(expected)}"
+
+
+def _underived_assertion(expected: str) -> str:
+    """A placeholder that fails until a real assertion replaces it, naming
+    the expected behaviour no assertion could be derived from (ledger 0908,
+    lines 325 and 342), as the TDD scaffold's `assert False, 'TDD RED: ...'`
+    does."""
+    reason = f"TDD RED: no assertion could be derived from the expected behaviour: {expected}"
+    return f"assert False, {reason!r}"
 
 
 def _path_to_module(path: str) -> str:
@@ -1016,17 +1039,23 @@ def unbound_names(
     * `symbols` -- everything else: the implementation's classes and helpers
       the bodies exercise. The emitter imports them by name from the
       implementation module.
+
+    Raises `ScaffoldImportError` when the source does not parse (ledger 0908,
+    line 787), naming the line and the parser's message: the names the
+    bodies use cannot be read, so the red-phase imports cannot be built. It
+    used to repair nothing and leave the refusal to N2.5, which regenerated a
+    transcription that comes out byte for byte the same. And when a module
+    finder raises on a name (line 833), naming the name and the cause: a
+    name nobody can classify is a symbol nobody can import.
     """
-    empty: dict[str, list[tuple[str, str]]] = {"modules": [], "symbols": []}
     try:
         tree = ast.parse(source)
-    except SyntaxError:
-        # fail-open: this is a repair, not the verdict. A file that does not
-        # parse is refused by the mechanical validation that follows the
-        # emitter (`validate_tests_mechanical`, syntax first), and that
-        # refusal names the line; repairing nothing here leaves the file
-        # exactly as legible to that check as it was.
-        return empty
+    except SyntaxError as exc:
+        raise ScaffoldImportError(
+            f"the Section 10 test functions do not parse (line {exc.lineno} "
+            f"of the emitted file: {exc.msg}), so the names they use cannot "
+            f"be read"
+        ) from exc
 
     from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
         _KNOWN_THIRD_PARTY,
@@ -1066,14 +1095,12 @@ def unbound_names(
         # searches the finders without executing anything.
         try:
             return importlib.util.find_spec(name) is not None
-        except (ImportError, ValueError):
-            # fail-open: a name the finders choke on is not evidence of a
-            # module, so it stays a symbol and is imported by name from the
-            # implementation module -- where a wrong guess fails at
-            # collection with the name in the message (#2888). Halting the
-            # scaffold on a finder error would cost the whole suite to
-            # protect one import line.
-            return False
+        except (ImportError, ValueError) as exc:
+            raise ScaffoldImportError(
+                f"`{name}`, used by the Section 10 test {found[name]}, cannot "
+                f"be classified as a module or an implementation symbol: the "
+                f"module finder raised {type(exc).__name__}: {exc}"
+            ) from exc
 
     return {
         "modules": sorted((n, f) for n, f in found.items() if _is_module(n)),
@@ -1308,6 +1335,31 @@ def determine_test_file_path(
     return path
 
 
+def _require_audit_dir(state: TestingWorkflowState) -> Path:
+    """The run's audit directory, which N0 made, or FileNotFoundError.
+
+    Ledger 0908, lines 1069 and 1199: the scaffold's audit copy was skipped
+    without a word when the directory was missing, so the run's lineage
+    lacked the suite it went on to test. An unset `audit_dir` was worse:
+    `Path("")` is the working directory, which exists, so the copy landed in
+    whatever directory the run was started in. Both callers turn the raise
+    into N2's halt, before anything is written.
+    """
+    named = state.get("audit_dir") or ""
+    if not named:
+        raise FileNotFoundError(
+            "the run's state names no audit directory, so the scaffold's "
+            "audit copy has nowhere to go (N0 makes the directory)"
+        )
+    audit_dir = Path(named)
+    if not audit_dir.is_dir():
+        raise FileNotFoundError(
+            f"the run's audit directory {audit_dir} does not exist, so the "
+            f"scaffold's audit copy cannot be written"
+        )
+    return audit_dir
+
+
 # =============================================================================
 # Issue #381: Non-Python Test Scaffolding Helper
 # =============================================================================
@@ -1325,6 +1377,8 @@ def _scaffold_non_python_tests(
     scenarios = state.get("test_scenarios", [])
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+    # Ledger 0908, line 1069: checked before anything is written.
+    audit_dir = _require_audit_dir(state)
 
     # Generate TypeScript test content
     content = generate_ts_test_file_content(scenarios, framework_config, issue_number)
@@ -1361,12 +1415,9 @@ def _scaffold_non_python_tests(
     )
 
     # Save to audit trail
-    audit_dir = Path(state.get("audit_dir", ""))
-    file_num = state.get("file_counter", 0)
-    if audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        ext = framework_config["test_file_extension"]
-        save_audit_file(audit_dir, file_num, f"test-scaffold{ext}", content)
+    file_num = next_file_number(audit_dir)
+    ext = framework_config["test_file_extension"]
+    save_audit_file(audit_dir, file_num, f"test-scaffold{ext}", content)
 
     # #3081: the key the validator reads, the one #789 named. This path
     # returned `test_file_content`, which nothing read, so every Playwright,
@@ -1499,7 +1550,12 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
             # cannot start, stops N2 the way it does with several frameworks.
             return _halt_scaffold_framework(frameworks[0].label, f"{type(e).__name__}: {e}")
 
-    return _scaffold_python_tests(state)
+    try:
+        return _scaffold_python_tests(state)
+    except (ValueError, OSError) as e:
+        # Ledger 0908, line 1199: a missing audit directory, or any scaffold
+        # that cannot be written, stops N2 as it does with several frameworks.
+        return _halt_scaffold_framework(frameworks[0].label, f"{type(e).__name__}: {e}")
 
 
 def _scaffold_python_tests(state: TestingWorkflowState) -> dict[str, Any]:
@@ -1530,6 +1586,9 @@ def _scaffold_python_tests(state: TestingWorkflowState) -> dict[str, Any]:
             "error_message": "GUARD: No test scenarios available",
         }
     # --------------------------------------------------------------------------
+
+    # Ledger 0908, line 1199: checked before anything is written.
+    audit_dir = _require_audit_dir(state)
 
     # #2316: when the spec ships executable test functions they ARE the
     # suite. Emitting them verbatim is what makes the TDD loop able to
@@ -1575,12 +1634,8 @@ def _scaffold_python_tests(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    Generated {emitted} tests")
 
     # Save to audit trail
-    audit_dir = Path(state.get("audit_dir", ""))
-    if audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "test-scaffold.py", content)
-    else:
-        file_num = state.get("file_counter", 0)
+    file_num = next_file_number(audit_dir)
+    save_audit_file(audit_dir, file_num, "test-scaffold.py", content)
 
     # Log scaffolding
     log_workflow_execution(

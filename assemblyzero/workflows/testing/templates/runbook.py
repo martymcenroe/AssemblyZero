@@ -5,9 +5,19 @@ Issue #93: N8 Documentation Node
 Generates operational runbooks for workflow features following AssemblyZero standards.
 """
 
+import logging
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def _loud(message: str) -> None:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[RUNBOOK] %s", message)
+    print(f"ERROR [RUNBOOK] {message}", file=sys.stderr, flush=True)
 
 
 def extract_procedure_from_lld(lld_content: str) -> list[str]:
@@ -121,7 +131,34 @@ def generate_runbook(
 
     Returns:
         Path to generated runbook.
+
+    Raises:
+        ValueError: naming the feature, the issue and every section the LLD
+            lacks -- prerequisites, procedure, verification -- after an ERROR
+            line, before anything is written (ADR 0236). The template used to
+            write invented ones in their place, and the runbook read as
+            written from the LLD.
     """
+    # Extract content from LLD
+    prereqs = extract_prerequisites_from_lld(lld_content)
+    steps = extract_procedure_from_lld(lld_content)
+    verifications = extract_verification_from_lld(lld_content)
+    missing = [
+        section for section, found in (
+            ("prerequisites", prereqs), ("procedure", steps), ("verification", verifications),
+        ) if not found
+    ]
+    if missing:
+        message = (
+            f"the runbook for {feature_name} (issue #{issue_number}) cannot be "
+            f"written from its LLD: the LLD lists no {', no '.join(missing)} "
+            f"(sections searched: Prerequisites/Dependencies/Requirements, "
+            f"Implementation/Procedure/Steps/Workflow, "
+            f"Verification/Testing/Validation/Test Plan)"
+        )
+        _loud(message)
+        raise ValueError(message)
+
     runbooks_dir = repo_root / "docs" / "runbooks"
     runbooks_dir.mkdir(parents=True, exist_ok=True)
 
@@ -132,11 +169,6 @@ def generate_runbook(
     filename = feature_name.lower().replace(" ", "-").replace("/", "-")
     filename = re.sub(r"[^a-z0-9-]", "", filename)
     runbook_path = runbooks_dir / f"{runbook_num:04d}-{filename}.md"
-
-    # Extract content from LLD
-    prereqs = extract_prerequisites_from_lld(lld_content)
-    steps = extract_procedure_from_lld(lld_content)
-    verifications = extract_verification_from_lld(lld_content)
 
     # Get mermaid diagram if present
     diagram_pattern = r"```mermaid\n(.*?)```"
@@ -163,15 +195,10 @@ def generate_runbook(
         "",
     ]
 
-    if prereqs:
-        content_parts.append("| Requirement | Check |")
-        content_parts.append("|-------------|-------|")
-        for prereq in prereqs:
-            content_parts.append(f"| {prereq} | `verify` |")
-    else:
-        content_parts.append("- Standard AssemblyZero environment")
-        content_parts.append("- GitHub CLI authenticated (`gh auth status`)")
-        content_parts.append("- Poetry environment active")
+    content_parts.append("| Requirement | Check |")
+    content_parts.append("|-------------|-------|")
+    for prereq in prereqs:
+        content_parts.append(f"| {prereq} | `verify` |")
 
     content_parts.extend(["", "---", ""])
 
@@ -190,14 +217,10 @@ def generate_runbook(
         "",
     ])
 
-    if steps:
-        for i, step in enumerate(steps, 1):
-            content_parts.append(f"### Step {i}: {step[:50]}{'...' if len(step) > 50 else ''}")
-            content_parts.append("")
-            content_parts.append(step)
-            content_parts.append("")
-    else:
-        content_parts.append("*Procedure steps to be documented.*")
+    for i, step in enumerate(steps, 1):
+        content_parts.append(f"### Step {i}: {step[:50]}{'...' if len(step) > 50 else ''}")
+        content_parts.append("")
+        content_parts.append(step)
         content_parts.append("")
 
     content_parts.extend(["---", ""])
@@ -207,15 +230,10 @@ def generate_runbook(
         "",
     ])
 
-    if verifications:
-        content_parts.append("| Check | Command | Expected |")
-        content_parts.append("|-------|---------|----------|")
-        for verif in verifications:
-            content_parts.append(f"| {verif[:30]}... | `verify` | Pass |")
-    else:
-        content_parts.append("| Check | Command | Expected |")
-        content_parts.append("|-------|---------|----------|")
-        content_parts.append("| Feature works | `run feature` | Success |")
+    content_parts.append("| Check | Command | Expected |")
+    content_parts.append("|-------|---------|----------|")
+    for verif in verifications:
+        content_parts.append(f"| {verif[:30]}... | `verify` | Pass |")
 
     content_parts.extend(["", "---", ""])
 

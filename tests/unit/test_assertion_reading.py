@@ -259,10 +259,19 @@ class TestTheImportedHalfOfTheRuling:
         source = "from nowhere import thing\n\ndef test_it():\n    thing()\n"
         assert imported_helper_sources(source, tmp_path) == {}
 
-    def test_an_unparseable_neighbour_costs_a_helper_not_the_run(self, tmp_path):
+    def test_an_unparseable_neighbour_is_named_not_dropped(self, tmp_path):
+        """Ledger 0908, line 522 (ADR 0236): it used to cost one helper
+        silently, and the test was refused with a message that never named
+        the file. It now raises naming the file; N2.5 halts on it."""
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+            HelperSourceUnreadable,
+        )
+
         (tmp_path / "helpers.py").write_text("def broken(:\n", encoding="utf-8")
         source = "from helpers import broken\n\ndef test_it():\n    broken()\n"
-        assert imported_helper_sources(source, tmp_path) == {}
+        with pytest.raises(HelperSourceUnreadable) as raised:
+            imported_helper_sources(source, tmp_path)
+        assert raised.value.path == tmp_path / "helpers.py"
 
     def test_unparseable_test_content_yields_no_helpers(self, tmp_path):
         assert imported_helper_sources("def broken(:\n", tmp_path) == {}

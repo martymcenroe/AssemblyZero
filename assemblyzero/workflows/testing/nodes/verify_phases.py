@@ -29,7 +29,7 @@ from assemblyzero.workflows.testing.audit import (
     parse_pytest_output,
     save_audit_file,
 )
-from assemblyzero.workflows.testing.checkpoints import record_measurement
+from assemblyzero.workflows.testing.checkpoints import CheckpointError, record_measurement
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
 from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
@@ -130,6 +130,79 @@ _CRITICAL_SKIP_KEYWORDS = ["security", "auth", "payment", "critical"]
 
 # Regex for verbose pytest skip lines: "test_name SKIPPED"
 _SKIP_PATTERN = re.compile(r"([\w/\\.\-]+::[\w\[\]\-]+)\s+SKIPPED")
+
+
+class PhaseStepError(RuntimeError):
+    """A step N3 or N5 depends on failed (ADR 0236, #3585).
+
+    Raised after an ERROR line at the point of failure, naming what failed
+    and why. The phase's entry point turns it into its halt
+    (`_halt_phase_step_failed`), which `route_after_red` and
+    `route_after_green` send to HALT, which alerts. These steps used to print
+    "(non-fatal)" or a warning and go on, so a phase graded a run its own
+    bookkeeping had not served."""
+
+
+def _step_failed(node: str, message: str) -> PhaseStepError:
+    """Say the failure at ERROR on stderr; return the error to raise."""
+    print(f"    ERROR [{node}] {message}", file=sys.stderr, flush=True)
+    return PhaseStepError(f"[{node}] {message}")
+
+
+def _halt_phase_step_failed(
+    node: str, output_key: str, error: PhaseStepError,
+) -> dict[str, Any]:
+    """The phase's halt when a step it depends on failed (#3585). Routed to
+    HALT, which alerts the operator with the step and its cause."""
+    message = (
+        f"PHASE STEP FAILED: {error}. The phase stops here: going on would "
+        f"grade a run that this step did not serve (ADR 0236)."
+    )
+    print(f"    [{node}] ERROR {message}", file=sys.stderr, flush=True)
+    return {output_key: message, "next_node": "end", "error_message": message}
+
+
+def _halts_on_a_failed_step(node: str, output_key: str):
+    """Wrap a phase's entry point so a `PhaseStepError` from any step under
+    it becomes the phase's halt rather than an exception out of the graph."""
+    import functools
+
+    def wrap(phase):
+        @functools.wraps(phase)
+        def guarded(state):
+            try:
+                return phase(state)
+            except PhaseStepError as error:
+                return _halt_phase_step_failed(node, output_key, error)
+        return guarded
+    return wrap
+
+
+def _save_phase_output(state: TestingWorkflowState, node: str, name: str, output: str) -> int:
+    """Write a phase's output into the run's audit directory; the file number.
+
+    No ``audit_dir`` in the state is a caller that asked for no audit trail
+    (N0 always names one, so only a direct call omits it): the state's
+    ``file_counter`` stands and nothing is written. A named directory that is
+    not there, or a write that fails, is a failure (#3585, ledger 0908 lines
+    1293 and 2431): the phase's record of what it ran would be missing.
+    """
+    audit_dir_str = state.get("audit_dir", "")
+    if not audit_dir_str:
+        return state.get("file_counter", 0)
+    audit_dir = Path(audit_dir_str)
+    if not audit_dir.is_dir():
+        raise _step_failed(
+            node, f"the audit directory {audit_dir} is not there, so {name} cannot be written",
+        )
+    try:
+        file_num = next_file_number(audit_dir)
+        save_audit_file(audit_dir, file_num, name, output)
+    except OSError as exc:
+        raise _step_failed(
+            node, f"{name} cannot be written into {audit_dir}: {type(exc).__name__}: {exc}",
+        ) from exc
+    return file_num
 
 
 def _validate_skip_audit(output: str) -> dict[str, Any]:
@@ -580,6 +653,11 @@ def _is_python_package_dir(d: Path) -> bool:
     form on 08-26, when that worktree still carried `src/boostgauge/__init__.py`
     and several sibling modules. Nothing in the derivation changed between the
     runs; the tree did.
+
+    A directory it cannot read raises PhaseStepError (#3585, ledger 0908 line
+    594): it used to answer "not a package", and the coverage target then
+    fell through to a directory form that may measure the wrong scope. A path
+    that is not a directory is still "not a package".
     """
     try:
         if not d.is_dir():
@@ -601,8 +679,12 @@ def _is_python_package_dir(d: Path) -> bool:
             )
             for sub in entries
         )
-    except (OSError, PermissionError):
-        return False
+    except OSError as exc:
+        raise _step_failed(
+            "N5",
+            f"cannot read {d} to decide whether it is a package, so its coverage "
+            f"target is unknown: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
@@ -748,6 +830,13 @@ def run_pytest(
 
     Returns:
         Dict with returncode, stdout, stderr, and parsed results.
+
+    Raises:
+        PhaseStepError: coverage was asked for and pytest-cov is not
+            installed, or pytest timed out, or poetry or pytest could not
+            start (#3585, ledger 0908 lines 767, 791 and 798). Each used to
+            come back as a run: without --cov, or as a synthetic -1 read as
+            test errors that sent the loop back to N4.
     """
     # Issue #268: Use poetry run to ensure correct virtualenv with dependencies
     # #2924: -vv, not -v. At verbosity 1 pytest truncates the reprs in an
@@ -770,13 +859,19 @@ def run_pytest(
         )
         try:
             import pytest_cov  # noqa: F401
-            cmd.extend(f"--cov={target}" for target in targets)
-            cmd.append("--cov-report=term-missing")
-            if coverage_target:
-                cmd.append(f"--cov-fail-under={coverage_target}")
-        except ImportError:
-            print("    [WARN] pytest-cov not installed — skipping coverage measurement")
+        except ImportError as exc:
+            raise _step_failed(
+                "pytest",
+                f"pytest-cov is not installed, so coverage of "
+                f"{', '.join(targets)} cannot be measured and the coverage "
+                f"gate cannot run",
+            ) from exc
+        cmd.extend(f"--cov={target}" for target in targets)
+        cmd.append("--cov-report=term-missing")
+        if coverage_target:
+            cmd.append(f"--cov-fail-under={coverage_target}")
 
+    where = str(repo_root) if repo_root else "the current directory"
     try:
         result = run_command(
             cmd,
@@ -798,20 +893,16 @@ def run_pytest(
             "parsed": parsed,
         }
 
-    except subprocess.TimeoutExpired:
-        return {
-            "returncode": -1,
-            "stdout": "",
-            "stderr": "Pytest execution timed out",
-            "parsed": {"passed": 0, "failed": 0, "errors": 1, "coverage": 0},
-        }
-    except FileNotFoundError:
-        return {
-            "returncode": -1,
-            "stdout": "",
-            "stderr": "pytest not found. Is it installed?",
-            "parsed": {"passed": 0, "failed": 0, "errors": 1, "coverage": 0},
-        }
+    except subprocess.TimeoutExpired as exc:
+        raise _step_failed(
+            "pytest",
+            f"`{' '.join(cmd)}` timed out after {PYTEST_TIMEOUT_SECONDS}s in {where}",
+        ) from exc
+    except FileNotFoundError as exc:
+        raise _step_failed(
+            "pytest",
+            f"`{' '.join(cmd)}` could not start in {where}: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 def restore_best_on_failure(state: TestingWorkflowState) -> str:
@@ -828,10 +919,14 @@ def restore_best_on_failure(state: TestingWorkflowState) -> str:
     picks up and what the operator inspects; leaving it at the worst point
     the run reached is the opposite of what the snapshot exists for.
 
-    Returns a description of what was restored, or '' when there was nothing
-    to restore. Best-effort by design: restoration trouble is reported and
-    must never mask the original failure, which is the thing the operator
-    actually needs to read.
+    Returns a description of what was restored and of every file that could
+    not be, or '' when there was nothing to restore. It is called only on a
+    halt, which carries the description into its error_message and so to the
+    operator through HALT's alert. A file that cannot be restored is said at
+    ERROR on stderr and named in the description (#3585, ledger 0908 line
+    841): it used to be a "(non-fatal)" stdout line, and a restore that failed
+    for every file returned '' as if there had been nothing to restore. It
+    still never raises, so it cannot mask the original failure.
     """
     import shutil
 
@@ -843,16 +938,27 @@ def restore_best_on_failure(state: TestingWorkflowState) -> str:
         return ""
 
     restored = 0
+    unrestored: list[str] = []
     for src_str, snap_str in files.items():
         try:
             if Path(snap_str).is_file():
                 shutil.copy2(snap_str, src_str)
                 restored += 1
         except OSError as exc:
-            print(f"    [N5] could not restore {src_str} (non-fatal): {exc}")
+            print(
+                f"    ERROR [N5] could not restore {src_str} from {snap_str}: "
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr, flush=True,
+            )
+            unrestored.append(f"{src_str} ({type(exc).__name__}: {exc})")
 
+    failed = (
+        f"{len(unrestored)} file(s) could not be restored and still hold the "
+        f"failed attempt: {'; '.join(unrestored)}"
+        if unrestored else ""
+    )
     if not restored:
-        return ""
+        return failed
 
     description = (
         f"{best.get('passed', '?')} passing at "
@@ -863,7 +969,7 @@ def restore_best_on_failure(state: TestingWorkflowState) -> str:
         f"{restored} snapshotted file(s) — the worktree holds that, not the "
         f"failed attempt"
     )
-    return description
+    return f"{description}; {failed}" if failed else description
 
 
 #: Repair passes a full-suite regression found after green may have past the
@@ -1008,16 +1114,28 @@ def _red_marker_path(state: TestingWorkflowState) -> Path | None:
 def write_red_marker(
     state: TestingWorkflowState, *, failing: int, exit_code: int
 ) -> None:
-    """Record that THIS stage entry verified red (#2542). Never raises.
+    """Record that THIS stage entry verified red (#2542).
 
     Written on every valid red outcome — the import-error red and the
     all-tests-failed red — and overwritten by a fresh first attempt, so a
     stale marker can never suppress a genuine entry's red demand (it is only
     ever CONSULTED on a later attempt of the same stage entry).
+
+    No ``audit_dir`` in the state writes nothing: N0 always names one, so
+    only a direct call omits it, and it asked for no trail. A named audit
+    directory that is not there, or a write that fails, raises PhaseStepError
+    (#3585, ledger 0908 lines 1009 and 1022): it used to return silently or
+    warn, and a later attempt then lost the marker without anyone being told.
     """
     path = _red_marker_path(state)
-    if path is None or not path.parent.is_dir():
+    if path is None:
         return
+    if not path.parent.is_dir():
+        raise _step_failed(
+            "N3",
+            f"the red marker cannot be written: the audit directory "
+            f"{path.parent} is not there",
+        )
     try:
         path.write_text(
             json.dumps({
@@ -1029,25 +1147,28 @@ def write_red_marker(
             encoding="utf-8",
         )
     except OSError as exc:
-        # fail-open: the marker is loop bookkeeping, not the red verdict —
-        # a marker that cannot persist costs a later attempt its skip (it
-        # falls back to the file-evidence check below), and the failure is
-        # printed here rather than silently swallowed.
-        print(f"    [N3] WARNING: could not persist the red marker ({exc})")
+        raise _step_failed(
+            "N3",
+            f"the red marker {path} cannot be written: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 def read_red_marker(state: TestingWorkflowState) -> dict | None:
+    """The stage entry's red marker (#2542), or None when none was written.
+
+    A marker that is there and cannot be read or parsed raises PhaseStepError
+    (#3585, ledger 0908 line 1036): it used to read as no marker.
+    """
     path = _red_marker_path(state)
     if path is None or not path.is_file():
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        # fail-open: an unreadable marker is treated as no marker — the
-        # later attempt then falls back to the prior-attempt file evidence,
-        # and a genuinely fresh entry still gets its red demand. Losing the
-        # skip is the cheap direction; inventing one is not possible here.
-        return None
+    except (OSError, ValueError) as exc:
+        raise _step_failed(
+            "N3",
+            f"the red marker {path} cannot be read: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 def _implementation_already_exists(
@@ -1241,17 +1362,22 @@ def _describe_hollow_suite(state: TestingWorkflowState) -> str:
 
     Reads the scaffold's source rather than its behaviour, which is what
     makes the distinction available at all while the implementation does not
-    yet exist. Anything it cannot parse or find returns '' -- an unreadable
-    suite is not evidence of a hollow one, and this must never invent a
-    failure.
+    yet exist. A suite with no stub-only shape returns '' -- this must never
+    invent a failure. A test file it cannot read raises PhaseStepError
+    (#3585, ledger 0908 line 1241): it used to be skipped, so "could not
+    check" read as "not hollow".
     """
     source = state.get("generated_tests", "") or ""
     if not source:
         for path in state.get("test_files", []) or []:
             try:
                 source += Path(path).read_text(encoding="utf-8") + "\n"
-            except OSError:
-                continue
+            except OSError as exc:
+                raise _step_failed(
+                    "N3",
+                    f"test file {path} cannot be read for the hollow-suite "
+                    f"check: {type(exc).__name__}: {exc}",
+                ) from exc
     if not source.strip():
         return ""
 
@@ -1312,15 +1438,32 @@ def _framework_legs(state: TestingWorkflowState) -> list[_Leg]:
     each test file belongs to exactly one, or the phase halts: a file no
     framework owns would never run, and a pass would hide it. The rule is
     `framework_ownership.owner_of`, which N2 and N4 read too (#4243, #4245).
+
+    Two halts the phase used to step past (#3585, ledger 0908 lines 1697,
+    1729 and 3355): a run with no framework at all, which ran nothing and
+    reported success, and a single framework_config naming a framework
+    nobody recognises, which ran as pytest. A config that names none is
+    still pytest, the single-framework default.
     """
     try:
         described = run_frameworks(state)
     except TestFileOwnershipError as e:
         raise FrameworkLegError(str(e)) from e
+    if not described:
+        raise FrameworkLegError(
+            "the run names no framework to run its tests: framework_configs "
+            "holds no configuration, so no phase would run and none would be graded"
+        )
 
     test_files = [str(f) for f in (state.get("test_files") or [])]
     if len(described) == 1:
         run = described[0]
+        named = (run.config or {}).get("framework")
+        if named and resolve_framework(run.config) is None:
+            raise FrameworkLegError(
+                f"framework_config names {named!r}, which is not a test "
+                f"framework; running it as pytest would grade the wrong suite"
+            )
         return [_Leg(run.config, run.framework, run.directory, tuple(test_files))]
 
     repo_root_str = state.get("repo_root", "")
@@ -1586,14 +1729,8 @@ def _verify_red_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed")
     print(f"    Exit code: {exit_code} ({describe_exit_code(exit_code)})")
 
-    # Save output to audit trail
-    audit_dir_str = state.get("audit_dir", "")
-    audit_dir = Path(audit_dir_str) if audit_dir_str else None
-    if audit_dir and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "red-phase.txt", output)
-    else:
-        file_num = state.get("file_counter", 0)
+    # Save output to audit trail (#3585: a named audit dir that is gone halts)
+    file_num = _save_phase_output(state, "N3", "red-phase.txt", output)
 
     # Issue #292: Check exit code FIRST for routing decisions
     # Exit codes 4 (syntax/collection error) and 5 (no tests collected) mean
@@ -1966,13 +2103,15 @@ COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
 
 
 
+@_halts_on_a_failed_step("N3", "red_phase_output")
 def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """N3: Verify all tests fail (TDD red phase).
 
     #4236: every framework of the run (`framework_configs`) verifies its own
     test files, in its own directory. A framework no test file of this run
     belongs to has nothing to verify here and says so; one that cannot run,
-    or a test file no framework owns, halts the phase.
+    or a test file no framework owns, halts the phase. #3585: so does any
+    step under it that raises PhaseStepError.
     """
     gate_log("[N3] Verifying red phase (all tests should fail)...")
 
@@ -2074,8 +2213,10 @@ def _hill_climb(
     guards compare against the best rather than the latest roll of the dice.
     A worse iteration then costs one revision instead of the run.
 
-    Mutates `updates` in place. Best-effort: snapshot or restore trouble is
-    reported and never fails the node.
+    Mutates `updates` in place. A snapshot or a restore that fails raises
+    PhaseStepError (#3585, ledger 0908 lines 1798 and 1821): it used to be a
+    "(non-fatal)" line, after which the loop had no best to return to, or
+    revised from a worktree that was half best and half the worse attempt.
     """
     import shutil
 
@@ -2113,8 +2254,11 @@ def _hill_climb(
                     shutil.copy2(src, dst)
                     manifest[str(src)] = str(dst)
         except OSError as exc:
-            print(f"    [N5] best-iteration snapshot failed (non-fatal): {exc}")
-            return
+            raise _step_failed(
+                "N5",
+                f"the best-iteration snapshot into {snap_dir} failed: "
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
         updates["best_iteration"] = {
             "passed": passed_count,
             "coverage": coverage_achieved,
@@ -2130,13 +2274,21 @@ def _hill_climb(
 
     if score < best_score:
         restored = 0
+        unrestored: list[str] = []
         for src_str, snap_str in (best.get("files") or {}).items():
             try:
                 if Path(snap_str).is_file():
                     shutil.copy2(snap_str, src_str)
                     restored += 1
             except OSError as exc:
-                print(f"    [N5] could not restore {src_str} (non-fatal): {exc}")
+                unrestored.append(f"{src_str} ({type(exc).__name__}: {exc})")
+        if unrestored:
+            raise _step_failed(
+                "N5",
+                f"restoring the best iteration failed for {len(unrestored)} "
+                f"file(s), so the next revision would start from a mixed "
+                f"state: {'; '.join(unrestored)}",
+            )
         updates["previous_passed"] = best.get("passed", passed_count)
         updates["previous_coverage"] = best.get("coverage", coverage_achieved)
         updates["previous_green_failures"] = best.get("green_failures", [])
@@ -2149,8 +2301,14 @@ def _hill_climb(
         )
 
 
-def _snapshot_untracked(repo_root) -> set[str] | None:
-    """Untracked paths right now, or None when git cannot say (#2048)."""
+def _snapshot_untracked(repo_root) -> set[str]:
+    """Untracked paths right now (#2048).
+
+    A git that cannot run or that fails raises PhaseStepError with its exit
+    code and stderr (#3585, ledger 0908 lines 1846 and 1849). It used to
+    return None, so the droppings were never removed and the next iteration
+    was judged against the last one's leftovers.
+    """
     # -uall: without it git collapses an untracked directory to "dir/" and the
     # files inside never appear -- exactly where generated baselines land
     # (tests/visual/baselines/ is born whole during the run).
@@ -2160,11 +2318,18 @@ def _snapshot_untracked(repo_root) -> set[str] | None:
             cwd=str(repo_root), capture_output=True, text=True,
             encoding="utf-8", errors="replace",
         )
-    except OSError:
-        # Nonexistent cwd, git missing -- could not measure, so measure nothing.
-        return None
+    except OSError as exc:
+        raise _step_failed(
+            "N5",
+            f"`git status` cannot run in {repo_root} to list the test run's "
+            f"droppings: {type(exc).__name__}: {exc}",
+        ) from exc
     if result.returncode != 0:
-        return None
+        raise _step_failed(
+            "N5",
+            f"`git status` failed in {repo_root} (exit {result.returncode}) "
+            f"listing the test run's droppings: {(result.stderr or '').strip()[:300]}",
+        )
     return {
         line[3:].strip().strip('"')
         for line in result.stdout.splitlines()
@@ -2172,7 +2337,7 @@ def _snapshot_untracked(repo_root) -> set[str] | None:
     }
 
 
-def _remove_test_run_droppings(repo_root, before: set[str] | None) -> None:
+def _remove_test_run_droppings(repo_root, before: set[str]) -> None:
     """Delete untracked files a pytest run just created (#2048).
 
     Scope is exact: only paths untracked NOW that were not untracked BEFORE the
@@ -2183,16 +2348,16 @@ def _remove_test_run_droppings(repo_root, before: set[str] | None) -> None:
     poisoning case: a generated visual test saved its baseline in iteration 1
     and every later iteration failed against it, unwinnable by revision.
 
-    None for `before` means the snapshot failed; delete nothing rather than
-    guess ("could not measure" is not "nothing was there" -- #2028's rule).
+    A snapshot git cannot take raises in `_snapshot_untracked` ("could not
+    measure" is not "nothing was there" -- #2028's rule, now said and halted
+    on rather than skipped). A dropping that cannot be removed is named, the
+    rest are still removed, and then PhaseStepError is raised (#3585, ledger
+    0908 line 1885): it used to be printed while the poison stayed.
     """
-    if before is None:
-        return
     after = _snapshot_untracked(repo_root)
-    if after is None:
-        return
     from pathlib import Path as _Path
 
+    kept: list[str] = []
     for rel in sorted(after - before):
         target = _Path(repo_root) / rel
         try:
@@ -2200,7 +2365,13 @@ def _remove_test_run_droppings(repo_root, before: set[str] | None) -> None:
                 target.unlink()
                 print(f"    [N5] removed test-run dropping: {rel}")
         except OSError as exc:
-            print(f"    [N5] could not remove test-run dropping {rel}: {exc}")
+            kept.append(f"{rel} ({type(exc).__name__}: {exc})")
+    if kept:
+        raise _step_failed(
+            "N5",
+            f"{len(kept)} test-run dropping(s) could not be removed and would "
+            f"be judged by the next iteration: {'; '.join(kept)}",
+        )
 
 
 #: #2443: image formats a visual test plausibly renders. Extension match is
@@ -2226,8 +2397,12 @@ def _preserve_visual_samples(
     tracked baseline is preserved the same as a first-generation one.
 
     Returns (destination dir, copied relative paths); ("", []) when there
-    is nothing to preserve or nowhere to put it. Never raises: a sample
-    must not cost a run.
+    is nothing to preserve or nowhere to put it. A git that cannot list the
+    images, or an image that cannot be copied, raises PhaseStepError (#3585,
+    ledger 0908 lines 1927, 1932 and 1956): a sample is the only check a
+    self-referential baseline gets, and the run used to go on without it.
+    The raise comes before the droppings removal, so the images stay in the
+    worktree.
     """
     if not audit_dir_str:
         return "", []
@@ -2241,14 +2416,17 @@ def _preserve_visual_samples(
             encoding="utf-8", errors="replace",
         )
     except OSError as exc:
-        # fail-open: a sample is evidence, not a gate -- losing it must not
-        # cost an otherwise-green run, and the miss is stated on the console.
-        print(f"    [N5] could not probe for visual samples: {exc} -- none preserved")
-        return "", []
+        raise _step_failed(
+            "N5",
+            f"`git status` cannot run in {repo_root} to find the visual "
+            f"samples: {type(exc).__name__}: {exc}",
+        ) from exc
     if result.returncode != 0:
-        # fail-open: same ruling -- git could not say, so nothing is
-        # preserved, and the empty return reports exactly that.
-        return "", []
+        raise _step_failed(
+            "N5",
+            f"`git status` failed in {repo_root} (exit {result.returncode}) "
+            f"finding the visual samples: {(result.stderr or '').strip()[:300]}",
+        )
     images = sorted({
         line[3:].strip().strip('"')
         for line in result.stdout.splitlines()
@@ -2262,18 +2440,24 @@ def _preserve_visual_samples(
     copied: list[str] = []
     for rel in images:
         src = Path(repo_root) / rel
+        if not src.is_file():
+            continue
+        dest = dest_root / rel
         try:
-            if not src.is_file():
-                continue
-            dest = dest_root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
-            copied.append(rel)
         except OSError as exc:
-            # fail-open: preserve every sample that can be preserved -- one
-            # uncopyable file must not forfeit the rest, and the failure is
-            # named on the console per file.
-            print(f"    [N5] could not preserve visual sample {rel}: {exc}")
+            # Raised at the first failure, not after the loop as ledger 0908
+            # line 1956 prescribed: the droppings removal that would delete
+            # these images runs only after this returns, so every image the
+            # run drew is still in the worktree for the operator.
+            raise _step_failed(
+                "N5",
+                f"visual sample {rel} could not be preserved into {dest_root} "
+                f"({len(copied)} of {len(images)} preserved before it; every "
+                f"image is still in the worktree): {type(exc).__name__}: {exc}",
+            ) from exc
+        copied.append(rel)
     if not copied:
         return "", []
     return str(dest_root), copied
@@ -2555,18 +2739,24 @@ def _align_plan_files_with_the_spec(
     raise `OSError`, failed the spec's copy, and was restored; twice. The
     copy is the spec's test by construction; the verifier makes it so before
     it measures, and reports what it aligned. Returns the relative paths it
-    rewrote.
+    rewrote. No spec suite on disk aligns nothing, which is an answer.
+
+    A spec suite or a plan file that cannot be read, and an aligned file that
+    cannot be written, raise PhaseStepError (#3585, ledger 0908 lines 2249,
+    2261 and 2270): each used to measure the drifted copy as it was, which is
+    the state #2912 exists to prevent.
     """
     spec_suite = repo_root / "tests" / f"test_issue_{state.get('issue_number', 0)}.py"
     if not spec_suite.is_file():
         return []
     try:
         spec_source = spec_suite.read_text(encoding="utf-8")
-    except OSError:
-        # fail-open: a spec suite that cannot be read aligns nothing; the
-        # run measures the plan files as they are, and the suite's own
-        # collection reports a suite that cannot be read.
-        return []
+    except OSError as exc:
+        raise _step_failed(
+            "N5",
+            f"the spec suite {spec_suite} cannot be read to align the plan's "
+            f"test files with it: {type(exc).__name__}: {exc}",
+        ) from exc
     rewritten: list[str] = []
     for file_str in test_files or []:
         path = Path(file_str)
@@ -2574,20 +2764,23 @@ def _align_plan_files_with_the_spec(
             continue
         try:
             plan_source = path.read_text(encoding="utf-8")
-        except OSError:
-            # fail-open: an unreadable plan file is measured as it is; the
-            # collection reports it if it cannot be read there either.
-            continue
+        except OSError as exc:
+            raise _step_failed(
+                "N5",
+                f"the plan test file {path} cannot be read to align it with "
+                f"the spec suite: {type(exc).__name__}: {exc}",
+            ) from exc
         aligned = align_spec_twins(plan_source, spec_source)
         if not aligned.aligned:
             continue
         try:
             path.write_text(aligned.source, encoding="utf-8")
         except OSError as exc:
-            # fail-open: a file that cannot be written is measured as it
-            # was; said aloud so the drift it leaves is explained.
-            print(f"    [N5] could not align {path.name}: {exc}")
-            continue
+            raise _step_failed(
+                "N5",
+                f"{path} cannot be written with the spec suite's copies of "
+                f"{', '.join(aligned.aligned)}: {type(exc).__name__}: {exc}",
+            ) from exc
         rel = str(path.relative_to(repo_root)).replace("\\", "/") if path.is_relative_to(repo_root) else str(path)
         print(
             f"    [N5] aligned {len(aligned.aligned)} test(s) in {rel} with the spec "
@@ -2697,19 +2890,35 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
                 for fi in state.get("files_to_modify", [])
                 if fi.get("path") and "test" not in fi["path"].lower()
             ]
-        if all_candidate_paths:
-            rel = Path(all_candidate_paths[0])
-            if repo_root:
-                try:
-                    rel = rel.relative_to(repo_root)
-                except ValueError:
-                    pass
-            # Use the top-level directory as coverage scope
-            coverage_module = str(rel.parts[0]).replace("\\", "/") if rel.parts else "assemblyzero"
-            print(f"    [N5] Fallback: inferred coverage scope from file paths: {coverage_module}")
-        else:
-            coverage_module = "assemblyzero"
-            print(f"    [N5] Fallback: no file paths available, defaulting to: {coverage_module}")
+        # #3585 (ledger 0908 lines 2387 and 2393): a candidate outside the
+        # repository built a scope from an absolute path, and nothing to go on
+        # measured a hard-coded module that is not this repository's. Both
+        # halt; a relative candidate is already relative to the repository.
+        if not all_candidate_paths:
+            raise _step_failed(
+                "N5",
+                "no coverage target can be derived: no implementation source "
+                "file, no planned source file, and no test file named after a "
+                "source file in the repository; a default module would measure "
+                "the wrong code",
+            )
+        rel = Path(all_candidate_paths[0])
+        if repo_root and rel.is_absolute():
+            try:
+                rel = rel.relative_to(repo_root)
+            except ValueError as exc:
+                raise _step_failed(
+                    "N5",
+                    f"the coverage scope cannot be taken from {rel}: it is "
+                    f"outside the repository {repo_root}",
+                ) from exc
+        if not rel.parts:
+            raise _step_failed(
+                "N5", f"no coverage target can be derived from the path {rel!s}",
+            )
+        # Use the top-level directory as coverage scope
+        coverage_module = str(rel.parts[0]).replace("\\", "/")
+        print(f"    [N5] Fallback: inferred coverage scope from file paths: {coverage_module}")
 
     coverage_targets = (
         [coverage_module] if isinstance(coverage_module, str)
@@ -2738,19 +2947,15 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # preserved attempt over the newest.
     _n5_passed = int(parsed.get("passed", 0) or 0)
     _n5_failed = int(parsed.get("failed", 0) or 0)
-    record_measurement(
+    noted = _note_measurement(
         repo_root, _n5_passed, _n5_passed + _n5_failed,
         float(parsed.get("coverage", 0) or 0.0),
     )
+    if noted is not None:
+        return noted
 
-    # Save output to audit trail
-    audit_dir_str = state.get("audit_dir", "")
-    audit_dir = Path(audit_dir_str) if audit_dir_str else None
-    if audit_dir and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "green-phase.txt", output)
-    else:
-        file_num = state.get("file_counter", 0)
+    # Save output to audit trail (#3585: a named audit dir that is gone halts)
+    file_num = _save_phase_output(state, "N5", "green-phase.txt", output)
 
     # Issue #292: Check exit code FIRST for routing decisions
     # Exit codes 4/5 mean scaffold is broken — not an implementation problem.
@@ -2830,9 +3035,7 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
         # resume picks up was the worst point the run reached.
         restored = restore_best_on_failure(state)
         if restored:
-            detail += (
-                f" Worktree restored to the best measured state: {restored}."
-            )
+            detail += f" Restoring the best measured state: {restored}."
 
         return {
             "green_phase_output": output,
@@ -3347,10 +3550,7 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     skipped_count = parsed.get("skipped", 0)
     skip_audit = _validate_skip_audit(output)
     if skip_audit["skip_count"] > 0:
-        if skip_audit["critical_count"] > 0:
-            print(f"    [SKIP-GATE] WARNING: {skip_audit['critical_count']} critical skipped test(s): "
-                  f"{', '.join(skip_audit['critical_tests'])}")
-        else:
+        if skip_audit["critical_count"] == 0:
             print(f"    [SKIP-GATE] {skip_audit['skip_count']} skipped test(s) (none critical)")
 
         log_workflow_execution(
@@ -3365,6 +3565,16 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
                 "gate_passed": skip_audit["gate_passed"],
             },
         )
+        if not skip_audit["gate_passed"]:
+            # #3585 (ledger 0908 line 3192): a skipped security, auth, payment
+            # or critical test is a check that did not run. It used to be a
+            # WARNING and the phase passed anyway.
+            raise _step_failed(
+                "N5",
+                f"the skip-audit gate fails: {skip_audit['critical_count']} "
+                f"critical test(s) were skipped, so what they check was never "
+                f"checked: {', '.join(skip_audit['critical_tests'])}",
+            )
     # --------------------------------------------------------------------------
 
     log_workflow_execution(
@@ -3417,6 +3627,33 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     }
 
 
+
+
+def _note_measurement(
+    repo_root: Path | str | None, passed: int, total: int, coverage: float,
+) -> dict[str, Any] | None:
+    """Note N5's result on the checkpoint it measured (#2867), or N5's halt.
+
+    None when the note was written. When git cannot write it,
+    ``record_measurement`` has already said so at ERROR and raised
+    ``CheckpointError`` (#3810); this returns the halt, routed to HALT by
+    ``route_after_green``, which alerts. The note is what a later resume reads
+    to start from the best attempt, so a run that cannot leave it stops
+    rather than leaving a resume to pick the newest attempt unawares.
+    """
+    try:
+        record_measurement(repo_root, passed, total, coverage)
+    except CheckpointError as error:
+        return {
+            "next_node": "end",
+            "error_message": (
+                f"[N5] the measurement ({passed} passing of {total}, "
+                f"{coverage:.1f}% coverage) could not be noted on the "
+                f"checkpoint it measured, so a later resume could not choose "
+                f"the best attempt: {error}"
+            ),
+        }
+    return None
 
 
 def _halt_coverage_unreadable(label: str, error: Exception) -> dict[str, Any]:
@@ -3525,6 +3762,18 @@ def _full_suite_gate(
             label, f"its whole suite collected 0 tests (exit {full_exit}): {cause}"
         )
 
+    # #3585 (ledger 0908 line 3098): an exit that says the run failed while
+    # the parse found no failure is a run the gate cannot read -- pytest's
+    # 2 (interrupted), 3 (internal error) or 4 (usage), or a runner's -1
+    # (timeout, missing command). It used to read as "no regressions".
+    if full_exit != 0 and full_failed == 0 and full_errors == 0:
+        cause = _summarize_collection_failure(full_output) or "no error line captured"
+        return _halt_full_suite_gate(
+            label,
+            f"its whole suite ended with exit {full_exit} but reported no "
+            f"failure ({full_passed} passed), so it cannot be read as clean: {cause}",
+        )
+
     if full_failed > 0 or full_errors > 0:
         regression_summary = (
             _build_failure_summary(full_output) if is_pytest
@@ -3608,6 +3857,7 @@ def _full_suite_gate(
     return None
 
 
+@_halts_on_a_failed_step("N5", "green_phase_output")
 def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """N5: Verify all tests pass (TDD green phase).
 
@@ -3615,7 +3865,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     test files in its own directory, and the run goes on only when every one
     passes. A framework no test file of this run belongs to still runs its
     whole suite at the full-suite gate (#3087). One that cannot run, or a
-    test file no framework owns, halts the phase.
+    test file no framework owns, halts the phase. #3585: so does any step
+    under it that raises PhaseStepError.
     """
     gate_log("[N5] Verifying green phase (all tests should pass)...")
 
@@ -3674,9 +3925,6 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             aggregated_errors += trr.get("errors", 0)
             aggregated_total += trr.get("total", 0)
 
-        cov = res.get("coverage_achieved", 100.0)
-        min_coverage = min(min_coverage, cov)
-
         file_counter = max(file_counter, res.get("file_counter", 0))
         state["file_counter"] = file_counter
 
@@ -3707,6 +3955,17 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 # what the state already held, stands (#4236).
                 merged["full_suite_validated"] = res.get("full_suite_validated", already_validated)
             return merged
+
+        # #3585 (ledger 0908 line 3310): a framework that passed must say
+        # what coverage it reached. A result without the figure used to count
+        # as 100%, so the run's minimum could pass on a number nobody measured.
+        if res.get("coverage_achieved") is None:
+            raise _step_failed(
+                "N5",
+                f"{leg.label}'s green result carries no coverage figure, so "
+                f"the run's coverage cannot be judged",
+            )
+        min_coverage = min(min_coverage, res["coverage_achieved"])
 
         if not final_next_node:
             final_next_node = next_node
@@ -3801,14 +4060,8 @@ def _verify_red_non_pytest(
     print(f"    Results: {passed} passed, {failed} failed, {errors} errors")
     print(f"    Exit code: {exit_code}")
 
-    # Save output to audit trail
-    audit_dir_str = state.get("audit_dir", "")
-    audit_dir = Path(audit_dir_str) if audit_dir_str else None
-    if audit_dir and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "red-phase.txt", output)
-    else:
-        file_num = state.get("file_counter", 0)
+    # Save output to audit trail (#3585: the pytest twin's rule, one helper)
+    file_num = _save_phase_output(state, "N3", "red-phase.txt", output)
 
     # Red phase: ALL tests must fail
     if passed > 0:
@@ -3899,6 +4152,16 @@ def _verify_red_non_pytest(
         }
 
     total_red = failed + errors
+    if total_red == 0 and exit_code < 0:
+        # #3585 (ledger 0908 line 3416): the runner reports a timeout, a
+        # missing command or an OS error as exit -1 with nothing run. That is
+        # a crash, not a scaffold that collected nothing, and re-scaffolding
+        # cannot repair it.
+        raise _step_failed(
+            "N3",
+            f"{framework.value} crashed before running a test (exit "
+            f"{exit_code}): {output.strip()[-300:] or '(no output)'}",
+        )
     if total_red == 0:
         # #2767: same reroute as the pytest path above, and bounded by the
         # same cap. Leaving the non-pytest path halting would make the fix a
@@ -3974,8 +4237,15 @@ def _verify_green_non_pytest(
     if isinstance(coverage_type, str):
         try:
             coverage_type = CoverageType(coverage_type)
-        except ValueError:
-            coverage_type = CoverageType.LINE
+        except ValueError as exc:
+            # #3585 (ledger 0908 line 3599): it used to measure lines instead.
+            raise _step_failed(
+                "N5",
+                f"{_framework_label(framework, framework_config)}'s coverage_type "
+                f"{coverage_type!r} is not one of "
+                f"{', '.join(t.value for t in CoverageType)}, so the coverage "
+                f"gate cannot tell what to measure",
+            ) from exc
 
     # #4246: Jest and Vitest measure line coverage on this run; it used to be
     # left off, so every run read 0%. A run whose tests all pass and whose
@@ -4014,20 +4284,26 @@ def _verify_green_non_pytest(
     print(f"    [N5] Results: {passed} passed, {failed} failed | "
           f"Coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
 
+    # #3585 (ledger 0908 line 3592): the runner reports a timeout, a missing
+    # command or an OS error as exit -1. That is a crash, never a collection
+    # the implementer can repair, and nothing it measured is worth noting.
+    if exit_code < 0:
+        raise _step_failed(
+            "N5",
+            f"{framework.value} crashed (exit {exit_code}): "
+            f"{output.strip()[-300:] or '(no output)'}",
+        )
+
     # #2867: same as the pytest path -- the measurement rides the checkpoint.
-    record_measurement(
+    noted = _note_measurement(
         repo_root, int(passed or 0), int(passed or 0) + int(failed or 0),
         float(coverage_achieved or 0.0),
     )
+    if noted is not None:
+        return noted
 
-    # Save output to audit trail
-    audit_dir_str = state.get("audit_dir", "")
-    audit_dir = Path(audit_dir_str) if audit_dir_str else None
-    if audit_dir and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "green-phase.txt", output)
-    else:
-        file_num = state.get("file_counter", 0)
+    # Save output to audit trail (#3585: the pytest twin's rule, one helper)
+    file_num = _save_phase_output(state, "N5", "green-phase.txt", output)
 
     # Stagnation detection
     previous_coverage = state.get("previous_coverage", -1.0)
@@ -4040,6 +4316,17 @@ def _verify_green_non_pytest(
             state, runner_name=framework.value, output=output, repo_root=repo_root,
             file_num=file_num, iteration_count=iteration_count,
             exit_code=exit_code, carried={"test_run_result": dict(result)},
+        )
+
+    # #3585 (ledger 0908 line 3592): an exit that says the run failed while
+    # the parse found no failure is a run nothing can read as green. It
+    # used to pass on the parse alone.
+    if exit_code != 0 and failed == 0 and errors == 0:
+        raise _step_failed(
+            "N5",
+            f"{framework.value} ended with exit {exit_code} but reported no "
+            f"failure ({passed} passed), so the run cannot be read as green: "
+            f"{output.strip()[-300:] or '(no output)'}",
         )
 
     if failed > 0 or errors > 0:

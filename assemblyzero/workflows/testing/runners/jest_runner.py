@@ -19,8 +19,11 @@ from assemblyzero.workflows.testing.framework_detector import (
 from assemblyzero.workflows.testing.runners.base_runner import (
     BaseTestRunner,
     CoverageReportError,
+    RunnerError,
     combined_output,
     first_json_object,
+    loud,
+    output_head,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,14 +47,19 @@ class JestRunner(BaseTestRunner):
     def __init__(self, config: FrameworkConfig, project_root: str) -> None:
         """Initialize and verify node/npx availability.
 
-        Raises EnvironmentError if 'npx' is not found on PATH.
+        Raises EnvironmentError if 'npx' is not found on PATH, after an ERROR
+        line naming the project (ADR 0236). Every caller turns it into a halt,
+        which alerts the operator.
         """
         super().__init__(config, project_root)
         if not shutil.which("npx"):
-            raise EnvironmentError(
-                "npx not found on PATH. Jest/Vitest tests require Node.js >= 18. "
+            message = (
+                f"npx not found on PATH, so {config['framework'].value} cannot run "
+                f"in {self.project_dir}. Jest/Vitest tests require Node.js >= 18. "
                 "Install Node.js from https://nodejs.org/ and ensure npx is available."
             )
+            loud(message)
+            raise EnvironmentError(message)
         self._is_vitest = config["framework"] == TestFramework.VITEST
 
     def require_dependencies(self) -> None:
@@ -111,6 +119,40 @@ class JestRunner(BaseTestRunner):
             )
         return float(pct)
 
+    def _has_typecheck_script(self) -> bool:
+        """Whether the project's package.json declares a `typecheck` script.
+
+        No package.json is a project that declares none: False, quietly. A
+        package.json that cannot be read, does not parse, or is not an object
+        with an object of scripts raises RunnerError naming it, after an
+        ERROR line (ADR 0236): it used to be passed over as "no script", so
+        a project whose typecheck it named was tested without one.
+        """
+        path = os.path.join(self.project_dir, "package.json")
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                pkg = json.load(f)
+        except (OSError, ValueError) as e:
+            message = (
+                f"the package.json at {path} cannot be read, so whether the "
+                f"project declares a typecheck script is unknown and its tests "
+                f"are not run: {type(e).__name__}: {e}"
+            )
+            loud(message)
+            raise RunnerError(message) from e
+        scripts = pkg.get("scripts", {}) if isinstance(pkg, dict) else None
+        if not isinstance(scripts, dict):
+            message = (
+                f"the package.json at {path} is not an object with an object "
+                f"of scripts, so whether the project declares a typecheck "
+                f"script is unknown and its tests are not run"
+            )
+            loud(message)
+            raise RunnerError(message)
+        return "typecheck" in scripts
+
     def run_tests(
         self,
         test_paths: list[str] | None = None,
@@ -144,30 +186,18 @@ class JestRunner(BaseTestRunner):
                     ) from e
         if self._is_vitest:
             print("Running vitest runner for project:", self.project_dir)
-            package_json_path = os.path.join(self.project_dir, "package.json")
-            has_typecheck_script = False
-            if os.path.exists(package_json_path):
-                try:
-                    with open(package_json_path, "r") as f:
-                        pkg = json.load(f)
-                        if "scripts" in pkg and "typecheck" in pkg["scripts"]:
-                            has_typecheck_script = True
-                except (OSError, json.JSONDecodeError):
-                    # fail-open: missing or malformed package.json just means no typecheck script
-                    pass
-            
             tsconfig_path = os.path.join(self.project_dir, "tsconfig.json")
-            
+
             typecheck_command = None
-            if has_typecheck_script:
+            if self._has_typecheck_script():
                 typecheck_command = ["npm", "run", "typecheck"]
             elif os.path.exists(tsconfig_path):
                 typecheck_command = ["npx", "tsc", "--noEmit"]
-                
+
             if typecheck_command:
                 out, err, code = self._run_subprocess(typecheck_command)
                 if code != 0:
-                    return self._fallback_result(combined_output(out, err), code)
+                    return self._typecheck_failed_result(combined_output(out, err), code)
 
             command = ["npx", "vitest", "run", "--reporter=json"]
         else:
@@ -218,26 +248,38 @@ class JestRunner(BaseTestRunner):
         `measure_coverage` run writes (`read_coverage_report`), one source,
         where it used to read 0% whenever the map was absent, which was
         every run, because none asked for coverage.
+
+        ADR 0236: a run with no report, or whose report does not parse,
+        raises RunnerError after an ERROR line, naming the project, the exit
+        code and the head of both streams. It used to come back as a
+        fallback whose counts read zero failures at exit 0, so a run nobody
+        could read was judged as one where nothing failed.
         """
-        passed = 0
-        failed = 0
-        skipped = 0
         errors = 0
         shown = combined_output(raw_output, stderr)
 
         try:
             report = first_json_object(raw_output, "numPassedTests")
-            if report is None:
-                logger.warning("No JSON report found in Jest/Vitest output")
-                return self._fallback_result(shown, exit_code)
+        except ValueError as e:
+            message = (
+                f"the {self.config['framework'].value} JSON report in "
+                f"{self.project_dir} (exit {exit_code}) does not parse, so the "
+                f"run's outcome is unknown: {e}. Output: {output_head(shown)}"
+            )
+            loud(message)
+            raise RunnerError(message) from e
+        if report is None:
+            message = (
+                f"no Jest/Vitest JSON report in the {self.config['framework'].value} "
+                f"run's stdout in {self.project_dir} (exit {exit_code}), so the "
+                f"run's outcome is unknown. Output: {output_head(shown)}"
+            )
+            loud(message)
+            raise RunnerError(message)
 
-            passed = report.get("numPassedTests", 0)
-            failed = report.get("numFailedTests", 0)
-            skipped = report.get("numPendingTests", 0)
-
-        except (ValueError, KeyError, TypeError, AttributeError) as e:
-            logger.warning("Failed to parse Jest/Vitest JSON output: %s", e)
-            return self._fallback_result(shown, exit_code)
+        passed = report.get("numPassedTests", 0)
+        failed = report.get("numFailedTests", 0)
+        skipped = report.get("numPendingTests", 0)
 
         total = passed + failed + skipped + errors
 
@@ -254,13 +296,18 @@ class JestRunner(BaseTestRunner):
             "framework": self.config["framework"],
         }
 
-    def _fallback_result(self, raw_output: str, exit_code: int) -> TestRunResult:
-        """Create a fallback result when JSON parsing fails."""
+    def _typecheck_failed_result(self, raw_output: str, exit_code: int) -> TestRunResult:
+        """The result of a Vitest run whose typecheck failed: one failure and
+        one error, always. The code does not compile, which is the run's
+        answer, not a missing one, so it is returned and not raised; the
+        phases read it as a failing run. It is the only result this runner
+        builds without a report (ADR 0236: the parse-failure fallback, which
+        read as not failing at exit 0, is gone)."""
         return {
             "passed": 0,
-            "failed": 1 if exit_code != 0 else 0,
+            "failed": 1,
             "skipped": 0,
-            "errors": 1 if exit_code != 0 else 0,
+            "errors": 1,
             "total": 1,
             "coverage_percent": None,  # #4246: nothing was measured
             "coverage_type": CoverageType.LINE,

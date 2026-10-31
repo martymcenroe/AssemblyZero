@@ -18,6 +18,7 @@ that did not build, and every failure is loud and stops what depends on it
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +46,11 @@ def hook_environment(environ: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def _halt(reason: str) -> dict[str, Any]:
+    """N4.5's halt: an ERROR line on stderr at the point of failure, and the
+    reason as `error_message`, which `route_after_mechanical_hooks` sends to
+    HALT, which alerts (ADR 0236)."""
     gate_log(f"  [HALT] {reason}")
+    print(f"ERROR [N4.5] {reason}", file=sys.stderr)
     return {"error_message": reason}
 
 
@@ -104,7 +109,25 @@ def mechanical_hooks(state: TestingWorkflowState) -> dict[str, Any]:
 
     gate_log("  post_implement_command completed successfully.")
     # Artifact Staging: Any files created or modified by the mechanical hook
-    # must be automatically staged (git add)
-    subprocess.run(["git", "add", "."], cwd=repo_root, check=False)
+    # must be automatically staged (git add). Ledger 0908, line 108: the
+    # return code was never read, so a staging that failed went on to the
+    # tests as if the hook's output were in the tree. It halts now.
+    try:
+        # check=False: the return code is read below, with git's stderr.
+        staged = subprocess.run(
+            ["git", "add", "."], cwd=repo_root, capture_output=True, text=True,
+            check=False,
+        )
+    except OSError as e:
+        return _halt(
+            f"N4.5: `git add .` in {repo_root} could not start, so the hook's "
+            f"output is not staged: {type(e).__name__}: {e}"
+        )
+    if staged.returncode != 0:
+        detail = staged.stderr.strip() or staged.stdout.strip()
+        return _halt(
+            f"N4.5: `git add .` in {repo_root} failed (exit code "
+            f"{staged.returncode}), so the hook's output is not staged:\n{detail}"
+        )
     gate_log("  Staged modified artifacts.")
     return {}

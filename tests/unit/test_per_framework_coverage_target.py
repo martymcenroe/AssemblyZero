@@ -36,6 +36,12 @@ SPEC = """# 7 - Engine replay
 
 **Status:** APPROVED
 
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `src/engine.py` | Add | The replay engine |
+
 ## 3. Requirements
 
 1. REQ-1: The engine replays a recorded session.

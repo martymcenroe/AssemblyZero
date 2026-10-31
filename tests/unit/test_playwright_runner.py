@@ -14,6 +14,7 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
 )
 from assemblyzero.workflows.testing.runner_registry import get_framework_config
+from assemblyzero.workflows.testing.runners.base_runner import RunnerError
 from assemblyzero.workflows.testing.runners.playwright_runner import PlaywrightRunner
 
 
@@ -102,10 +103,10 @@ class TestPlaywrightRunnerParseResults:
         assert result["total"] == 2
 
     def test_parse_invalid_json(self, playwright_runner):
-        """Fallback when JSON is invalid."""
-        result = playwright_runner.parse_results("not json at all", exit_code=1)
-        assert result["failed"] >= 1
-        assert result["errors"] >= 1
+        """No report is an unreadable run, raised (ADR 0236); it used to be a
+        fallback result whose counts no report backed."""
+        with pytest.raises(RunnerError, match="no Playwright JSON report"):
+            playwright_runner.parse_results("not json at all", exit_code=1)
 
     def test_parse_nested_suites(self, playwright_runner):
         """Parse nested suite structure."""

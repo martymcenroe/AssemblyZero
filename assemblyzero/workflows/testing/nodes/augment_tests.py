@@ -16,6 +16,16 @@ to reach.
 
 This node adds tests. It never touches implementation files, and it appends
 rather than rewriting, so tests already proven to pass cannot be lost.
+
+#3585 (ADR 0236): every failure of this node halts. It used to return to N5
+with an empty error_message whatever went wrong, and N5 measured the same
+shortfall and sent it back. A failure of the node's machinery (no test file,
+an unreadable file or report, no audit dir, no seat, a failed model call, a
+vetting run that ran nothing) halts through `_halt_augment_cannot_run`; a
+spent allowance (generation attempts, the one repair pass, no added test
+passing) through `_halt_augment_spent`. `route_after_augment` sends either
+to HALT, which alerts. The suite left on disk always passes: what was there,
+plus only the additions that ran and passed.
 """
 
 from __future__ import annotations
@@ -91,21 +101,38 @@ def parse_uncovered_lines(output: str) -> dict[str, list[str]]:
     return uncovered
 
 
+class CoverageRangeUnreadable(ValueError):
+    """A coverage report's Missing column holds a part that is no line or range."""
+
+
+class AugmentInvariantBroken(RuntimeError):
+    """An addition the node compiled before writing does not parse alone."""
+
+
+class VettingRanNothing(RuntimeError):
+    """The vetting run of the extended file executed no test at all."""
+
+
 def _line_numbers(ranges: list[str]) -> list[int]:
-    """`["56-58", "63"]` -> `[56, 57, 58, 63]`, malformed parts skipped."""
+    """`["56-58", "63"]` -> `[56, 57, 58, 63]`.
+
+    #3585 (ledger 0908, augment_tests.py:101, :106): a malformed part raises
+    CoverageRangeUnreadable naming it. It used to be skipped, so the request
+    named fewer lines than the report did and nothing said why.
+    """
     wanted: list[int] = []
     for part in ranges:
-        if "-" in part:
-            start, _, end = part.partition("-")
-            try:
+        start, dash, end = part.partition("-")
+        try:
+            if dash:
                 wanted.extend(range(int(start), int(end) + 1))
-            except ValueError:
-                continue
-        else:
-            try:
+            else:
                 wanted.append(int(part))
-            except ValueError:
-                continue
+        except ValueError as err:
+            raise CoverageRangeUnreadable(
+                f"the coverage report's Missing column holds {part!r}, which "
+                f"is neither a line number nor a range"
+            ) from err
     return wanted
 
 
@@ -126,14 +153,17 @@ def _read_context(path: Path, ranges: list[str]) -> str:
     that holds an uncovered line is quoted once, whole, with line numbers and
     the uncovered lines marked `>>`; a long function gets its head and a
     window around each uncovered line; a line outside any function gets its
-    neighbours. Falls back to the bare lines when the file does not parse.
+    neighbours. Falls back to the bare lines when the file does not parse:
+    that is a documented degradation of the quote, not a failure.
+
+    #3585 (ledger 0908, augment_tests.py:134): a source that cannot be read
+    raises its OSError, and a malformed range CoverageRangeUnreadable. The
+    read used to return "", and the request named bare line numbers with no
+    code beside them.
     """
     import ast
 
-    try:
-        source = path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
+    source = path.read_text(encoding="utf-8")
     lines = source.splitlines()
     wanted = [n for n in _line_numbers(ranges)[:MAX_TARGET_LINES] if 1 <= n <= len(lines)]
     if not wanted:
@@ -204,25 +234,15 @@ def _read_context(path: Path, ranges: list[str]) -> str:
 
 
 def _read_lines(path: Path, ranges: list[str]) -> str:
-    """Quote the uncovered source so the request names real code, not numbers."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return ""
+    """Quote the uncovered source so the request names real code, not numbers.
 
-    wanted: list[int] = []
-    for part in ranges:
-        if "-" in part:
-            start, _, end = part.partition("-")
-            try:
-                wanted.extend(range(int(start), int(end) + 1))
-            except ValueError:
-                continue
-        else:
-            try:
-                wanted.append(int(part))
-            except ValueError:
-                continue
+    #3585 (ledger 0908, augment_tests.py:209, :218, :223): an unreadable
+    source raises its OSError, and a malformed range CoverageRangeUnreadable
+    (the ranges are read by `_line_numbers`, not a second parser). Both used
+    to be skipped.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    wanted = _line_numbers(ranges)
 
     out: list[str] = []
     for number in wanted[:MAX_TARGET_LINES]:
@@ -304,21 +324,28 @@ def _keep_passing_additions(
     """Run the merged file and keep only the added tests that pass (#2902).
 
     Runs pytest on the merged file alone -- the file is already written --
-    and reads the outcome lines for the added test names. A file that
-    collects nothing drops every addition, with the collection error as
-    the reason: the additions broke the file, whatever the cause. Helpers
-    and imports the addition carries are kept whenever any test survives.
-    The dropped tests' source travels back so a repair pass can name them
-    (#2903), and the output carries the coverage report when asked for.
+    and reads the outcome lines for the added test names. Helpers and imports
+    the addition carries are kept whenever any test survives. The dropped
+    tests' source travels back so a repair pass can name them (#2903), and
+    the output carries the coverage report when asked for.
+
+    #3585 (ledger 0908, augment_tests.py:317, :347): an addition that does
+    not parse raises AugmentInvariantBroken (the caller compiled the merged
+    file before writing it, so this is a broken invariant, not a verdict on
+    the tests). A run that executed no test raises VettingRanNothing with the
+    first error line and the exit code: the check could not run, whatever the
+    cause. Both used to return "keep nothing", which the node read as "none
+    passed" and went back to N5 without a word.
     """
     import ast
 
     try:
         tree = ast.parse(addition)
-    except SyntaxError:
-        # fail-open: the caller compiled the merged file before writing it,
-        # so this cannot happen; if it did, keeping nothing is the safe side.
-        return Vetted("", [("(addition)", "does not parse")], {}, "")
+    except SyntaxError as err:
+        raise AugmentInvariantBroken(
+            f"the addition to {test_path} does not parse ({err}), though the "
+            f"merged file compiled before it was written"
+        ) from err
     lines = addition.splitlines()
 
     def _segment(node: ast.stmt) -> str:
@@ -349,11 +376,11 @@ def _keep_passing_additions(
         reason = next(
             (line.strip() for line in output.splitlines()
              if re.match(r"(?:E\s+)?[\w.]*(?:Error|Exception)\b\s*:", line.strip())),
-            f"pytest ran nothing (exit {result.get('returncode')})",
+            "no error line in pytest's output",
         )
-        return Vetted(
-            "", [(name, reason) for name in sorted(test_nodes)],
-            {name: _segment(node) for name, node in test_nodes.items()}, output,
+        raise VettingRanNothing(
+            f"the vetting run of {test_path} executed no test (exit "
+            f"{result.get('returncode')}): {reason}"
         )
 
     dropped: list[tuple[str, str]] = []
@@ -380,18 +407,21 @@ def _keep_passing_additions(
 
 
 def _without_named_tests(source: str, names: set[str]) -> tuple[str, list[str]]:
-    """`source` minus the top-level tests named in `names`, and which were removed."""
+    """`source` minus the top-level tests named in `names`, and which were removed.
+
+    Nothing to remove (no source, no names, or no name matching) returns the
+    source unchanged; that is the answer, not a failure.
+
+    #3585 (ledger 0908, augment_tests.py:389): a source that does not parse
+    raises its SyntaxError. It used to pass through unchanged, trusting a
+    later compile to reject it; the node now rejects an unparseable repair
+    before it gets here.
+    """
     import ast
 
     if not source.strip() or not names:
         return source, []
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        # fail-open: the caller compiles the merged candidate next and
-        # reports a file that does not parse; nothing is hidden by passing
-        # the source through unchanged here.
-        return source, []
+    tree = ast.parse(source)
     lines = source.splitlines()
     removed: list[str] = []
     segments: list[str] = []
@@ -543,12 +573,51 @@ def _halt_gap_not_augmentable(state: TestingWorkflowState, framework: str) -> di
     return {"next_node": "end", "error_message": message}
 
 
+def _halt_augment_cannot_run(reason: str) -> dict[str, Any]:
+    """N4c's halt when its own machinery fails (#3585). Said at ERROR on
+    stderr; routed to HALT by `route_after_augment`, which alerts."""
+    print(f"ERROR [N4c] N4c cannot add tests: {reason}", file=sys.stderr)
+    return {"next_node": "end", "error_message": f"[N4c] N4c cannot add tests: {reason}"}
+
+
+def _halt_augment_spent(reason: str) -> dict[str, Any]:
+    """N4c's halt when an allowance is spent (#3585): the generation
+    attempts, the one repair pass, or every added test failing. Said at ERROR
+    on stderr; routed to HALT by `route_after_augment`, which alerts."""
+    print(f"ERROR [N4c] Coverage test additions spent: {reason}", file=sys.stderr)
+    return {"next_node": "end", "error_message": f"Coverage test additions spent: {reason}"}
+
+
+def _parse_failure(err: SyntaxError) -> list[str]:
+    """The rejection for a candidate that does not parse."""
+    return [f"the file does not parse: {err}"]
+
+
+def _candidate_failures(candidate: str, test_path: Path, repo_root: Path) -> list[str]:
+    """Why `candidate` may not be written: it does not parse, or an import
+    names nothing (#2336). [] when it may."""
+    try:
+        compile(candidate, str(test_path), "exec")
+    except SyntaxError as err:
+        return _parse_failure(err)
+    return validate_test_imports(candidate, repo_root)
+
+
+def _restore_passing(test_path: Path, existing: str, kept: str) -> None:
+    """Put back the suite that passes: what was there, plus the kept tests."""
+    if kept.strip():
+        test_path.write_text(existing.rstrip() + "\n\n\n" + kept.strip() + "\n", encoding="utf-8")
+    else:
+        test_path.write_text(existing, encoding="utf-8")
+
+
 def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     """N4c: append tests targeting uncovered lines (#2327).
 
-    Returns to N5 either way. A failure to add tests is reported and leaves
-    the suite untouched -- it must never damage a passing suite, and it must
-    never route the shortfall to implementation revision.
+    Returns to N5 when tests were added. #3585: any failure halts, with the
+    reason in error_message; it used to return to N5 with none. Either way it
+    must never damage a passing suite, and it must never route the shortfall
+    to implementation revision.
     """
     gate_log("[N4c] Adding tests for uncovered lines...")
 
@@ -568,8 +637,11 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     repo_root = Path(state.get("repo_root", "") or ".")
 
     if not test_files:
-        print("    [N4c] no test file to extend — returning to verification")
-        return {"next_node": "N5_verify_green", "error_message": ""}
+        # #3585 (ledger 0908, augment_tests.py:537)
+        return _halt_augment_cannot_run(
+            f"the run has no test file to extend, with coverage "
+            f"{coverage_achieved:.1f}% against a target of {coverage_target}%"
+        )
 
     # #2637: read the report ONCE, through the accessor N5 also uses. This
     # branch used to render an ABSENT target as "no uncovered lines" -- an
@@ -585,19 +657,38 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
 
     uncovered = reading.uncovered
     if not uncovered:
-        print(
-            "    [N4c] coverage report named no uncovered lines; nothing "
-            "specific to target — returning to verification"
+        # #3585 (ledger 0908, augment_tests.py:554): it returned to N5, which
+        # measured the same shortfall and sent it back, uncounted.
+        return _halt_augment_cannot_run(
+            f"coverage is {coverage_achieved:.1f}% against a target of "
+            f"{coverage_target}%, and the coverage report names no uncovered "
+            f"line to target"
         )
-        return {"next_node": "N5_verify_green", "error_message": ""}
+
+    # #2899's record of the prompt and every response. #3585 (ledger 0908,
+    # augment_tests.py:593): with no audit dir the writes were skipped
+    # silently, so a generation could not be examined afterwards.
+    audit_dir = Path(state.get("audit_dir", "") or "")
+    if not state.get("audit_dir") or not audit_dir.is_dir():
+        return _halt_augment_cannot_run(
+            f"the audit directory {state.get('audit_dir', '')!r} is not a "
+            f"directory, so the prompt and responses would not be kept"
+        )
 
     targets: dict[str, str] = {}
-    for path, ranges in uncovered.items():
-        # #2903: the function around the line, not the line alone.
-        quoted = _read_context(repo_root / path, ranges)
-        if not quoted:
-            quoted = ", ".join(ranges)
-        targets[path] = quoted
+    try:
+        for path, ranges in uncovered.items():
+            # #2903: the function around the line, not the line alone.
+            quoted = _read_context(repo_root / path, ranges)
+            if not quoted:
+                quoted = ", ".join(ranges)
+            targets[path] = quoted
+    except (OSError, CoverageRangeUnreadable) as err:
+        # #3585 (ledger 0908, augment_tests.py:101, :106, :134, :209)
+        return _halt_augment_cannot_run(
+            f"the uncovered source could not be quoted: "
+            f"{type(err).__name__}: {err}"
+        )
 
     total_lines = sum(len(r) for r in uncovered.values())
     print(
@@ -612,8 +703,11 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     try:
         existing = test_path.read_text(encoding="utf-8")
     except OSError as err:
-        print(f"    [N4c] could not read {test_path}: {err}")
-        return {"next_node": "N5_verify_green", "error_message": ""}
+        # #3585 (ledger 0908, augment_tests.py:581)
+        return _halt_augment_cannot_run(
+            f"the test file {test_path} could not be read: "
+            f"{type(err).__name__}: {err}"
+        )
 
     prompt = build_augment_prompt(
         str(test_path), existing, targets, coverage_achieved, coverage_target,
@@ -622,12 +716,8 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     # #2899: this node saved nothing, so a 3,335-second generation could not
     # be examined afterwards. The prompt and every attempt's response go to
     # the audit dir the way N4's do, and the call carries a ceiling.
-    audit_dir = Path(state.get("audit_dir", "") or "")
-    audit_ok = bool(state.get("audit_dir")) and audit_dir.is_dir()
-
     def _audit(name: str, content: str) -> None:
-        if audit_ok:
-            save_audit_file(audit_dir, next_file_number(audit_dir), name, content)
+        save_audit_file(audit_dir, next_file_number(audit_dir), name, content)
 
     _audit("augment-prompt.md", prompt)
 
@@ -644,8 +734,10 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     try:
         seat = resolve(state, "impl.augment_tests")
     except ValueError as err:
-        print(f"    [N4c] no new tests generated: {err}")
-        return {"next_node": "N5_verify_green", "error_message": ""}
+        # #3585 (ledger 0908, augment_tests.py:613)
+        return _halt_augment_cannot_run(
+            f"the impl.augment_tests seat could not be resolved: {err}"
+        )
     model = seat.spec
     effort = seat.effort
     print(
@@ -676,44 +768,39 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
         suffix = f"-retry{attempt}" if attempt > 1 else ""
         _audit(f"augment-response{suffix}.md", response or f"(no response: {error})")
         if error or not response:
-            print(f"    [N4c] no new tests generated: {error or 'empty response'}")
-            return {"next_node": "N5_verify_green", "error_message": ""}
+            # #3585 (ledger 0908, augment_tests.py:645): the provider's error
+            # used to be printed and dropped, with no attempt counted.
+            return _halt_augment_cannot_run(
+                f"the generation call ({model}) failed on attempt {attempt}: "
+                f"{error or 'empty response'}; the suite is unchanged"
+            )
 
         addition = extract_code_block(response, str(test_path)) or ""
         if not addition.strip():
-            print("    [N4c] response contained no code block; suite unchanged")
-            return {"next_node": "N5_verify_green", "error_message": ""}
-
-        # Append. Never rewrite: the existing tests are proven to pass, and a
-        # regeneration that loses one trades a coverage point for a real test.
-        candidate = existing.rstrip() + "\n\n\n" + addition.strip() + "\n"
-
-        try:
-            compile(candidate, str(test_path), "exec")
-        except SyntaxError as err:
-            problems = [f"the file does not parse: {err}"]
+            # #3585 (ledger 0908, augment_tests.py:650): a reply with no code
+            # is a rejected attempt, revised like any other, not a quiet
+            # return to N5.
+            problems = ["the response contained no ```python code block"]
         else:
-            problems = validate_test_imports(candidate, repo_root)
-
-        if not problems:
-            merged = candidate
-            break
+            # Append. Never rewrite: the existing tests are proven to pass,
+            # and a regeneration that loses one trades a coverage point for a
+            # real test.
+            candidate = existing.rstrip() + "\n\n\n" + addition.strip() + "\n"
+            problems = _candidate_failures(candidate, test_path, repo_root)
+            if not problems:
+                merged = candidate
+                break
 
         for problem in problems:
             print(f"    [N4c] rejected: {problem}")
         if attempt >= MAX_GENERATION_ATTEMPTS:
-            print(
-                f"    [N4c] {MAX_GENERATION_ATTEMPTS} attempt(s) did not "
-                f"produce importable tests; suite left unchanged so the "
-                f"passing tests survive"
+            # #3585 (ledger 0908, augment_tests.py:671): it returned to N5 as
+            # a skip.
+            return _halt_augment_spent(
+                f"{MAX_GENERATION_ATTEMPTS} generation attempt(s) for "
+                f"{test_path.name} produced no tests that can be written: "
+                f"{'; '.join(problems)}; the suite is unchanged"
             )
-            return {
-                "coverage_augment_attempts": int(
-                    state.get("coverage_augment_attempts", 0) or 0
-                ) + 1,
-                "next_node": "N5_verify_green",
-                "error_message": "",
-            }
 
         print(f"    [N4c] revising (attempt {attempt + 1}/{MAX_GENERATION_ATTEMPTS})")
         prompt = build_revision_prompt(prompt, addition, problems)
@@ -728,18 +815,36 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     # a test at all. Appended unverified, they became the contract and N4
     # was sent to fix collector.py for failures no edit of it can touch.
     coverage_module = state.get("coverage_module") or None
-    vetted = _keep_passing_additions(
-        test_path, existing, addition, repo_root, coverage_module=coverage_module,
-    )
+    try:
+        vetted = _keep_passing_additions(
+            test_path, existing, addition, repo_root, coverage_module=coverage_module,
+        )
+    except VettingRanNothing as err:
+        # #3585 (ledger 0908, augment_tests.py:347): the check could not run.
+        test_path.write_text(existing, encoding="utf-8")
+        return _halt_augment_cannot_run(
+            f"{err}; the additions are removed and the suite is as it was"
+        )
+    except AugmentInvariantBroken:
+        test_path.write_text(existing, encoding="utf-8")
+        raise
+    # #3585 (ledger 0908, augment_tests.py:701): a dropped test is a failed
+    # test, said at ERROR; the ones that pass are kept.
     for name, reason in vetted.dropped:
-        print(f"    [N4c] dropped {name}: {reason} (#2902)")
+        print(f"ERROR [N4c] dropped {name}: {reason} (#2902)", file=sys.stderr)
     kept = vetted.kept
     last_output = vetted.output
+    dropped_names = {name for name, _ in vetted.dropped}
 
     # #2903: one repair pass. The dropped tests go back with the line that
     # says why each failed; the model corrects those and only those, and the
     # corrections are validated, run and filtered exactly like the first
     # pass. Without this, the second pass repeated the first pass's guess.
+    # #3585 (ledger 0908, augment_tests.py:721, :734, :755): a repair that
+    # cannot be made (the call failed, no code, it does not parse, it imports
+    # nothing real, or it only repeats tests the file has) halts. Each used
+    # to be printed and passed over. The suite left on disk is what was
+    # there plus the first pass's passing tests.
     if vetted.dropped and vetted.dropped_source:
         repair_prompt = build_repair_prompt(prompt, vetted.dropped, vetted.dropped_source)
         print(
@@ -751,64 +856,90 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
             seat="impl.augment_tests",  # #3577: the call record names this seat
         )
         _audit("augment-response-repair.md", response or f"(no response: {error})")
-        repaired = extract_code_block(response or "", str(test_path)) or ""
+        if error or not response:
+            _restore_passing(test_path, existing, kept)
+            return _halt_augment_cannot_run(
+                f"the repair call ({model}) failed: {error or 'empty response'}; "
+                f"the suite keeps only the additions that passed"
+            )
+        repaired = extract_code_block(response, str(test_path)) or ""
         base = existing.rstrip() + ("\n\n\n" + kept.strip() if kept.strip() else "")
         # A repair may only answer for the dropped names; a test that repeats a
         # name already in the file would define it twice.
         taken = set(re.findall(r"^def\s+(test_\w+)", base, re.MULTILINE))
-        repaired, duplicates = _without_named_tests(repaired, taken)
+        try:
+            repaired, duplicates = _without_named_tests(repaired, taken)
+        except SyntaxError as err:
+            _restore_passing(test_path, existing, kept)
+            return _halt_augment_spent(
+                f"the repair pass's code does not parse ({err}); the suite keeps "
+                f"only the additions that passed"
+            )
         for name in duplicates:
             print(f"    [N4c] repair returned {name}, which the file already has; not added (#2903)")
-        candidate = base + "\n\n\n" + repaired.strip() + "\n" if repaired.strip() else ""
-        problems: list[str] = []
-        if candidate:
-            try:
-                compile(candidate, str(test_path), "exec")
-            except SyntaxError as err:
-                # fail-open: a repair that does not parse is a rejected repair,
-                # not a halt -- the kept tests from the first pass stand, the
-                # rejection is printed below with the error, and the file on
-                # disk is never the unparseable candidate.
-                problems = [f"the file does not parse: {err}"]
-            else:
-                problems = validate_test_imports(candidate, repo_root)
-        if candidate and not problems:
-            test_path.write_text(candidate, encoding="utf-8")
+        if not repaired.strip():
+            _restore_passing(test_path, existing, kept)
+            return _halt_augment_spent(
+                "the repair pass returned no new test (no ```python code block, "
+                "or only tests the file already has); the suite keeps only the "
+                "additions that passed"
+            )
+        candidate = base + "\n\n\n" + repaired.strip() + "\n"
+        problems = _candidate_failures(candidate, test_path, repo_root)
+        if problems:
+            _restore_passing(test_path, existing, kept)
+            return _halt_augment_spent(
+                f"the repair pass was rejected: {'; '.join(problems)}; the suite "
+                f"keeps only the additions that passed"
+            )
+        test_path.write_text(candidate, encoding="utf-8")
+        try:
             repaired_vetted = _keep_passing_additions(
                 test_path, base, repaired, repo_root, coverage_module=coverage_module,
             )
-            for name, reason in repaired_vetted.dropped:
-                print(f"    [N4c] repair dropped {name}: {reason} (#2903)")
-            if repaired_vetted.kept.strip():
-                kept = (kept.rstrip() + "\n\n\n" + repaired_vetted.kept.strip() + "\n"
-                        if kept.strip() else repaired_vetted.kept)
-                last_output = repaired_vetted.output or last_output
-                repaired_names = re.findall(r"^def\s+(test_\w+)", repaired_vetted.kept, re.MULTILINE)
-                print(f"    [N4c] repair kept {len(repaired_names)} test(s): {', '.join(repaired_names)}")
-        elif candidate:
-            for problem in problems:
-                print(f"    [N4c] repair rejected: {problem}")
-        else:
-            print("    [N4c] repair pass returned no code; nothing added by it")
+        except VettingRanNothing as err:
+            _restore_passing(test_path, existing, kept)
+            return _halt_augment_cannot_run(
+                f"{err}; the suite keeps only the first pass's additions that passed"
+            )
+        except AugmentInvariantBroken:
+            _restore_passing(test_path, existing, kept)
+            raise
+        for name, reason in repaired_vetted.dropped:
+            print(f"ERROR [N4c] repair dropped {name}: {reason} (#2903)", file=sys.stderr)
+        dropped_names |= {name for name, _ in repaired_vetted.dropped}
+        if repaired_vetted.kept.strip():
+            kept = (kept.rstrip() + "\n\n\n" + repaired_vetted.kept.strip() + "\n"
+                    if kept.strip() else repaired_vetted.kept)
+            last_output = repaired_vetted.output or last_output
+            repaired_names = re.findall(r"^def\s+(test_\w+)", repaired_vetted.kept, re.MULTILINE)
+            print(f"    [N4c] repair kept {len(repaired_names)} test(s): {', '.join(repaired_names)}")
 
     if not kept.strip():
+        # #3585 (ledger 0908, augment_tests.py:761): it returned to N5 with no
+        # error, and N5 sent the same shortfall back.
         test_path.write_text(existing, encoding="utf-8")
-        print(
-            "    [N4c] none of the added tests pass on this machine; suite "
-            "left as it was (#2902)"
+        return _halt_augment_spent(
+            f"none of the {len(dropped_names)} added test(s) pass on this "
+            f"machine, after the repair pass; the suite is as it was (#2902)"
         )
-        return {
-            "test_files": [str(p) for p in test_files],
-            "coverage_augment_attempts": int(
-                state.get("coverage_augment_attempts", 0) or 0
-            ) + 1,
-            "next_node": "N5_verify_green",
-            "error_message": "",
-        }
     merged = existing.rstrip() + "\n\n\n" + kept.strip() + "\n"
     test_path.write_text(merged, encoding="utf-8")
     added = len(re.findall(r"^def\s+test_\w+", kept, re.MULTILINE))
-    reached, targeted = _reached(uncovered, last_output)
+    still_dropped = dropped_names - set(re.findall(r"^def\s+(test_\w+)", kept, re.MULTILINE))
+    if still_dropped:
+        print(
+            f"ERROR [N4c] {len(still_dropped)} added test(s) failed and were "
+            f"dropped: {', '.join(sorted(still_dropped))} (#2902)",
+            file=sys.stderr,
+        )
+    try:
+        reached, targeted = _reached(uncovered, last_output)
+    except CoverageRangeUnreadable as err:
+        return _halt_augment_cannot_run(
+            f"the vetting run's coverage report could not be read: {err}; the "
+            f"{added} added test(s) that passed are in {test_path.name}"
+        )
     print(
         f"    [N4c] added {added} test(s) targeting {total_lines} uncovered "
         f"range(s); the vetting run reached {reached} of {targeted} uncovered "

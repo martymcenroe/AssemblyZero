@@ -202,7 +202,16 @@ class TestTheLoopEndsAtTheCapNotTheRecursionLimit:
 
     @pytest.fixture
     def rolled(self, monkeypatch, tmp_path):
+        import subprocess
+
         import assemblyzero.workflows.testing.graph as g
+
+        # #3585: the run's checkpoints commit in the worktree and halt when
+        # git cannot, so the worktree is a real repository.
+        for args in (["init", "-q", "-b", "main"],
+                     ["config", "user.email", "t@example.com"],
+                     ["config", "user.name", "Test"]):
+            subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
 
         entries = {"scaffold": 0}
 

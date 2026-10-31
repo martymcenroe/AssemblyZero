@@ -705,13 +705,18 @@ class TestSpecRequired:
         """load_lld successfully loads a spec file."""
         from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
-        # Create spec file with minimum content
+        # Create spec file with minimum content. #3585: a spec that names no
+        # files to implement halts N0, so the minimum includes the table.
         spec_dir = tmp_path / "docs" / "lld" / "drafts"
         spec_dir.mkdir(parents=True)
         spec_content = (
             "# Spec 042: Test Feature\n\n"
             "## 1. Context & Goal\n* **Issue:** #42\n"
             "* **Status:** Approved\n\n"
+            "## 2. Files to Implement\n\n"
+            "| Order | File | Change Type | Description |\n"
+            "|-------|------|-------------|-------------|\n"
+            "| 1 | `src/feature.py` | Add | The feature |\n\n"
             "## 3. Requirements\n1. REQ-1: Must work\n\n"
             "## 10. Test Plan\n### test_it_works\nVerify it works.\n\n"
             "**Final Status:** APPROVED\n"

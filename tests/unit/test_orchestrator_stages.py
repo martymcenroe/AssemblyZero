@@ -193,9 +193,14 @@ class TestImplCompletenessGateHonesty:
             def compile(self) -> _StubApp:
                 return _StubApp()
 
+        # The stubbed git cuts no worktree, so there is nothing to provision;
+        # provisioning a worktree that is not there refuses (ADR 0236, #3585).
         with patch(
             "assemblyzero.workflows.orchestrator.stages.run_command",
             return_value=MagicMock(returncode=0, stdout="", stderr=""),
+        ), patch(
+            "assemblyzero.workflows.orchestrator.stages.provision_worktree",
+            return_value=[],
         ), patch(
             "assemblyzero.workflows.testing.graph.build_testing_workflow",
             return_value=_StubGraph(),
@@ -467,9 +472,12 @@ class TestRunImplStageRepoRoot:
     halted with "No commits between main and issue-N."
     """
 
+    # The stubbed git cuts no worktree, so there is nothing to provision;
+    # provisioning a worktree that is not there refuses (ADR 0236, #3585).
+    @patch("assemblyzero.workflows.orchestrator.stages.provision_worktree", return_value=[])
     @patch("assemblyzero.workflows.orchestrator.stages.run_command")
     def test_impl_invokes_testing_with_repo_root_eq_worktree(
-        self, mock_run, tmp_path,
+        self, mock_run, _no_provisioning, tmp_path,
     ):
         from assemblyzero.workflows.orchestrator.stages import run_impl_stage
 

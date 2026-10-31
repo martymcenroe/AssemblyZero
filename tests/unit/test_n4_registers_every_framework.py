@@ -16,6 +16,7 @@ and nothing runs a suite.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,6 +69,9 @@ def _scaffolds(root: Path, *, typescript: bool) -> list[str]:
 
 
 def _implement(root: Path, plan: list[dict], test_files: list[str]) -> dict:
+    # #3585: a git repository, as N4's worktree always is -- came_from_base
+    # raises when git cannot answer.
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
     loaded = _mock_load_lld({"issue_number": 7, "repo_root": str(root)})
     state = {
         **loaded,

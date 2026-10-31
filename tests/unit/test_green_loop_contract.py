@@ -51,6 +51,9 @@ RUN9_FILES = (
 
 
 def _state(tmp_path: Path, **overrides):
+    # #3585: a named audit directory that is not there halts N5, and so does
+    # a run where nothing names a coverage target.
+    (tmp_path / "audit").mkdir(exist_ok=True)
     base = {
         "test_files": [str(tmp_path / "tests" / "test_example.py")],
         "repo_root": str(tmp_path),
@@ -60,7 +63,7 @@ def _state(tmp_path: Path, **overrides):
         "iteration_count": 1,
         "max_iterations": 5,
         "coverage_target": 95,
-        "implementation_files": [],
+        "implementation_files": [str(tmp_path / "pkg" / "mod.py")],
         "skip_e2e": True,
         "previous_coverage": -1.0,
         "previous_passed": -1,

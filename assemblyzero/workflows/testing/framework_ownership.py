@@ -17,7 +17,10 @@ from assemblyzero.workflows.testing.framework_detector import (
     choose_by_test_name,
     source_extensions,
 )
-from assemblyzero.workflows.testing.runner_registry import resolve_framework
+from assemblyzero.workflows.testing.runner_registry import (
+    UnknownFrameworkError,
+    resolve_framework,
+)
 
 
 class TestFileOwnershipError(ValueError):
@@ -66,7 +69,13 @@ def run_frameworks(state: dict) -> list[RunFramework]:
     multi = len(configs) > 1
     out: list[RunFramework] = []
     for config in configs:
-        framework = resolve_framework(config) if "framework" in config else TestFramework.PYTEST
+        # #3585: the registry raises for a framework it does not know, where
+        # it used to answer None. Wrapped, so every caller that handles a run
+        # it cannot own (N2 to N5) halts on it, naming the framework (#4311).
+        try:
+            framework = resolve_framework(config) if "framework" in config else TestFramework.PYTEST
+        except UnknownFrameworkError as e:
+            raise TestFileOwnershipError(str(e)) from e
         if framework is None:
             if multi:
                 raise TestFileOwnershipError(

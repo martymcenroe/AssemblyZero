@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 
 from assemblyzero.workflows.testing.symbol_validator import (
+    SymbolCheckError,
     exported_names,
     validate_test_imports,
 )
@@ -224,5 +225,7 @@ class TestCompoundStatements:
         assert "inner" not in names
         assert "also_inner" not in names
 
-    def test_an_unparseable_module_is_still_none(self, tmp_path: Path):
-        assert exported_names(_module(tmp_path, "def broken(:\n")) is None
+    def test_an_unparseable_module_raises(self, tmp_path: Path):
+        """ADR 0236: it was None, which the check read as no finding."""
+        with pytest.raises(SymbolCheckError):
+            exported_names(_module(tmp_path, "def broken(:\n"))

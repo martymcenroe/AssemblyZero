@@ -8,6 +8,7 @@ Generates test report and archives the audit trail:
 """
 
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,49 +31,77 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 logger = logging.getLogger(__name__)
 
 
+class FinalizeError(RuntimeError):
+    """N7 cannot record or archive what the run did (ADR 0236).
+
+    Raised, never logged and passed over: N7's result is the run's record of
+    completion, and a record built on a failure is a false one. The raise
+    reaches the run's entry point, which reports and alerts it.
+    """
+
+
+def _fail(message: str) -> str:
+    """N7's ERROR line on stderr, at the point of failure; returns the message."""
+    print(f"ERROR [N7] {message}", file=sys.stderr)
+    logger.error(message)
+    return message
+
+
 def archive_file_to_done(active_path: Path) -> Path | None:
     """
     Move a file from active/ to done/ directory.
-    
+
     Args:
         active_path: Path to file in active/ directory
-        
+
     Returns:
-        The new path if successful, None if skipped or failed
+        The new path. None only when the file is not under an active/
+        directory: there is nothing to archive, which is not a failure. A
+        file already in done/ with no copy left in active/ is the file an
+        earlier pass of N7 archived, and its done/ path is returned.
+
+    Raises:
+        FileNotFoundError: the file is in neither place (ledger 0908, line
+            46). It was a WARNING and None, and the run reported COMPLETE.
+        FinalizeError: the move failed, naming both paths and the cause
+            (line 74).
     """
+    # Verify it's in an active/ directory
+    if "active" not in str(active_path):
+        logger.info(f"File not in active/ directory, skipping archival: {active_path}")
+        return None
+
+    # Construct the done/ path
+    done_path = Path(str(active_path).replace("/active/", "/done/").replace("\\active\\", "\\done\\"))
+
+    if not active_path.exists():
+        if done_path.exists():
+            logger.info(f"Already archived: {done_path}")
+            return done_path
+        raise FileNotFoundError(_fail(
+            f"the file to archive, {active_path}, does not exist, and "
+            f"{done_path} does not either"
+        ))
+
+    # Handle name conflicts by appending timestamp
+    if done_path.exists():
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        stem = done_path.stem
+        suffix = done_path.suffix
+        done_path = done_path.parent / f"{stem}-{timestamp}{suffix}"
+
     try:
-        # Verify the file exists
-        if not active_path.exists():
-            logger.warning(f"File not found for archival: {active_path}")
-            return None
-        
-        # Verify it's in an active/ directory
-        if "active" not in str(active_path):
-            logger.info(f"File not in active/ directory, skipping archival: {active_path}")
-            return None
-        
-        # Construct the done/ path
-        done_path = Path(str(active_path).replace("/active/", "/done/").replace("\\active\\", "\\done\\"))
-        
         # Create done/ directory if it doesn't exist
         done_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Handle name conflicts by appending timestamp
-        if done_path.exists():
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            stem = done_path.stem
-            suffix = done_path.suffix
-            done_path = done_path.parent / f"{stem}-{timestamp}{suffix}"
-        
         # Move the file
         active_path.rename(done_path)
-        logger.info(f"Archived {active_path.name} to {done_path}")
-        
-        return done_path
-        
     except OSError as e:
-        logger.error(f"Failed to archive {active_path}: {e}")
-        return None
+        raise FinalizeError(_fail(
+            f"could not archive {active_path} to {done_path}: "
+            f"{type(e).__name__}: {e}"
+        )) from e
+    logger.info(f"Archived {active_path.name} to {done_path}")
+    return done_path
 
 
 def _archive_workflow_artifacts(state: TestingWorkflowState) -> dict[str, list[str]]:
@@ -81,9 +110,13 @@ def _archive_workflow_artifacts(state: TestingWorkflowState) -> dict[str, list[s
     
     Args:
         state: Current workflow state
-        
+
     Returns:
-        Dict with 'archived' and 'skipped' lists of file paths
+        Dict with 'archived' and 'skipped' lists of file paths. 'skipped'
+        holds only files with nothing to archive: not under an active/
+        directory, or every file when the workflow did not succeed. A file
+        that fails to archive raises (`archive_file_to_done`) instead of
+        joining the list, which nothing read (ledger 0908, line 216).
     """
     archived = []
     skipped = []
@@ -151,6 +184,17 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
     green_output = state.get("green_phase_output", "")
     parsed = parse_pytest_output(green_output)
     test_count = parsed.get("passed", 0) + parsed.get("failed", 0) + parsed.get("errors", 0)
+    if test_count == 0:
+        # Ledger 0908, line 152: an empty or unreadable green-phase output
+        # was reported as 0 of 0 tests passed, and the run as COMPLETE. N5
+        # halts a run that collects nothing, so no counts here means the
+        # output that reached N7 cannot say what the tests did.
+        excerpt = (green_output or "").strip().replace("\n", " ")[:160]
+        raise FinalizeError(_fail(
+            f"issue #{issue_number}: the green-phase output carries no test "
+            f"counts, so the test report cannot say what ran (output begins: "
+            f"{excerpt!r}). N7 stops; nothing is reported or archived."
+        ))
     passed_count = parsed.get("passed", 0)
     failed_count = parsed.get("failed", 0) + parsed.get("errors", 0)
 
@@ -218,6 +262,10 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
     if archived_files:
         print("\n    Archived artifacts:")
         for file_path in archived_files:
+            print(f"      - {file_path}")
+    if archival_result["skipped"]:
+        print("\n    Not archived (not under an active/ directory):")
+        for file_path in archival_result["skipped"]:
             print(f"      - {file_path}")
 
     # Issue #100: Move lineage from active/ to done/

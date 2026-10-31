@@ -7,6 +7,7 @@ Issue #381: Tests that framework detection is wired into the workflow nodes
 import tempfile
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
@@ -21,6 +22,15 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     _verify_green_non_pytest,
 )
 from assemblyzero.workflows.testing.runner_registry import get_framework_config
+
+
+def _a_git_worktree(path: str) -> None:
+    """#3585: the full-suite gate lists the run's droppings with `git
+    status`, which halts the phase outside a repository; a run's worktree
+    always is one."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", path], check=True)
 
 
 # =============================================================================
@@ -107,8 +117,11 @@ class TestResolveFrameworkEnum:
     def test_string_value_converted(self):
         assert _resolve_framework_enum({"framework": "playwright"}) == TestFramework.PLAYWRIGHT
 
-    def test_invalid_string_returns_none(self):
-        assert _resolve_framework_enum({"framework": "unknown_framework"}) is None
+    def test_invalid_string_raises(self):
+        """ADR 0236: an unknown framework raises, naming it; it used to be
+        None, which a one-framework run reads as pytest."""
+        with pytest.raises(ValueError, match="unknown_framework"):
+            _resolve_framework_enum({"framework": "unknown_framework"})
 
     def test_missing_key_returns_none(self):
         assert _resolve_framework_enum({}) is None
@@ -351,6 +364,7 @@ class TestN5GreenPhaseNonPytest:
         mock_get_runner.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            _a_git_worktree(tmpdir)
             state = {
                 "test_files": ["tests/app.test.ts"],
                 "repo_root": tmpdir,
@@ -393,6 +407,7 @@ class TestN5GreenPhaseNonPytest:
         mock_get_runner.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            _a_git_worktree(tmpdir)
             state = {
                 "test_files": ["tests/app.spec.ts"],
                 "repo_root": tmpdir,
@@ -564,6 +579,7 @@ class TestN5GreenPhaseNonPytest:
         mock_get_runner.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            _a_git_worktree(tmpdir)
             state = {
                 "test_files": ["tests/app.test.ts"],
                 "repo_root": tmpdir,
