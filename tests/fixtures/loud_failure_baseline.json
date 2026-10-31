@@ -1,5 +1,5 @@
 {
-  "count": 262,
+  "count": 258,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
@@ -533,103 +533,103 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 960
+      "line": 962
     },
     "assemblyzero/workflows/orchestrator/stages.py::_recoverable_attempt_branch::fail_open_tag::1": {
       "detail": "# fail-open: an unmeasurable candidate is skipped, and a run out",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1476
+      "line": 1484
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees._remove_with_retry::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2371
+      "line": 2352
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2384
+      "line": 2365
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2392
+      "line": 2373
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::3": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2394
+      "line": 2375
     },
     "assemblyzero/workflows/orchestrator/stages.py::_remove_orchestrator_worktrees::swallowed_handler::4": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2402
+      "line": 2383
     },
     "assemblyzero/workflows/orchestrator/stages.py::_synthesize_brief_summary::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 459
+      "line": 461
     },
     "assemblyzero/workflows/orchestrator/stages.py::fetch_issue_body::fail_open_tag::1": {
       "detail": "# fail-open: only in shape -- None unsettles, and unsettled means the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 87
+      "line": 89
     },
     "assemblyzero/workflows/orchestrator/stages.py::fetch_issue_body::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 86
+      "line": 88
     },
     "assemblyzero/workflows/orchestrator/stages.py::run_impl_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2043
+      "line": 2024
     },
     "assemblyzero/workflows/orchestrator/stages.py::run_lld_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 800
+      "line": 802
     },
     "assemblyzero/workflows/orchestrator/stages.py::run_pr_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2260
+      "line": 2241
     },
     "assemblyzero/workflows/orchestrator/stages.py::run_spec_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 1274
+      "line": 1276
     },
     "assemblyzero/workflows/orchestrator/stages.py::run_visual_stage::fail_open_tag::1": {
       "detail": "# fail-open: in shape only -- the handler substitutes a FAILED,",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 989
+      "line": 991
     },
     "assemblyzero/workflows/orchestrator/stages.py::settle_stage::fail_open_tag::1": {
       "detail": "# fail-open: a stage that passed its gate stays passed. Losing the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 231
+      "line": 233
     },
     "assemblyzero/workflows/orchestrator/stages.py::settle_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 230
+      "line": 232
     },
     "assemblyzero/workflows/parallel/coordinator.py::ParallelCoordinator._execute_item::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1357,131 +1357,107 @@
       "kind": "swallowed_handler",
       "line": 801
     },
-    "tools/run_implementation_spec_workflow.py::run_workflow::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 696
-    },
     "tools/run_janitor_workflow.py::main::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 175
     },
-    "tools/run_requirements_workflow.py::checkpoint_exists::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 118
-    },
-    "tools/run_requirements_workflow.py::run_resume_review::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 1174
-    },
-    "tools/run_requirements_workflow.py::run_single_workflow::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 930
-    },
     "tools/speedrun_roll.py::_archive_successful_run::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3446
+      "line": 3447
     },
     "tools/speedrun_roll.py::_dispose_after_kill::fail_open_tag::1": {
       "detail": "# fail-open: the operator's order -- stop the roll -- is already",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2129
+      "line": 2130
     },
     "tools/speedrun_roll.py::_dispose_after_kill::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2128
+      "line": 2129
     },
     "tools/speedrun_roll.py::_poll_view_keys::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2482
+      "line": 2483
     },
     "tools/speedrun_roll.py::_profile_label::fail_open_tag::1": {
       "detail": "# fail-open: the child loads the same profile and refuses a bad one",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1257
+      "line": 1258
     },
     "tools/speedrun_roll.py::_profile_label::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 1256
+      "line": 1257
     },
     "tools/speedrun_roll.py::_quiz_bank::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2503
+      "line": 2504
     },
     "tools/speedrun_roll.py::_requirements_unverified_lines::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3376
+      "line": 3377
     },
     "tools/speedrun_roll.py::_teach_map::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 2403
+      "line": 2404
     },
     "tools/speedrun_roll.py::main::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3970
+      "line": 3971
     },
     "tools/speedrun_roll.py::main::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 4007
+      "line": 4008
     },
     "tools/speedrun_roll.py::main::swallowed_handler::3": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 4019
+      "line": 4020
     },
     "tools/speedrun_roll.py::main::swallowed_handler::4": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 4060
+      "line": 4061
     },
     "tools/speedrun_roll.py::persisted_profile_name::fail_open_tag::1": {
       "detail": "# fail-open: no readable state means nothing to resume, so nothing",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1268
+      "line": 1269
     },
     "tools/speedrun_roll.py::print_verdict::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3340
+      "line": 3341
     },
     "tools/speedrun_roll.py::run_still_writing::fail_open_tag::1": {
       "detail": "# fail-open: an unstattable log is no evidence of life. The",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2312
+      "line": 2313
     },
     "tools/speedrun_roll.py::settlement_inputs::fail_open_tag::1": {
       "detail": "# fail-open: only in shape -- a None body unsettles, which restores",

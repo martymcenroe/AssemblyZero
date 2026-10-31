@@ -45,6 +45,7 @@ import os
 import re
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -61,9 +62,39 @@ from assemblyzero.core.llm_provider import get_cumulative_cost
 from assemblyzero.utils.git import is_generated_work_branch, is_issue_work_branch
 atexit.register(flush)
 
+#: This entry point, as its alerts and its start-up check name it.
+ENTRY = "tools/run_implement_from_lld.py"
+
+#: The consequence of a refusal before the worktree is touched.
+NOTHING_RAN = "nothing ran: no worktree was cut and no model was called"
+
+
+class RunFailed(Exception):
+    """A failure this entry point names itself (ADR 0236, #4097).
+
+    Raised for what the tool owns: a bad argument, a git read that failed, a
+    refused start, an input that cannot be used, a record that cannot be
+    written. ``main``'s one handler prints it as one ERROR line on stderr,
+    alerts the operator with its ``consequence``, and exits 1; any other
+    exception gets its traceback as well.
+    """
+
+    def __init__(
+        self, message: str, *,
+        consequence: str = "the run stopped and exited 1; nothing after the failure ran",
+    ) -> None:
+        super().__init__(message)
+        self.consequence = consequence
+
 
 def get_current_branch(repo_path: Path) -> str:
-    """Get the current git branch name."""
+    """Get the current git branch name ("HEAD" when detached).
+
+    Raises:
+        RunFailed: git cannot read it (ledger 0908, line 77). It used to
+            return "", dropping git's stderr, and the caller refused on stdout
+            as if the HEAD were detached.
+    """
     result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=str(repo_path),
@@ -72,17 +103,24 @@ def get_current_branch(repo_path: Path) -> str:
         encoding="utf-8",
         errors="replace",
     )
-    if result.returncode == 0:
-        return result.stdout.strip()
-    return ""
+    if result.returncode != 0:
+        raise RunFailed(
+            f"git rev-parse --abbrev-ref HEAD failed in {repo_path} "
+            f"(exit {result.returncode}): {result.stderr.strip()}",
+            consequence=NOTHING_RAN,
+        )
+    return result.stdout.strip()
 
 
-def _worktree_entries(repo_path: Path) -> list[tuple[Path, str]] | None:
+def _worktree_entries(repo_path: Path) -> list[tuple[Path, str]]:
     """`git worktree list --porcelain` as (path, branch) pairs.
 
-    The branch is the short name, or "" for a detached or bare entry. None
-    when git itself fails, so a caller cannot mistake "could not list" for
-    "no such worktree".
+    The branch is the short name, or "" for a detached or bare entry.
+
+    Raises:
+        RunFailed: git itself fails (ledger 0908, line 123), so no caller can
+            mistake "could not list" for "no such worktree". It used to
+            return None, which find_existing_worktree read as exactly that.
     """
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
@@ -93,7 +131,11 @@ def _worktree_entries(repo_path: Path) -> list[tuple[Path, str]] | None:
         errors="replace",
     )
     if result.returncode != 0:
-        return None
+        raise RunFailed(
+            f"git worktree list failed in {repo_path} (exit {result.returncode}): "
+            f"{result.stderr.strip()}",
+            consequence=NOTHING_RAN,
+        )
 
     entries: list[tuple[Path, str]] = []
     path: Path | None = None
@@ -117,10 +159,11 @@ def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
     A substring match on ``-{issue}`` let issue 42 resume into ``Repo-420``
     and sweep that issue's files into its own checkpoint commits -- the same
     shape as the #1756 branch match.
+
+    None means git listed the worktrees and none is this issue's. A listing
+    git cannot make raises (``_worktree_entries``).
     """
     entries = _worktree_entries(repo_path)
-    if entries is None:
-        return None
     want_name = f"{repo_path.name}-{issue_number}"
     want_branch = f"{issue_number}-implementation"
     for path, branch in entries:
@@ -186,7 +229,7 @@ def create_worktree(
             # #3513: the right name on the wrong branch is not this issue's
             # worktree, and reusing it would commit into another branch.
             on_branch = {
-                p.resolve(): b for p, b in (_worktree_entries(repo_path) or [])
+                p.resolve(): b for p, b in _worktree_entries(repo_path)
             }.get(worktree_path.resolve())
             if on_branch != branch_name:
                 return worktree_path, (
@@ -658,6 +701,34 @@ def checkpoint_db_for_run(
     return get_checkpoint_db_path(issue_number, target_repo)
 
 
+def resume_checkpoint_refusal(db_path: Path, issue_number: int) -> str | None:
+    """Why ``--resume`` has nothing to resume, or None when it has (#4097).
+
+    Ledger 0908, line 1331: a --resume that found no checkpoint printed
+    "starting fresh" and ran from the start, spending the whole run again
+    under a flag that asked for the opposite. A database that is not there is
+    not created here. One that cannot be read raises, from sqlite.
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    thread_id = f"{issue_number}-testing"
+    if not db_path.is_file():
+        return (
+            f"--resume: no checkpoint database at {db_path}, so there is no "
+            f"checkpoint for issue #{issue_number} to resume. Run without "
+            "--resume to start, or pass --db-path to the database the halted run used"
+        )
+    with SqliteSaver.from_conn_string(str(db_path)) as memory:
+        checkpoint = memory.get({"configurable": {"thread_id": thread_id}})
+    if checkpoint is None:
+        return (
+            f"--resume: {db_path} holds no checkpoint for issue #{issue_number} "
+            f"(thread {thread_id}), so there is nothing to resume. Run without "
+            "--resume to start"
+        )
+    return None
+
+
 def select_approved_lld(repo_root: Path) -> int | None:
     """Interactively select from approved LLDs in docs/lld/active/.
 
@@ -668,18 +739,28 @@ def select_approved_lld(repo_root: Path) -> int | None:
         repo_root: Path to repository root.
 
     Returns:
-        Selected issue number, or None if cancelled/no LLDs found.
+        Selected issue number, or None when the operator cancels (0, or
+        Ctrl-C or Ctrl-D at the prompt). Nothing else returns None.
+
+    Raises:
+        RunFailed: no LLD directory, no LLD file, or an answer that selects
+            nothing (ledger 0908, line 1003). Each used to return None, which
+            main read as a cancel and exited 0.
     """
     lld_dir = repo_root / "docs" / "lld" / "active"
-    if not lld_dir.exists():
-        print(f"No LLD directory found: {lld_dir}")
-        return None
+    if not lld_dir.is_dir():
+        raise RunFailed(
+            f"--select: no LLD directory at {lld_dir}, so there is no LLD to offer",
+            consequence=NOTHING_RAN,
+        )
 
     # Scan for LLD files
     lld_files = sorted(lld_dir.glob("LLD-*.md"))
     if not lld_files:
-        print("No LLD files found in docs/lld/active/")
-        return None
+        raise RunFailed(
+            f"--select: no LLD files (LLD-*.md) in {lld_dir}, so there is no LLD to offer",
+            consequence=NOTHING_RAN,
+        )
 
     entries = []
     for lld_path in lld_files:
@@ -726,8 +807,10 @@ def select_approved_lld(repo_root: Path) -> int | None:
         })
 
     if not entries:
-        print("No valid LLD files found.")
-        return None
+        raise RunFailed(
+            f"--select: no LLD file in {lld_dir} is named LLD-<number>.md",
+            consequence=NOTHING_RAN,
+        )
 
     # Display menu
     print()
@@ -745,26 +828,28 @@ def select_approved_lld(repo_root: Path) -> int | None:
     print("  [ 0] Cancel")
     print()
 
-    # Prompt for selection
+    # Prompt for selection. Ctrl-C and Ctrl-D are the operator cancelling.
     try:
         choice = input(f"Select LLD [0-{len(entries)}]: ").strip()
     except (EOFError, KeyboardInterrupt):
         print("\nCancelled.")
         return None
 
+    invalid = RunFailed(
+        f"--select: invalid selection {choice!r}: choose 1-{len(entries)}, or 0 to cancel",
+        consequence=NOTHING_RAN,
+    )
     try:
         idx = int(choice)
-    except ValueError:
-        print("Invalid selection.")
-        return None
+    except ValueError as exc:
+        raise invalid from exc
 
     if idx == 0:
         print("Cancelled.")
         return None
 
     if idx < 1 or idx > len(entries):
-        print(f"Invalid selection. Choose 1-{len(entries)} or 0 to cancel.")
-        return None
+        raise invalid
 
     selected = entries[idx - 1]
     print(f"\nSelected: #{selected['issue']} - {selected['title']}")
@@ -1075,6 +1160,11 @@ def _write_status_file(
         error: Error message if failed.
         state: Final workflow state dict for enrichment.
         out_dir: Where the file goes; the repo root when not given.
+
+    Raises:
+        RunFailed: the file cannot be written (ledger 0908, line 961). It
+            used to pass as "best-effort", and agents that read the file to
+            tell a success from a failure found nothing.
     """
     import json
     from datetime import datetime, timezone
@@ -1137,11 +1227,25 @@ def _write_status_file(
 
         status_file.write_text(json.dumps(status_data, indent=2), encoding="utf-8")
         print(f"[implement] Status file: {status_file}")
-    except OSError:
-        pass  # Non-fatal — best-effort status file
+    except OSError as exc:
+        raise RunFailed(
+            f"cannot write the run's status file {status_file}: {type(exc).__name__}: {exc}",
+            consequence=(
+                f"the run's {status} outcome is not in its status file, which "
+                "agents read to tell a success from a failure; the run exits 1"
+            ),
+        ) from exc
 
 
 def main():
+    """The entry point. #4097 (ADR 0236, ledger 0908, line 1489): one handler
+    owns every failure below it that nothing else has reported. It prints
+    the failure at ERROR on stderr, with its traceback when the tool did not
+    name it itself (a ``RunFailed``), alerts the operator, closes the run
+    record when one is open, and returns 1. The refusals that already alert
+    where they happen still exit 1 there; a cancelled ``--select`` returns 0,
+    the operator's decision.
+    """
     parser = create_argument_parser()
     args = parser.parse_args()
 
@@ -1150,7 +1254,38 @@ def main():
     # ADR 0236 property 4 for failures this tool owns rather than a graph
     # node goes through the module attribute, which the test tiers replace.
     from assemblyzero.core import alert
-    alert.require_alert_channel("tools/run_implement_from_lld.py")
+    alert.require_alert_channel(ENTRY)
+
+    try:
+        return _main(args)
+    except Exception as exc:  # noqa: BLE001 - the one handler: reported and alerted below
+        named = isinstance(exc, RunFailed)
+        cause = str(exc) if named else f"{type(exc).__name__}: {exc}"
+        print(f"[implement] ERROR: {cause}", file=sys.stderr)
+        if not named:
+            traceback.print_exc(file=sys.stderr)
+        alert.alert_operator(
+            what="the implementation run failed",
+            where=f"{ENTRY} main",
+            cause=cause,
+            consequence=getattr(
+                exc, "consequence",
+                "the run crashed and exited 1; a worktree it cut is kept",
+            ),
+            repo=getattr(args, "resolved_repo", "") or (args.repo or ""),
+            issue=args.issue,
+        )
+        record = getattr(args, "run_record", None)
+        if record is not None:
+            # Idempotent: a path that closed the record first keeps its outcome.
+            record.finish("fail" if named else "halt", cause)
+        return 1
+
+
+def _main(args: argparse.Namespace):
+    """Everything ``main`` guards. Raises on every failure it does not
+    report where it happens."""
+    from assemblyzero.core import alert
 
     # Issue #773: Set API policy before any providers are created
     from assemblyzero.core.llm_provider import set_api_policy
@@ -1169,30 +1304,41 @@ def main():
     from assemblyzero.workflows.testing import TestingWorkflowState, build_testing_workflow
     from assemblyzero.workflows.testing.audit import get_repo_root
 
-    # Determine repo root (needed before --select)
+    # Determine repo root (needed before --select). Ledger 0908, lines 990
+    # and 996: both refusals printed on stdout and alerted no one.
     if args.repo:
         repo_root = Path(args.repo).resolve()
         if not repo_root.exists():
-            print(f"Error: Repository path does not exist: {repo_root}")
-            sys.exit(1)
+            raise RunFailed(
+                f"repository path does not exist: {repo_root}", consequence=NOTHING_RAN,
+            )
     else:
         try:
             repo_root = get_repo_root()
         except RuntimeError as e:
-            print(f"Error: {e}")
-            sys.exit(1)
+            raise RunFailed(
+                f"no --repo was given, and the working directory's repository "
+                f"cannot be found: {e}",
+                consequence=NOTHING_RAN,
+            ) from e
+    # The alert of a later failure names the repository the run resolved.
+    args.resolved_repo = str(repo_root)
 
-    # Handle --select: interactive LLD selection
+    # Handle --select: interactive LLD selection. Ledger 0908, line 1003:
+    # a missing LLD directory, no LLDs and a bad answer exited 0 here as if
+    # cancelled; select_approved_lld raises for them now, so None is only the
+    # operator cancelling.
     if args.select:
         selected = select_approved_lld(repo_root)
         if selected is None:
             sys.exit(0)
         args.issue = selected
 
-    # Validate issue number
+    # Validate issue number (ledger 0908, line 1008: stdout, no alert).
     if args.issue is None or args.issue <= 0:
-        print("Error: --issue must be a positive integer")
-        sys.exit(1)
+        raise RunFailed(
+            f"--issue must be a positive integer, not {args.issue}", consequence=NOTHING_RAN,
+        )
 
     # #4150: a real run lands through the fleet merge driver. Refuse here,
     # before the resume contract is consumed, a worktree is cut or a model is
@@ -1279,7 +1425,7 @@ def main():
             print("  Worktree: none (--no-worktree), the run would work in place")
         else:
             current = get_current_branch(repo_root)
-            base = args.base_branch or current or "(unreadable)"
+            base = args.base_branch or current
             print(
                 f"  Worktree would be cut at: {repo_root.parent / f'{repo_root.name}-{args.issue}'}"
             )
@@ -1300,6 +1446,17 @@ def main():
         print("[DRY RUN] Nothing was created, pushed or modified.")
         return 0
 
+    # Ledger 0908, line 1331: --resume with no checkpoint printed "starting
+    # fresh" and ran from the start. It refuses now, before the worktree is
+    # touched.
+    if args.resume:
+        reason = resume_checkpoint_refusal(
+            checkpoint_db_for_run(args.db_path, args.issue, bool(args.mock), repo_root),
+            args.issue,
+        )
+        if reason:
+            raise RunFailed(reason, consequence=NOTHING_RAN)
+
     # Handle worktree creation/detection (#1756 attempt-branch model:
     # ANY named integration branch — main or e.g. speedrun-attempt-N —
     # is a valid base; the worktree branch is carved from it and PRs
@@ -1315,22 +1472,21 @@ def main():
             # checkpoints as no-ops (#1756).
             print(f"Already on issue branch: {current_branch}")
         elif is_generated_work_branch(current_branch):
-            print(
-                f"ERROR: On '{current_branch}' — a generated work branch "
-                "for a different issue."
+            # Ledger 0908, line 1087: stdout and exit 1, no alert.
+            raise RunFailed(
+                f"{repo_root} is on '{current_branch}', a generated work branch "
+                f"for an issue other than #{args.issue}. Check out your "
+                "integration branch (e.g. main or speedrun-attempt-N) and re-run",
+                consequence=NOTHING_RAN,
             )
-            print(
-                "       Check out your integration branch (e.g. main or "
-                "speedrun-attempt-N) and re-run."
-            )
-            sys.exit(1)
         elif not current_branch or current_branch == "HEAD":
-            print("ERROR: Detached HEAD (or unreadable branch) in the target repo.")
-            print(
-                "       Check out your integration branch (e.g. main or "
-                "speedrun-attempt-N) and re-run."
+            # Ledger 0908, line 1096. An unreadable branch raises in
+            # get_current_branch with git's stderr (line 77).
+            raise RunFailed(
+                f"{repo_root} is on a detached HEAD. Check out your integration "
+                "branch (e.g. main or speedrun-attempt-N) and re-run",
+                consequence=NOTHING_RAN,
             )
-            sys.exit(1)
         else:
             # Named integration branch: carve the issue worktree from it.
             base_branch = args.base_branch or current_branch
@@ -1352,8 +1508,11 @@ def main():
                     detached=bool(args.mock),
                 )
                 if error:
-                    print(f"Error: {error}")
-                    sys.exit(1)
+                    # Ledger 0908, line 1123: stdout and exit 1, no alert.
+                    raise RunFailed(
+                        f"the worktree for issue #{args.issue} was not cut: {error}",
+                        consequence=NOTHING_RAN,
+                    )
                 print(f"Created worktree: {worktree_path}")
                 repo_root = worktree_path
 
@@ -1398,6 +1557,8 @@ def main():
     # a crash record if it dies, and what it left in place at the end.
     from assemblyzero.core.run_record import RunRecord
     record = RunRecord.start("impl", original_repo_root, args.issue)
+    # main's handler closes the record for a failure raised after this.
+    args.run_record = record
     # #3509: the status file sits beside the run's log, in the checkout's
     # gitignored data/, not at the root of a worktree the run removes.
     runs_dir = Path(original_repo_root) / "data" / "speedrun" / "runs"
@@ -1445,12 +1606,24 @@ def main():
 
         print(f"[implement] Loading {len(args.context)} context file(s)...")
         context_content, context_errors = load_context_files(args.context, repo_root)
-        for err in context_errors:
-            print(f"[implement] {err}")
-        if context_errors and not context_content:
-            print("[implement] ERROR: All context files failed validation")
-            record.finish("fail", "all context files failed validation")
-            sys.exit(1)
+        # Ledger 0908, lines 1181 and 1183: one rejected file printed and the
+        # run went on with the context that was left; all rejected printed
+        # on stdout and exited 1 with no alert. Any rejection stops the run:
+        # the operator named every file the prompts should carry.
+        if context_errors:
+            failed = len(context_errors)
+            reason = (
+                f"{failed} of {len(args.context)} context file(s) could not be "
+                "used: " + "; ".join(context_errors)
+            )
+            record.finish("fail", reason)
+            raise RunFailed(
+                reason,
+                consequence=(
+                    "nothing ran: the graph was not built and no model was called; "
+                    f"{repo_root} is kept as it is"
+                ),
+            )
         if context_content:
             print(f"[implement] Context loaded: {len(context_content):,} chars")
 
@@ -1461,9 +1634,15 @@ def main():
     try:
         profile = profile_from_args(args, original_repo_root, LEGACY_SEAT_FLAGS)
     except ValueError as e:
-        print(f"[implement] ERROR: model profile: {e}")
+        # Ledger 0908, line 1199: stdout and exit 1, no alert.
         record.finish("fail", f"model profile: {e}")
-        sys.exit(1)
+        raise RunFailed(
+            f"model profile: {e}",
+            consequence=(
+                "nothing ran: the graph was not built and no model was called; "
+                f"{repo_root} is kept as it is"
+            ),
+        ) from e
     print(describe(profile))
     # #3565: the run record opens with the profile; seats no state reaches
     # (triage, visual gate, contract fidelity) follow it.
@@ -1622,13 +1801,10 @@ def main():
                 "recursion_limit": 50,
             }
 
-            # Check for resume
+            # A --resume with no checkpoint refused before the worktree
+            # (resume_checkpoint_refusal), so one is there.
             if args.resume:
-                checkpoint = memory.get(config)
-                if checkpoint:
-                    print(f"Resuming from checkpoint for issue #{args.issue}...")
-                else:
-                    print(f"No checkpoint found for issue #{args.issue}, starting fresh...")
+                print(f"Resuming from checkpoint for issue #{args.issue}...")
 
             # Stream events
             for event in app.stream(initial_state, config):
@@ -1765,6 +1941,12 @@ def main():
         return 130
 
     except Exception as e:
+        if isinstance(e, RunFailed):
+            # #4097 (ledger 0908, line 961): the run's own record could not be
+            # written. main's handler reports it once, with its consequence.
+            _finalize_speedrun("fail", error_msg=str(e))
+            record.finish("fail", str(e))
+            raise
         # #4150 (ledger 0908, line 1458): both branches printed to stdout and
         # alerted no one.
         cause = f"{type(e).__name__}: {getattr(e, 'reason', None) or e}"
