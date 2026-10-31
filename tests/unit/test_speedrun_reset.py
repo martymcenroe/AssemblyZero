@@ -22,8 +22,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
 from speedrun_reset import (
     close_open_prs,
     current_branch,
-    delete_local_branches,
-    delete_remote_branches,
     relocate_lld_artifacts,
     remove_worktree,
     worktree_is_dirty,
@@ -40,86 +38,7 @@ def _completed(returncode=0, stdout="", stderr=""):
     )
 
 
-class TestBranchSweepIsAttemptBranchAware:
-
-    def test_never_deletes_the_checked_out_branch(self, tmp_path):
-        """
-        The attempt branch is what the run stands on. Even if it somehow
-        matched the issue glob, deleting it would cut the branch out from
-        under the attempt.
-        """
-        calls = []
-
-        def fake_run(cmd, cwd=None, check=False):
-            calls.append(cmd)
-            if cmd[:3] == ["git", "branch", "--list"]:
-                # Bare refnames: the sweep now passes
-                # --format=%(refname:short), so git emits no `* ` / `+ `
-                # decoration to parse (#1937).
-                return _completed(stdout="1234-lld\n1234-attempt\n")
-            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
-                return _completed(stdout="1234-attempt\n")
-            return _completed()
-
-        with patch("speedrun_reset._run", side_effect=fake_run):
-            deleted = delete_local_branches(tmp_path, 1234)
-
-        assert deleted == 1
-        deletions = [c for c in calls if c[:3] == ["git", "branch", "-d"]]
-        assert deletions == [["git", "branch", "-d", "1234-lld"]]
-
-    def test_impl_branch_issue_n_is_swept(self, tmp_path):
-        """#1862: the pipeline's issue-{N} impl branch is a candidate too."""
-        calls = []
-
-        def fake_run(cmd, cwd=None, check=False):
-            calls.append(cmd)
-            if cmd[:3] == ["git", "branch", "--list"]:
-                return _completed(stdout="  issue-7\n  7-lld\n")
-            if cmd[:2] == ["git", "rev-parse"]:
-                return _completed(stdout="hardening-run-11\n")
-            return _completed()
-
-        with patch("speedrun_reset._run", side_effect=fake_run):
-            deleted = delete_local_branches(tmp_path, 7)
-
-        assert deleted == 2
-        list_call = next(c for c in calls if c[:3] == ["git", "branch", "--list"])
-        assert "issue-7" in list_call
-        deleted_branches = [c[3] for c in calls if c[:3] == ["git", "branch", "-d"]]
-        assert "issue-7" in deleted_branches
-        assert "7-lld" in deleted_branches
-
-    def test_attempt_branch_does_not_match_the_issue_glob(self, tmp_path):
-        """Enumeration is scoped to `{issue}-*` and `issue-{N}` (#1862);
-        `attempt-test-1` is not swept."""
-        with patch("speedrun_reset._run", return_value=_completed(stdout="")) as run:
-            delete_local_branches(tmp_path, 1234)
-        listing = run.call_args_list[0].args[0]
-        assert listing == [
-            "git", "branch", "--list", "--format=%(refname:short)",
-            "1234-*", "issue-1234",
-        ]
-
-    def test_unmerged_branch_is_left_alone_without_suggesting_force_delete(
-        self, tmp_path, capsys
-    ):
-        def fake_run(cmd, cwd=None, check=False):
-            if cmd[:3] == ["git", "branch", "--list"]:
-                return _completed(stdout="  1234-implementation\n")
-            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
-                return _completed(stdout="attempt-test-1\n")
-            if cmd[:3] == ["git", "branch", "-d"]:
-                return _completed(returncode=1, stderr="not fully merged")
-            return _completed()
-
-        with patch("speedrun_reset._run", side_effect=fake_run):
-            deleted = delete_local_branches(tmp_path, 1234)
-
-        assert deleted == 0
-        out = capsys.readouterr().out
-        assert "unmerged commits" in out
-        assert "-D" not in out, "must never advertise a force-delete to the operator"
+class TestBranchSweepNeverForceDeletes:
 
     def test_source_contains_no_force_delete_instruction(self):
         """
@@ -334,80 +253,3 @@ class TestCurrentBranch:
     def test_returns_empty_string_when_undetermined(self, tmp_path):
         with patch("speedrun_reset._run", return_value=_completed(returncode=128)):
             assert current_branch(tmp_path) == ""
-
-
-class TestRemoteBranchSweep:
-    """#1885: the wipe must finish on origin, not just locally."""
-
-    def _ls_remote(self, *names):
-        return "\n".join(
-            f"{'a' * 40}\trefs/heads/{name}" for name in names
-        ) + "\n"
-
-    def test_deletes_pipeline_branches_present_on_origin(self, tmp_path):
-        calls = []
-
-        def fake_run(cmd, cwd=None, check=False):
-            calls.append(cmd)
-            if cmd[:3] == ["git", "branch", "--list"]:
-                return _completed(stdout="  7-lld\n")
-            if cmd[:2] == ["git", "ls-remote"]:
-                return _completed(stdout=self._ls_remote("issue-7", "7-lld", "main"))
-            if cmd[:2] == ["git", "rev-parse"]:
-                return _completed(stdout="hardening-run-12\n")
-            return _completed()
-
-        with patch("speedrun_reset._run", side_effect=fake_run):
-            deleted = delete_remote_branches(tmp_path, 7)
-
-        assert deleted == 2
-        pushed = [c[4] for c in calls if c[:4] == ["git", "push", "origin", "--delete"]]
-        assert sorted(pushed) == ["7-lld", "issue-7"]
-        assert "main" not in pushed
-
-    def test_absent_ref_is_not_an_error(self, tmp_path):
-        """A partially-cleaned repo is the common case; a single combined
-        push --delete aborts entirely when one ref is already gone."""
-
-        def fake_run(cmd, cwd=None, check=False):
-            if cmd[:3] == ["git", "branch", "--list"]:
-                return _completed(stdout="")
-            if cmd[:2] == ["git", "ls-remote"]:
-                return _completed(stdout=self._ls_remote("issue-7"))
-            if cmd[:2] == ["git", "rev-parse"]:
-                return _completed(stdout="hardening-run-12\n")
-            return _completed()
-
-        with patch("speedrun_reset._run", side_effect=fake_run):
-            assert delete_remote_branches(tmp_path, 7) == 1
-
-    def test_never_deletes_the_checked_out_attempt_branch(self, tmp_path):
-        calls = []
-
-        def fake_run(cmd, cwd=None, check=False):
-            calls.append(cmd)
-            if cmd[:3] == ["git", "branch", "--list"]:
-                return _completed(stdout="")
-            if cmd[:2] == ["git", "ls-remote"]:
-                return _completed(stdout=self._ls_remote("issue-7", "hardening-run-12"))
-            if cmd[:2] == ["git", "rev-parse"]:
-                return _completed(stdout="hardening-run-12\n")
-            return _completed()
-
-        with patch("speedrun_reset._run", side_effect=fake_run):
-            delete_remote_branches(tmp_path, 7)
-
-        pushed = [c[4] for c in calls if c[:4] == ["git", "push", "origin", "--delete"]]
-        assert "hardening-run-12" not in pushed
-
-    def test_unreachable_remote_is_a_warning_not_a_crash(self, tmp_path, capsys):
-        def fake_run(cmd, cwd=None, check=False):
-            if cmd[:3] == ["git", "branch", "--list"]:
-                return _completed(stdout="")
-            if cmd[:2] == ["git", "ls-remote"]:
-                return _completed(returncode=128, stderr="could not read from remote")
-            return _completed()
-
-        with patch("speedrun_reset._run", side_effect=fake_run):
-            assert delete_remote_branches(tmp_path, 7) == 0
-        assert "skipping remote sweep" in capsys.readouterr().out

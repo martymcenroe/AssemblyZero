@@ -5,9 +5,8 @@ THIS SCRIPT MUST BE RUN BY THE USER, NOT BY AN AGENT (ADR-0216). It decrypts
 the classic PAT into this process's heap; an agent-spawned process would be
 the agent's child and defeat that guarantee.
 
-The general form of `upgrade_boostgauge_auto_reviewer.py` and
-`upgrade_comp_environ_auto_reviewer.py`, which each did this for one
-repository. An OLD-format caller (`name: auto-reviewer`, `secrets: inherit`,
+The general form of two one-shots, since deleted (#3154), which each did
+this for one repository. An OLD-format caller (`name: auto-reviewer`, `secrets: inherit`,
 no `permissions:` block, no `required_checks` input) hits `startup_failure`
 on every PR against the reusable workflow, so Cerberus never approves and
 every PR in the repository is blocked. `deploy_auto_reviewer_workflow.py`

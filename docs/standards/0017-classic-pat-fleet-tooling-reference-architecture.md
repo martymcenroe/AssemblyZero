@@ -2,6 +2,8 @@
 
 A cross-fleet playbook for writing Python tools that perform privileged GitHub operations using the in-process classic PAT pattern (ADR-0216). Derived from production experience with `sentinel_migrate.py`, `fleet_delete_pr_sentinel.py`, `merge_aletheia_603_audit_gate.py`, `fleet_set_delete_branch_on_merge.py`, and `new_repo.py`.
 
+`merge_aletheia_603_audit_gate.py`, cited below, was a one-shot and was deleted with the others once its job was done (#3154). Its last version stays readable: `git show fe45de4f:tools/merge_aletheia_603_audit_gate.py`.
+
 This is not prescriptive about specific algorithms. It captures **patterns that worked**, **patterns that didn't**, and **decisions you'll face early** that are expensive to change later.
 
 ---

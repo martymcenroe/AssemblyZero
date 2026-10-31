@@ -1916,26 +1916,26 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/dependabot_morning_status.py:120` | empty count output | prints "?" | loud, logged, stops | raise on empty output |
 | `tools/dependabot_morning_status.py:134` | gh search (closed PRs) fails | stdout line, exit 0 | loud, stops, alerts | ERROR and exit non-zero |
 | `tools/dependabot_morning_status.py:177` | any section failed | exit 0 always | stops, alerts | track failures and exit non-zero |
-| `tools/deploy_auto_reviewer_fleet.py:79` | gh call times out | returns (1, "TIMEOUT"); callers treat any rc!=0 inconsistently (e.g. as "no protection") | loud, logged, stops, alerts | raise TimeoutExpired with the command |
-| `tools/deploy_auto_reviewer_fleet.py:81` | gh CLI not installed | returns (1, msg) | loud, stops, alerts | raise |
-| `tools/deploy_auto_reviewer_fleet.py:86` | gh auth status fails | rc ignored; token type "unknown" | loud, logged, stops | check rc and raise |
-| `tools/deploy_auto_reviewer_fleet.py:103` | repo listing fails | stdout ERROR, returns [], then exit 1 | loud, alerts | ERROR to stderr and alert_operator |
-| `tools/deploy_auto_reviewer_fleet.py:129` | sha lookup fails for a reason other than 404 | treated as new file, PUT without sha | loud, logged, stops | distinguish 404 from error and raise |
-| `tools/deploy_auto_reviewer_fleet.py:133` | DELETE enforce_admins fails | result ignored | loud, logged, stops, alerts | check rc and stop |
-| `tools/deploy_auto_reviewer_fleet.py:149` | re-enabling enforce_admins fails | result ignored; protection silently left weakened | loud, logged, stops, alerts | check rc, ERROR and alert_operator |
-| `tools/deploy_auto_reviewer_fleet.py:168` | GET protection fails for any reason | treated as "no protection", existing protection overwritten from scratch | loud, logged, stops, alerts | only 404 means absent; raise otherwise |
-| `tools/deploy_auto_reviewer_fleet.py:195` | protection response unparseable | (False, msg) recorded, stdout, exit 2 | loud, alerts | ERROR to stderr and alert_operator |
-| `tools/deploy_auto_reviewer_fleet.py:317` | token type unknown | WARNING, proceeds | loud, stops, alerts | refuse and exit non-zero |
-| `tools/deploy_auto_reviewer_fleet.py:324` | no repos found | exit 1 with no failure message | loud, logged, alerts | ERROR with cause and alert_operator |
-| `tools/deploy_auto_reviewer_fleet.py:336` | default branch missing | defaults to "main" | loud, logged, stops | raise when the default branch is unknown |
-| `tools/deploy_auto_reviewer_fleet.py:412` | workflow or review failures | exit 2 after stdout summary | loud, alerts | ERROR to stderr and alert_operator |
-| `tools/deploy_auto_reviewer_fleet.py:416` | unhandled exceptions (report write) | traceback, no alert | alerts | wrap main with an alert_operator handler |
-| `tools/deploy_auto_reviewer_poll_fix.py:285` | HTTP 404 | returns (404, {}); callers at 322 and 347 do not check status and crash on KeyError | logged, alerts | callers must check status and raise with context |
-| `tools/deploy_auto_reviewer_poll_fix.py:289` | non-404 HTTP error | SystemExit with detail on stderr, exit 1 | alerts | call alert_operator before exiting |
-| `tools/deploy_auto_reviewer_poll_fix.py:302` | payload verification fails | SystemExit on stderr | alerts | call alert_operator |
-| `tools/deploy_auto_reviewer_poll_fix.py:304` | payload has CRLF | SystemExit on stderr | alerts | call alert_operator |
-| `tools/deploy_auto_reviewer_poll_fix.py:323` | main ref GET returned 404 | KeyError traceback with no context | logged, alerts | check status and raise with detail |
-| `tools/deploy_auto_reviewer_poll_fix.py:363` | URLError and other exceptions | traceback, no alert | alerts | wrap main with an alert_operator handler |
+| `tools/deploy_auto_reviewer_fleet.py:79` | gh call times out | returns (1, "TIMEOUT"); callers treat any rc!=0 inconsistently (e.g. as "no protection") | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:81` | gh CLI not installed | returns (1, msg) | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:86` | gh auth status fails | rc ignored; token type "unknown" | loud, logged, stops | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:103` | repo listing fails | stdout ERROR, returns [], then exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:129` | sha lookup fails for a reason other than 404 | treated as new file, PUT without sha | loud, logged, stops | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:133` | DELETE enforce_admins fails | result ignored | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:149` | re-enabling enforce_admins fails | result ignored; protection silently left weakened | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:168` | GET protection fails for any reason | treated as "no protection", existing protection overwritten from scratch | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:195` | protection response unparseable | (False, msg) recorded, stdout, exit 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:317` | token type unknown | WARNING, proceeds | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:324` | no repos found | exit 1 with no failure message | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:336` | default branch missing | defaults to "main" | loud, logged, stops | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:412` | workflow or review failures | exit 2 after stdout summary | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_fleet.py:416` | unhandled exceptions (report write) | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_poll_fix.py:285` | HTTP 404 | returns (404, {}); callers at 322 and 347 do not check status and crash on KeyError | logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_poll_fix.py:289` | non-404 HTTP error | SystemExit with detail on stderr, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_poll_fix.py:302` | payload verification fails | SystemExit on stderr | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_poll_fix.py:304` | payload has CRLF | SystemExit on stderr | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_poll_fix.py:323` | main ref GET returned 404 | KeyError traceback with no context | logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_auto_reviewer_poll_fix.py:363` | URLError and other exceptions | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/deploy_auto_reviewer_workflow.py:116` | repo GET network error | returns None; cause discarded; caller prints generic stdout ERROR | loud, logged, alerts | return/raise with cause and log ERROR to stderr |
 | `tools/deploy_auto_reviewer_workflow.py:118` | repo GET non-2xx | returns None; status discarded | loud, logged, alerts | raise with status and body |
 | `tools/deploy_auto_reviewer_workflow.py:132` | workflow file GET network error | (None, None); cause discarded | loud, logged, alerts | raise with cause |
@@ -1959,15 +1959,15 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/deploy_auto_reviewer_workflow.py:603` | workflow state unknown | stdout, repo counted failed | loud, logged, alerts | stderr ERROR with cause and alert_operator |
 | `tools/deploy_auto_reviewer_workflow.py:625` | deploy failed | stdout | loud, alerts | ERROR to stderr and alert_operator |
 | `tools/deploy_auto_reviewer_workflow.py:638` | failures occurred | exit 2, no alert | alerts | call alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:168` | file-on-main GET fails | HTTPError traceback, exit 1 | alerts | entry handler calls alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:180` | branch GET fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:193` | file-on-branch GET fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:204` | open PR query fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:218` | main head GET fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:229` | branch create fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:246` | Contents PUT fails (branch already created) | HTTPError traceback, partial state | alerts | entry handler calls alert_operator naming partial state |
-| `tools/deploy_boostgauge_landing_workflow.py:261` | PR create fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/deploy_boostgauge_landing_workflow.py:320` | any exception | traceback, no alert | alerts | wrap main with an alert_operator handler |
+| `tools/deploy_boostgauge_landing_workflow.py:168` | file-on-main GET fails | HTTPError traceback, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:180` | branch GET fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:193` | file-on-branch GET fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:204` | open PR query fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:218` | main head GET fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:229` | branch create fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:246` | Contents PUT fails (branch already created) | HTTPError traceback, partial state | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:261` | PR create fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/deploy_boostgauge_landing_workflow.py:320` | any exception | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/enable_wikis.py:57` | gh repo list fails | CalledProcessError traceback; captured stderr never shown | logged, alerts | catch, log stderr at ERROR, alert, re-raise |
 | `tools/enable_wikis.py:63` | unexpected gh output line | ValueError traceback | logged, alerts | raise with the offending line |
 | `tools/enable_wikis.py:70` | network exception mid-fleet | unhandled, loop aborts, partial run, no summary | logged, alerts | catch per repo, ERROR, alert, exit non-zero |
@@ -1981,15 +1981,15 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/fix_gemini_ack.py:192` | PR never became mergeable | stdout status, not counted as failure, exit 0 | loud, stops, alerts | count as failure and exit non-zero |
 | `tools/fix_gemini_ack.py:228` | any per-repo failure | stdout ERROR, continues | loud, alerts | ERROR to stderr and alert_operator |
 | `tools/fix_gemini_ack.py:235` | failures occurred | exit 1, no alert | alerts | call alert_operator |
-| `tools/fix_requires_python.py:64` | gh auth token fails | CalledProcessError traceback, stderr hidden | logged, alerts | log stderr at ERROR and alert |
-| `tools/fix_requires_python.py:98` | pyproject GET fails | HTTPError aborts discovery | alerts | entry handler calls alert_operator |
-| `tools/fix_requires_python.py:114` | normalizer output has no requires-python | silently returns the invalid original spec | loud, logged, stops, alerts | raise when normalization fails |
-| `tools/fix_requires_python.py:129` | repo listing page fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/fix_requires_python.py:156` | mergeable poll fails | HTTPError caught per repo | alerts | call alert_operator |
-| `tools/fix_requires_python.py:177` | normalizer left a known-invalid caret spec unchanged | reported as skipped, success | loud, logged, stops, alerts | treat as failure and raise |
-| `tools/fix_requires_python.py:207` | PR never mergeable | not counted as failure, exit 0 | loud, stops, alerts | count as failure |
-| `tools/fix_requires_python.py:245` | any per-repo failure | stdout ERROR, continues | loud, alerts | ERROR to stderr and alert_operator |
-| `tools/fix_requires_python.py:252` | failures occurred | exit 1, no alert | alerts | call alert_operator |
+| `tools/fix_requires_python.py:64` | gh auth token fails | CalledProcessError traceback, stderr hidden | logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:98` | pyproject GET fails | HTTPError aborts discovery | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:114` | normalizer output has no requires-python | silently returns the invalid original spec | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:129` | repo listing page fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:156` | mergeable poll fails | HTTPError caught per repo | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:177` | normalizer left a known-invalid caret spec unchanged | reported as skipped, success | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:207` | PR never mergeable | not counted as failure, exit 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:245` | any per-repo failure | stdout ERROR, continues | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_requires_python.py:252` | failures occurred | exit 1, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/fleet_set_permission_mode.py:130` | code search fails | HTTPError traceback | alerts | entry handler calls alert_operator |
 | `tools/fleet_set_permission_mode.py:131` | search results exceed one page or are incomplete | silently truncated to first page | loud, logged, stops | paginate and raise on incomplete_results |
 | `tools/fleet_set_permission_mode.py:171` | .unleashed.json malformed | returns False (not set) | loud, logged, stops | raise |
@@ -2013,34 +2013,34 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/harvest_reviewer_idioms.py:72` | no readiness verdicts | non-ERROR stderr line, exit 2 | loud, alerts | ERROR line and alert_operator |
 | `tools/harvest_reviewer_idioms.py:81` | verdict file unreadable | skipped silently, still counted as scanned | loud, logged, stops, alerts | raise with path |
 | `tools/heal_report.py:156` | ledger missing/unreadable or --repo wrong | treated as an empty ledger, exit 0 | loud, stops, alerts | distinguish missing file from empty and exit non-zero on missing |
-| `tools/hermes_add_ci_workflow.py:170` | file-on-main GET fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:181` | open PR query fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:194` | main head GET fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:205` | branch create returns 422 for any validation reason | assumed "already exists", continues | loud, logged, stops | confirm the branch exists before reusing |
-| `tools/hermes_add_ci_workflow.py:209` | branch create fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:224` | Contents PUT fails | HTTPError traceback, partial state | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:234` | PR create fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:262` | mergeable poll fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:280` | merge fails | HTTPError traceback after PR opened | alerts | entry handler calls alert_operator |
-| `tools/hermes_add_ci_workflow.py:309` | resumed PR not mergeable | stdout, exit 1 | loud, alerts | ERROR to stderr and alert_operator |
-| `tools/hermes_add_ci_workflow.py:333` | new PR not mergeable | stdout, exit 1 | loud, alerts | ERROR to stderr and alert_operator |
-| `tools/hermes_add_ci_workflow.py:345` | any exception | traceback, no alert | alerts | wrap main with an alert_operator handler |
-| `tools/land_aletheia_ci_oidc.py:100` | git show of the local branch fails | CalledProcessError traceback, captured stderr hidden | logged, alerts | log stderr at ERROR and alert |
-| `tools/land_aletheia_ci_oidc.py:110` | branch head GET fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:121` | 422 for any validation reason | assumed "already exists" | loud, logged, stops | confirm the ref exists before reusing |
-| `tools/land_aletheia_ci_oidc.py:124` | branch create fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:132` | file sha GET fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:148` | Contents PUT fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:164` | existing PR lookup fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:165` | 422 "already exists" but no open PR listed | IndexError with no context | logged, alerts | check emptiness and raise with detail |
-| `tools/land_aletheia_ci_oidc.py:168` | PR create fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:177` | mergeable poll fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:207` | merge fails | HTTPError traceback | alerts | entry handler calls alert_operator |
-| `tools/land_aletheia_ci_oidc.py:214` | remote branch delete returns an error status | response never checked | loud, logged, alerts | check status and report ERROR |
-| `tools/land_aletheia_ci_oidc.py:218` | remote branch delete network error | `pass`, swallowed | loud, logged, stops, alerts | ERROR, alert, exit non-zero |
-| `tools/land_aletheia_ci_oidc.py:231` | sentinel missing from payload | stdout ERROR, exit 1 | loud, alerts | write to stderr and alert_operator |
-| `tools/land_aletheia_ci_oidc.py:258` | PR not mergeable | stdout, exit 1 | loud, alerts | ERROR to stderr and alert_operator |
-| `tools/land_aletheia_ci_oidc.py:269` | any exception | traceback, no alert | alerts | wrap main with an alert_operator handler |
+| `tools/hermes_add_ci_workflow.py:170` | file-on-main GET fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:181` | open PR query fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:194` | main head GET fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:205` | branch create returns 422 for any validation reason | assumed "already exists", continues | loud, logged, stops | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:209` | branch create fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:224` | Contents PUT fails | HTTPError traceback, partial state | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:234` | PR create fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:262` | mergeable poll fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:280` | merge fails | HTTPError traceback after PR opened | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:309` | resumed PR not mergeable | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:333` | new PR not mergeable | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_add_ci_workflow.py:345` | any exception | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:100` | git show of the local branch fails | CalledProcessError traceback, captured stderr hidden | logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:110` | branch head GET fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:121` | 422 for any validation reason | assumed "already exists" | loud, logged, stops | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:124` | branch create fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:132` | file sha GET fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:148` | Contents PUT fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:164` | existing PR lookup fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:165` | 422 "already exists" but no open PR listed | IndexError with no context | logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:168` | PR create fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:177` | mergeable poll fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:207` | merge fails | HTTPError traceback | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:214` | remote branch delete returns an error status | response never checked | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:218` | remote branch delete network error | `pass`, swallowed | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:231` | sentinel missing from payload | stdout ERROR, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:258` | PR not mergeable | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_oidc.py:269` | any exception | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/model_scorecard.py:45` | model has no known pricing | invented default price used silently | loud, logged, stops | raise on an unknown model |
 | `tools/model_scorecard.py:56` | raw_response has no token counts | zeros reported as real counts | loud, logged, stops | raise or mark the entry unmeasured |
 | `tools/model_scorecard.py:98` | logs directory missing | no entries; "No data found", exit 0 | loud, stops, alerts | raise when the directory is missing |
@@ -2264,29 +2264,29 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/factory_report.py:97` | --since unparseable | argparse error on stderr, exit 2 | alerts | Alert before exiting. |
 | `tools/factory_report.py:100` | building the report raises | unhandled, no alert | alerts | Catch at main, alert, exit 1. |
 | `tools/factory_report.py:115` | requested save fails | warning on stdout, exit 0 | loud, logged, stops, alerts | ERROR to stderr, alert, exit 1. |
-| `tools/hermes_pin_workflow_shas.py:182` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | Catch at main, alert_operator, exit 1. |
-| `tools/hermes_pin_workflow_shas.py:231` | branch create returns 422 for any reason | assumed to exist and reused without checking its base | loud, logged, stops, alerts | Check the 422 body and the branch head before reusing. |
-| `tools/hermes_pin_workflow_shas.py:303` | mergeable poll times out | returns last state; caller prints to stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/hermes_pin_workflow_shas.py:335` | file on main differs from expectation | stderr, exit 2 | alerts | Call alert_operator. |
-| `tools/hermes_pin_workflow_shas.py:359` | PR not mergeable | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/hermes_pin_workflow_shas.py:389` | PR not mergeable | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/hermes_pin_workflow_shas.py:406` | post-merge verification fails | stderr, exit 1 | alerts | Call alert_operator. |
-| `tools/land_2283_ci_tiers.py:267` | file absent on main | returns (None, None); caller treats it as a create | compliant | none |
-| `tools/land_2283_ci_tiers.py:269` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | Catch at main, alert, exit 1. |
-| `tools/land_2283_ci_tiers.py:291` | branch already exists | reused without checking it is based on current main | logged, stops, alerts | Refuse unless the branch head equals main or the expected commit. |
-| `tools/land_2283_ci_tiers.py:356` | PR dirty | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/land_2283_ci_tiers.py:359` | poll budget runs out | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/land_2283_ci_tiers.py:383` | branch delete returns 422 | reported as deleted | loud, logged, stops, alerts | Treat only 204 (and 404) as success. |
-| `tools/land_2283_ci_tiers.py:414` | embed is stale | stdout, exit 2 | loud, alerts | ERROR to stderr and alert. |
-| `tools/land_career_test_ci.py:114` | contents GET returns a non-200, non-404, non-error status | treated as file absent | loud, logged, stops, alerts | Raise on any status other than 200 or 404. |
-| `tools/land_career_test_ci.py:123` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | Catch at main, alert, exit 1. |
-| `tools/land_career_test_ci.py:134` | branch exists | reused without checking its base | logged, stops, alerts | Verify the branch head before reuse. |
-| `tools/land_career_test_ci.py:212` | branch delete returns 422 | reported as cleaned up | loud, logged, stops, alerts | Treat only 204 (and 404) as success. |
-| `tools/land_career_test_ci.py:238` | PR dirty or poll budget runs out | stderr, exit 1 | alerts | Call alert_operator. |
-| `tools/land_polybolos_ci_workflow.py:201` | file absent on branch | returns None; caller creates instead of updating | compliant | none |
-| `tools/land_polybolos_ci_workflow.py:203` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | Catch at main, alert, exit 1. |
-| `tools/land_polybolos_ci_workflow.py:247` | no protection on main | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/land_polybolos_ci_workflow.py:252` | required status checks off | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
+| `tools/hermes_pin_workflow_shas.py:182` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_pin_workflow_shas.py:231` | branch create returns 422 for any reason | assumed to exist and reused without checking its base | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_pin_workflow_shas.py:303` | mergeable poll times out | returns last state; caller prints to stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_pin_workflow_shas.py:335` | file on main differs from expectation | stderr, exit 2 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_pin_workflow_shas.py:359` | PR not mergeable | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_pin_workflow_shas.py:389` | PR not mergeable | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/hermes_pin_workflow_shas.py:406` | post-merge verification fails | stderr, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_2283_ci_tiers.py:267` | file absent on main | returns (None, None); caller treats it as a create | compliant | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_2283_ci_tiers.py:269` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_2283_ci_tiers.py:291` | branch already exists | reused without checking it is based on current main | logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_2283_ci_tiers.py:356` | PR dirty | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_2283_ci_tiers.py:359` | poll budget runs out | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_2283_ci_tiers.py:383` | branch delete returns 422 | reported as deleted | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_2283_ci_tiers.py:414` | embed is stale | stdout, exit 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_test_ci.py:114` | contents GET returns a non-200, non-404, non-error status | treated as file absent | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_test_ci.py:123` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_test_ci.py:134` | branch exists | reused without checking its base | logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_test_ci.py:212` | branch delete returns 422 | reported as cleaned up | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_test_ci.py:238` | PR dirty or poll budget runs out | stderr, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_polybolos_ci_workflow.py:201` | file absent on branch | returns None; caller creates instead of updating | compliant | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_polybolos_ci_workflow.py:203` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_polybolos_ci_workflow.py:247` | no protection on main | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_polybolos_ci_workflow.py:252` | required status checks off | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/land_staged_workflow.py:112` | file absent | returns None; every caller handles None explicitly | compliant | none |
 | `tools/land_staged_workflow.py:137` | staged file not on main | message to stderr, exit 1 | alerts | Call alert_operator before exiting. |
 | `tools/land_staged_workflow.py:181` | branch exists | reused without checking its base | logged, stops, alerts | Verify the branch head before reuse. |
@@ -2295,11 +2295,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/land_staged_workflow.py:351` | PR never mergeable | caller prints to stderr, exit 1 | alerts | Call alert_operator. |
 | `tools/land_staged_workflow.py:371` | branch delete returns 422 | reported as cleaned up | loud, logged, stops, alerts | Treat only 204 (and 404) as success. |
 | `tools/land_staged_workflow.py:466` | installed workflow concludes red | stderr, exit 1 | alerts | Call alert_operator. |
-| `tools/merge_aletheia_603_audit_gate.py:239` | branch delete returns 422 | reported as already deleted | loud, logged, stops, alerts | Treat only 204 (and 404) as success. |
-| `tools/merge_aletheia_603_audit_gate.py:306` | PR creation fails | prints cleanup note to stdout, re-raises | loud, alerts | Print to stderr and alert before re-raising. |
-| `tools/merge_aletheia_603_audit_gate.py:342` | local file missing | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/merge_aletheia_603_audit_gate.py:357` | any landing step fails | stdout FATAL without exception type, exit 2 | loud, logged, alerts | ERROR to stderr with type and step, alert. |
-| `tools/merge_aletheia_603_audit_gate.py:367` | PR #584 nudge fails | WARNING on stdout, exit 0 | loud, logged, stops, alerts | ERROR to stderr, alert, exit non-zero. |
+| `tools/merge_aletheia_603_audit_gate.py:239` | branch delete returns 422 | reported as already deleted | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/merge_aletheia_603_audit_gate.py:306` | PR creation fails | prints cleanup note to stdout, re-raises | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/merge_aletheia_603_audit_gate.py:342` | local file missing | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/merge_aletheia_603_audit_gate.py:357` | any landing step fails | stdout FATAL without exception type, exit 2 | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/merge_aletheia_603_audit_gate.py:367` | PR #584 nudge fails | WARNING on stdout, exit 0 | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/merge_sentinel_permissions_prs.py:73` | more than 100 matching PRs | list silently truncated | logged, stops, alerts | Fail when the count equals the limit. |
 | `tools/merge_sentinel_permissions_prs.py:81` | gh search fails | stdout ERROR, empty list; main prints "No PRs to merge. Done." and exits 0 | loud, stops, alerts | Raise, alert, exit 1. |
 | `tools/merge_sentinel_permissions_prs.py:86` | search output not JSON | stdout ERROR, empty list, exit 0 | loud, stops, alerts | Raise, alert, exit 1. |
@@ -2307,9 +2307,9 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/merge_sentinel_permissions_prs.py:160` | merge fails | recorded, next PR processed, exit 2 | loud, alerts | ERROR to stderr and alert. |
 | `tools/merge_sentinel_permissions_prs.py:165` | enforce_admins NOT restored | error appended, printed to stdout, batch continues to other repos | loud, stops, alerts | ERROR to stderr, alert immediately, stop the batch. |
 | `tools/merge_sentinel_permissions_prs.py:297` | search record lacks repository or number | defaults to unknown/0 and calls the API on them | loud, logged, stops, alerts | Raise on a malformed record. |
-| `tools/migrate_lineage_flat_to_run_scoped.py:67` | repo has no docs/lineage (wrong path) | reported "[OK] no migration needed", exit 0 | loud, logged, stops, alerts | Fail when docs/lineage is absent. |
-| `tools/migrate_lineage_flat_to_run_scoped.py:86` | a move fails partway | unhandled, partial migration, no alert | alerts | Catch, report moved and pending files, alert, exit 1. |
-| `tools/migrate_lineage_flat_to_run_scoped.py:114` | bad --repo | stdout, exit 2 | loud, alerts | ERROR to stderr and alert. |
+| `tools/migrate_lineage_flat_to_run_scoped.py:67` | repo has no docs/lineage (wrong path) | reported "[OK] no migration needed", exit 0 | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/migrate_lineage_flat_to_run_scoped.py:86` | a move fails partway | unhandled, partial migration, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/migrate_lineage_flat_to_run_scoped.py:114` | bad --repo | stdout, exit 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/new_repo.py:49` | deploy_cerberus_secrets import fails | swallowed; names stay undefined unless the next fallback runs, NameError later | loud, logged, stops, alerts | Let the import fail or re-import in the handler. |
 | `tools/new_repo.py:409` | dup2 of stdin fails | returns False; the caller ignores it | loud, logged, stops, alerts | Raise; stdin detachment is a security property. |
 | `tools/new_repo.py:466` | repo lookup returns 404 | returns None, documented; other failures raise RuntimeError | compliant | none |
@@ -2439,12 +2439,12 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/update-doc-refs.py:219` | file update fails | stdout, returns 0, run exits 0 | loud, logged, stops, alerts | Raise, alert, exit 1. |
 | `tools/update-doc-refs.py:261` | bad project path | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
 | `tools/update-doc-refs.py:278` | report write fails | unhandled, no alert | alerts | Catch at main, alert, exit 1. |
-| `tools/upgrade_boostgauge_auto_reviewer.py:134` | workflow file absent | (None, None); caller refuses with exit 1 | compliant | none |
-| `tools/upgrade_boostgauge_auto_reviewer.py:150` | rulesets endpoint 404 | empty list meaning no rulesets, documented | compliant | none |
-| `tools/upgrade_boostgauge_auto_reviewer.py:253` | contents PUT fails | stdout detail, then raise_for_status; finally restores; traceback, no alert | loud, alerts | Catch at main, alert, exit 1. |
-| `tools/upgrade_boostgauge_auto_reviewer.py:312` | file absent | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/upgrade_boostgauge_auto_reviewer.py:358` | ruleset bypass restore fails | WARNING on stdout, script continues and exits 0 with admin bypass left in place | loud, logged, stops, alerts | ERROR to stderr, alert, exit non-zero. |
-| `tools/upgrade_boostgauge_auto_reviewer.py:368` | enforce_admins restore fails | WARNING on stdout, exit 0 with protection weakened | loud, logged, stops, alerts | ERROR to stderr, alert, exit non-zero. |
+| `tools/upgrade_boostgauge_auto_reviewer.py:134` | workflow file absent | (None, None); caller refuses with exit 1 | compliant | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_boostgauge_auto_reviewer.py:150` | rulesets endpoint 404 | empty list meaning no rulesets, documented | compliant | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_boostgauge_auto_reviewer.py:253` | contents PUT fails | stdout detail, then raise_for_status; finally restores; traceback, no alert | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_boostgauge_auto_reviewer.py:312` | file absent | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_boostgauge_auto_reviewer.py:358` | ruleset bypass restore fails | WARNING on stdout, script continues and exits 0 with admin bypass left in place | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_boostgauge_auto_reviewer.py:368` | enforce_admins restore fails | WARNING on stdout, exit 0 with protection weakened | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/verdict-analyzer.py:67` | registry not found | falls back to scanning the cwd | loud, logged, stops, alerts | Refuse without a registry or --repos. |
 | `tools/verdict-analyzer.py:88` | a verdict fails to parse or store | logger.error, continues, exit 0 | stops, alerts | Raise, alert, exit 1. |
 | `tools/verdict-analyzer.py:119` | template missing | ERROR log, return 1 | alerts | Call alert_operator. |
@@ -2455,10 +2455,10 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/verify_gpg_agent_ttl.py:79` | malformed conf line | skipped; the directive then reads as missing and FAILs | compliant | none |
 | `tools/verify_gpg_agent_ttl.py:94` | gpgconf --list-options fails | traceback, no alert | logged, alerts | Catch, die() with stderr, alert. |
 | `tools/verify_gpg_agent_ttl.py:156` | TTL non-compliant | remediation on stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/widen_boostgauge_auto_reviewer_trigger.py:85` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | Catch at main, alert, exit 1. |
-| `tools/widen_boostgauge_auto_reviewer_trigger.py:96` | file shape unexpected | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
-| `tools/widen_boostgauge_auto_reviewer_trigger.py:123` | branch exists | reused without checking its base | logged, stops, alerts | Verify the branch head before reuse. |
-| `tools/widen_boostgauge_auto_reviewer_trigger.py:170` | mergeable poll times out | stdout, exit 1 | loud, alerts | ERROR to stderr and alert. |
+| `tools/widen_boostgauge_auto_reviewer_trigger.py:85` | any GitHub REST call fails | HTTPError ends the process, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/widen_boostgauge_auto_reviewer_trigger.py:96` | file shape unexpected | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/widen_boostgauge_auto_reviewer_trigger.py:123` | branch exists | reused without checking its base | logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/widen_boostgauge_auto_reviewer_trigger.py:170` | mergeable poll times out | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/_gate.py:73` | stdin closes before the confirmation phrase is typed | converts EOF to an empty answer, which then fails the phrase match and exits 2 | loud, alerts | write an ERROR line to stderr naming EOF as the cause and call alert_operator before exiting 2 |
 | `tools/_gate.py:89` | the refusal log cannot be written (OSError) | unhandled exception ends the process before the refusal message is printed | loud, logged, alerts | catch OSError, log ERROR with the path and cause, alert, exit 2 |
 | `tools/_gate.py:92` | gate phrase mismatch | prints the refusal to stdout, appends JSONL, exits 2 | loud, alerts | print at ERROR to stderr and call alert_operator before sys.exit |
@@ -2614,35 +2614,35 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/github_protection_audit.py:993` | global settings.local.json unreadable | pass | loud, logged, stops, alerts | record ERROR |
 | `tools/github_protection_audit.py:1402` | FAIL, ERROR or VULNERABLE results, or checks that could not run | always exits 0 | stops, alerts | exit non-zero on any ERROR/FAIL and alert |
 | `tools/golden_disasters.py:66` | a case's fixtures are missing | digest "MISSING" printed; --list exits 0 | loud, logged, stops, alerts | ERROR with the case and path; exit non-zero |
-| `tools/land_1104_auto_reviewer_fix.py:99` | network error or timeout | unhandled traceback | loud, logged, alerts | catch RequestException, ERROR, alert, exit 1 |
-| `tools/land_1104_auto_reviewer_fix.py:106` | contents GET fails | stderr, exit 1 | loud, alerts | ERROR prefix plus alert |
-| `tools/land_1104_auto_reviewer_fix.py:117` | the expected dispatch block is missing | ERROR on stderr, exit 1 | alerts | alert_operator |
-| `tools/land_1104_auto_reviewer_fix.py:128` | the main ref GET fails | stderr with status only, exit 1 | loud, logged, alerts | include the body; ERROR plus alert |
-| `tools/land_1104_auto_reviewer_fix.py:138` | branch creation returns 422 for any validation reason | read as "already exists"; continues | loud, logged, stops, alerts | verify the branch exists at the expected SHA, else fail |
-| `tools/land_1104_auto_reviewer_fix.py:142` | branch creation fails | stderr, exit 1 | loud, alerts | ERROR plus alert |
-| `tools/land_1104_auto_reviewer_fix.py:164` | the contents PUT fails | stderr, exit 1 | loud, alerts | ERROR plus alert |
-| `tools/land_1104_auto_reviewer_fix.py:200` | PR creation fails | stderr, exit 1 | loud, alerts | ERROR plus alert |
-| `tools/land_1104_auto_reviewer_fix.py:209` | a poll GET fails | silently retried until the timeout | loud, logged, alerts | log ERROR with the status; fail after repeated errors |
-| `tools/land_1104_auto_reviewer_fix.py:217` | the PR never becomes mergeable | stderr, exit 1 | loud, alerts | ERROR with the last state plus alert |
-| `tools/land_1104_auto_reviewer_fix.py:224` | the merge fails | stderr, exit 1 | loud, alerts | ERROR plus alert |
-| `tools/land_1104_auto_reviewer_fix.py:278` | the branch blob GET fails | stderr exit 1; the status is discarded at line 148 | loud, logged, alerts | carry status/body; ERROR plus alert |
-| `tools/land_aletheia_775.py:80` | git show of the local branch fails | CalledProcessError traceback | loud, logged, alerts | catch, ERROR with stderr, alert, exit 1 |
-| `tools/land_aletheia_775.py:88` | GitHub API calls fail (this and the other raise_for_status sites) | HTTPError traceback | loud, logged, alerts | wrap main in a handler that logs ERROR and alerts |
-| `tools/land_aletheia_775.py:97` | 422 for any reason on branch creation | read as "already exists" | loud, logged, stops, alerts | verify the branch exists, else fail |
-| `tools/land_aletheia_775.py:174` | the remote branch delete fails (status also never checked) | pass | loud, logged, stops, alerts | check the status; ERROR plus alert on failure |
-| `tools/land_aletheia_775.py:187` | content guard fails | stdout, exit 1 | loud, alerts | stderr plus alert |
-| `tools/land_aletheia_775.py:190` | content guard fails | stdout, exit 1 | loud, alerts | stderr plus alert |
-| `tools/land_aletheia_775.py:218` | the PR is not mergeable | stdout, exit 1 | loud, alerts | ERROR to stderr plus alert |
-| `tools/land_career_lint_workflow.py:105` | GitHub API calls fail (this and the other raise_for_status sites) | HTTPError traceback | loud, logged, alerts | handler that logs ERROR and alerts |
-| `tools/land_career_lint_workflow.py:116` | 422 for any reason on branch creation | read as "already exists" | loud, logged, stops, alerts | verify the branch exists, else fail |
-| `tools/land_career_lint_workflow.py:171` | merge conflict | stdout, exit 1 | loud, alerts | stderr ERROR plus alert |
-| `tools/land_career_lint_workflow.py:174` | the poll loop runs out without "clean" | timeout message on stdout, exit 1 | loud, alerts | stderr ERROR with the last state plus alert |
-| `tools/land_career_lint_workflow.py:184` | the merge fails | stdout, exit 1 | loud, alerts | stderr ERROR plus alert |
-| `tools/land_dependabot_skip_1251.py:136` | network error | unhandled traceback | loud, logged, alerts | catch, ERROR, alert, exit 1 |
-| `tools/land_dependabot_skip_1251.py:178` | the PR never becomes mergeable | traceback, exit 1 | loud, alerts | ERROR plus alert in the entry point |
-| `tools/land_dependabot_skip_1251.py:193` | the local file lacks the marker | stderr, exit 2 | loud, alerts | ERROR prefix plus alert |
-| `tools/land_dependabot_skip_1251.py:239` | 422 for any reason on branch creation | read as "already exists" | loud, logged, stops, alerts | verify the branch, else fail |
-| `tools/land_dependabot_skip_1251.py:304` | post-merge verification fails | stderr, exit 1 | loud, alerts | ERROR plus alert_operator |
+| `tools/land_1104_auto_reviewer_fix.py:99` | network error or timeout | unhandled traceback | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:106` | contents GET fails | stderr, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:117` | the expected dispatch block is missing | ERROR on stderr, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:128` | the main ref GET fails | stderr with status only, exit 1 | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:138` | branch creation returns 422 for any validation reason | read as "already exists"; continues | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:142` | branch creation fails | stderr, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:164` | the contents PUT fails | stderr, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:200` | PR creation fails | stderr, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:209` | a poll GET fails | silently retried until the timeout | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:217` | the PR never becomes mergeable | stderr, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:224` | the merge fails | stderr, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_1104_auto_reviewer_fix.py:278` | the branch blob GET fails | stderr exit 1; the status is discarded at line 148 | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_775.py:80` | git show of the local branch fails | CalledProcessError traceback | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_775.py:88` | GitHub API calls fail (this and the other raise_for_status sites) | HTTPError traceback | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_775.py:97` | 422 for any reason on branch creation | read as "already exists" | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_775.py:174` | the remote branch delete fails (status also never checked) | pass | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_775.py:187` | content guard fails | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_775.py:190` | content guard fails | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_775.py:218` | the PR is not mergeable | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_lint_workflow.py:105` | GitHub API calls fail (this and the other raise_for_status sites) | HTTPError traceback | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_lint_workflow.py:116` | 422 for any reason on branch creation | read as "already exists" | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_lint_workflow.py:171` | merge conflict | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_lint_workflow.py:174` | the poll loop runs out without "clean" | timeout message on stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_career_lint_workflow.py:184` | the merge fails | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_dependabot_skip_1251.py:136` | network error | unhandled traceback | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_dependabot_skip_1251.py:178` | the PR never becomes mergeable | traceback, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_dependabot_skip_1251.py:193` | the local file lacks the marker | stderr, exit 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_dependabot_skip_1251.py:239` | 422 for any reason on branch creation | read as "already exists" | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_dependabot_skip_1251.py:304` | post-merge verification fails | stderr, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/mine_quality_patterns.py:164` | telemetry schema mismatch | uncaught in main; traceback, exit 1 | loud, alerts | catch in main, ERROR, alert, exit 1 |
 | `tools/mine_quality_patterns.py:201` | the detail field is not JSON | falls back to detail[:64] as the grouping key | compliant | none |
 | `tools/mine_quality_patterns.py:344` | the telemetry DB is missing | stderr, exit 1 | loud, alerts | ERROR prefix plus alert |
@@ -2688,10 +2688,10 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/test-gate.py:200` | unverified critical skips | stderr, exit 1 | alerts | alert_operator |
 | `tools/test_gate/parser.py:62` | pytest times out | returns (1, "", message); the caller prints it to stderr and exits 1 | loud, alerts | raise with an ERROR log, or have the caller alert |
 | `tools/test_gate/parser.py:72` | pytest cannot be found | returns (1, "", message) | loud, alerts | raise with an ERROR log and alert |
-| `tools/update_clio_repo_metadata.py:104` | network error (ConnectionError/Timeout is not caught) | unhandled traceback | loud, logged, alerts | catch RequestException in main, ERROR, alert |
-| `tools/update_clio_repo_metadata.py:150` | GitHub rejects the request | ERROR on stderr, exit 1 | alerts | alert_operator |
-| `tools/update_clio_repo_metadata.py:155` | the PAT file is missing | ERROR on stderr, exit 1 | alerts | alert_operator |
-| `tools/update_clio_repo_metadata.py:160` | gpg attempts are exhausted | ERROR on stderr, exit 1 | alerts | alert_operator |
+| `tools/update_clio_repo_metadata.py:104` | network error (ConnectionError/Timeout is not caught) | unhandled traceback | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/update_clio_repo_metadata.py:150` | GitHub rejects the request | ERROR on stderr, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/update_clio_repo_metadata.py:155` | the PAT file is missing | ERROR on stderr, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/update_clio_repo_metadata.py:160` | gpg attempts are exhausted | ERROR on stderr, exit 1 | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/upgrade_auto_reviewer_caller.py:153` | the secrets list fails | shown as a "missing" entry; --apply proceeds; exit 0 | loud, stops, alerts | raise; ERROR plus alert |
 | `tools/upgrade_auto_reviewer_caller.py:168` | the contents PUT fails | stdout, then raise_for_status traceback after the finally restore | loud, alerts | stderr ERROR plus alert |
 | `tools/upgrade_auto_reviewer_caller.py:176` | the file is absent | stdout, exit 1 | loud, alerts | stderr ERROR plus alert |
@@ -2791,7 +2791,7 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/consolidate_logs.py:153` | removing the temp file | swallowed; a stray temp file is left | loud, logged, alerts | Log at ERROR. |
 | `tools/consolidate_logs.py:160` | deleting a merged shard | skipped; the next run merges the shard again and duplicates history | loud, logged, stops, alerts | Raise or alert. |
 | `tools/consolidate_logs.py:174` | any consolidation failure | "Warning:" on stderr, exit 0 | loud, stops, alerts | ERROR on stderr, alert_operator, exit non-zero. |
-| `tools/deploy_boostgauge_release_yml.py:306` | raise_for_status / RequestException at any API step (153-246), possibly after the branch exists without the file or PR | traceback, non-zero, no alert | alerts | Entry-point handler that calls alert_operator naming the step reached. |
+| `tools/deploy_boostgauge_release_yml.py:306` | raise_for_status / RequestException at any API step (153-246), possibly after the branch exists without the file or PR | traceback, non-zero, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/derive_stage_nominals.py:75` | reading a run log | skipped silently; the nominals come from a partial corpus | loud, logged, stops, alerts | Raise naming the log. |
 | `tools/derive_stage_nominals.py:92` | empty sample list | returns 0.0, but every caller (lines 121, 133) skips empty lists before calling | compliant | none |
 | `tools/derive_stage_nominals.py:110` | runs dir missing | stdout, return 2 | loud, alerts | stderr ERROR plus alert_operator. |
@@ -2810,10 +2810,10 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/enable_dependabot.py:278` | bad argument | stderr, return 1, no alert | alerts | Call alert_operator. |
 | `tools/enable_dependabot.py:300` | per-repo failures | WARNING on stdout, return 2 | loud, alerts | ERROR on stderr plus alert_operator. |
 | `tools/enable_dependabot.py:310` | unhandled exceptions (json.loads, PAT session) | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
-| `tools/fix_az_workflow_concurrency.py:53` | workflow file absent on a target branch | skipped silently; the run still prints "All branches updated" | loud, logged, alerts | Report each skipped file loudly. |
-| `tools/fix_az_workflow_concurrency.py:97` | main branch fix fails | stdout, return 1 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/fix_az_workflow_concurrency.py:104` | a branch fix fails after main was already changed | stdout, return 1 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/fix_az_workflow_concurrency.py:111` | unhandled (requests exceptions, KeyError, decode) | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
+| `tools/fix_az_workflow_concurrency.py:53` | workflow file absent on a target branch | skipped silently; the run still prints "All branches updated" | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_az_workflow_concurrency.py:97` | main branch fix fails | stdout, return 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_az_workflow_concurrency.py:104` | a branch fix fails after main was already changed | stdout, return 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/fix_az_workflow_concurrency.py:111` | unhandled (requests exceptions, KeyError, decode) | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/fix_branch_protections.py:100` | gh api lookup of the default branch fails | defaults to "main", so protection may be PUT on the wrong or a nonexistent branch | loud, logged, stops, alerts | Raise with gh's stderr. |
 | `tools/fix_branch_protections.py:120` | verify read fails | FixResult failure on stdout; exit 1 at end | loud, alerts | ERROR on stderr plus alert_operator. |
 | `tools/fix_branch_protections.py:147` | verify response not JSON | FixResult failure on stdout | loud, alerts | ERROR on stderr plus alert_operator. |
@@ -2835,16 +2835,16 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/fleet_set_delete_branch_on_merge.py:236` | repo discovery fails | stdout, return 2 | loud, alerts | stderr plus alert_operator. |
 | `tools/fleet_set_delete_branch_on_merge.py:247` | unexpected per-repo error | converted to an error tuple, continues, exit 3 | loud, alerts | ERROR on stderr plus alert_operator. |
 | `tools/fleet_set_delete_branch_on_merge.py:268` | unhandled (PAT session, retry exhaustion at 115-116) | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
-| `tools/land_aletheia_ci_pipestatus.py:177` | GET branch ref fails (401/5xx) | treated as branch absent; tries to create it | loud, logged, alerts | Return False only on 404 and raise otherwise. |
-| `tools/land_aletheia_ci_pipestatus.py:254` | mergeable poll times out | returns the last state; the caller prints stdout and returns 1 | loud, alerts | Raise a timeout error naming the PR. |
-| `tools/land_aletheia_ci_pipestatus.py:278` | local file missing | stdout, return 1 | loud, alerts | stderr plus alert_operator. |
-| `tools/land_aletheia_ci_pipestatus.py:342` | PR dirty | stdout, return 1 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/land_aletheia_ci_pipestatus.py:345` | PR not mergeable | stdout, return 1 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/land_aletheia_ci_pipestatus.py:359` | unhandled raise_for_status | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
-| `tools/land_windows_ci_job.py:197` | any 422 (including validation errors) | assumed to mean the branch already exists | loud, logged, alerts | Check the 422 message, or confirm the ref exists. |
-| `tools/land_windows_ci_job.py:258` | PR creation fails | stdout, then prints "The PR is open" and returns 0 | loud, stops, alerts | Exit non-zero with ERROR plus alert unless an existing PR is confirmed. |
-| `tools/land_windows_ci_job.py:264` | existing-PR lookup fails | silently prints nothing | loud, logged, alerts | Raise on a failed lookup. |
-| `tools/land_windows_ci_job.py:276` | unhandled raise_for_status | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
+| `tools/land_aletheia_ci_pipestatus.py:177` | GET branch ref fails (401/5xx) | treated as branch absent; tries to create it | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_pipestatus.py:254` | mergeable poll times out | returns the last state; the caller prints stdout and returns 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_pipestatus.py:278` | local file missing | stdout, return 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_pipestatus.py:342` | PR dirty | stdout, return 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_pipestatus.py:345` | PR not mergeable | stdout, return 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_aletheia_ci_pipestatus.py:359` | unhandled raise_for_status | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_windows_ci_job.py:197` | any 422 (including validation errors) | assumed to mean the branch already exists | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_windows_ci_job.py:258` | PR creation fails | stdout, then prints "The PR is open" and returns 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_windows_ci_job.py:264` | existing-PR lookup fails | silently prints nothing | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/land_windows_ci_job.py:276` | unhandled raise_for_status | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/lint_per_repo_claude_md.py:79` | first config import | retries with a path fix; the second import raises if it fails | compliant | none |
 | `tools/lint_per_repo_claude_md.py:200` | .unleashed.json unreadable | None ("no signal"), so marker 6 is skipped silently | loud, logged, stops, alerts | Raise or report an ERROR finding. |
 | `tools/lint_per_repo_claude_md.py:272` | git show origin/main:CLAUDE.md fails for any reason | None, reported as MISSING with git's stderr dropped | loud, logged, alerts | Separate "absent" from "git failed" and raise on the latter. |
@@ -2854,28 +2854,28 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/prompt_revision_rank.py:56` | telemetry absent or unreadable (e.g. wrong --repo), if load_telemetry returns [] | reported as "no failures recorded", exit 0 | loud, logged, stops, alerts | Fail when the telemetry file does not exist, and keep exit 0 only for an existing empty file. |
 | `tools/prompt_revision_rank.py:65` | runs.csv missing | note on stdout; ranks by count and flags duration-unknown, the documented contract (docstring lines 12-14) | compliant | none |
 | `tools/prompt_revision_rank.py:80` | unhandled exceptions | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
-| `tools/push_workflow_fixes.py:65` | checked command fails | stdout, exit 1 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/push_workflow_fixes.py:124` | Fix 2 target string absent | WARNING on stdout, continues | loud, stops, alerts | Fail unless the new value is confirmed present. |
-| `tools/push_workflow_fixes.py:157` | any 422 on branch create | treated as success | loud, logged, alerts | Confirm the branch exists on a 422. |
-| `tools/push_workflow_fixes.py:194` | GET of the existing file fails (non-404) | ignored; PUT is sent without a sha | loud, logged, alerts | Raise on statuses other than 200/404. |
-| `tools/push_workflow_fixes.py:254` | gh api reviews call fails | counted as "not approved"; polling continues | loud, logged, alerts | Raise on gh failure. |
-| `tools/push_workflow_fixes.py:288` | main SHA lookup fails | skips Fix 3, run exits 0 | loud, logged, stops, alerts | Raise with the cause. |
-| `tools/push_workflow_fixes.py:292` | branch create fails | skips, exit 0 | loud, stops, alerts | Raise. |
-| `tools/push_workflow_fixes.py:296` | file PUT fails | skips, exit 0 | loud, stops, alerts | Raise. |
-| `tools/push_workflow_fixes.py:301` | PR create fails | skips, exit 0 | loud, stops, alerts | Raise. |
-| `tools/push_workflow_fixes.py:304` | merge fails or approval times out | return value ignored; DONE, exit 0 | loud, stops, alerts | Check the result and fail loudly. |
-| `tools/push_workflow_fixes.py:320` | gh repo list fails | returns []; Fix 4 runs on zero repos, exit 0 | loud, logged, stops, alerts | Raise. |
-| `tools/push_workflow_fixes.py:353` | PATCH fails for a repo | stdout, counted, exit 0 | loud, stops, alerts | Exit non-zero with ERROR plus alert when failed > 0. |
-| `tools/push_workflow_fixes.py:395` | git push fails | stderr dropped; falls back to pushing the current branch | loud, logged, alerts | Log the first failure at ERROR before any fallback. |
-| `tools/push_workflow_fixes.py:417` | rev-parse failure lands here too (toplevel empty) | stdout, return 1, git cause dropped | loud, logged, alerts | Check returncode separately; stderr plus alert. |
-| `tools/push_workflow_fixes.py:475` | unhandled exceptions | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
-| `tools/remediate_patent_general_protection.py:95` | ruleset probe fails (non-200/404) | exists=False: the dry run says "already removed" and the post-fix check at 214-216 passes as gone | loud, stops, alerts | Raise on unexpected statuses. |
-| `tools/remediate_patent_general_protection.py:105` | DELETE returns 404 | treated as already gone, per the documented idempotency (docstring lines 20-21) | compliant | none |
-| `tools/remediate_patent_general_protection.py:187` | ruleset DELETE fails | stdout, return 2 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/remediate_patent_general_protection.py:196` | classic PUT fails after the ruleset was deleted (branch unprotected) | stdout, return 2 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/remediate_patent_general_protection.py:209` | verification fails | stdout, return 2 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/remediate_patent_general_protection.py:217` | ruleset survived | stdout, return 2 | loud, alerts | stderr ERROR plus alert_operator. |
-| `tools/remediate_patent_general_protection.py:230` | unhandled requests exceptions | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
+| `tools/push_workflow_fixes.py:65` | checked command fails | stdout, exit 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:124` | Fix 2 target string absent | WARNING on stdout, continues | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:157` | any 422 on branch create | treated as success | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:194` | GET of the existing file fails (non-404) | ignored; PUT is sent without a sha | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:254` | gh api reviews call fails | counted as "not approved"; polling continues | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:288` | main SHA lookup fails | skips Fix 3, run exits 0 | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:292` | branch create fails | skips, exit 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:296` | file PUT fails | skips, exit 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:301` | PR create fails | skips, exit 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:304` | merge fails or approval times out | return value ignored; DONE, exit 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:320` | gh repo list fails | returns []; Fix 4 runs on zero repos, exit 0 | loud, logged, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:353` | PATCH fails for a repo | stdout, counted, exit 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:395` | git push fails | stderr dropped; falls back to pushing the current branch | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:417` | rev-parse failure lands here too (toplevel empty) | stdout, return 1, git cause dropped | loud, logged, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/push_workflow_fixes.py:475` | unhandled exceptions | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/remediate_patent_general_protection.py:95` | ruleset probe fails (non-200/404) | exists=False: the dry run says "already removed" and the post-fix check at 214-216 passes as gone | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/remediate_patent_general_protection.py:105` | DELETE returns 404 | treated as already gone, per the documented idempotency (docstring lines 20-21) | compliant | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/remediate_patent_general_protection.py:187` | ruleset DELETE fails | stdout, return 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/remediate_patent_general_protection.py:196` | classic PUT fails after the ruleset was deleted (branch unprotected) | stdout, return 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/remediate_patent_general_protection.py:209` | verification fails | stdout, return 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/remediate_patent_general_protection.py:217` | ruleset survived | stdout, return 2 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/remediate_patent_general_protection.py:230` | unhandled requests exceptions | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
 | `tools/run_implement_from_lld.py:77` | git rev-parse fails | returns "" with stderr dropped; the caller refuses at 1095 on stdout | loud, logged, alerts | FIXED in the entry-point batch (#4097): get_current_branch raises RunFailed with git's exit code and stderr; "HEAD" still means detached; test_77 in tests/unit/test_run_implement_from_lld_loud_failure.py |
 | `tools/run_implement_from_lld.py:123` | git worktree list fails | returns None, meaning "no existing worktree", the conflation _worktree_entries was built to prevent | loud, logged, alerts | FIXED in the entry-point batch (#4097): _worktree_entries raises RunFailed with git's stderr instead of returning None, so find_existing_worktree (and create_worktree's reuse check) can no longer read a failed listing as "no worktree"; test_123 in tests/unit/test_run_implement_from_lld_loud_failure.py |
 | `tools/run_implement_from_lld.py:296` | git status fails | returncode unchecked; empty listing, nothing kept, and the later worktree remove deletes ignored files such as lineage | loud, logged, stops, alerts | FIXED in #4150: fails loud on stderr, keeps the worktree and branch, alerts (through HALT for an ended run), exits 1; tests in test_impl_lands_through_driver.py |
@@ -3031,11 +3031,11 @@ A file is marked read only after every line of it has been read. Each finding is
 | `tools/test_governance_system.py:983` | repo listing failed | stdout, exit 1, cause misreported | loud, logged, alerts | stderr with gh's cause plus alert_operator. |
 | `tools/test_governance_system.py:992` | tests or audit failed | stdout summary, exit 2, no alert | loud, alerts | ERROR on stderr plus alert_operator when failed. |
 | `tools/test_governance_system.py:996` | unhandled (requests exceptions in audit, json.loads at 134) | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
-| `tools/upgrade_comp_environ_auto_reviewer.py:162` | rulesets endpoint 404 | [] (no rulesets); if protection actually blocks, the later PUT raises at 262 | compliant | none |
-| `tools/upgrade_comp_environ_auto_reviewer.py:260` | Contents PUT fails | stdout, then raise_for_status, no alert | loud, alerts | ERROR on stderr plus alert_operator. |
-| `tools/upgrade_comp_environ_auto_reviewer.py:281` | secrets listing fails | reported as missing; run proceeds | loud, alerts | Raise on a failed listing. |
-| `tools/upgrade_comp_environ_auto_reviewer.py:348` | target file absent | stdout, return 1 | loud, alerts | stderr plus alert_operator. |
-| `tools/upgrade_comp_environ_auto_reviewer.py:370` | Cerberus secrets missing (a known blocker) | --apply proceeds and returns 0 | loud, stops, alerts | Refuse --apply, or exit non-zero, while secrets are missing. |
-| `tools/upgrade_comp_environ_auto_reviewer.py:408` | restoring ruleset bypass_actors fails | WARNING on stdout; if the PUT succeeded, main returns 0 with protection still weakened | loud, stops, alerts | ERROR on stderr, alert_operator, and exit non-zero. |
-| `tools/upgrade_comp_environ_auto_reviewer.py:418` | re-enabling enforce_admins fails | WARNING on stdout; exit 0 with protection weakened | loud, stops, alerts | ERROR on stderr, alert_operator, and exit non-zero. |
-| `tools/upgrade_comp_environ_auto_reviewer.py:434` | unhandled raise_for_status | traceback, no alert | alerts | Entry-point handler that calls alert_operator. |
+| `tools/upgrade_comp_environ_auto_reviewer.py:162` | rulesets endpoint 404 | [] (no rulesets); if protection actually blocks, the later PUT raises at 262 | compliant | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_comp_environ_auto_reviewer.py:260` | Contents PUT fails | stdout, then raise_for_status, no alert | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_comp_environ_auto_reviewer.py:281` | secrets listing fails | reported as missing; run proceeds | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_comp_environ_auto_reviewer.py:348` | target file absent | stdout, return 1 | loud, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_comp_environ_auto_reviewer.py:370` | Cerberus secrets missing (a known blocker) | --apply proceeds and returns 0 | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_comp_environ_auto_reviewer.py:408` | restoring ruleset bypass_actors fails | WARNING on stdout; if the PUT succeeded, main returns 0 with protection still weakened | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_comp_environ_auto_reviewer.py:418` | re-enabling enforce_admins fails | WARNING on stdout; exit 0 with protection weakened | loud, stops, alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
+| `tools/upgrade_comp_environ_auto_reviewer.py:434` | unhandled raise_for_status | traceback, no alert | alerts | WON'T DO (#3154): the script's job is finished and the script is deleted |
