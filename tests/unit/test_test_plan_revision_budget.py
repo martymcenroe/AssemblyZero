@@ -208,6 +208,14 @@ class TestTheLoopRunsAndTheCapEndsIt:
     @pytest.fixture
     def roll(self, monkeypatch, tmp_path):
         """Roll the graph with a scripted reviser. Returns (final, revisor)."""
+        import subprocess
+
+        # #3585: the run's checkpoints commit in the worktree and halt when
+        # git cannot, so the worktree is a real repository.
+        for args in (["init", "-q", "-b", "main"],
+                     ["config", "user.email", "t@example.com"],
+                     ["config", "user.name", "Test"]):
+            subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
 
         def _run(tables: list[str]):
             import assemblyzero.workflows.testing.graph as g
