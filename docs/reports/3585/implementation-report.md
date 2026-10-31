@@ -48,3 +48,7 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **Two raises are now loud.** An unreadable package.json (215) and a `test_dirs` declaration naming no framework (252) raised with nothing said where they failed. Each now prints an ERROR line first. The path resolver's read of the same package.json, added by #4237 after the ledger's base, does the same.
 - **A missing project is not pytest (273).** `detect_framework_dirs` with a project root that is empty or not a directory raises `FrameworkResolutionError` naming it, after an ERROR line. It returned no frameworks, which the callers read as pytest at the root. A project that exists and declares nothing is still the quiet empty answer.
 - **Where the raises go.** N0 catches ValueError on all three paths and halts, and HALT alerts; provisioning turns ValueError into `ProvisioningError` naming the worktree.
+
+### coverage_report.py (2 ledger rows: both compliant, pinned)
+
+- **Unchanged, by design.** No TOTAL row (137) and a table that leaves out the target (143) are each a reading in the state ABSENT, with no percentage and a message naming what was sought and what the report held. That is the module's contract (#2637). N5 stops on it, and N4c returns it as an error that its router sends to HALT. The new tests pin the contract.

@@ -87,3 +87,13 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 576 passed across 21 files: the detector's tests, N0's, provisioning's, the multi-framework and mock runs, and the LLD parsing chain.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
+
+## coverage_report.py
+
+**New: `tests/unit/test_coverage_report_loud_failure.py` (6).** Every test pins the kept contract.
+
+**Against HEAD's module:** 6 passed. There is no fix.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 51 passed across the 3 files that read the coverage report.
