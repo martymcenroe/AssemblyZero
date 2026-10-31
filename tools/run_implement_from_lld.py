@@ -1395,6 +1395,9 @@ def _main(args: argparse.Namespace):
     # real resume that follows it.
     if not args.dry_run and not check_and_consume(
         "testing", args.issue,
+        # #4292: the repository's own halt files, and a --mock run's apart.
+        repo_root=repo_root,
+        mock=bool(args.mock),
         accept_changed=args.accept_changed_inputs,
     ):
         sys.exit(1)

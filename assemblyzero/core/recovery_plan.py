@@ -101,6 +101,9 @@ class RecoveryPlan:
     resume_command: str
     earliest_retry: str
     recommendation: str
+    #: What names this run's files (#4292): the issue number, or for a brief
+    #: run, which has none, the brief's key. Empty means the issue number.
+    run_key: str = ""
 
     def save(self, directory: Path) -> Path:
         """Save recovery plan as JSON to the specified directory.
@@ -113,7 +116,7 @@ class RecoveryPlan:
         """
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        filename = f"recovery-{self.issue_number}-{self.workflow}.json"
+        filename = f"recovery-{self.run_key or self.issue_number}-{self.workflow}.json"
         plan_path = directory / filename
         with open(plan_path, "w", encoding="utf-8") as f:
             json.dump(asdict(self), f, indent=2)
@@ -176,6 +179,7 @@ def generate_recovery_plan(
     cost_spent_usd: float = 0.0,
     cost_budget_usd: float = 0.0,
     state_path: str = "",
+    run_key: str = "",
 ) -> RecoveryPlan:
     """Smart factory — infers is_transient, builds resume_command, writes recommendation.
 
@@ -188,6 +192,7 @@ def generate_recovery_plan(
         state: Current workflow state dict (for context).
         cost_spent_usd: How much has been spent so far.
         cost_budget_usd: Total budget for this run.
+        run_key: What names the run's files (#4292); empty for the issue number.
 
     Returns:
         Populated RecoveryPlan ready to save/print.
@@ -225,6 +230,7 @@ def generate_recovery_plan(
         resume_command=resume_command,
         earliest_retry=earliest_retry,
         recommendation=recommendation,
+        run_key=run_key,
     )
 
 
