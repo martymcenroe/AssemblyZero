@@ -539,6 +539,34 @@ def archive_lineage_dirs(repo_root: Path, issue: int) -> int:
     return archived
 
 
+#: The branches, as formats over the issue number, a checkpoint commit can sit
+#: on (#4216). `issue-{issue}` is the branch the impl stage commits its
+#: checkpoints on (`stages.py`; `testing/checkpoints.py`) and comes first.
+#: Nothing in the pipeline creates `{issue}-impl`; it stays for a branch an
+#: older roll left. The pin below and `speedrun_roll.find_checkpoint` both
+#: read this one list, so they cannot disagree about where a checkpoint lives.
+CHECKPOINT_BRANCH_FORMATS = (
+    "issue-{issue}",
+    "{issue}-impl",
+    "{issue}-lld",
+    "{issue}-spec",
+    "{issue}-fix",
+)
+
+
+def checkpoint_search_refs(issue: int) -> list[str]:
+    """Every ref a checkpoint for this issue could be on, in search order.
+
+    Each branch is searched locally and then as `origin/<branch>`, so a
+    checkpoint that was pushed, and whose local branch is gone, is still found.
+    """
+    refs: list[str] = []
+    for branch_format in CHECKPOINT_BRANCH_FORMATS:
+        branch = branch_format.format(issue=issue)
+        refs.extend((branch, f"origin/{branch}"))
+    return refs
+
+
 def pin_checkpoint(repo_root: Path, issue: int) -> str | None:
     """Stamp a rescue ref over this issue's newest checkpoint, before branches go.
 
@@ -550,12 +578,7 @@ def pin_checkpoint(repo_root: Path, issue: int) -> str | None:
 
     Returns the rescue ref name, or None when there was no checkpoint to pin.
     """
-    for ref in (
-        f"{issue}-impl", f"origin/{issue}-impl",
-        f"{issue}-lld", f"origin/{issue}-lld",
-        f"{issue}-spec", f"origin/{issue}-spec",
-        f"{issue}-fix", f"origin/{issue}-fix",
-    ):
+    for ref in checkpoint_search_refs(issue):
         found = _run(
             ["git", "log", "-1", "--format=%H", "--grep=^\\[CP:", ref],
             cwd=repo_root,

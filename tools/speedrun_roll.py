@@ -368,13 +368,11 @@ def find_checkpoint(repo_root: Path, issue: int) -> str | None:
     Every ref that could carry one is searched, including the worktree's own
     branch, because the checkpointing commit lands wherever the stage ran.
     """
-    refs = [
-        f"{issue}-impl", f"origin/{issue}-impl",
-        f"{issue}-lld", f"origin/{issue}-lld",
-        f"{issue}-spec", f"origin/{issue}-spec",
-        f"{issue}-fix", f"origin/{issue}-fix",
-    ]
-    for ref in refs:
+    #
+    # #4216: the list is `speedrun_reset.checkpoint_search_refs`, the one the
+    # reset's pin reads, and it includes `issue-{N}`, the branch the impl stage
+    # checkpoints on.
+    for ref in reset.checkpoint_search_refs(issue):
         found = _run(
             ["git", "log", "-1", "--format=%h", "--grep=^\\[CP:", ref],
             cwd=repo_root,
