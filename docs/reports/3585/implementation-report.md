@@ -88,3 +88,8 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **No placeholder overview (120).** An LLD with no overview raises ValueError naming the feature, the issue and the headings searched, after an ERROR line and before anything is written.
 - **A missing sidebar is said (169).** `update_wiki_sidebar` raises FileNotFoundError naming `_Sidebar.md`, after an ERROR line. It returned False, the same answer as "already linked", and N8 ignored it. False now means only "already linked".
 - **The caller still swallows both.** N8 catches every exception from the wiki step and prints "SKIPPED" on stdout: ledger rows `document.py:289` and `document.py:292`, in another batch.
+
+### templates/cp_docs.py (2 ledger rows: 2 fixed)
+
+- **No invented commands (137, 159).** An LLD that shows no command raises ValueError naming the tool, the issue and what was searched, after an ERROR line and before anything is written. The CLI document carried an invented reference row and usage block, neither of them the tool's.
+- **The caller still swallows it.** N8 catches every exception from the c/p docs and prints "SKIPPED": ledger row `document.py:338`, in another batch. The CLI document is written first, so no prompt document is written without it.

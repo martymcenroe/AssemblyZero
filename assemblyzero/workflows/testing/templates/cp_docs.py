@@ -6,8 +6,22 @@ Generates CLI (c) and Prompt (p) documentation pairs following:
 docs/standards/0008-documentation-convention.md
 """
 
+import logging
 import re
+import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+#: The command words a line of an LLD's shell block must start with to be
+#: read as the tool's command. Closed.
+_COMMAND_WORDS = ("poetry", "python", "npm", "gh", "git", "pytest")
+
+
+def _loud(message: str) -> None:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[CP DOCS] %s", message)
+    print(f"ERROR [CP DOCS] {message}", file=sys.stderr, flush=True)
 
 
 def get_next_doc_number(docs_dir: Path) -> int:
@@ -53,7 +67,7 @@ def extract_commands_from_lld(lld_content: str) -> list[tuple[str, str]]:
             if line.startswith("#") or not line:
                 continue
             # Extract commands (simple heuristic)
-            if any(line.startswith(cmd) for cmd in ["poetry", "python", "npm", "gh", "git", "pytest"]):
+            if any(line.startswith(cmd) for cmd in _COMMAND_WORDS):
                 commands.append((line, "Command from LLD"))
 
     return commands[:10]  # Limit
@@ -100,7 +114,24 @@ def generate_cli_doc(
 
     Returns:
         Path to generated CLI doc.
+
+    Raises:
+        ValueError: naming the tool, the issue and what was searched, after
+            an ERROR line and before anything is written, when the LLD shows
+            no command (ADR 0236). The document used to carry an invented
+            Quick Reference row and usage block in their place.
     """
+    # Extract info from LLD
+    commands = extract_commands_from_lld(lld_content)
+    if not commands:
+        message = (
+            f"the CLI document for {tool_name} (issue #{issue_number}) cannot be "
+            f"written from its LLD: the LLD shows no command (searched: lines "
+            f"of fenced shell blocks starting with {', '.join(_COMMAND_WORDS)})"
+        )
+        _loud(message)
+        raise ValueError(message)
+
     skills_dir = repo_root / "docs" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
 
@@ -108,9 +139,6 @@ def generate_cli_doc(
     filename = tool_name.lower().replace(" ", "-").replace("/", "-")
     filename = re.sub(r"[^a-z0-9-]", "", filename)
     doc_path = skills_dir / f"{doc_num}c-{filename}-cli.md"
-
-    # Extract info from LLD
-    commands = extract_commands_from_lld(lld_content)
 
     # Build CLI doc content
     content_parts = [
@@ -134,13 +162,10 @@ def generate_cli_doc(
         "|---------|-------------|",
     ]
 
-    if commands:
-        for cmd, desc in commands:
-            # Truncate long commands
-            cmd_display = cmd[:50] + "..." if len(cmd) > 50 else cmd
-            content_parts.append(f"| `{cmd_display}` | {desc} |")
-    else:
-        content_parts.append("| `poetry run python tools/tool.py` | Run tool |")
+    for cmd, desc in commands:
+        # Truncate long commands
+        cmd_display = cmd[:50] + "..." if len(cmd) > 50 else cmd
+        content_parts.append(f"| `{cmd_display}` | {desc} |")
 
     content_parts.extend(["", "---", ""])
 
@@ -152,11 +177,8 @@ def generate_cli_doc(
         "```bash",
     ])
 
-    if commands:
-        for cmd, _ in commands[:3]:
-            content_parts.append(cmd)
-    else:
-        content_parts.append("poetry run python tools/run_workflow.py --help")
+    for cmd, _ in commands[:3]:
+        content_parts.append(cmd)
 
     content_parts.extend([
         "```",

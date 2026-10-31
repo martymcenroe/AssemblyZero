@@ -176,3 +176,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 301 passed across 4 files: the wiki tests, the workflow tests and N8's.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds nothing in the module or the new test file.
+
+## templates/cp_docs.py
+
+**New: `tests/unit/test_cp_docs_template_loud_failure.py` (3).**
+
+**Before the fix, measured:** 2 failed, 1 passed. The two site tests failed. The one that passed pins the LLD's own commands as the reference, with none of the invented ones.
+
+**Changed tests:** `test_doc_step_handling.py::test_document_emits_cp_docs_when_not_skipped` gives its LLD a command, so the c/p docs it expects are written from the LLD.
+
+**Neighbouring suites:** 299 passed across 4 files: the c/p doc tests, the workflow tests and N8's.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds nothing in the module or the new test file.
