@@ -56,6 +56,10 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 - **Failures are no longer "skipped" (216).** The skipped list held failures nothing read. They raise now; the list holds only files with nothing to archive, and N7 prints it.
 - **Why a raise.** `route_after_finalize` does send `error_message` to HALT, but N7 has no registered halt site and the gate registry is not this batch's file. The raise reaches the entry point, which alerts.
 
+### nodes/adversarial_validator.py (3 open ledger rows: 3 compliant and pinned)
+
+- **Pinned (114, 227, 251).** A file that does not compile is an error and makes the result invalid. The mock and assertion scans answer "nothing found" for source that does not parse because their only caller runs them after `compile` accepted the file; their docstrings now say so. Lines 63 and 79 were fixed in #3725.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.

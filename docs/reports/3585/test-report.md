@@ -85,3 +85,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** the 21 files that import the module or `route_after_finalize`, with `test_gate_registry.py`: 608 passed, 1 skipped and 4 failed before the changes above, which were those four tests; after, 25 passed in `test_issue_141.py` with the new file, and 18 in the Finalize classes of `test_testing_workflow.py`.
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff finds the module's same 2 issues as at HEAD; the new test file is clean.
+
+## nodes/adversarial_validator.py
+
+**New: `tests/unit/test_adversarial_validator_loud_failure.py` (4).** All four pin kept behaviour: a file that does not compile is an error, reported once, and the scans still find a mock and a test without assertions in code that compiles.
+
+**Before the change, measured** against HEAD's `adversarial_validator.py`: 4 passed, as pins should.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** `test_adversarial_validator.py`, `test_adversarial_review_halts.py`, `test_adversarial_node.py` and the new file: 115 passed.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff is clean, as at HEAD.

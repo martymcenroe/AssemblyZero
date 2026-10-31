@@ -111,7 +111,10 @@ def _check_no_mocks(source_code: str, filepath: str) -> list[str]:
         filepath: File path for error reporting.
 
     Returns:
-        List of violation descriptions.
+        List of violation descriptions. Source that does not parse has none
+        to report: the only caller, `validate_adversarial_tests`, runs this
+        after `_check_syntax` accepted the file, and a file `_check_syntax`
+        refuses is already an error there (ledger 0908, line 114).
     """
     violations: list[str] = []
 
@@ -225,7 +228,9 @@ def _check_syntax(source_code: str, filepath: str) -> list[str]:
         filepath: File path for error reporting.
 
     Returns:
-        List of syntax error descriptions.
+        List of syntax error descriptions. A file that does not compile is an
+        error, and `validate_adversarial_tests` returns it invalid (ledger
+        0908, line 227).
     """
     errors: list[str] = []
     try:
@@ -249,6 +254,10 @@ def _check_assertions(source_code: str, filepath: str) -> list[str]:
 
     Returns:
         List of error descriptions for test functions without assertions.
+        Source that does not parse has no test functions to read: the only
+        caller runs this after `_check_syntax` accepted the file, whose
+        syntax error is the one error a refused file gets (ledger 0908,
+        line 251).
     """
     errors: list[str] = []
 
