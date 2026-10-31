@@ -27,4 +27,8 @@ Each new test file was run against `main`'s unchanged source in the primary chec
 
 Every test file under `tests/unit` and `tests/tools` that names one of the changed modules (123 files): 2020 passed, 20 skipped, 2 failed. The two failures, `tests/tools/test_dependabot_review.py::TestRunJsGate::test_node_modules_removed_after_gate` and `::test_node_modules_removed_even_on_failure`, fail identically on `main` in the primary checkout, and belong to the local test-tier defects.
 
-The full unit tier runs before the push, after the `core/` batch lands and is merged in.
+## After merging `main` (the `core/` batch, PR #4252 and PR #4260)
+
+- The merge was clean. This branch's two `tools/run_implement_from_lld.py` test files then made five tests in `main`'s new `tests/unit/test_preflight_loud_failure.py` fail when run after them: the shared fixture in `tests/unit/conftest.py` set the transport stand-in with `patch()`, these tests set the check again with `monkeypatch`, and the two undo steps ran in the wrong order, so the stand-in stayed for the rest of the process. The fixture now uses `monkeypatch` too. `tests/unit/test_preflight_stand_in_does_not_leak.py` (2) pins it: 1 failed on the old fixture, 2 pass now. The same combination, five files, went from 5 failed to 42 passed.
+- Full unit tier, `poetry run pytest tests/unit -q -p no:cacheprovider`, 2026-10-30, 7:39 to 7:48 PM Central: `11566 passed, 66 skipped, 7 deselected, 6 xfailed, 13 warnings in 542.22s`. No failures; the session guards printed no `FAIL:` line; the tree was clean afterwards.
+- `tools/audit_fail_open.py --check --strict`: PASS, 313 files, 9770 sites, no new fail-open. `tools/audit_loud_failure.py --check`: PASS, 263 sites, all in the baseline.
