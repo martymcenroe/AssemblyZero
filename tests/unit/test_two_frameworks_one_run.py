@@ -162,14 +162,21 @@ def _patched(recorder: _Recorder):
 
 
 def _run_state(root: Path, test_files: list[Path], **overrides) -> dict:
-    """The state N0's mock load site writes for this target, plus the files."""
+    """The state N0's mock load site writes for this target, plus the files.
+
+    #3585: the root is a git repository, as a run's worktree always is (the
+    full-suite gate lists droppings with `git status`, which halts outside
+    one), and pytest's leg has a source file to name its coverage target."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
     loaded = _mock_load_lld({"issue_number": 7, "repo_root": str(root)})
     state = {
         **loaded,
         "issue_number": 7,
         "repo_root": str(root),
         "test_files": [str(p) for p in test_files],
-        "implementation_files": [],
+        "implementation_files": [str(root / "engine.py")],
         "files_to_modify": [],
         "coverage_target": 90,
         "iteration_count": 0,

@@ -59,7 +59,8 @@ def _state(tmp_path: Path, **overrides: object) -> dict:
         "issue_number": 331,
         "audit_dir": "",
         "test_files": [],
-        "implementation_files": [],
+        # #3585: N5 halts when nothing names a coverage target.
+        "implementation_files": [str(tmp_path / "pkg" / "mod.py")],
         "files_to_modify": [],
         "coverage_target": 95,
         "iteration_count": 0,

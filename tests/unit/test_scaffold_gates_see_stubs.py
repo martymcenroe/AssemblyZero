@@ -224,9 +224,17 @@ def test_red_phase_reads_test_files_when_state_lacks_source(
     {},
     {"generated_tests": ""},
     {"generated_tests": "   \n"},
-    {"test_files": ["/nonexistent/path/test_x.py"]},
     {"generated_tests": "def test_broken(:\n"},
 ])
 def test_red_phase_never_invents_a_failure(state: dict) -> None:
     """Unreadable input is not evidence of a hollow suite."""
     assert _describe_hollow_suite(state) == ""
+
+
+def test_a_test_file_that_cannot_be_read_is_a_failure_not_a_pass() -> None:
+    """#3585 (ledger 0908 line 1241): it used to read as "not hollow", so a
+    check that could not run passed. It halts the red phase now."""
+    from assemblyzero.workflows.testing.nodes.verify_phases import PhaseStepError
+
+    with pytest.raises(PhaseStepError, match="/nonexistent/path/test_x.py"):
+        _describe_hollow_suite({"test_files": ["/nonexistent/path/test_x.py"]})

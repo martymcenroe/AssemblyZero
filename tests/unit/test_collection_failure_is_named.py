@@ -112,7 +112,8 @@ class TestItReachesTheHalt:
             "iteration_count": 0,
             "max_iterations": 5,
             "coverage_target": 95,
-            "implementation_files": [],
+            # #3585: N5 halts when nothing names a coverage target.
+            "implementation_files": ["/tmp/repo/pkg/mod.py"],
             "skip_e2e": True,
         }
         result_stub = {

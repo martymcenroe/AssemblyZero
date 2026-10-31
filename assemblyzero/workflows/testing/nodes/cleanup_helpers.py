@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 SUBPROCESS_TIMEOUT: int = 10  # seconds — max wait for gh/git CLI calls
 
 
+class LineageReadError(RuntimeError):
+    """A lineage artifact the learning summary needs cannot be read or does
+    not parse (#3585). Raised, never returned: the summary would otherwise
+    report a history missing an iteration, or one at 0.0% it never had."""
+
+
+def _loud(message: str) -> None:
+    """One ERROR line on stderr and in the log, at the point of failure."""
+    import sys
+
+    logger.error("[N9] %s", message)
+    print(f"ERROR [N9] {message}", file=sys.stderr, flush=True)
+
+
 @dataclass
 class IterationSnapshot:
     """Captures coverage data from a single TDD iteration."""
@@ -126,6 +140,9 @@ def get_worktree_branch(worktree_path: str | Path) -> str | None:
         Branch name string, or None if worktree not found in git worktree list.
 
     Raises:
+        subprocess.CalledProcessError: If `git worktree list` fails (#3585,
+            ledger 0908 line 144). It used to log a WARNING and return None,
+            which N9 read as "no branch to delete".
         subprocess.TimeoutExpired: If git CLI exceeds SUBPROCESS_TIMEOUT.
     """
     # Keep as plain string to match git porcelain output format exactly.
@@ -142,8 +159,13 @@ def get_worktree_branch(worktree_path: str | Path) -> str | None:
     )
 
     if result.returncode != 0:
-        logger.warning("[N9] git worktree list failed: %s", result.stderr)
-        return None
+        _loud(
+            f"`git worktree list` failed (exit {result.returncode}), so the "
+            f"branch of {worktree_str} is unknown: {(result.stderr or '').strip()}"
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
 
     # Parse porcelain output: blocks separated by blank lines
     current_worktree = None
@@ -176,7 +198,10 @@ def delete_local_branch(branch_name: str) -> bool:
 
     Raises:
         subprocess.CalledProcessError: If git branch -d fails for reasons
-            other than branch-not-found (e.g. the branch is not merged).
+            other than branch-not-found (e.g. the branch is not merged, or is
+            checked out elsewhere). Only git's own "error: branch '<name>' not
+            found" for THIS branch reads as already deleted (#3585, ledger
+            0908 line 193); any stderr starting "error: branch" used to.
         subprocess.TimeoutExpired: If git CLI exceeds SUBPROCESS_TIMEOUT.
     """
     try:
@@ -190,9 +215,13 @@ def delete_local_branch(branch_name: str) -> bool:
         logger.info("[N9] Deleted local branch: %s", branch_name)
         return True
     except subprocess.CalledProcessError as exc:
-        if "not found" in exc.stderr.lower() or "error: branch" in exc.stderr.lower():
+        if f"error: branch '{branch_name}' not found" in (exc.stderr or ""):
             logger.info("[N9] Branch not found (already deleted?): %s", branch_name)
             return False
+        _loud(
+            f"`git branch -d {branch_name}` failed (exit {exc.returncode}): "
+            f"{(exc.stderr or '').strip()}"
+        )
         raise
 
 
@@ -249,7 +278,13 @@ def extract_iteration_data(lineage_dir: Path) -> list[IterationSnapshot]:
         lineage_dir: Path to the lineage directory (active or done).
 
     Returns:
-        List of IterationSnapshot in chronological order.
+        List of IterationSnapshot in chronological order. An artifact with no
+        coverage line records 0.0, as it always has.
+
+    Raises:
+        LineageReadError: an artifact cannot be read, or its coverage figure
+            does not parse (#3585, ledger 0908 lines 277 and 288). The first
+            used to drop the iteration; the second recorded 0.0%.
     """
     if not lineage_dir.exists():
         return []
@@ -274,8 +309,13 @@ def extract_iteration_data(lineage_dir: Path) -> list[IterationSnapshot]:
 
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        except OSError as exc:
+            message = (
+                f"lineage artifact {file_path} cannot be read for the learning "
+                f"summary: {type(exc).__name__}: {exc}"
+            )
+            _loud(message)
+            raise LineageReadError(message) from exc
 
         # Extract coverage percentage
         coverage_pct = 0.0
@@ -285,8 +325,13 @@ def extract_iteration_data(lineage_dir: Path) -> list[IterationSnapshot]:
         if match:
             try:
                 coverage_pct = float(match.group(1))
-            except ValueError:
-                coverage_pct = 0.0
+            except ValueError as exc:
+                message = (
+                    f"lineage artifact {file_path} has a coverage figure that "
+                    f"does not parse: {match.group(0)!r}"
+                )
+                _loud(message)
+                raise LineageReadError(message) from exc
 
         # Extract missing lines
         missing_lines: list[str] = []

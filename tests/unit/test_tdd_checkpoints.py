@@ -2,6 +2,8 @@
 import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.testing import checkpoints
 
 
@@ -9,15 +11,17 @@ def _mk_completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> su
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-# ---- commit_checkpoint -- best-effort guards ----
+# ---- commit_checkpoint -- the quiet answers, and the failures that raise ----
 
 def test_returns_false_when_worktree_is_none():
     assert checkpoints.commit_checkpoint(None, 123, "post-scaffold") is False
 
 
-def test_returns_false_when_worktree_path_is_not_directory(tmp_path):
+def test_raises_when_worktree_path_is_not_directory(tmp_path):
+    """#3810: a missing worktree is a failure, not "nothing to commit"."""
     nonexistent = tmp_path / "nope"
-    assert checkpoints.commit_checkpoint(nonexistent, 123, "post-scaffold") is False
+    with pytest.raises(checkpoints.CheckpointError, match="not a directory"):
+        checkpoints.commit_checkpoint(nonexistent, 123, "post-scaffold")
 
 
 def test_returns_false_when_nothing_to_commit(tmp_path):
@@ -133,7 +137,9 @@ def test_the_worktree_is_not_given_an_upstream_at_creation(tmp_path):
     assert "could not push" not in source
 
 
-def test_returns_false_when_commit_itself_fails(tmp_path):
+def test_raises_when_commit_itself_fails(tmp_path):
+    """#3810: a failed commit raises with git's stderr; it used to return
+    False, the same answer as "nothing to commit"."""
     wt = tmp_path / "wt"
     wt.mkdir()
 
@@ -144,8 +150,9 @@ def test_returns_false_when_commit_itself_fails(tmp_path):
             return _mk_completed(returncode=128, stderr="fatal: not a git repo")
         return _mk_completed(returncode=0)
 
-    with patch.object(checkpoints.subprocess, "run", side_effect=fake_run):
-        assert checkpoints.commit_checkpoint(wt, 123, "post-scaffold") is False
+    with patch.object(checkpoints.subprocess, "run", side_effect=fake_run), \
+            pytest.raises(checkpoints.CheckpointError, match="not a git repo"):
+        checkpoints.commit_checkpoint(wt, 123, "post-scaffold")
 
 
 def test_omits_issue_reference_when_issue_number_is_none(tmp_path):
@@ -193,19 +200,20 @@ def test_excludes_workflow_internal_dirs_from_staging(tmp_path):
     assert ":!data/lineage" in add_args, f"exclude missing in {add_args}"
 
 
-def test_timeout_handled_as_non_fatal(tmp_path):
-    """A subprocess timeout must not propagate -- the workflow node would
-    otherwise fail on a transient git issue."""
+def test_timeout_raises(tmp_path):
+    """#3810 (ADR 0236): a git timeout raises a CheckpointError carrying the
+    timeout. It used to be swallowed as non-fatal, which left the work
+    uncommitted with nothing but a stdout line to say so."""
     wt = tmp_path / "wt"
     wt.mkdir()
 
     def fake_run(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
 
-    with patch.object(checkpoints.subprocess, "run", side_effect=fake_run):
-        # Should not raise
-        result = checkpoints.commit_checkpoint(wt, 123, "post-scaffold")
-    assert result is False
+    with patch.object(checkpoints.subprocess, "run", side_effect=fake_run), \
+            pytest.raises(checkpoints.CheckpointError) as raised:
+        checkpoints.commit_checkpoint(wt, 123, "post-scaffold")
+    assert isinstance(raised.value.__cause__, subprocess.TimeoutExpired)
 
 
 # ---- _run wrapper has encoding defaults from #837 ----

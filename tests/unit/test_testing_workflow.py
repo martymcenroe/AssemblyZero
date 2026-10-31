@@ -1633,25 +1633,28 @@ class TestVerifyPhasesModule:
         test_file = tmp_path / "test_simple.py"
         test_file.write_text("def test_pass():\n    assert True")
 
+        # #3585: a timeout raises; it used to come back as a -1 "run" that
+        # was read as test errors and sent the loop back to N4.
+        from assemblyzero.workflows.testing.nodes.verify_phases import PhaseStepError
+
         with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("pytest", 300)
 
-            result = run_pytest([str(test_file)], repo_root=tmp_path)
-
-        assert result["returncode"] == -1
-        assert "timed out" in result["stderr"]
+            with pytest.raises(PhaseStepError, match="timed out"):
+                run_pytest([str(test_file)], repo_root=tmp_path)
 
     def test_run_pytest_not_found(self, tmp_path):
-        """run_pytest handles missing pytest."""
-        from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
+        """run_pytest raises when pytest cannot start (#3585)."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import (
+            PhaseStepError,
+            run_pytest,
+        )
 
         with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError("pytest not found")
 
-            result = run_pytest([], repo_root=tmp_path)
-
-        assert result["returncode"] == -1
-        assert "not found" in result["stderr"]
+            with pytest.raises(PhaseStepError, match="not found"):
+                run_pytest([], repo_root=tmp_path)
 
     def test_verify_red_phase_no_test_files(self, tmp_path):
         """verify_red_phase blocks when no test files."""
@@ -1835,6 +1838,9 @@ class TestVerifyPhasesModule:
             "iteration_count": 0,
             "implementation_files": [str(tmp_path / "assemblyzero" / "module.py")],
             "skip_e2e": True,
+            # #3585: the full-suite gate lists droppings with git, and
+            # tmp_path is no repository; the gate is not this test's subject.
+            "full_suite_validated": True,
         }
 
         with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
@@ -1867,7 +1873,8 @@ class TestVerifyPhasesModule:
             "coverage_target": 80,
             "iteration_count": 0,
             "max_iterations": 10,
-            "implementation_files": [],
+            # #3585: N5 halts when nothing names a coverage target.
+            "implementation_files": [str(tmp_path / "pkg" / "mod.py")],
         }
 
         with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
@@ -1934,7 +1941,8 @@ class TestVerifyPhasesModule:
             "coverage_target": 90,
             "iteration_count": 0,
             "max_iterations": 10,
-            "implementation_files": [],
+            # #3585: N5 halts when nothing names a coverage target.
+            "implementation_files": [str(tmp_path / "pkg" / "mod.py")],
         }
 
         with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
