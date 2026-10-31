@@ -13,6 +13,7 @@ from typing import Literal
 
 from assemblyzero.hooks.cascade_patterns import (
     CascadePattern,
+    CascadePatternError,
     load_default_patterns,
     load_user_patterns,
     merge_patterns,
@@ -52,6 +53,13 @@ def detect_cascade_risk(
 
     Returns:
         CascadeDetectionResult with detection status and recommended action.
+
+    Raises:
+        CascadePatternError: naming the pattern and the regex error, for a
+            pattern whose regex does not compile (ADR 0236, #3585). It used to
+            be skipped, so detection ran with fewer patterns and could allow
+            output the missing pattern exists to block. The user pattern
+            config raises the same error when it cannot be used.
     """
     # Guard: empty/None input
     if not model_output:
@@ -75,12 +83,14 @@ def detect_cascade_risk(
     for pattern in patterns:
         try:
             compiled = re.compile(pattern["regex"])
-            match = compiled.search(text)
-            if match:
-                matched.append((pattern, match))
-        except re.error:
-            # Skip invalid patterns silently
-            continue
+        except (re.error, TypeError) as exc:
+            raise CascadePatternError(
+                f"cascade pattern {pattern.get('id', '?')!r} has a regex that "
+                f"does not compile ({pattern.get('regex')!r}): {exc}"
+            ) from exc
+        match = compiled.search(text)
+        if match:
+            matched.append((pattern, match))
 
     # Compute risk score
     score, risk_level = compute_risk_score(matched)

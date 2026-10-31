@@ -256,3 +256,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** `test_cascade_events.py::TestGetCascadeStats::test_corrupt_lines_skipped` is now `test_a_corrupt_line_stops_the_count`.
 
 **Neighbouring suites:** before the test change, 129 passed and 1 failed (exactly that test) across `test_cascade_events.py`, `test_cascade_action.py`, `test_cascade_detector.py`, `test_circular_imports.py`, `tests/integration/test_cascade_hook_integration.py` and the new file; after, 130 passed.
+
+## hooks/cascade_action.py, cascade_detector.py, cascade_patterns.py
+
+**New:** `tests/unit/test_cascade_action_loud_failure.py` (4): site tests for 64 (a write that fails, an event that cannot be built), and pins that a recorded block and an allowed output alert nobody. `tests/unit/test_cascade_detector_loud_failure.py` (2): a site test for 81 and a pin that valid patterns still match. `tests/unit/test_cascade_patterns_loud_failure.py` (10): site tests for 221 (two), 228, 237, 245, 247 and 252, and pins for 214 (an absent config), a disabled config, and a valid config. Patterns and config paths are passed explicitly, so the default path and per-call read (open issues of their own) are not exercised.
+
+**Before the fix, measured** against the unchanged modules: 10 failed, 6 passed (action 2 and 2, detector 1 and 1, patterns 7 and 3; the passes are the kept-behaviour tests).
+
+**Changed tests:** `test_cascade_detector.py::TestCorruptConfigFallback::test_corrupt_config_fallback` is now `test_corrupt_config_raises_naming_it`.
+
+**Neighbouring suites:** before the test change, 145 passed and 1 failed (exactly that test) across `test_cascade_events.py`, `test_cascade_action.py`, `test_cascade_detector.py`, `test_circular_imports.py`, `tests/integration/test_cascade_hook_integration.py`, the cascade-events loud-failure file and the three new files; after, 146 passed.

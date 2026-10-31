@@ -287,3 +287,14 @@ The cascade detector's event log, for measuring its accuracy. Every run imports 
 - An absent log is still zero stats, and with no window no timestamp is read.
 
 Compliance: each failure is an ERROR log line or a raise naming the log and line; the write's caller alerts. No alert at the reader, as the ledger's fixes ask: it has no caller in the codebase to route one through.
+
+### hooks/cascade_action.py, cascade_detector.py, cascade_patterns.py (8 sites, and 1 compliant row)
+
+The cascade detector blocks auto-approval of output that offers to start the next task. Every run imports these modules (`telemetry/__init__` -> `cascade_events` -> `hooks`), but nothing in `assemblyzero/` or `tools/` calls `detect_cascade_risk`, `load_user_patterns` or `handle_cascade_detection`. The detector's config path, its per-call config read, and pattern CP-024 are open issues of their own (#4277, #4276, #4275) and are unchanged.
+
+- **A block whose telemetry cannot be recorded alerts, and still blocks** (cascade_action 64). The handler was a bare `pass`. It now calls `alert_operator` with the session id, the action and the cause; the alert import is lazy, like the telemetry import beside it, because `hooks/__init__` imports this module.
+- **A pattern whose regex does not compile raises** (cascade_detector 81) the new `CascadePatternError`, naming the pattern and the regex error. It was skipped "silently", so detection ran with fewer patterns and could allow what the missing one exists to block.
+- **A user pattern config that cannot be used raises** `CascadePatternError` (cascade_patterns 221, 228, 237, 245, 247, 252): one that cannot be read or is not JSON, is not an object, has a `patterns` field that is not a list, or holds an entry that is not an object, lacks a required key, or has a regex that does not compile. Each named the config or the entry in a WARNING, or nothing, and returned the defaults alone, so the operator's overrides vanished.
+- 214 is compliant and pinned: an absent config is no user patterns. A config with `"enabled": false` is too, by the same reasoning.
+
+Compliance: the block handler alerts with what, where, cause and consequence; the detector and the loader raise naming the pattern or config, which stops detection. No alert at those two: the ledger's fixes say raise, and they have no caller in the codebase. Baseline: the `handle_cascade_detection` handler entry leaves.
