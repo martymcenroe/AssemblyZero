@@ -43,7 +43,12 @@ from assemblyzero.telemetry.cascade_events import (
 
 # ── Fixture loading ──
 
-FIXTURES_PATH = Path("tests/fixtures/cascade_samples.json")
+#: #4167: both inputs read from the checkout, never the working directory. A
+#: run started anywhere else found neither, so the fixture tests errored and
+#: the CLAUDE.md tests failed while CI, which runs from the checkout, passed.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURES_PATH = REPO_ROOT / "tests" / "fixtures" / "cascade_samples.json"
+CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 
 
 @pytest.fixture
@@ -736,8 +741,9 @@ def _validate_claude_md_cascade_rule(
     }
 
     path = Path(claude_md_path)
-    if not path.exists():
-        return result
+    # #4167: a missing file used to come back as "no rule", which read as a
+    # finding about CLAUDE.md when the test had only looked in the wrong place.
+    assert path.is_file(), f"{path} not found: the check cannot run without it"
 
     content = path.read_text(encoding="utf-8")
     content_lower = content.lower()
@@ -792,28 +798,28 @@ class TestClaudeMdCascadeRule:
 
     def test_rule_present(self) -> None:
         """T260: CLAUDE.md contains cascade prevention rule."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["rule_present"] is True, (
             "CLAUDE.md must contain a cascade prevention rule."
         )
 
     def test_open_ended_phrasing(self) -> None:
         """T270: CLAUDE.md rule uses open-ended phrasing."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["contains_open_ended"] is True, (
             "CLAUDE.md cascade rule must contain open-ended phrasing."
         )
 
     def test_forbids_numbered_options(self) -> None:
         """T270: CLAUDE.md rule forbids numbered yes/no options."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["forbids_numbered_options"] is True, (
             "CLAUDE.md cascade rule must explicitly forbid numbered yes/no options."
         )
 
     def test_section_correct(self) -> None:
         """T280: CLAUDE.md rule is in correct section."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["section_correct"] is True, (
             "CLAUDE.md cascade rule must be in a top-level ## section."
         )

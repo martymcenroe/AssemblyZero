@@ -59,11 +59,13 @@ def test_005():
     ]
 
     # TDD: Act
-    # Check that files exist (linting would be done by CI)
-    all_exist = all(Path(f).exists() for f in changed_files)
+    # Check that files exist (linting would be done by CI). #4167: under the
+    # checkout, not the working directory, which a run need not start in.
+    repo_root = Path(__file__).resolve().parents[2]
+    missing = [f for f in changed_files if not (repo_root / f).exists()]
 
     # TDD: Assert
-    assert all_exist, "All changed files should exist"
+    assert not missing, f"All changed files should exist; missing: {missing}"
 
 
 def test_010(mock_subprocess_run, mock_state):

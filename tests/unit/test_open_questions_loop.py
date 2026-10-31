@@ -292,15 +292,18 @@ class TestPreReviewValidationRemoved:
         # The flow no longer calls it. Parsed rather than string-searched, so a
         # mention in a comment or docstring cannot satisfy or break this.
         import ast
+        import importlib
         from pathlib import Path
 
+        # #4167: the module's own file, wherever the run started. The old
+        # fallback for a different working directory imported the module with
+        # `import ... as gd`, which binds the package's re-exported function of
+        # the same name, so `gd.__file__` raised AttributeError there.
         source = Path(
-            "assemblyzero/workflows/requirements/nodes/generate_draft.py"
+            importlib.import_module(
+                "assemblyzero.workflows.requirements.nodes.generate_draft"
+            ).__file__
         )
-        if not source.is_file():  # running from a different cwd
-            import assemblyzero.workflows.requirements.nodes.generate_draft as gd
-
-            source = Path(gd.__file__)
 
         tree = ast.parse(source.read_text(encoding="utf-8"))
         called_names = {
