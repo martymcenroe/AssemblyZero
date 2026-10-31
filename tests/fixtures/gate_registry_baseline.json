@@ -6,7 +6,7 @@
     "gates": 107
   },
   "halt_rows_per_stage": {
-    "impl": 44,
+    "impl": 47,
     "lld": 15,
     "orchestrator": 18,
     "spec": 20

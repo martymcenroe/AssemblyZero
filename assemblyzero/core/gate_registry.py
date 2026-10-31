@@ -577,7 +577,11 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.test_plan_revision_incomplete", "impl", JUDGES_BUDGET, ACTION_HALT,
         "Test plan revision budget spent",
-        _s(f"{_TS}/nodes/revise_test_plan.py::revise_test_plan::return", 3),
+        _s(f"{_TS}/nodes/revise_test_plan.py::revise_test_plan::return", 3)
+        # #3585: N1's router halts a plan still BLOCKED when the revisions are
+        # spent, or at once under test_plan_policy=strict, which allows none.
+        # Both ended at END with a print; N1's stop wrapper records them.
+        + _s(f"{_TS}/graph.py::_stop_after_review::return", 0, 1),
         justified_by="#2775",
         notes=(
             "budget since #2775 (ruling 1 of #2723). It judged model output "
@@ -775,7 +779,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.e2e_cap", "impl", JUDGES_BUDGET, ACTION_HALT,
         "E2E failed after",
-        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 3),
+        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 3)
+        # #3585: the graph's own cap on N6's loop back to N4 ended at END.
+        + _s(f"{_TS}/graph.py::_stop_after_e2e::return", 0),
     ),
     Gate(
         "impl.circuit_breaker", "impl", JUDGES_BUDGET, ACTION_HALT,
@@ -884,6 +890,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.scaffold_suite_invalid", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "the generated test suite cannot be",
+        # #3585: N2.5 carried 'escalate' without naming the halt; it ended at
+        # END. N2.5's stop wrapper records it.
+        _s(f"{_TS}/graph.py::_stop_after_validate::return", 0),
         decided_in=f"{_TS}/nodes/validate_tests_mechanical.py",
         notes=(
             "the spec's own test functions were stubs or used phantom fixtures; "
@@ -930,7 +939,43 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "Green phase failed after",
         # 2 and 5 since #3085 moved the zero-collected halt out; were 3 and 6.
         _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 2, 5)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 1, 3),
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 1, 3)
+        # #3585: the graph's own cap, when N5 asks for another revision or for
+        # test additions at the cap. Both ended at END with an empty reason.
+        + _s(f"{_TS}/graph.py::_stop_after_green::return", 0, 3),
+    ),
+    Gate(
+        "impl.coverage_augment_spent", "impl", JUDGES_BUDGET, ACTION_HALT,
+        "Coverage test additions spent",
+        _s(f"{_TS}/graph.py::_stop_after_green::return", 1),
+        decided_in=f"{_TS}/graph.py::route_after_green",
+        created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N4c's attempts (MAX_COVERAGE_AUGMENT_ATTEMPTS) did not reach the "
+              "coverage target. #2327 made it stop rather than route to "
+              "implementation, but it stopped at END with a print, so the "
+              "stage read the empty reason as a pass and no one was told",
+    ),
+    Gate(
+        "impl.budget.cost", "impl", JUDGES_BUDGET, ACTION_HALT,
+        "[BUDGET]",
+        _s(f"{_TS}/graph.py::_stop_after_green::return", 2, 4),
+        decided_in=f"{_TS}/graph.py::route_after_green",
+        created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="the run's cost budget (--budget) is exceeded before another "
+              "implementation revision (#640) or another test addition. Both "
+              "ended at END with a print and no reason",
+    ),
+    Gate(
+        "impl.route_unrecognised", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "Unrecognised route after",
+        _s(f"{_TS}/graph.py::_stop_after_validate::return", 1)
+        + _s(f"{_TS}/graph.py::_stop_after_red::return", 0)
+        + _s(f"{_TS}/graph.py::_stop_after_green::return", 5),
+        decided_in=f"{_TS}/graph.py",
+        created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N2.5, N3 or N5 named a next step the graph has no edge for and "
+              "recorded no reason: a broken node contract. The routers sent it "
+              "to END silently, and the stage read the empty reason as a pass",
     ),
     Gate(
         "impl.stagnation.test_count", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,

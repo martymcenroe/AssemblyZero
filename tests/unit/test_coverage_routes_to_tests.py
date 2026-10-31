@@ -112,14 +112,15 @@ def test_coverage_shortfall_never_routes_to_implementation() -> None:
 
 
 def test_exhausted_attempts_halt_rather_than_fall_through() -> None:
+    """#3585: the halt is HALT, which alerts; it was END, which tells no one."""
     state = _green_state(
         coverage_augment_attempts=MAX_COVERAGE_AUGMENT_ATTEMPTS,
     )
-    assert route_after_green(state) == "end"
+    assert route_after_green(state) == "HALT"
 
 
 def test_iteration_cap_still_applies() -> None:
-    assert route_after_green(_green_state(iteration_count=3)) == "end"
+    assert route_after_green(_green_state(iteration_count=3)) == "HALT"
 
 
 def test_a_genuine_implementation_loop_is_unaffected() -> None:

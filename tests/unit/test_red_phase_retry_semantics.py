@@ -171,7 +171,9 @@ def test_route_accepts_the_verify_destination() -> None:
 @pytest.mark.parametrize("next_node,expected", [
     ("N4_implement_code", "N4_implement_code"),
     ("N2_scaffold_tests", "N2_scaffold_tests"),
-    ("END", "end"),
+    # #3585: an END with no recorded reason halts; every real END the red
+    # phase returns carries an error_message, which halts first.
+    ("END", "HALT"),
 ])
 def test_existing_routes_are_unchanged(next_node: str, expected: str) -> None:
     assert route_after_red(

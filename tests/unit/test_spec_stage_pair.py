@@ -64,14 +64,17 @@ def spec_0007() -> str:
 
 class TestEscalationHalts:
     def test_an_exhausted_scaffold_no_longer_reaches_implementation(self):
-        """The defect itself. This used to return N4_implement_code."""
+        """The defect itself. This used to return N4_implement_code.
+
+        #3585: and then "end", which alerts no one; it halts now.
+        """
         state = {
             "validation_result": {"is_valid": False},
             "scaffold_attempts": MAX_SCAFFOLD_ATTEMPTS,
             "generated_tests": HOLLOW,
         }
         assert should_regenerate(state) == "escalate"
-        assert route_after_validate(state) == "end"
+        assert route_after_validate(state) == "HALT"
 
     def test_a_valid_suite_still_goes_to_the_red_phase(self):
         state = {"validation_result": {"is_valid": True}, "scaffold_attempts": 0}

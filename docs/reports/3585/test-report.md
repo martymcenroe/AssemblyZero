@@ -1,0 +1,15 @@
+# Test Report: the testing graph and three of its nodes under standard 0034 (#3585 step 5, batch C)
+
+Each fixed site has a test that fails before its fix and passes after, run first against the unchanged module. Filled in module by module on `3585-testing-graph`. No test makes a model call, and no workflow is run against a repository; routers and nodes are called directly with built state, the one graph roll stubs every node it passes through, and alerts are asserted through the `operator_alerts` fixture.
+
+## graph.py
+
+**New: `tests/unit/test_testing_graph_loud_failure.py` (37).** Each site test is named for its ledger line; the rest pin kept behaviour and the stop wrapper's identity.
+
+**Before the fix, measured** against HEAD's `graph.py`: 32 failed, 5 passed. The five that passed pin a working checkpoint, an N1 error without auto_mode, a BLOCKED plan under the revision cap, the augment path under budget, and N7.5's halt (557).
+
+**Changed tests:** in `test_testing_workflow.py`, eight router tests that asserted `end` (or N2 under auto) now assert HALT or a revision; in `test_revise_test_plan.py`, the cap and strict tests assert HALT and the two auto tests assert a revision; `test_test_plan_revision_budget.py::test_what_the_defect_actually_was` now finds a halt with the budget reason and a bundle; `test_impl_verdict_integrity.py::test_the_cap_still_stops_the_loop`, two tests in `test_coverage_routes_to_tests.py`, `test_red_phase_retry_semantics.py::test_existing_routes_are_unchanged[END-HALT]` and `test_spec_stage_pair.py::test_an_exhausted_scaffold_no_longer_reaches_implementation` assert HALT.
+
+**Neighbouring suites:** 28 files that import the graph, its routers, the atlas, the gate registry or the halt node: 434 passed, 1 skipped, and the two stale-baseline tests failed as expected. 18 impl, mock-roll, CLI and orchestrator files that build or invoke the graph: 306 passed.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new and 1 stale, the checkpoint wrapper's handler. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes with every site registered. Ruff finds no issue in the module that is not at HEAD; the new test file is clean.

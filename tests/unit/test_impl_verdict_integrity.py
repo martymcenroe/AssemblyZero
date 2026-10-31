@@ -96,15 +96,21 @@ def test_the_seeded_cap_governs_the_router() -> None:
 
 
 def test_the_cap_still_stops_the_loop(capsys: pytest.CaptureFixture[str]) -> None:
-    """And when it does stop, it says so rather than ending silently."""
+    """And when it does stop, it says so rather than ending silently.
+
+    #3585: it halts (HALT alerts), and says so at ERROR on stderr; it used to
+    end at END with a line on stdout.
+    """
     state = {
         "error_message": "",
         "next_node": "N4_implement_code",
         "iteration_count": DEFAULT_MAX_ITERATIONS,
         "max_iterations": DEFAULT_MAX_ITERATIONS,
     }
-    assert route_after_green(state) == "end"
-    assert "ITERATION CAP" in capsys.readouterr().out
+    assert route_after_green(state) == "HALT"
+    err = capsys.readouterr().err
+    assert "ERROR [N5] Green phase failed after" in err
+    assert "not a pass" in err
 
 
 # ------------------------------------------------- #2344: measured verdicts

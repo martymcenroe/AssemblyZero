@@ -55,8 +55,10 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N2_scaffold_tests": "the plan is usable",
             "N1_5_revise_test_plan": "blocked; revise the plan once",
-            "HALT": "the reviewer failed and left a reason",
-            "END": "blocked under a strict policy, or out of revisions",
+            "HALT": (
+                "the reviewer failed and left a reason, or the plan is blocked "
+                "under a strict policy or out of revisions (#3585)"
+            ),
         },
     },
     "N1_5_revise_test_plan": {
@@ -112,8 +114,10 @@ ATLAS: dict[str, dict] = {
             # having skipped the red phase. The edge is in the compiled graph
             # and is named here so the drift guard stays honest about it.
             "N4_implement_code": "never taken; the edge #2331 stopped using",
-            "HALT": "still unusable when the attempt budget is spent",
-            "END": "the node returned no reason to record",
+            "HALT": (
+                "still unusable when the attempt budget is spent, or a route "
+                "the graph does not know (#3585)"
+            ),
         },
     },
     "N3_verify_red": {
@@ -129,8 +133,10 @@ ATLAS: dict[str, dict] = {
             "N4_implement_code": "the tests fail, as they must",
             "N5_verify_green": "the work is already done (#2337)",
             "N2_scaffold_tests": "the suite is broken; scaffold again",
-            "HALT": "the tests pass without code, or the runner is unusable",
-            "END": "the node returned no reason to record",
+            "HALT": (
+                "the tests pass without code, the runner is unusable, or the "
+                "node named a route the graph does not have (#3585)"
+            ),
         },
     },
     "N4_implement_code": {
@@ -206,8 +212,11 @@ ATLAS: dict[str, dict] = {
             "N4_implement_code": "still failing; implement again",
             "N4c_augment_tests": "green but under-covered; add tests (#2327)",
             "N2_scaffold_tests": "the suite itself is the problem",
-            "HALT": "the iteration cap, the circuit breaker, or a dead runner",
-            "END": "the node returned no reason to record",
+            "HALT": (
+                "the iteration cap, the coverage attempts or the cost budget "
+                "spent, the circuit breaker, a dead runner, or a route the "
+                "graph does not have (#3585)"
+            ),
         },
     },
     "N6_e2e_validation": {
@@ -222,8 +231,10 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N7_finalize": "validated, or not applicable",
             "N4_implement_code": "the feature does not work; implement again",
-            "HALT": "the circuit breaker, or an e2e error with a reason",
-            "END": "the e2e iteration cap, which records no reason",
+            "HALT": (
+                "the circuit breaker, an e2e error with a reason, or the e2e "
+                "iteration cap (#3585)"
+            ),
         },
     },
     "N7_finalize": {
