@@ -30,7 +30,7 @@ The operator decided on 2026-09-05 that this fleet does not pay per token: when 
 - `ClaudeCLIProvider`, `GeminiProvider`, `MockProvider`, `ScriptedProvider`, `is_non_retryable_error` and `_is_capacity_message` (the CLI uses both).
 - Labels, not paths: the `anthropic` provider string in the cost tracker, the retry tests and `BillingError(provider=...)` examples; the spend lock's "Anthropic model" wording and `anthropic_seats` (the CLI is an Anthropic model); the notional per-token prices for `claude:` models in `tools/model_scorecard.py`; the `@anthropic-ai/claude-code` install hint; `noreply@anthropic.com` in commit trailers.
 - `ANTHROPIC_API_KEY` in `tests/e2e/conftest.py`, a list of key names the mock test removes from the environment: it reads nothing.
-- `jiter` stays in `pyproject.toml`: it is pinned explicitly and I did not establish that the SDK was its only user, so it is outside this removal.
+- `jiter` goes too. It was pinned directly, nothing under `assemblyzero/`, `tools/` or `tests/` imports it, and no package in `poetry.lock` depends on it once the SDK is gone.
 - `docs/lld/active/LLD-774.md`, `LLD-775.md`, `wiki/LangGraph-Evolution.md` and `docs/adrs/0223-retire-rag-adopt-tiphys.md` describe the removed code as history and are left.
 
 ## Not done
