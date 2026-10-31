@@ -37,7 +37,10 @@ import speedrun_roll as sr  # noqa: E402
 
 @pytest.fixture
 def repo(tmp_path):
-    """Enough of a repo for main() -- the git-touching checks are patched."""
+    """Enough of a repo for main() -- the git-touching checks are patched.
+
+    #3585: that includes the baseline `untracked_files` read, since a
+    `git status` that fails now raises instead of reading as "none"."""
     r = tmp_path / "boostgauge"
     (r / ".git").mkdir(parents=True)
     return r
@@ -136,7 +139,8 @@ class TestRelaunchArgv:
                 patch.object(sr, "check_box_health", _healthy_box), \
                 patch.object(sr, "roll_issue",
                              lambda *a: rolled.append(a) or 0), \
-                patch.object(sr, "restore_repo", lambda *a: []):
+                patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "untracked_files", lambda *_a: []):
             code = sr.main(argv)
 
         assert code == 0
@@ -354,6 +358,7 @@ class TestStoppingADetachedRoll:
     def test_a_roll_records_its_pid_so_it_can_be_stopped(self, repo):
         with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
                 patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "untracked_files", lambda *_a: []), \
                 patch.object(sr, "roll_issue", lambda *a: 0):
             seen = {}
 
@@ -369,6 +374,7 @@ class TestStoppingADetachedRoll:
     def test_a_finished_roll_leaves_no_pid_behind(self, repo):
         with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
                 patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "untracked_files", lambda *_a: []), \
                 patch.object(sr, "roll_issue", lambda *a: 0):
             sr.main(["--repo", str(repo), "--issue", "7"])
 

@@ -260,3 +260,18 @@ The sweep runs at every launch and moves or removes the pipeline's worktrees. A 
 Callers: `tools/speedrun_roll.py` at launch catches `Exception` around the sweep and writes SWEEP FAILED (continuing); every failure above alerts before that. `restore_repo` in the same file calls `registered_worktrees` from the roll's `finally`, so a worktree list that fails there now raises out of it, after the alert.
 
 Compliance: each failure path alerts with what, where, repository, cause and consequence; the list failure and the unexpected OSError stop the sweep, the per-worktree failures stop that worktree's handling and keep its content. Baseline: no loud-baseline entries existed for this module.
+
+### speedrun/leavings.py (6 sites, and 1 compliant row)
+
+The file janitor preserves pipeline-authored untracked files on a pushed graveyard branch and then clears them, at launch and at exit.
+
+- **A `git status` that fails alerts and raises** the new `LeavingsError` with its exit code and stderr, in `untracked_files` (180, which read it as "no untracked files") and in `classify_dirt` (213, which passed it off as one line of operator dirt).
+- **With no log, every line goes to stderr** (247); it went to a no-op.
+- **A preservation step that fails alerts** (263): read-tree, add, write-tree, commit-tree, branch or push. Every file still stays in place.
+- **A branch the preserved-branch ledger cannot record alerts** (312). The files are still cleared, because the pushed branch holds them.
+- **A file that cannot be removed alerts** (321), naming the file and the branch that holds its content.
+- 349 is compliant and pinned: `rmdir` of a directory that still holds something is the pruning's stop condition.
+
+Callers: in `tools/speedrun_roll.py`, the launch janitor catches `Exception` and writes JANITOR FAILED (continuing), after the alert; the baseline `untracked_files` read before the first roll does not catch, so a status that fails stops the launch; `restore_repo` (in the roll's `finally`) does not catch either. `tools/speedrun_new_attempt.py` (`check_preconditions`, and `main` under `--apply`) lets the raise out.
+
+Compliance: each failure path alerts with what, where, repository, cause and consequence; a status failure stops what reads it, a preservation failure clears nothing, and a removal failure leaves that file. Baseline: no loud-baseline entries existed for this module.
