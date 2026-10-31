@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from abc import ABC, abstractmethod
 
 from assemblyzero.workflows.testing.framework_detector import (
@@ -27,6 +28,36 @@ class CoverageReportError(RuntimeError):
     Raised, never read as 0%: a percentage no report backs is a measurement
     failure, not a coverage gap. Names the report's path and the cause.
     """
+
+
+class RunnerError(RuntimeError):
+    """A test run whose outcome cannot be read (ADR 0236, #3585).
+
+    The run's report is missing or broken, or the project's own files do not
+    say how to run it. Raised, never turned into counts: a result no report
+    backs reads as a pass or a red the run never produced. The message names
+    the project, the exit code and the head of the output. The node or the
+    entry point that the raise reaches ends the run and alerts the operator.
+    """
+
+
+def loud(message: str) -> None:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[RUNNER] %s", message)
+    print(f"ERROR [RUNNER] {message}", file=sys.stderr, flush=True)
+
+
+#: How much of a run's output a RunnerError carries: enough to name the
+#: cause, short enough for one alert.
+OUTPUT_HEAD_CHARS = 600
+
+
+def output_head(text: str) -> str:
+    """The start of a run's output, for an error message."""
+    text = text.strip()
+    if len(text) <= OUTPUT_HEAD_CHARS:
+        return text
+    return text[:OUTPUT_HEAD_CHARS] + " ..."
 
 
 def combined_output(stdout: str, stderr: str) -> str:

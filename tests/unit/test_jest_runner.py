@@ -14,6 +14,7 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
 )
 from assemblyzero.workflows.testing.runner_registry import get_framework_config
+from assemblyzero.workflows.testing.runners.base_runner import RunnerError
 from assemblyzero.workflows.testing.runners.jest_runner import JestRunner
 
 
@@ -103,9 +104,10 @@ class TestJestRunnerParseResults:
         assert result["total"] == 5
 
     def test_parse_invalid_json(self, jest_runner):
-        """Fallback when JSON is invalid."""
-        result = jest_runner.parse_results("not json", exit_code=1)
-        assert result["failed"] >= 1
+        """No report is an unreadable run, raised (ADR 0236); it used to be a
+        fallback result whose counts no report backed."""
+        with pytest.raises(RunnerError, match="no Jest/Vitest JSON report"):
+            jest_runner.parse_results("not json", exit_code=1)
 
     def test_parse_with_coverage_map(self, jest_runner):
         """A report's coverageMap is not a coverage source (#4246): coverage
