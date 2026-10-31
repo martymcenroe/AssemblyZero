@@ -2304,13 +2304,18 @@ class TestLoadLLDModule:
         assert result[2]["change_type"] == "Modify"
 
     def test_extract_files_to_modify_no_table(self):
-        """extract_files_to_modify returns empty when no table."""
-        from assemblyzero.workflows.testing.nodes.load_lld import extract_files_to_modify
+        """extract_files_to_modify raises when there is no table (#3585).
+
+        It returned [], and the run went on until N4 found nothing to write.
+        """
+        from assemblyzero.workflows.testing.nodes.load_lld import (
+            WorkflowParsingError,
+            extract_files_to_modify,
+        )
 
         lld_content = "# LLD\n\n## 2. Scope\n\nNo files changed."
-        result = extract_files_to_modify(lld_content)
-
-        assert result == []
+        with pytest.raises(WorkflowParsingError, match="no Files to Implement table"):
+            extract_files_to_modify(lld_content)
 
     def test_load_lld_non_mock(self, tmp_path):
         """load_lld loads actual implementation spec file."""
@@ -2319,10 +2324,17 @@ class TestLoadLLDModule:
         # Issue #384: load_lld now requires an impl spec, not a raw LLD
         spec_dir = tmp_path / "docs" / "lld" / "drafts"
         spec_dir.mkdir(parents=True)
+        # #3585: a spec that names no files to implement halts N0.
         (spec_dir / "spec-0042.md").write_text("""# Implementation Spec
 
 ## 1. Overview
 * **Status:** Approved (Gemini Review, 2026-01-30)
+
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `src/login.py` | Add | Login |
 
 ## 3. Requirements
 1. REQ-1: User login
@@ -3961,10 +3973,17 @@ class TestLoadLLDEdgeCases:
         # Create LLD file at custom path
         custom_path = tmp_path / "custom" / "lld.md"
         custom_path.parent.mkdir(parents=True)
+        # #3585: an LLD that names no files to implement halts N0.
         custom_path.write_text("""# Custom LLD
 
 ## 1. Context
 * **Status:** APPROVED
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `src/custom.py` | Add | Custom feature |
 
 ## 3. Requirements
 1. REQ-1: Test requirement

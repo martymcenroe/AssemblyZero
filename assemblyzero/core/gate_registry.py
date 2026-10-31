@@ -462,7 +462,12 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.input_precondition", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "No issue number provided",
         _s(f"{_TS}/nodes/load_lld.py::load_lld::return", 0, 2)
-        + _s(f"{_TS}/nodes/load_lld.py::_load_from_issue::return", 0, 1, 2, 3),
+        + _s(f"{_TS}/nodes/load_lld.py::_load_from_issue::return", 0, 1, 2, 3)
+        # #3585: an LLD N0 found and could not read (ledger 0908, line 1164),
+        # and an LLD rebuild from refs that raised (line 324). Each used to be
+        # a WARN, and the run went on with the spec standing in for the LLD.
+        + _s(f"{_TS}/nodes/load_lld.py::load_lld::return", 4)
+        + _s(f"{_TS}/nodes/load_lld.py::_halt_input_unreadable::return", 0),
     ),
     Gate(
         "infra.missing_spec", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -472,7 +477,13 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.lld_not_usable", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "GUARD: LLD content too short",
-        _s(f"{_TS}/nodes/load_lld.py::load_lld::return", 3),
+        _s(f"{_TS}/nodes/load_lld.py::load_lld::return", 3)
+        # #3585: a spec with no APPROVED marker, no Section 10 test plan in
+        # the LLD or the spec, no requirements, or no files to implement, and
+        # an issue-only body with no test plan or no files (ledger 0908,
+        # load_lld.py:896, :1001, :1146, :1182, :1224). Each used to be a
+        # warning or nothing, and the run spent its reviews against it.
+        + _s(f"{_TS}/nodes/load_lld.py::_halt_spec_unusable::return", 0),
     ),
     Gate(
         "impl.no_files_to_implement", "impl", JUDGES_UPSTREAM, ACTION_HALT,

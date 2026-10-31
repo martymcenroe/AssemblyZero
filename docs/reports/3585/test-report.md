@@ -13,3 +13,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 28 files that import the graph, its routers, the atlas, the gate registry or the halt node: 434 passed, 1 skipped, and the two stale-baseline tests failed as expected. 18 impl, mock-roll, CLI and orchestrator files that build or invoke the graph: 306 passed.
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new and 1 stale, the checkpoint wrapper's handler. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes with every site registered. Ruff finds no issue in the module that is not at HEAD; the new test file is clean.
+
+## nodes/load_lld.py
+
+**New: `tests/unit/test_load_lld_loud_failure.py` (27).** Each site test is named for its ledger line; the eight compliant rows are pinned, and a control spec carries everything the halting tests remove.
+
+**Before the fix, measured** against HEAD's `load_lld.py` with the first 26 tests: 15 failed, 11 passed. The eleven that passed are the control, the quiet "no functions" answer, a clean rebuild miss, and the eight compliant pins. The 27th test, added with the fix, checks that `validate_spec_structure` raises exactly the reason `spec_structure_error` gives.
+
+**Changed tests:** each a fixture that relied on a missing files table or test plan being accepted, or an assertion of the old empty list: `test_extract_files_fencing.py::test_table_inside_code_fence_is_skipped` and `test_testing_workflow.py::test_extract_files_to_modify_no_table` expect the raise; the specs in `test_testing_workflow.py` (two tests), `test_implement_from_lld_cli.py`, `test_per_framework_coverage_target.py` and `test_two_frameworks_one_run.py` gain a files table; `test_ts_path_resolves_to_its_runner.py`'s helpers write a three-column table and a Section 10 test plan, and `test_two_frameworks_one_run.py`'s issue-only body carries both.
+
+**Neighbouring suites:** 27 files that import the module or its functions, the spec workflow's three checks that call the extractor, the answer key and `tests/integration/test_lld_parsing_chain.py`: 670 passed after the fixture updates. The first pass, before them, failed 11, each one of those fixtures.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new and 2 more stale, the rebuild handler and its tag. `audit_fail_open.py --check` reports no new fail-open, and none is left in the module. `audit_halt_sites.py --check` passes. Ruff finds the module's same three issues as at HEAD; the new test file is clean.

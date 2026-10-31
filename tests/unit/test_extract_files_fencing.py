@@ -13,14 +13,22 @@ Tests verify:
 
 from __future__ import annotations
 
-from assemblyzero.workflows.testing.nodes.load_lld import extract_files_to_modify
+import pytest
+
+from assemblyzero.workflows.testing.nodes.load_lld import (
+    WorkflowParsingError,
+    extract_files_to_modify,
+)
 
 
 # --- Issue #471: Code fence filtering ---
 
 
 def test_table_inside_code_fence_is_skipped():
-    """A table inside ``` fences should NOT be parsed."""
+    """A table inside ``` fences should NOT be parsed.
+
+    #3585: with no table left, the extractor raises rather than returning [].
+    """
     content = (
         "# Implementation Spec\n\n"
         "```markdown\n"
@@ -30,8 +38,8 @@ def test_table_inside_code_fence_is_skipped():
         "| fake/file.py | Add | Fake entry |\n"
         "```\n"
     )
-    result = extract_files_to_modify(content)
-    assert len(result) == 0, f"Should find 0 files but got: {result}"
+    with pytest.raises(WorkflowParsingError, match="no Files to Implement table"):
+        extract_files_to_modify(content)
 
 
 def test_real_table_outside_fence_found():

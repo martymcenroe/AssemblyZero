@@ -31,9 +31,12 @@ TF = fd.TestFramework
 
 
 def _lld(*paths: str, extra: str = "") -> str:
-    rows = "\n".join(f"| `{p}` | Add |" for p in paths)
+    # #3585: three columns, the fewest the files extractor reads; a table it
+    # reads no file from now halts N0 instead of loading an empty list.
+    rows = "\n".join(f"| `{p}` | Add | a file |" for p in paths)
     return (
-        "## 2.1 Files Changed\n| File | Change Type |\n|------|-------------|\n"
+        "## 2.1 Files Changed\n| File | Change Type | Description |\n"
+        "|------|-------------|-------------|\n"
         f"{rows}\n\n{extra}\n"
     )
 
@@ -56,6 +59,8 @@ class _Proc:
 
 
 def _issue_load(root: Path, body: str) -> dict:
+    # #3585: issue-only mode halts on a body with no Section 10 test plan.
+    body += "\n## 10. Test Plan\n\n### test_replay\nVerify the replay.\n"
     issue = json.dumps({"title": "Replay", "body": body})
     with patch.object(load_lld_module, "run_command", return_value=_Proc(issue)):
         return _load_from_issue({}, 9, root)
