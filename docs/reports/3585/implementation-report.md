@@ -42,3 +42,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 
 - **The unused router is deleted (47, 60, 68, 71).** `route_by_exit_code` sent a red phase that passed, an interrupted or broken pytest, a timeout and an unknown code to a plain end, never to HALT. Nothing called it: the routing that runs is inline in `nodes/verify_phases.py` on the same constants (see #2690). The ledger allowed routing to HALT or deletion; deletion leaves no second copy with silent ends to wire in, and changes no route.
 - **What verify_phases reads stays.** The constants, `describe_exit_code` and `describe_run_outcome` are unchanged.
+
+### framework_detector.py (3 ledger rows: 3 fixed)
+
+- **Two raises are now loud.** An unreadable package.json (215) and a `test_dirs` declaration naming no framework (252) raised with nothing said where they failed. Each now prints an ERROR line first. The path resolver's read of the same package.json, added by #4237 after the ledger's base, does the same.
+- **A missing project is not pytest (273).** `detect_framework_dirs` with a project root that is empty or not a directory raises `FrameworkResolutionError` naming it, after an ERROR line. It returned no frameworks, which the callers read as pytest at the root. A project that exists and declares nothing is still the quiet empty answer.
+- **Where the raises go.** N0 catches ValueError on all three paths and halts, and HALT alerts; provisioning turns ValueError into `ProvisioningError` naming the worktree.

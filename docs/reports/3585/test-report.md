@@ -75,3 +75,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 68 passed and 1 skipped across 5 files: the router's two test files, the verify_phases lint test, the exit-code verify_phases tests and the honest-coverage tests. The skip is the lint test's own: ruff is not importable in the environment.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issue as at HEAD.
+
+## framework_detector.py
+
+**New: `tests/unit/test_framework_detector_loud_failure.py` (8).**
+
+**Before the fix, measured:** 6 failed, 2 passed. The six site tests failed. The two that passed pin an existing empty project, read quietly as pytest at the root, and a detected config.
+
+**Changed tests:** `test_framework_detector.py::test_nonexistent_directory` now expects `FrameworkResolutionError` naming the path, where it expected an empty list.
+
+**Neighbouring suites:** 576 passed across 21 files: the detector's tests, N0's, provisioning's, the multi-framework and mock runs, and the LLD parsing chain.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.

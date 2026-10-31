@@ -130,8 +130,16 @@ class TestDetectFrameworkFromProject:
             assert detect_framework_from_project(tmpdir) == [TestFramework.PYTEST]
 
     def test_nonexistent_directory(self):
-        """Non-existent directory returns None."""
-        assert detect_framework_from_project("/nonexistent/path/xyz") == []
+        """A directory that does not exist raises (ADR 0236); it used to be
+        no frameworks, which the callers read as pytest."""
+        import pytest
+
+        from assemblyzero.workflows.testing.framework_detector import (
+            FrameworkResolutionError,
+        )
+
+        with pytest.raises(FrameworkResolutionError, match="/nonexistent/path/xyz"):
+            detect_framework_from_project("/nonexistent/path/xyz")
 
     def test_empty_directory(self):
         """Empty directory returns None."""

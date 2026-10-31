@@ -8,10 +8,18 @@ import json
 import logging
 import os
 import re
+import sys
 from enum import Enum
 from typing import Optional, TypedDict
 
 logger = logging.getLogger(__name__)
+
+
+def _loud(message: str) -> None:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1). Every
+    raise it precedes reaches N0, which halts, and HALT alerts."""
+    logger.error("[FRAMEWORKS] %s", message)
+    print(f"ERROR [FRAMEWORKS] {message}", file=sys.stderr, flush=True)
 
 
 class TestFramework(Enum):
@@ -309,8 +317,16 @@ def _js_frameworks_in(directory: str) -> list[TestFramework]:
         except (json.JSONDecodeError, OSError) as e:
             # A package.json that cannot be read is a broken project, not a
             # missing one; the run stops here rather than testing half of it.
-            raise ValueError(f"{package_json_path} could not be read: {e}") from e
+            raise _unreadable_package_json(package_json_path, e) from e
     return detected
+
+
+def _unreadable_package_json(path: str, error: Exception) -> ValueError:
+    """The ValueError for a package.json the detector cannot read, after its
+    ERROR line (ADR 0236): it raised, but said nothing where it failed."""
+    message = f"{path} could not be read: {type(error).__name__}: {error}"
+    _loud(message)
+    return ValueError(message)
 
 
 #: (file, section) pairs whose section declares pytest configuration (#3001).
@@ -404,10 +420,12 @@ def _declared_test_dirs(project_root: str) -> dict[TestFramework, str]:
         try:
             framework = TestFramework(name)
         except ValueError as e:
-            raise ValueError(
+            message = (
                 f"{path}: test_dirs names {name!r}, which is not a test framework "
                 f"({[f.value for f in TestFramework]})"
-            ) from e
+            )
+            _loud(message)
+            raise ValueError(message) from e
         out[framework] = os.path.normpath(str(directory))
     return out
 
@@ -425,9 +443,20 @@ def detect_framework_dirs(project_root: str) -> dict[TestFramework, str]:
     in path order. A `test_dirs` declaration in the target's .unleashed.json
     wins over detection. Order: the root's JavaScript frameworks, pytest,
     then the subdirectories', which is the order the root-only detector gave.
+
+    An empty dict means the project exists and declares no framework, which
+    the callers read as pytest at the root. A project root that is empty or
+    is not a directory raises FrameworkResolutionError naming it, after an
+    ERROR line (ADR 0236): it used to be the same empty dict, so a project
+    that was not there was tested as pytest.
     """
     if not project_root or not os.path.isdir(project_root):
-        return {}
+        message = (
+            f"the project root {project_root!r} is not a directory, so which "
+            f"test frameworks the project has, and where, cannot be told"
+        )
+        _loud(message)
+        raise FrameworkResolutionError(message)
     root = os.path.abspath(project_root)
     found: dict[TestFramework, str] = {}
 
@@ -455,7 +484,8 @@ def detect_framework_from_project(project_root: str) -> list[TestFramework]:
 
     Before #3707 this looked at the root alone, so a target with its web app
     in a subdirectory was seen as pytest only and its JavaScript suite never
-    ran. Returns an empty list if nothing is found.
+    ran. Returns an empty list if nothing is found; raises
+    FrameworkResolutionError when the project root is not a directory.
     """
     return list(detect_framework_dirs(project_root))
 
@@ -480,7 +510,7 @@ def _runner_evidence(directory: str) -> list[list[TestFramework]]:
             with open(package_json_path, "r", encoding="utf-8") as f:
                 pkg = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            raise ValueError(f"{package_json_path} could not be read: {e}") from e
+            raise _unreadable_package_json(package_json_path, e) from e
         test_script = (pkg.get("scripts") or {}).get("test", "")
         for word, framework in (
             ("playwright", TestFramework.PLAYWRIGHT),
