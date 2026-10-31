@@ -30,7 +30,7 @@ class TestGetFrameworkConfig:
         assert config["test_file_pattern"] == "*.spec.ts"
         assert config["test_file_extension"] == ".spec.ts"
         assert config["coverage_type"] == CoverageType.SCENARIO
-        assert config["coverage_target"] == 1.0
+        assert config["coverage_target_percent"] == 100  # #3089: a percentage
 
     def test_t090_pytest_config(self):
         """T090: get_framework_config returns correct config for PYTEST."""
@@ -40,7 +40,7 @@ class TestGetFrameworkConfig:
         assert config["test_file_pattern"] == "test_*.py"
         assert config["test_file_extension"] == ".py"
         assert config["coverage_type"] == CoverageType.LINE
-        assert config["coverage_target"] == 0.95
+        assert config["coverage_target_percent"] == 95  # #3089: a percentage
 
     def test_jest_config(self):
         """get_framework_config returns correct config for JEST."""
@@ -60,8 +60,8 @@ class TestGetFrameworkConfig:
         """Returned config should be a copy (not mutable registry)."""
         config1 = get_framework_config(TestFramework.PYTEST)
         config2 = get_framework_config(TestFramework.PYTEST)
-        config1["coverage_target"] = 0.5
-        assert config2["coverage_target"] == 0.95  # Unaffected
+        config1["coverage_target_percent"] = 50
+        assert config2["coverage_target_percent"] == 95  # Unaffected
 
 
 class TestGetRunner:

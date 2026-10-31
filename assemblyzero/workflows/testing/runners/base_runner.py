@@ -4,6 +4,7 @@ Issue #381: Defines the interface all test runners must implement.
 """
 
 from assemblyzero.utils.shell import run_command
+import json
 import logging
 import os
 import subprocess
@@ -18,6 +19,80 @@ logger = logging.getLogger(__name__)
 
 # Default subprocess timeout in seconds
 DEFAULT_TIMEOUT = 300
+
+
+class CoverageReportError(RuntimeError):
+    """A run asked to measure coverage whose report cannot be read (#4246).
+
+    Raised, never read as 0%: a percentage no report backs is a measurement
+    failure, not a coverage gap. Names the report's path and the cause.
+    """
+
+
+def combined_output(stdout: str, stderr: str) -> str:
+    """Both streams, stdout first, as a reader of the run's output sees them."""
+    return stdout + ("\n" + stderr if stderr else "")
+
+
+def _object_end(text: str, start: int) -> int:
+    """The index of the `}` that closes the `{` at `start`, reading JSON
+    strings as strings; -1 when it never closes."""
+    depth = 0
+    in_string = escaped = False
+    for index in range(start, len(text)):
+        character = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def first_json_object(text: str, required_key: str) -> dict | None:
+    """The first JSON object in `text` whose top level carries `required_key`
+    (#3065).
+
+    Each `{` is matched to the `}` that closes it, so text after the report
+    (npx's warnings, when the streams were joined) cannot reach the parse,
+    and a brace in a log line ahead of it (`Using config {rootDir: web}`) is
+    passed over: an object is decoded only when it opens as JSON does and
+    names the key. A JSON log line that is not the report is passed over
+    whole, so nothing nested inside it is mistaken for the report.
+
+    None when no object in `text` carries the key: there is no report. An
+    object that carries the key and does not parse raises ValueError -- that
+    is the report, broken.
+    """
+    marker = f'"{required_key}"'
+    index = text.find("{")
+    while index != -1:
+        end = _object_end(text, index)
+        if end == -1:
+            index = text.find("{", index + 1)
+            continue
+        span = text[index:end + 1]
+        if span[1:].lstrip()[:1] in ('"', "}") and marker in span:
+            try:
+                value = json.loads(span)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"the JSON object carrying {marker} does not parse: {e}"
+                ) from e
+            if isinstance(value, dict) and required_key in value:
+                return value
+        index = text.find("{", end + 1)
+    return None
 
 
 class BaseTestRunner(ABC):
@@ -58,18 +133,95 @@ class BaseTestRunner(ABC):
                 out.append(path)
         return out
 
+    def require_dependencies(self) -> None:
+        """Raise OSError (EnvironmentError) when this runner's project cannot
+        run its tests (#4236). The base runner needs nothing beyond what its
+        constructor checked; the JavaScript runners need their packages."""
+
+    def _require_node_package(self, binary: str) -> None:
+        """Raise OSError unless `node_modules/.bin/<binary>` exists in
+        the project directory or a directory above it up to the project root
+        (#4236), or a Yarn Plug'n'Play `.pnp.cjs` stands in for node_modules.
+
+        Node resolves packages upwards, so a workspace that installs at the
+        root is installed for `web/` too. Without the package, `npx` fetches
+        the runner from the network instead of running the project's own, or
+        fails: the run never starts a suite it cannot run.
+        """
+        searched: list[str] = []
+        for current in self._node_search_dirs():
+            searched.append(current)
+            bin_dir = os.path.join(current, "node_modules", ".bin")
+            if (
+                os.path.isfile(os.path.join(bin_dir, binary))
+                or os.path.isfile(os.path.join(bin_dir, f"{binary}.cmd"))
+                or os.path.isfile(os.path.join(current, ".pnp.cjs"))
+            ):
+                return
+        raise OSError(
+            f"{binary} cannot run in {self.project_dir}: no "
+            f"node_modules/.bin/{binary} in {', '.join(searched)}. Install the "
+            f"project's dependencies there (npm ci) before the run"
+        )
+
+    def _node_search_dirs(self) -> list[str]:
+        """The project directory and each directory above it up to the
+        project root: where Node resolves a package from."""
+        root = os.path.abspath(self.project_root)
+        current = os.path.abspath(self.project_dir)
+        dirs: list[str] = []
+        while True:
+            dirs.append(current)
+            parent = os.path.dirname(current)
+            if current == root or parent == current or not (
+                parent == root or parent.startswith(root + os.sep)
+            ):
+                return dirs
+            current = parent
+
+    def _require_one_node_module(self, names: tuple[str, ...], purpose: str) -> None:
+        """Raise OSError unless one of the packages `names` is installed in
+        `node_modules` in the project directory or above it, or a Yarn
+        Plug'n'Play `.pnp.cjs` stands in for node_modules (#4246)."""
+        searched: list[str] = []
+        for current in self._node_search_dirs():
+            searched.append(current)
+            if os.path.isfile(os.path.join(current, ".pnp.cjs")) or any(
+                os.path.isdir(os.path.join(current, "node_modules", *name.split("/")))
+                for name in names
+            ):
+                return
+        raise OSError(
+            f"{self.config['framework'].value} cannot {purpose} in "
+            f"{self.project_dir}: neither {' nor '.join(names)} is installed in "
+            f"node_modules in {', '.join(searched)}. Install one (for example "
+            f"npm i -D {names[0]}) before the run"
+        )
+
     @abstractmethod
     def run_tests(
         self,
         test_paths: list[str] | None = None,
         extra_args: list[str] | None = None,
+        *,
+        measure_coverage: bool = False,
     ) -> TestRunResult:
-        """Execute tests and return unified results."""
+        """Execute tests and return unified results.
+
+        `measure_coverage` (#4246) asks a runner that measures line coverage
+        to do so and to report it in `coverage_percent`; a runner whose
+        coverage is measured elsewhere (pytest's, by `run_pytest`) or is
+        scenario coverage (Playwright's) ignores it."""
         raise NotImplementedError
 
     @abstractmethod
-    def parse_results(self, raw_output: str, exit_code: int) -> TestRunResult:
-        """Parse runner-specific output into unified TestRunResult."""
+    def parse_results(
+        self, raw_output: str, exit_code: int, stderr: str = "",
+    ) -> TestRunResult:
+        """Parse runner-specific output into unified TestRunResult.
+
+        `raw_output` is the stream the runner parses, and `stderr` the other
+        one, kept for the reader (#3065)."""
         raise NotImplementedError
 
     @abstractmethod
@@ -102,10 +254,17 @@ class BaseTestRunner(ABC):
         command: list[str],
         timeout: int = DEFAULT_TIMEOUT,
         cwd: str | None = None,
-    ) -> tuple[str, int]:
-        """Run a subprocess command and return (stdout, exit_code).
+    ) -> tuple[str, str, int]:
+        """Run a subprocess command and return (stdout, stderr, exit_code).
 
-        Handles timeout and other subprocess errors gracefully.
+        #3065: the streams come back apart, so a runner that asked for a
+        machine-readable report on stdout parses stdout alone; `npx` writes
+        to stderr as a matter of routine, and a warning appended after the
+        report broke every JSON parse. A runner that reads human output
+        joins them (`combined_output`).
+
+        A timeout, a missing command or an OS error comes back as exit code
+        -1 with its cause in place of stderr, as it did.
         """
         working_dir = cwd or self.project_root
         if self.config.get("working_directory"):
@@ -122,16 +281,13 @@ class BaseTestRunner(ABC):
                 timeout=timeout,
                 cwd=working_dir,
             )
-            output = result.stdout
-            if result.stderr:
-                output += "\n" + result.stderr
-            return output, result.returncode
+            return result.stdout or "", result.stderr or "", result.returncode
         except subprocess.TimeoutExpired:
             logger.error("Command timed out after %ds: %s", timeout, " ".join(command))
-            return f"Command timed out after {timeout}s", -1
+            return "", f"Command timed out after {timeout}s", -1
         except FileNotFoundError as e:
             logger.error("Command not found: %s", e)
-            return f"Command not found: {e}", -1
+            return "", f"Command not found: {e}", -1
         except OSError as e:
             logger.error("OS error running command: %s", e)
-            return f"OS error: {e}", -1
+            return "", f"OS error: {e}", -1

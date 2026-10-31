@@ -4,7 +4,6 @@ Issue #381: Handles Playwright (@playwright/test) execution via npx,
 JSON report parsing, and TypeScript test file validation.
 """
 
-import json
 import logging
 import re
 import shutil
@@ -15,7 +14,11 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
     TestRunResult,
 )
-from assemblyzero.workflows.testing.runners.base_runner import BaseTestRunner
+from assemblyzero.workflows.testing.runners.base_runner import (
+    BaseTestRunner,
+    combined_output,
+    first_json_object,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +38,22 @@ class PlaywrightRunner(BaseTestRunner):
                 "Install Node.js from https://nodejs.org/ and ensure npx is available."
             )
 
+    def require_dependencies(self) -> None:
+        """The project's own Playwright must be installed (#4236)."""
+        self._require_node_package("playwright")
+
     def run_tests(
         self,
         test_paths: list[str] | None = None,
         extra_args: list[str] | None = None,
+        *,
+        measure_coverage: bool = False,
     ) -> TestRunResult:
-        """Run 'npx playwright test' with --reporter=json."""
+        """Run 'npx playwright test' with --reporter=json.
+
+        `measure_coverage` is accepted and ignored (#4246): Playwright's
+        coverage is scenario coverage, computed from the result by the green
+        phase, not measured by the run."""
         command = ["npx", "playwright", "test", "--reporter=json"]
 
         if extra_args:
@@ -50,10 +63,12 @@ class PlaywrightRunner(BaseTestRunner):
         if test_paths:
             command.extend(test_paths)
 
-        raw_output, exit_code = self._run_subprocess(command)
-        return self.parse_results(raw_output, exit_code)
+        stdout, stderr, exit_code = self._run_subprocess(command)
+        return self.parse_results(stdout, exit_code, stderr)
 
-    def parse_results(self, raw_output: str, exit_code: int) -> TestRunResult:
+    def parse_results(
+        self, raw_output: str, exit_code: int, stderr: str = "",
+    ) -> TestRunResult:
         """Parse Playwright JSON reporter output into TestRunResult.
 
         Playwright JSON format has:
@@ -77,22 +92,23 @@ class PlaywrightRunner(BaseTestRunner):
                 }
             ]
         }
+
+        #3065: the report is read from `raw_output`, the run's stdout, as the
+        first JSON object that carries `suites`; `stderr` (npx's warnings,
+        Playwright's browser-launch notices) is kept in the result's
+        `raw_output` for the reader and never parsed.
         """
         passed = 0
         failed = 0
         skipped = 0
         errors = 0
+        shown = combined_output(raw_output, stderr)
 
         try:
-            # Playwright may emit non-JSON output before the JSON blob.
-            # Find the first '{' to locate the JSON.
-            json_start = raw_output.find("{")
-            if json_start == -1:
-                logger.warning("No JSON found in Playwright output; using exit code only")
-                return self._fallback_result(raw_output, exit_code)
-
-            json_str = raw_output[json_start:]
-            report = json.loads(json_str)
+            report = first_json_object(raw_output, "suites")
+            if report is None:
+                logger.warning("No JSON report found in Playwright output; using exit code only")
+                return self._fallback_result(shown, exit_code)
 
             for suite in report.get("suites", []):
                 passed_s, failed_s, skipped_s, errors_s = self._count_suite(suite)
@@ -101,9 +117,9 @@ class PlaywrightRunner(BaseTestRunner):
                 skipped += skipped_s
                 errors += errors_s
 
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
             logger.warning("Failed to parse Playwright JSON report: %s", e)
-            return self._fallback_result(raw_output, exit_code)
+            return self._fallback_result(shown, exit_code)
 
         total = passed + failed + skipped + errors
 
@@ -115,7 +131,7 @@ class PlaywrightRunner(BaseTestRunner):
             "total": total,
             "coverage_percent": 0.0,  # Playwright doesn't provide line coverage
             "coverage_type": CoverageType.SCENARIO,
-            "raw_output": raw_output,
+            "raw_output": shown,
             "exit_code": exit_code,
             "framework": TestFramework.PLAYWRIGHT,
         }

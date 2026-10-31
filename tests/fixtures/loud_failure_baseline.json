@@ -1,17 +1,11 @@
 {
-  "count": 259,
+  "count": 258,
   "entries": {
     "assemblyzero.workflows.implementation_spec.graph::N3_validate_completeness::unrouted_error::1": {
       "detail": "node N3_validate_completeness returns error_message; a router does not send error_message to HALT",
       "issue": 3581,
       "kind": "unrouted_error",
       "line": 99
-    },
-    "assemblyzero.workflows.testing.graph::N4c_augment_tests::unrouted_error::1": {
-      "detail": "node N4c_augment_tests returns error_message; no conditional edge",
-      "issue": 3581,
-      "kind": "unrouted_error",
-      "line": 522
     },
     "assemblyzero/hooks/cascade_action.py::handle_cascade_detection::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -905,19 +899,19 @@
       "detail": "# fail-open: the caller compiled the merged file before writing it,",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 318
+      "line": 319
     },
     "assemblyzero/workflows/testing/nodes/augment_tests.py::_without_named_tests::fail_open_tag::1": {
       "detail": "# fail-open: the caller compiles the merged candidate next and",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 390
+      "line": 391
     },
     "assemblyzero/workflows/testing/nodes/augment_tests.py::augment_tests_for_coverage::fail_open_tag::1": {
       "detail": "# fail-open: a repair that does not parse is a rejected repair,",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 735
+      "line": 768
     },
     "assemblyzero/workflows/testing/nodes/cleanup.py::cleanup::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1019,43 +1013,43 @@
       "detail": "# fail-open: an unreadable file leaves the edit script with",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 913
+      "line": 921
     },
     "assemblyzero/workflows/testing/nodes/implementation/orchestrator.py::implement_code::fail_open_tag::2": {
       "detail": "# fail-open: the file on disk is left exactly as it is either",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1017
+      "line": 1025
     },
     "assemblyzero/workflows/testing/nodes/implementation/orchestrator.py::implement_code::fail_open_tag::3": {
       "detail": "# fail-open: the file on disk is untouched either way;",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1066
+      "line": 1074
     },
     "assemblyzero/workflows/testing/nodes/implementation/orchestrator.py::implement_code::fail_open_tag::4": {
       "detail": "# fail-open: an unreadable spec suite releases nothing and",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1121
+      "line": 1129
     },
     "assemblyzero/workflows/testing/nodes/implementation/orchestrator.py::implement_code::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 589
+      "line": 597
     },
     "assemblyzero/workflows/testing/nodes/implementation/orchestrator.py::implement_code::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 819
+      "line": 827
     },
     "assemblyzero/workflows/testing/nodes/implementation/orchestrator.py::try_edit_script_fix::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 117
+      "line": 125
     },
     "assemblyzero/workflows/testing/nodes/implementation/parsers.py::_addoption_flags::fail_open_tag::1": {
       "detail": "# fail-open: syntax is the syntax check's finding, two lines above",
@@ -1085,13 +1079,13 @@
       "detail": "# fail-open: the rebuild is a recovery attempt on a path that",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 371
+      "line": 407
     },
     "assemblyzero/workflows/testing/nodes/load_lld.py::find_lld_path::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 370
+      "line": 406
     },
     "assemblyzero/workflows/testing/nodes/review_test_plan.py::review_test_plan::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1103,73 +1097,73 @@
       "detail": "# fail-open: a name the finders choke on is not evidence of a",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1036
+      "line": 1070
     },
     "assemblyzero/workflows/testing/nodes/scaffold_tests.py::unbound_names::fail_open_tag::1": {
       "detail": "# fail-open: this is a repair, not the verdict. A file that does not",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 990
+      "line": 1024
     },
     "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py::imported_helper_sources::fail_open_tag::1": {
       "detail": "# fail-open: returning no helpers is strictly more conservative than",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 500
+      "line": 507
     },
     "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py::imported_helper_sources::fail_open_tag::2": {
       "detail": "# fail-open: one unreadable neighbour drops one helper and the loop",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 523
+      "line": 530
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::_align_plan_files_with_the_spec::fail_open_tag::1": {
       "detail": "# fail-open: a spec suite that cannot be read aligns nothing; the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2249
+      "line": 2566
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::_align_plan_files_with_the_spec::fail_open_tag::2": {
       "detail": "# fail-open: an unreadable plan file is measured as it is; the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2261
+      "line": 2578
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::_align_plan_files_with_the_spec::fail_open_tag::3": {
       "detail": "# fail-open: a file that cannot be written is measured as it",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 2270
+      "line": 2587
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::_preserve_visual_samples::fail_open_tag::1": {
       "detail": "# fail-open: a sample is evidence, not a gate -- losing it must not",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1927
+      "line": 2244
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::_preserve_visual_samples::fail_open_tag::2": {
       "detail": "# fail-open: same ruling -- git could not say, so nothing is",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1932
+      "line": 2249
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::_preserve_visual_samples::fail_open_tag::3": {
       "detail": "# fail-open: preserve every sample that can be preserved -- one",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1956
+      "line": 2273
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::read_red_marker::fail_open_tag::1": {
       "detail": "# fail-open: an unreadable marker is treated as no marker \u2014 the",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1036
+      "line": 1046
     },
     "assemblyzero/workflows/testing/nodes/verify_phases.py::write_red_marker::fail_open_tag::1": {
       "detail": "# fail-open: the marker is loop bookkeeping, not the red verdict \u2014",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 1022
+      "line": 1032
     },
     "assemblyzero/workflows/testing/path_validator.py::load_context_files::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -1181,7 +1175,7 @@
       "detail": "# fail-open: missing or malformed package.json just means no typecheck script",
       "issue": 3581,
       "kind": "fail_open_tag",
-      "line": 58
+      "line": 156
     },
     "tools/audit_fully_landed.py::<module>::swallowed_handler::1": {
       "detail": "bare except neither raises nor calls alert_operator",

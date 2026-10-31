@@ -4,6 +4,7 @@ Contains implement_code() (the N4 node entry point) and supporting functions.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,13 @@ from assemblyzero.workflows.testing.audit import (
     save_audit_file,
 )
 from assemblyzero.workflows.testing.circuit_breaker import record_iteration_cost
+from assemblyzero.workflows.testing.framework_detector import TestFramework
+from assemblyzero.workflows.testing.framework_ownership import (
+    TestFileOwnershipError,
+    is_test_file,
+    owner_of,
+    run_frameworks,
+)
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 from .claude_client import (
@@ -1162,21 +1170,13 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     # Issue #460 replaced the scaffold with the implementer's test files. Since
     # #2316 the scaffold is the spec's own suite -- the contract -- and it
     # stays (#2709). One helper decides, so the rule has one home.
-    issue_number = state.get("issue_number", 0)
-    real_test_files = [
-        p for p in written_paths
-        if "/tests/" in p.replace("\\", "/")
-        and Path(p).name.startswith("test_")
-        and p.endswith(".py")
-    ]
-    test_files_after = merge_test_files(
-        scaffold_path=repo_root / "tests" / f"test_issue_{issue_number}.py",
-        scaffold_is_spec_suite=bool(
-            (state.get("spec_test_suite") or {}).get("functions")
-        ),
-        real_test_files=real_test_files,
-        prior_test_files=list(state.get("test_files", []) or []),
-    )
+    # #4245: every test file N4 wrote, of every framework of the run, by the
+    # ownership rule the phases use; it used to be Python tests alone.
+    real_test_files = [p for p in written_paths if is_test_file(p)]
+    try:
+        test_files_after = registered_test_files(state, real_test_files, repo_root)
+    except TestFileOwnershipError as e:
+        return _halt_test_file_unowned(e)
 
     # Log to audit
     log_workflow_execution(
@@ -1240,6 +1240,68 @@ def merge_test_files(
         scaffold_path.unlink()
         print(f"    Deleted scaffold: {scaffold_path}")
     return list(real_test_files)
+
+
+def registered_test_files(
+    state: TestingWorkflowState, real_test_files: list[str], repo_root: Path,
+) -> list[str]:
+    """What the green phase runs after N4, for every framework of the run
+    (#2709, #4245).
+
+    Each test file N4 wrote goes to the framework that owns it, by the rule
+    the red and green phases split the run's files with
+    (`framework_ownership.owner_of`). Then each framework's files are merged
+    by `merge_test_files`, with that framework's own scaffold: pytest's is
+    `tests/test_issue_<N>.py`, kept when it is the spec's suite (#2709), and a
+    JavaScript framework's is its stub in its own directory (#4243), replaced
+    by N4's tests for it as #460 replaced pytest's. A framework N4 wrote no
+    test for keeps its files. With one framework this is exactly the one
+    `merge_test_files` call it was.
+
+    Raises TestFileOwnershipError, naming the file, when a written test file
+    belongs to no framework of the run or to two: nothing would run it.
+    """
+    from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_path_for
+
+    frameworks = run_frameworks(state)
+    root = str(repo_root)
+    written: list[list[str]] = [[] for _ in frameworks]
+    for path in real_test_files:
+        written[owner_of(path, frameworks, root)].append(path)
+    prior_files = [str(p) for p in (state.get("test_files", []) or [])]
+    prior: list[list[str]] = [[] for _ in frameworks]
+    for path in prior_files:
+        prior[owner_of(path, frameworks, root) if len(frameworks) > 1 else 0].append(path)
+
+    spec_suite = bool((state.get("spec_test_suite") or {}).get("functions"))
+    issue_number = state.get("issue_number", 0)
+    merged: list[str] = []
+    for index, run in enumerate(frameworks):
+        merged.extend(merge_test_files(
+            scaffold_path=scaffold_path_for(issue_number, repo_root, run.config),
+            scaffold_is_spec_suite=spec_suite and run.framework == TestFramework.PYTEST,
+            real_test_files=written[index],
+            prior_test_files=prior[index],
+        ))
+    return merged
+
+
+def _halt_test_file_unowned(error: Exception) -> dict[str, Any]:
+    """N4's halt when a test file it wrote belongs to no framework of the run
+    (#4245). Routed to HALT by `route_after_implement`, which alerts. The
+    plan named the path, so the same plan halts the same way again."""
+    # Imported here: the nodes package imports this module while it loads.
+    from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+        DETERMINISTIC_FAILURE,
+    )
+
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [N4] {error}. A test file N4 wrote that no "
+        f"framework of the run runs would never be graded, so the run stops "
+        f"here (#4245)."
+    )
+    print(f"ERROR [N4] {message}", file=sys.stderr)
+    return {"error_message": message}
 
 
 def _mock_implement_code(state: TestingWorkflowState) -> dict[str, Any]:

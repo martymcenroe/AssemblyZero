@@ -111,7 +111,7 @@ class TestPytestRunnerRunTests:
     @patch.object(PytestRunner, "_run_subprocess")
     def test_t240_invokes_correct_command(self, mock_subprocess, pytest_runner):
         """T240: PytestRunner.run_tests invokes correct command."""
-        mock_subprocess.return_value = ("5 passed in 0.5s", 0)
+        mock_subprocess.return_value = ("5 passed in 0.5s", "", 0)  # #3065
         pytest_runner.run_tests(test_paths=["tests/test_example.py"])
 
         args, kwargs = mock_subprocess.call_args
@@ -124,7 +124,7 @@ class TestPytestRunnerRunTests:
     @patch.object(PytestRunner, "_run_subprocess")
     def test_extra_args_passed(self, mock_subprocess, pytest_runner):
         """Extra args are appended to the command."""
-        mock_subprocess.return_value = ("5 passed", 0)
+        mock_subprocess.return_value = ("5 passed", "", 0)  # #3065
         pytest_runner.run_tests(extra_args=["--cov=mymodule"])
 
         args, _ = mock_subprocess.call_args

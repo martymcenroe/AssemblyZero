@@ -71,7 +71,9 @@ class FrameworkConfig(TypedDict):
     import_patterns: list[str]
     result_parser: str
     coverage_type: CoverageType
-    coverage_target: float
+    #: #3089: an integer percentage, the unit of every coverage target in
+    #: the run. It was `coverage_target: float`, a fraction nothing read.
+    coverage_target_percent: int
     scaffold_template: str
     working_directory: Optional[str]
 
@@ -83,7 +85,9 @@ class TestRunResult(TypedDict):
     skipped: int
     errors: int
     total: int
-    coverage_percent: float
+    #: #4246: None when the run did not measure line coverage (it was not
+    #: asked to, or its tests did not all pass); never 0% in place of one.
+    coverage_percent: float | None
     coverage_type: CoverageType
     raw_output: str
     exit_code: int
@@ -99,13 +103,39 @@ _EXPLICIT_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
 ]
 
 # --- File pattern indicators (second priority) ---
-_FILE_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
+#: The suffix guesses for a JavaScript or TypeScript test file. Used only when
+#: there is no project to read (`detect_framework_from_lld` without a root):
+#: with a project, a named path resolves to the runner its own directory has
+#: (#4237), because the suffix alone cannot tell Vitest from Jest.
+_JS_FILE_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
     (re.compile(r"\.spec\.ts[`\"'\s|]"), TestFramework.PLAYWRIGHT),
     (re.compile(r"\.spec\.js[`\"'\s|]"), TestFramework.PLAYWRIGHT),
     (re.compile(r"\.test\.ts[`\"'\s|]"), TestFramework.JEST),
     (re.compile(r"\.test\.js[`\"'\s|]"), TestFramework.JEST),
+]
+_PYTEST_FILE_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
     (re.compile(r"test_.*\.py[`\"'\s|]"), TestFramework.PYTEST),
 ]
+_FILE_PATTERNS = _JS_FILE_PATTERNS + _PYTEST_FILE_PATTERNS
+
+#: The JavaScript and TypeScript test-file suffixes an LLD names (#4237).
+#: Closed: the four the runners' default test patterns share.
+JS_TEST_SUFFIXES: tuple[str, ...] = (".test.ts", ".test.js", ".spec.ts", ".spec.js")
+
+#: Characters that delimit a path in markdown: code spans, quotes, table
+#: cells, link targets and list punctuation. Closed.
+_PATH_DELIMITERS = "`'\"|()[]<>,;"
+
+#: Characters that make a token a pattern rather than a file. Closed.
+_GLOB_CHARACTERS = "*?{}"
+
+
+class FrameworkResolutionError(ValueError):
+    """The run cannot say which runner tests a file, or where it runs (#4237).
+
+    A ValueError, so a load site that already stops on an unreadable
+    package.json (#3707) stops on this the same way.
+    """
 
 # --- Keyword indicators (third priority) ---
 _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
@@ -118,49 +148,116 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
 ]
 
 
-def detect_framework_from_lld(lld_content: str) -> list[TestFramework]:
-    """Parse LLD content for test framework indicators.
+def named_js_test_paths(lld_content: str) -> list[str]:
+    """Every JavaScript or TypeScript test file the LLD names, in order (#4237).
 
-    Scans for:
-    1. Explicit declarations (e.g., "Test Framework: Playwright")
-    2. File patterns in Section 2.1 (e.g., .spec.ts, .test.ts, test_*.py)
-    3. Keywords anywhere in the LLD
+    A token is a path when it ends in one of JS_TEST_SUFFIXES once markdown
+    delimiters and sentence punctuation are taken off. A token holding a glob
+    character (`*.test.ts`) describes files and names none, so it is not a
+    path. Paths come back with forward slashes and no leading `./`.
+    """
+    text = lld_content or ""
+    for character in _PATH_DELIMITERS:
+        text = text.replace(character, " ")
+    found: list[str] = []
+    for token in text.split():
+        token = token.rstrip(".:").replace("\\", "/")
+        if not token.endswith(JS_TEST_SUFFIXES):
+            continue
+        if any(character in token for character in _GLOB_CHARACTERS):
+            continue
+        while token.startswith("./"):
+            token = token[2:]
+        if token and token not in found:
+            found.append(token)
+    return found
+
+
+def frameworks_named_by_lld(
+    lld_content: str, project_root: str | None = None,
+) -> dict[TestFramework, str | None]:
+    """The frameworks the LLD itself names, in priority order, each with the
+    directory its own test paths place it in, or None when only the project
+    can say where it lives (#4237).
+
+    1. Explicit declarations ("Test Framework: Vitest"), highest priority.
+    2. Test file paths. A JavaScript or TypeScript path resolves to the
+       runner the project has in the directory that holds it
+       (`runner_for_test_path`); with no project to read (`project_root` is
+       None) the suffix is all there is, and `.test.ts` reads as Jest, as it
+       always did. An explicit JavaScript declaration covers every
+       JavaScript path, so none is inferred beside it. `test_*.py` is pytest.
+    3. Keywords anywhere in the LLD.
+
+    An empty dict means the LLD names no framework at all.
+    """
+    named: dict[TestFramework, str | None] = {}
+    if not lld_content:
+        return named
+
+    for pattern, framework in _EXPLICIT_PATTERNS:
+        if pattern.search(lld_content) and framework not in named:
+            logger.info("Detected framework from explicit declaration: %s", framework.value)
+            named[framework] = None
+    explicit_js = any(framework != TestFramework.PYTEST for framework in named)
+
+    if project_root is None:
+        for pattern, framework in _JS_FILE_PATTERNS:
+            if pattern.search(lld_content) and framework not in named:
+                logger.info("Detected framework from file pattern: %s", framework.value)
+                named[framework] = None
+    elif not explicit_js:
+        for path in named_js_test_paths(lld_content):
+            framework, directory = runner_for_test_path(path, project_root)
+            if named.get(framework) not in (None, directory):
+                raise FrameworkResolutionError(
+                    f"the LLD places {framework.value} tests in both "
+                    f"{named[framework]} and {directory} (at {path}); one run "
+                    f"tests one directory per framework"
+                )
+            if named.get(framework) is None:
+                logger.info("Resolved %s to %s in %s", path, framework.value, directory)
+                named[framework] = directory
+
+    for pattern, framework in _PYTEST_FILE_PATTERNS:
+        if pattern.search(lld_content) and framework not in named:
+            logger.info("Detected framework from file pattern: %s", framework.value)
+            named[framework] = None
+
+    # A keyword is the weakest signal. With a project to read, it names a
+    # JavaScript runner only when no declaration and no test path has: prose
+    # such as "Jest-compatible" beside a Vitest path must not add a runner
+    # the project does not have and halt the run for it (#4237).
+    js_named = any(framework != TestFramework.PYTEST for framework in named)
+    for pattern, framework in _KEYWORD_PATTERNS:
+        if framework != TestFramework.PYTEST and pattern.search(lld_content) and framework not in named:
+            if project_root is not None and js_named:
+                logger.info("Keyword %s not taken: the LLD already names its "
+                            "JavaScript runner", framework.value)
+                continue
+            logger.info("Detected framework from keyword: %s", framework.value)
+            named[framework] = None
+
+    # Include PYTEST if there are pytest keywords but only if we didn't find it yet
+    if TestFramework.PYTEST not in named and re.search(r"\bpytest\b", lld_content, re.IGNORECASE):
+        logger.info("Detected framework from keyword: pytest")
+        named[TestFramework.PYTEST] = None
+
+    return named
+
+
+def detect_framework_from_lld(
+    lld_content: str, project_root: str | None = None,
+) -> list[TestFramework]:
+    """The frameworks the LLD names (`frameworks_named_by_lld`), in order.
 
     Returns [TestFramework.PYTEST] as default if no framework detected.
     """
-    if not lld_content:
-        return [TestFramework.PYTEST]
-
-    detected = []
-
-    # Priority 1: Explicit declarations
-    for pattern, framework in _EXPLICIT_PATTERNS:
-        if pattern.search(lld_content) and framework not in detected:
-            logger.info("Detected framework from explicit declaration: %s", framework.value)
-            detected.append(framework)
-
-    # Priority 2: File patterns
-    for pattern, framework in _FILE_PATTERNS:
-        if pattern.search(lld_content) and framework not in detected:
-            logger.info("Detected framework from file pattern: %s", framework.value)
-            detected.append(framework)
-
-    # Priority 3: Keywords
-    for pattern, framework in _KEYWORD_PATTERNS:
-        if framework != TestFramework.PYTEST and pattern.search(lld_content) and framework not in detected:
-            logger.info("Detected framework from keyword: %s", framework.value)
-            detected.append(framework)
-            
-    # Include PYTEST if there are pytest keywords but only if we didn't find it yet
-    if TestFramework.PYTEST not in detected and re.search(r"\bpytest\b", lld_content, re.IGNORECASE):
-        logger.info("Detected framework from keyword: pytest")
-        detected.append(TestFramework.PYTEST)
-
-    if not detected:
+    named = list(frameworks_named_by_lld(lld_content, project_root))
+    if not named:
         logger.info("No framework detected from LLD; defaulting to pytest")
         return [TestFramework.PYTEST]
-        
-    return detected
+    return named
 
 
 #: Directories the detector never descends into (#3707).
@@ -216,6 +313,64 @@ def _js_frameworks_in(directory: str) -> list[TestFramework]:
     return detected
 
 
+#: (file, section) pairs whose section declares pytest configuration (#3001).
+#: Closed: pytest reads its configuration from exactly these.
+_PYTEST_CONFIG_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("pyproject.toml", "[tool.pytest"),
+    ("setup.cfg", "[tool:pytest]"),
+    ("tox.ini", "[pytest]"),
+)
+
+#: Files whose presence at the root declares a pytest suite (#3001).
+_PYTEST_ROOT_FILES: tuple[str, ...] = ("pytest.ini", "conftest.py")
+
+#: The directories a Python suite conventionally lives in, searched to
+#: MAX_DETECT_DEPTH levels for test files (#3001). Closed.
+_PYTHON_TEST_DIRS: tuple[str, ...] = ("tests", "test")
+
+
+def _is_python_test_file(name: str) -> bool:
+    """pytest's default `python_files`: `test_*.py` and `*_test.py`."""
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+def _has_pytest_suite(root: str) -> bool:
+    """True when the root holds a pytest suite: a pytest configuration, or
+    Python test files at the root or in its tests directory (#3001).
+
+    A dependency line is not evidence. `pytest = "^8"` under
+    `[tool.poetry.group.dev.dependencies]` says pytest is installed, which is
+    true of nearly every Python repository whatever runs its tests; reading
+    it as a suite made a JavaScript project with a tooling pyproject a pytest
+    project too. A file that exists and cannot be read raises.
+    """
+    for name, section in _PYTEST_CONFIG_SECTIONS:
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                if section in f.read():
+                    return True
+    if any(os.path.isfile(os.path.join(root, name)) for name in _PYTEST_ROOT_FILES):
+        return True
+    if any(_is_python_test_file(name) for name in os.listdir(root)
+           if os.path.isfile(os.path.join(root, name))):
+        return True
+    for test_dir in _PYTHON_TEST_DIRS:
+        top = os.path.join(root, test_dir)
+        if not os.path.isdir(top):
+            continue
+        for current, dirnames, filenames in os.walk(top):
+            depth = os.path.relpath(current, top).count(os.sep) + (current != top)
+            dirnames[:] = sorted(
+                d for d in dirnames if d not in SKIPPED_DIRS and not d.startswith(".")
+            )
+            if depth >= MAX_DETECT_DEPTH:
+                dirnames[:] = []
+            if "conftest.py" in filenames or any(_is_python_test_file(n) for n in filenames):
+                return True
+    return False
+
+
 def _candidate_dirs(root: str) -> list[str]:
     """Subdirectories of `root` to MAX_DETECT_DEPTH, in path order, skipping
     SKIPPED_DIRS and hidden directories."""
@@ -261,7 +416,8 @@ def detect_framework_dirs(project_root: str) -> dict[TestFramework, str]:
     """Which test frameworks the project has, and where each one lives, as a
     path relative to `project_root` ("." for the root) (#3707).
 
-    pytest is looked for at the root (`pyproject.toml`). The JavaScript
+    pytest is looked for at the root, from a declaration or Python test
+    files, never from a dependency line (`_has_pytest_suite`, #3001). The JavaScript
     frameworks are looked for at the root and up to MAX_DETECT_DEPTH levels
     below it, skipping SKIPPED_DIRS and hidden directories, so a target that
     keeps its web app in `web/` beside a Python package is seen as both. The
@@ -278,12 +434,8 @@ def detect_framework_dirs(project_root: str) -> dict[TestFramework, str]:
     for framework in _js_frameworks_in(root):
         found.setdefault(framework, ".")
 
-    pyproject_path = os.path.join(root, "pyproject.toml")
-    if os.path.isfile(pyproject_path):
-        with open(pyproject_path, "r") as f:
-            toml_content = f.read()
-        if "[tool.pytest" in toml_content or "pytest" in toml_content:
-            found.setdefault(TestFramework.PYTEST, ".")
+    if _has_pytest_suite(root):
+        found.setdefault(TestFramework.PYTEST, ".")
 
     for directory in _candidate_dirs(root):
         for framework in _js_frameworks_in(directory):
@@ -308,18 +460,167 @@ def detect_framework_from_project(project_root: str) -> list[TestFramework]:
     return list(detect_framework_dirs(project_root))
 
 
+def _runner_evidence(directory: str) -> list[list[TestFramework]]:
+    """The JavaScript test runners one directory declares, strongest
+    evidence first (#4237): its config files; its package.json `test`
+    script; the `vitest` and `jest` packages its package.json depends on.
+
+    A config is a declaration. A dependency says only that the package is
+    installed, so it decides nothing a config or the test script has decided.
+    """
+    configs: list[TestFramework] = []
+    for filename, framework in _CONFIG_FILES.items():
+        if os.path.isfile(os.path.join(directory, filename)) and framework not in configs:
+            configs.append(framework)
+    script: list[TestFramework] = []
+    depends: list[TestFramework] = []
+    package_json_path = os.path.join(directory, "package.json")
+    if os.path.isfile(package_json_path):
+        try:
+            with open(package_json_path, "r", encoding="utf-8") as f:
+                pkg = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"{package_json_path} could not be read: {e}") from e
+        test_script = (pkg.get("scripts") or {}).get("test", "")
+        for word, framework in (
+            ("playwright", TestFramework.PLAYWRIGHT),
+            ("vitest", TestFramework.VITEST),
+            ("jest", TestFramework.JEST),
+        ):
+            if word in test_script:
+                script.append(framework)
+                break
+        packages = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
+        for name, framework in (("vitest", TestFramework.VITEST), ("jest", TestFramework.JEST)):
+            if name in packages:
+                depends.append(framework)
+    return [configs, script, depends]
+
+
+def choose_by_test_name(candidates: list[TestFramework], path: str) -> list[TestFramework]:
+    """Two runners in one directory, told apart by the test file's own name:
+    `.spec.` is Playwright's convention, `.test.` the unit runners'. Shared
+    by path resolution here and test-file ownership in the phases (#4236)."""
+    if len(candidates) < 2:
+        return candidates
+    name = os.path.basename(path)
+    if ".spec." in name and TestFramework.PLAYWRIGHT in candidates:
+        return [TestFramework.PLAYWRIGHT]
+    if ".test." in name:
+        unit = [c for c in candidates if c != TestFramework.PLAYWRIGHT]
+        return unit or candidates
+    return candidates
+
+
+def runner_for_test_path(path: str, project_root: str) -> tuple[TestFramework, str]:
+    """The runner that tests `path`, and the directory it runs in relative to
+    the project root ("." for the root) (#4237).
+
+    The directory that holds the file is read first, then each directory
+    above it up to the root; the first that declares a runner decides, by
+    its strongest evidence (`_runner_evidence`). Raises
+    FrameworkResolutionError naming every directory searched when none
+    declares one, or when one declares two the file's name cannot choose
+    between. Nothing is ever placed at the root for want of a declaration.
+    """
+    if not project_root or not os.path.isdir(project_root):
+        raise FrameworkResolutionError(
+            f"the LLD names {path}, but there is no project at {project_root!r} "
+            f"to say which runner runs it"
+        )
+    root = os.path.abspath(project_root)
+    relative = os.path.normpath(path)
+    if os.path.isabs(relative) or relative == ".." or relative.startswith(".." + os.sep):
+        raise FrameworkResolutionError(
+            f"the LLD names {path}, which is not a path inside the project {root}"
+        )
+    parts = os.path.dirname(relative).split(os.sep) if os.path.dirname(relative) else []
+    chain = [os.path.join(*parts[:i]) for i in range(len(parts), 0, -1)] + ["."]
+    searched: list[str] = []
+    for directory in chain:
+        searched.append(directory)
+        absolute = os.path.join(root, directory)
+        if not os.path.isdir(absolute):
+            continue  # a new file's directory may be new too
+        for tier in _runner_evidence(absolute):
+            if not tier:
+                continue
+            chosen = choose_by_test_name(tier, relative)
+            if len(chosen) == 1:
+                return chosen[0], directory
+            raise FrameworkResolutionError(
+                f"the LLD names {path}, and {directory} declares "
+                f"{' and '.join(f.value for f in chosen)}; the file's name "
+                f"cannot choose between them. Declare one with a "
+                f"'Test framework:' line in the LLD"
+            )
+    raise FrameworkResolutionError(
+        f"the LLD names {path}, and no directory that holds it declares a "
+        f"JavaScript test runner (searched: {', '.join(searched)}). Nothing "
+        f"runs it from the root: a Vitest, Jest or Playwright config, test "
+        f"script or dependency must be present in its project"
+    )
+
+
+def searched_directories(project_root: str) -> list[str]:
+    """Every directory `detect_framework_dirs` reads, relative to the root."""
+    if not project_root or not os.path.isdir(project_root):
+        return []
+    root = os.path.abspath(project_root)
+    return ["."] + [os.path.relpath(d, root) for d in _candidate_dirs(root)]
+
+
+def place_frameworks(
+    frameworks: dict[TestFramework, str | None] | list[TestFramework],
+    project_root: str,
+) -> dict[TestFramework, str]:
+    """Each framework with the directory it runs in, relative to the root
+    (#3707, #4237).
+
+    A `test_dirs` declaration in .unleashed.json wins; then the directory the
+    LLD's own test path placed it in; then where detection found it. pytest
+    runs at the root by construction and needs nothing installed there.
+    Any other framework the project has nowhere raises
+    FrameworkResolutionError naming it and every directory searched: it is
+    never run from a root that does not have it.
+    """
+    wanted = dict(frameworks) if isinstance(frameworks, dict) else dict.fromkeys(frameworks)
+    declared = _declared_test_dirs(project_root) if project_root and os.path.isdir(project_root) else {}
+    detected = detect_framework_dirs(project_root)
+    placed: dict[TestFramework, str] = {}
+    for framework, directory in wanted.items():
+        directory = declared.get(framework) or directory or detected.get(framework)
+        if directory is None and framework == TestFramework.PYTEST:
+            directory = "."
+        if directory is None:
+            searched = ", ".join(searched_directories(project_root)) or repr(project_root)
+            raise FrameworkResolutionError(
+                f"the LLD names {framework.value}, which the project has "
+                f"nowhere (searched: {searched}). It is not run from the root"
+            )
+        placed[framework] = directory
+    return placed
+
+
+def _lld_decides(named: dict[TestFramework, str | None] | list[TestFramework]) -> bool:
+    """The LLD outranks the project when it names anything but pytest."""
+    return any(framework != TestFramework.PYTEST for framework in named)
+
+
 def resolve_framework(lld_content: str, project_root: str) -> list[TestFramework]:
     """Resolve test framework using LLD as primary signal, project files as fallback.
 
-    Returns a list of all detected frameworks.
+    Returns a list of all detected frameworks. A JavaScript or TypeScript
+    test path the LLD names resolves to the runner its own directory has
+    (#4237), and raises FrameworkResolutionError when no directory that
+    holds it has one.
     """
-    # Try LLD detection first
-    lld_results = detect_framework_from_lld(lld_content)
-    
+    named = frameworks_named_by_lld(lld_content, project_root)
+
     # If LLD is explicitly something other than just PYTEST default, use it.
-    if len(lld_results) > 1 or (len(lld_results) == 1 and lld_results[0] != TestFramework.PYTEST):
-        logger.info("Frameworks resolved from LLD: %s", [f.value for f in lld_results])
-        return lld_results
+    if _lld_decides(named):
+        logger.info("Frameworks resolved from LLD: %s", [f.value for f in named])
+        return list(named)
 
     # LLD returned default pytest — check if project files disagree or add more
     project_results = detect_framework_from_project(project_root)
@@ -330,3 +631,18 @@ def resolve_framework(lld_content: str, project_root: str) -> list[TestFramework
     # Both returned default or None → use pytest
     logger.info("Framework resolved to default: pytest")
     return [TestFramework.PYTEST]
+
+
+def resolve_framework_dirs(lld_content: str, project_root: str) -> dict[TestFramework, str]:
+    """Every framework the run tests with, each with the directory it runs in
+    (#4236, #4237): `resolve_framework`'s frameworks, placed by
+    `place_frameworks`. Raises FrameworkResolutionError when a framework
+    cannot be placed.
+    """
+    named = frameworks_named_by_lld(lld_content, project_root)
+    if _lld_decides(named):
+        return place_frameworks(named, project_root)
+    detected = detect_framework_dirs(project_root)
+    if detected:
+        return detected
+    return {TestFramework.PYTEST: "."}

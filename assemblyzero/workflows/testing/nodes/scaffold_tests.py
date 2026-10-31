@@ -20,6 +20,8 @@ because stub tests always fail regardless of implementation.
 import ast
 import builtins
 import importlib.util
+import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -38,6 +40,14 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
     FrameworkConfig,
 )
+from assemblyzero.workflows.testing.framework_ownership import (
+    RunFramework,
+    TestFileOwnershipError,
+    framework_label,
+    owner_of,
+    run_frameworks,
+)
+from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import DETERMINISTIC_FAILURE
 from assemblyzero.workflows.testing.runner_registry import get_runner, resolve_framework
 
 
@@ -436,11 +446,34 @@ def generate_ts_test_file_content(
         raise ValueError(f"Cannot generate TS content for framework: {framework}")
 
 
+#: The body of every TypeScript placeholder test (#3067; ledger 0908,
+#: `scaffold_tests.py:457` and `:489`). It fails until a real test replaces
+#: it, as the Python scaffold's `assert False, 'TDD RED: ...'` does. The
+#: placeholders were `expect(true).toBe(true)` and
+#: `await expect(page).toBeTruthy()`, which pass with no implementation at
+#: all, so a fresh TypeScript scaffold could never fail its red phase and a
+#: scaffold no one replaced read as green.
+TS_RED_PLACEHOLDER = "expect(false).toBe(true);"
+
+
+def _ts_string(text: object) -> str:
+    """`text` as a TypeScript string literal. JSON's escaping is valid
+    TypeScript, so a description holding an apostrophe or a newline no longer
+    ends the literal early (`it('Replays a user's session` did)."""
+    return json.dumps(str(text))
+
+
+def _ts_comment(text: object) -> str:
+    """`text` on one line, safe to follow `//`."""
+    return " ".join(str(text).split())
+
+
 def _generate_playwright_content(
     scenarios: list[TestScenario],
     issue_number: int,
 ) -> str:
-    """Generate Playwright .spec.ts test content."""
+    """Generate Playwright .spec.ts test content: one placeholder per
+    scenario, each failing until a real test replaces it (#3067)."""
     lines = [
         "import { test, expect } from '@playwright/test';",
         "",
@@ -450,12 +483,12 @@ def _generate_playwright_content(
 
     for scenario in scenarios:
         test_name = scenario.get("description", scenario.get("id", "unnamed"))
-        expected = scenario.get("expected_behavior", "// TODO: implement assertion")
+        expected = scenario.get("expected_behavior", "no expected behaviour given")
         lines.extend([
-            f"test('{test_name}', async ({{ page }}) => {{",
-            f"  // Expected: {expected}",
-            "  // TODO: Implement test logic",
-            "  await expect(page).toBeTruthy();",
+            f"test({_ts_string(test_name)}, async ({{ page }}) => {{",
+            f"  // Expected: {_ts_comment(expected)}",
+            "  // TDD RED: a placeholder; it fails until a real test replaces it",
+            f"  {TS_RED_PLACEHOLDER}",
             "});",
             "",
         ])
@@ -468,7 +501,8 @@ def _generate_jest_content(
     framework_config: FrameworkConfig,
     issue_number: int,
 ) -> str:
-    """Generate Jest/Vitest .test.ts content."""
+    """Generate Jest/Vitest .test.ts content: one placeholder per scenario,
+    each failing until a real test replaces it (#3067)."""
     runner = get_runner(framework_config["framework"])
     import_line = runner.get_scaffold_imports()
 
@@ -477,17 +511,17 @@ def _generate_jest_content(
         "",
         f"// Issue #{issue_number} - Auto-scaffolded tests",
         "",
-        f"describe('Issue #{issue_number}', () => {{",
+        f"describe({_ts_string(f'Issue #{issue_number}')}, () => {{",
     ]
 
     for scenario in scenarios:
         test_name = scenario.get("description", scenario.get("id", "unnamed"))
-        expected = scenario.get("expected_behavior", "// TODO: implement assertion")
+        expected = scenario.get("expected_behavior", "no expected behaviour given")
         lines.extend([
-            f"  it('{test_name}', () => {{",
-            f"    // Expected: {expected}",
-            "    // TODO: Implement test logic",
-            "    expect(true).toBe(true);",
+            f"  it({_ts_string(test_name)}, () => {{",
+            f"    // Expected: {_ts_comment(expected)}",
+            "    // TDD RED: a placeholder; it fails until a real test replaces it",
+            f"    {TS_RED_PLACEHOLDER}",
             "  });",
             "",
         ])
@@ -1180,46 +1214,98 @@ def _wrap_text(text: str, width: int) -> list[str]:
     return lines if lines else [""]
 
 
+class ScaffoldPathError(ValueError):
+    """A scaffold would land where no framework of the run runs it (#4243).
+
+    Raised, never written: a scaffold no framework collects fails nothing in
+    the red phase and is graded by nothing in the green one.
+    """
+
+
+#: The directory a JavaScript framework's scaffold goes in, beneath the
+#: framework's own directory (#4243). Vitest's, Jest's and Playwright's
+#: default test patterns all collect it. Their config files are JavaScript
+#: or TypeScript modules the run does not evaluate, so a narrower `include`
+#: or `testDir` a project declares there is not read.
+JS_SCAFFOLD_DIR = "tests"
+
+
+def scaffold_path_for(
+    issue_number: int, repo_root: Path | str, framework_config: dict | None = None,
+) -> Path:
+    """Where N2 writes a framework's scaffold, without touching the disk.
+
+    pytest's is `tests/test_issue_<N>.py` at the root, as it always was. A
+    JavaScript framework's is `<its directory>/tests/issue_<N><ext>` (#4243):
+    it used to be the root's `tests/` whatever the framework's
+    `working_directory`, where Vitest in `web/` never looks.
+    """
+    root = Path(repo_root)
+    framework = resolve_framework(framework_config) if framework_config else None
+    if framework in (TestFramework.PLAYWRIGHT, TestFramework.JEST, TestFramework.VITEST):
+        ext = framework_config.get("test_file_extension") or (
+            ".spec.ts" if framework == TestFramework.PLAYWRIGHT else ".test.ts"
+        )
+        directory = framework_config.get("working_directory") or "."
+        return root / directory / JS_SCAFFOLD_DIR / f"issue_{issue_number}{ext}"
+    return root / "tests" / f"test_issue_{issue_number}.py"
+
+
+def _require_owned_by(
+    path: Path, framework_config: dict, run_configs: list[dict] | None, repo_root: Path,
+) -> None:
+    """Raise ScaffoldPathError unless the run's ownership rule gives `path`
+    to the framework it is the scaffold of (#4243)."""
+    frameworks = run_frameworks({"framework_configs": run_configs or [framework_config]})
+    framework = resolve_framework(framework_config)
+    directory = os.path.normpath(framework_config.get("working_directory") or ".")
+    label = framework_label(framework, directory)
+    try:
+        owner = frameworks[owner_of(str(path), frameworks, str(repo_root))]
+    except TestFileOwnershipError as e:
+        raise ScaffoldPathError(f"the {label} scaffold cannot be placed: {e}") from e
+    if (owner.framework, owner.directory) != (framework, directory):
+        raise ScaffoldPathError(
+            f"the {label} scaffold {path} would be run by {owner.label}, not "
+            f"by {label}"
+        )
+
+
 def determine_test_file_path(
     issue_number: int,
     scenarios: list[TestScenario],
     repo_root: Path,
     framework_config: FrameworkConfig | None = None,
+    run_configs: list[dict] | None = None,
 ) -> Path:
-    """Determine the appropriate path for the test file.
+    """Determine the appropriate path for the test file, and make its directory.
 
     Issue #381: Now supports framework-aware file extensions via
     optional framework_config parameter.
+
+    #4243: a JavaScript framework's scaffold goes in that framework's own
+    directory (`scaffold_path_for`), and the path must be one the run's
+    ownership rule gives to that framework among `run_configs` (the run's
+    `framework_configs`; the framework alone when absent). Raises
+    ScaffoldPathError naming the path and the frameworks when it is not,
+    before any directory is made.
 
     Args:
         issue_number: GitHub issue number.
         scenarios: List of test scenarios.
         repo_root: Repository root path.
         framework_config: Optional framework config for file extension.
+        run_configs: Every framework of the run, as N0 wrote them.
 
     Returns:
         Path for the test file.
     """
-    # Issue #381: Framework-aware path determination
-    if framework_config is not None:
-        framework = framework_config["framework"]
-        ext = framework_config["test_file_extension"]
-        if framework == TestFramework.PLAYWRIGHT:
-            tests_dir = repo_root / "tests"
-            tests_dir.mkdir(parents=True, exist_ok=True)
-            return tests_dir / f"issue_{issue_number}{ext}"
-        elif framework in (TestFramework.JEST, TestFramework.VITEST):
-            tests_dir = repo_root / "tests"
-            tests_dir.mkdir(parents=True, exist_ok=True)
-            return tests_dir / f"issue_{issue_number}{ext}"
-
-    # Default: existing pytest behavior (unchanged)
-    tests_dir = repo_root / "tests"
-    tests_dir.mkdir(parents=True, exist_ok=True)
-
-    # Extract module name from scenarios if possible
-    # For now, use issue number as identifier
-    return tests_dir / f"test_issue_{issue_number}.py"
+    path = scaffold_path_for(issue_number, repo_root, framework_config)
+    framework = resolve_framework(framework_config) if framework_config else None
+    if framework not in (None, TestFramework.PYTEST):
+        _require_owned_by(path, dict(framework_config), run_configs, Path(repo_root))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 # =============================================================================
@@ -1243,9 +1329,11 @@ def _scaffold_non_python_tests(
     # Generate TypeScript test content
     content = generate_ts_test_file_content(scenarios, framework_config, issue_number)
 
-    # Determine file path
+    # Determine file path: in the framework's own directory, where the run's
+    # ownership rule gives it to this framework (#4243).
     test_file_path = determine_test_file_path(
-        issue_number, scenarios, repo_root, framework_config
+        issue_number, scenarios, repo_root, framework_config,
+        run_configs=state.get("framework_configs") or None,
     )
 
     # Write the file
@@ -1253,6 +1341,13 @@ def _scaffold_non_python_tests(
     test_file_path.write_text(content, encoding="utf-8")
 
     gate_log(f"[N2] Scaffolded {framework_config['framework'].value} test: {test_file_path}")
+    # #3067: said out loud, because nothing of this file can pass: each of
+    # its tests is a placeholder that fails until N4 writes the real one.
+    print(
+        f"    [N2] {framework_config['framework'].value}: {len(scenarios)} "
+        f"placeholder test(s), each failing until replaced (the spec ships "
+        f"no {framework_config['framework'].value} test bodies)"
+    )
     log_workflow_execution(
         target_repo=repo_root,
         issue_number=issue_number,
@@ -1273,9 +1368,12 @@ def _scaffold_non_python_tests(
         ext = framework_config["test_file_extension"]
         save_audit_file(audit_dir, file_num, f"test-scaffold{ext}", content)
 
+    # #3081: the key the validator reads, the one #789 named. This path
+    # returned `test_file_content`, which nothing read, so every Playwright,
+    # Jest and Vitest scaffold was validated as an empty file.
     return {
         "test_files": [str(test_file_path)],
-        "test_file_content": content,
+        "generated_tests": content,
         "file_counter": file_num,
         "error_message": "",
     }
@@ -1286,12 +1384,69 @@ def _scaffold_non_python_tests(
 # =============================================================================
 
 
+def _halt_scaffold_framework(label: str, cause: str) -> dict[str, Any]:
+    """N2's halt when one framework of the run cannot be scaffolded (#4244).
+
+    Routed to HALT by `route_after_scaffold`, and HALT alerts the operator.
+    Deterministic: the same tree and the same plan fail the same way again.
+    """
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [N2] the {label} tests cannot be "
+        f"scaffolded: {cause}. N2 stops here: every framework of the run is "
+        f"scaffolded, or the run does not go on (#4244)."
+    )
+    print(f"ERROR [N2] {message}", file=sys.stderr)
+    return {"error_message": message}
+
+
+def _scaffold_every_framework(
+    state: TestingWorkflowState, frameworks: list[RunFramework],
+) -> dict[str, Any]:
+    """N2 for a run with more than one framework (#4244): each framework's
+    scaffold, by its own scaffolder, in the order N0 wrote them.
+
+    `generated_tests` stays the Python scaffold when pytest is one of them,
+    because the pytest validator reads that key (#789); every other
+    framework's scaffold is read from disk by its own validator. A framework
+    whose scaffold cannot be built halts N2 naming it.
+    """
+    test_files: list[str] = []
+    generated: str | None = None
+    file_counter = state.get("file_counter", 0)
+    for run in frameworks:
+        try:
+            if run.framework == TestFramework.PYTEST:
+                result = _scaffold_python_tests(state)
+            else:
+                result = _scaffold_non_python_tests(
+                    state, {**run.config, "framework": run.framework}
+                )
+        except (ValueError, OSError) as e:
+            return _halt_scaffold_framework(run.label, f"{type(e).__name__}: {e}")
+        if result.get("error_message"):
+            return result
+        test_files.extend(result.get("test_files", []))
+        file_counter = result.get("file_counter", file_counter)
+        content = result.get("generated_tests", "")
+        if run.framework == TestFramework.PYTEST or generated is None:
+            generated = content
+    return {
+        "test_files": test_files,
+        "generated_tests": generated or "",  # Issue #789: validate_tests_mechanical reads this
+        "file_counter": file_counter,
+        "error_message": "",
+    }
+
+
 def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     """N2: Generate executable test stubs.
 
     Issue #381: Now supports multi-framework scaffolding. If framework_config
     is present in state and specifies a non-pytest framework, delegates to
     TypeScript scaffolding. Otherwise, uses existing pytest scaffolding.
+
+    #4244: a run with more than one framework (`framework_configs`, #4236)
+    gets every framework's scaffold; it used to get the first's alone.
 
     Args:
         state: Current workflow state.
@@ -1318,6 +1473,14 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
             gate_log(f"[N2] {len(existing_test_files)} test files already exist — skipping scaffold")
             return {}
 
+    # #4244: every framework of the run, when there is more than one.
+    try:
+        frameworks = run_frameworks(state)
+    except TestFileOwnershipError as e:
+        return _halt_scaffold_framework("run's", str(e))
+    if len(frameworks) > 1:
+        return _scaffold_every_framework(state, frameworks)
+
     # Issue #381: Framework-aware scaffolding
     framework_config = state.get("framework_config")
 
@@ -1327,12 +1490,21 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     # non-Python path gets the enum back for its `.value` and `get_runner`.
     framework = resolve_framework(framework_config)
     if framework is not None and framework != TestFramework.PYTEST:
-        return _scaffold_non_python_tests(
-            state, {**framework_config, "framework": framework}
-        )
+        try:
+            return _scaffold_non_python_tests(
+                state, {**framework_config, "framework": framework}
+            )
+        except (ValueError, OSError) as e:
+            # #4243: a scaffold no framework would run, or a runner that
+            # cannot start, stops N2 the way it does with several frameworks.
+            return _halt_scaffold_framework(frameworks[0].label, f"{type(e).__name__}: {e}")
 
-    # Default: existing pytest scaffolding (unchanged)
+    return _scaffold_python_tests(state)
 
+
+def _scaffold_python_tests(state: TestingWorkflowState) -> dict[str, Any]:
+    """The pytest scaffold: the spec's own Section 10 functions, verbatim
+    (#2316), or generated from scenario metadata when it ships none."""
     # Get data from state
     issue_number = state.get("issue_number", 0)
     test_scenarios = state.get("test_scenarios", [])

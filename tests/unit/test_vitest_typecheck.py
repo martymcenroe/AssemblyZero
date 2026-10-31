@@ -19,13 +19,14 @@ def test_vitest_typecheck_with_package_json(temp_project_dir):
                 
             config = {"framework": TestFramework.VITEST}
             runner = JestRunner(config, project_root=temp_project_dir)
-            
+
+            # #3065: _run_subprocess returns (stdout, stderr, exit_code)
             mock_sub.side_effect = [
-                ("typecheck output", 0),
-                ('{"success":true,"numPassedTests":1}', 0)
+                ("typecheck output", "", 0),
+                ('{"success":true,"numPassedTests":1}', "", 0)
             ]
             runner.run_tests()
-            
+
             assert mock_sub.call_count == 2
             args1, _ = mock_sub.call_args_list[0]
             assert args1[0] == ["npm", "run", "typecheck"]
@@ -43,11 +44,11 @@ def test_vitest_typecheck_with_tsconfig(temp_project_dir):
             runner = JestRunner(config, project_root=temp_project_dir)
             
             mock_sub.side_effect = [
-                ("typecheck output", 0),
-                ('{"success":true,"numPassedTests":1}', 0)
+                ("typecheck output", "", 0),
+                ('{"success":true,"numPassedTests":1}', "", 0)
             ]
             runner.run_tests()
-            
+
             assert mock_sub.call_count == 2
             args1, _ = mock_sub.call_args_list[0]
             assert args1[0] == ["npx", "tsc", "--noEmit"]
@@ -65,7 +66,7 @@ def test_vitest_typecheck_failure(temp_project_dir):
             
             # Fail typecheck
             mock_sub.side_effect = [
-                ("TS Error 2322", 1)
+                ("TS Error 2322", "", 1)
             ]
             result = runner.run_tests()
             

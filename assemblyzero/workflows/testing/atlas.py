@@ -179,12 +179,15 @@ ATLAS: dict[str, dict] = {
         "ordinal": None,
         "goal": "Add tests for code the suite does not reach.",
         "teach": (
-            "A loop, not a step, and deliberately one-way: it always returns "
-            "to verification and never routes to implementation, so a "
-            "coverage shortfall cannot turn into an edit of the code (#2327)."
+            "A loop, not a step, and deliberately one-way: it returns to "
+            "verification and never routes to implementation, so a coverage "
+            "shortfall cannot turn into an edit of the code (#2327). It "
+            "writes pytest tests only; a gap in another framework halts "
+            "(#4246)."
         ),
         "successors": {
-            "N5_verify_green": "always",
+            "N5_verify_green": "tests were added, or none could be",
+            "HALT": "coverage could not be measured, or the gap is in a framework N4c cannot add tests for (#4246)",
         },
     },
     "N5_verify_green": {

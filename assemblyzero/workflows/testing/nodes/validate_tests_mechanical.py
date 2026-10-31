@@ -12,6 +12,7 @@ stub tests early and route back for regeneration.
 import ast
 import hashlib
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -19,7 +20,13 @@ from typing import Any, Literal
 
 from assemblyzero.workflows.testing.audit import gate_log
 from assemblyzero.workflows.testing.framework_detector import TestFramework
-from assemblyzero.workflows.testing.runner_registry import get_runner, resolve_framework
+from assemblyzero.workflows.testing.framework_ownership import (
+    RunFramework,
+    TestFileOwnershipError,
+    owner_of,
+    run_frameworks,
+)
+from assemblyzero.workflows.testing.runner_registry import get_runner
 
 logger = logging.getLogger(__name__)
 
@@ -607,16 +614,23 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     scenarios = parsed_scenarios.get("scenarios", [])
     scaffold_attempts = state.get("scaffold_attempts", 0)
 
-    # Issue #381: Framework-aware validation branch
-    framework_config = state.get("framework_config")
-    if framework_config:
-        # The framework may be the enum or its string value (#3708); the one
-        # shared resolver reads both (#3732).
-        fw_enum = resolve_framework(framework_config)
-        if fw_enum and fw_enum != TestFramework.PYTEST:
-            return _validate_non_pytest(
-                state, generated_tests, fw_enum, scaffold_attempts
-            )
+    # Issue #381: Framework-aware validation branch. #4244: every framework
+    # of the run has a scaffold, and each is validated by its own framework's
+    # rules: pytest's on `generated_tests` (#789), every other framework's on
+    # its files as they are on disk (#3081).
+    try:
+        frameworks = run_frameworks(state)
+    except TestFileOwnershipError as e:
+        return _halt_validation_cannot_run("run's", str(e), scaffold_attempts)
+    if all(run.framework != TestFramework.PYTEST for run in frameworks):
+        return _validate_non_pytest(state, frameworks, scaffold_attempts)
+    javascript_errors: list[str] = []
+    javascript_text = ""
+    if len(frameworks) > 1:
+        try:
+            javascript_errors, javascript_text = _non_pytest_errors(state, frameworks)
+        except _ValidatorUnavailable as e:
+            return _halt_validation_cannot_run(e.label, e.cause, scaffold_attempts)
 
     all_errors = []
 
@@ -703,6 +717,9 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     coverage_errors = validate_scenario_coverage(generated_tests, scenarios)
     all_errors.extend(coverage_errors)
 
+    # #4244: the other frameworks' scaffolds, judged by their own validators.
+    all_errors.extend(javascript_errors)
+
     # Build validation result
     is_valid = len(all_errors) == 0
 
@@ -771,8 +788,11 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # #2767: consulted on the VALID path too. A suite that validates and then
     # collects nothing sends the red phase back here, and without this the
     # cap it is supposedly bounded by was never read.
+    # #4244: the stagnation hash and the exhaustion check cover every
+    # scaffold validated here, not the Python one alone.
+    validated_text = generated_tests + javascript_text
     reason = _halt_if_exhausted(
-        state, result_dict, generated_tests, new_attempts, all_errors,
+        state, result_dict, validated_text, new_attempts, all_errors,
         is_valid=is_valid,
     )
     if reason:
@@ -781,18 +801,142 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
         result_dict["scaffold_route"] = "regenerate" if not is_valid else "continue"
 
     # Issue #502: Store hash for stagnation detection
-    if generated_tests:
+    if validated_text:
         result_dict["previous_scaffold_hash"] = hashlib.sha256(
-            generated_tests.encode()
+            validated_text.encode()
         ).hexdigest()
 
     return result_dict
 
 
+class _ValidatorUnavailable(Exception):
+    """A framework's validator cannot be built, so its scaffold cannot be
+    judged (#3081). Carries the framework's label and the cause to the halt."""
+
+    def __init__(self, label: str, cause: str) -> None:
+        super().__init__(f"{label}: {cause}")
+        self.label = label
+        self.cause = cause
+
+
+def _halt_validation_cannot_run(
+    label: str, cause: str, scaffold_attempts: int,
+) -> dict[str, Any]:
+    """N2.5's halt when a scaffold cannot be validated at all (#3081).
+
+    It used to return `is_valid: True` with a warning when the runner could
+    not be built: a check that cannot run read as a pass (ledger 0908,
+    `validate_tests_mechanical.py:811`). Routed to HALT by
+    `route_after_validate`, and HALT alerts the operator.
+    """
+    message = (
+        f"{DETERMINISTIC_FAILURE}: [N2.5] the {label} scaffold cannot be "
+        f"validated: {cause}. A validation that cannot run is not a pass, so "
+        f"the run stops here (ADR 0236, #3081)."
+    )
+    print(f"ERROR [N2.5] {message}", file=sys.stderr)
+    return {
+        "validation_result": {
+            "is_valid": False,
+            "errors": [message],
+            "warnings": [],
+            "stub_count": 0,
+            "real_test_count": 0,
+        },
+        "scaffold_attempts": scaffold_attempts + 1,
+        "scaffold_route": "escalate",
+        "next_node": "end",
+        "error_message": message,
+    }
+
+
+def _non_pytest_errors(
+    state: dict[str, Any], frameworks: list[RunFramework],
+) -> tuple[list[str], str]:
+    """Every non-pytest scaffold of the run, read from disk and judged by its
+    own framework's validator (#3081, #4244).
+
+    The content judged is the file at the path, never a state key: the
+    TypeScript scaffold used to return its content under a key nothing read,
+    and every Playwright, Jest and Vitest scaffold was validated as an empty
+    string. With several frameworks, each test file goes to the framework
+    that owns it (`framework_ownership.owner_of`); pytest's files are judged
+    on `generated_tests` by the caller, and a non-pytest framework with no
+    file at all is an error, because N2 scaffolds every framework.
+
+    A single-framework run whose state lists no test files is judged on
+    `generated_tests` as `<generated>`, as it was: there is no file to read.
+
+    Returns `(errors, the text judged)`. Raises `_ValidatorUnavailable`, which
+    halts, when a framework's validator cannot be built, when a test file
+    cannot be read, and when no framework of the run owns one: each is a
+    check that cannot run, never a file passed over.
+    """
+    repo_root = state.get("repo_root") or "."
+    root = os.path.abspath(repo_root)
+    test_files = [str(f) for f in (state.get("test_files") or [])]
+    multi = len(frameworks) > 1
+    runners: dict[int, Any] = {}
+    validated: set[int] = set()
+    errors: list[str] = []
+    texts: list[str] = []
+
+    def runner_for(index: int):
+        if index not in runners:
+            run = frameworks[index]
+            try:
+                runners[index] = get_runner(
+                    run.framework, repo_root,
+                    working_directory=run.config.get("working_directory"),
+                )
+            except (ValueError, OSError) as e:
+                raise _ValidatorUnavailable(run.label, f"{type(e).__name__}: {e}") from e
+        return runners[index]
+
+    if not test_files and not multi:
+        generated = state.get("generated_tests", "")
+        return runner_for(0).validate_test_file("<generated>", generated), generated
+
+    def owner(path: str) -> int:
+        if not multi:
+            return 0
+        try:
+            return owner_of(path, frameworks, root)
+        except TestFileOwnershipError as e:
+            raise _ValidatorUnavailable("run's", str(e)) from e
+
+    def read(index: int, path: str) -> str:
+        absolute = path if os.path.isabs(path) else os.path.join(root, path)
+        try:
+            return Path(absolute).read_text(encoding="utf-8")
+        except OSError as e:
+            raise _ValidatorUnavailable(
+                frameworks[index].label,
+                f"test file {absolute} cannot be read: {type(e).__name__}: {e}",
+            ) from e
+
+    for path in test_files:
+        index = owner(path)
+        if frameworks[index].framework == TestFramework.PYTEST:
+            continue
+        runner = runner_for(index)
+        validated.add(index)
+        content = read(index, path)
+        texts.append(content)
+        errors.extend(runner.validate_test_file(path, content))
+
+    for index, run in enumerate(frameworks):
+        if run.framework != TestFramework.PYTEST and index not in validated:
+            errors.append(
+                f"no {run.label} test file to validate: every framework of the "
+                f"run has a scaffold (#4244)"
+            )
+    return errors, "".join(texts)
+
+
 def _validate_non_pytest(
     state: dict[str, Any],
-    generated_tests: str,
-    framework: TestFramework,
+    frameworks: list[RunFramework],
     scaffold_attempts: int,
 ) -> dict[str, Any]:
     """Validate non-pytest test files using framework-specific runner validators.
@@ -800,46 +944,22 @@ def _validate_non_pytest(
     Issue #381: Playwright/Jest/Vitest files can't be validated with Python AST.
     Instead, use the runner's validate_test_file() method which checks for
     framework-specific patterns (imports, test blocks, etc.).
+
+    #3081: each file is read from disk (`_non_pytest_errors`), and a
+    validator that cannot be built halts instead of passing.
     """
-    repo_root = state.get("repo_root", ".")
-    test_files = state.get("test_files", [])
-
-    all_errors: list[str] = []
-
     try:
-        runner = get_runner(framework, repo_root)
-    except (ValueError, EnvironmentError) as e:
-        # If runner can't be created (e.g., npx not installed), skip validation
-        print(f"    [N2.5] Runner unavailable for {framework.value}: {e}")
-        print("    [N2.5] Skipping mechanical validation (runner unavailable)")
-        return {
-            "validation_result": {
-                "is_valid": True,
-                "errors": [],
-                "warnings": [f"Runner unavailable: {e}"],
-                "stub_count": 0,
-                "real_test_count": 0,
-            },
-            "scaffold_attempts": scaffold_attempts,
-            "scaffold_route": "continue",  # #2676
-        }
-
-    # Validate each test file using the runner
-    if test_files:
-        for tf in test_files:
-            errors = runner.validate_test_file(tf, generated_tests)
-            all_errors.extend(errors)
-    else:
-        # If no test_files list, validate the generated content directly
-        errors = runner.validate_test_file("<generated>", generated_tests)
-        all_errors.extend(errors)
+        all_errors, validated_text = _non_pytest_errors(state, frameworks)
+    except _ValidatorUnavailable as e:
+        return _halt_validation_cannot_run(e.label, e.cause, scaffold_attempts)
 
     is_valid = len(all_errors) == 0
+    labels = ", ".join(run.label for run in frameworks)
 
     if is_valid:
-        print(f"    [N2.5] {framework.value} validation PASSED")
+        print(f"    [N2.5] {labels} validation PASSED")
     else:
-        print(f"    [N2.5] {framework.value} validation FAILED: {len(all_errors)} errors")
+        print(f"    [N2.5] {labels} validation FAILED: {len(all_errors)} errors")
         for error in all_errors[:5]:
             print(f"      - {error}")
 
@@ -861,14 +981,20 @@ def _validate_non_pytest(
     # property of the framework the run happens to use.
     # #2676: and it owes the same carried route, for the same reason.
     # #2767: and the same budget, consulted on the valid path too.
+    # #3081: judged on the text the validators read from disk, which is now
+    # also what the stagnation hash (#502) is taken over, as on the pytest path.
     reason = _halt_if_exhausted(
-        state, result, generated_tests, new_attempts, all_errors,
+        state, result, validated_text, new_attempts, all_errors,
         is_valid=is_valid,
     )
     if reason:
         result["scaffold_route"] = "escalate"
     else:
         result["scaffold_route"] = "regenerate" if not is_valid else "continue"
+    if validated_text:
+        result["previous_scaffold_hash"] = hashlib.sha256(
+            validated_text.encode()
+        ).hexdigest()
     return result
 
 

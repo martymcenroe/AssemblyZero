@@ -108,7 +108,9 @@ class TestJestRunnerParseResults:
         assert result["failed"] >= 1
 
     def test_parse_with_coverage_map(self, jest_runner):
-        """Parse report with coverage data."""
+        """A report's coverageMap is not a coverage source (#4246): coverage
+        is the json-summary a `measure_coverage` run writes, read by
+        `read_coverage_report`. The parse says it measured nothing."""
         report = {
             "success": True,
             "numPassedTests": 3,
@@ -123,7 +125,8 @@ class TestJestRunnerParseResults:
             },
         }
         result = jest_runner.parse_results(json.dumps(report), exit_code=0)
-        assert result["coverage_percent"] == 75.0  # 3/4 statements covered
+        assert result["passed"] == 3
+        assert result["coverage_percent"] is None
 
 
 class TestJestRunnerRunTests:
@@ -132,7 +135,8 @@ class TestJestRunnerRunTests:
     @patch.object(JestRunner, "_run_subprocess")
     def test_t230_invokes_correct_command(self, mock_subprocess, jest_runner):
         """T230: JestRunner.run_tests invokes correct command."""
-        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', 0)
+        # #3065: _run_subprocess returns (stdout, stderr, exit_code)
+        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', "", 0)
         jest_runner.run_tests(test_paths=["tests/utils.test.ts"])
 
         args, _ = mock_subprocess.call_args
@@ -145,7 +149,7 @@ class TestJestRunnerRunTests:
     @patch.object(JestRunner, "_run_subprocess")
     def test_vitest_invokes_correct_command(self, mock_subprocess, vitest_runner):
         """Vitest runner uses vitest run --reporter=json."""
-        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', 0)
+        mock_subprocess.return_value = ('{"success":true,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTotalTests":1}', "", 0)
         vitest_runner.run_tests()
 
         args, _ = mock_subprocess.call_args
