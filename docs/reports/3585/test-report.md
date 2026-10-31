@@ -276,3 +276,18 @@ The 6 files involved then gave 154 passed.
 **Changed tests:** three invalid-config tests in `test_requirements_config.py` expect the raise at construction.
 
 **Neighbouring suites:** 207 passed.
+
+## The landing branch
+
+The 11 commits of `3585-requirements-nodes` and the 12 of `3585-requirements-support` were picked onto `origin/main` at `21e32f12`, oldest first.
+
+**Conflicts, two:**
+- The first support commit met the nodes half's copy of this report and its sibling, each a whole-file add. Both are kept: one title and preamble for the package, the nodes sections, then the support sections, each unchanged.
+- The audit commit and the drafter commit each wrote a comment over the target-repo `mkdir` in `test_lld_edit_script_revision.py`'s `lld_state` fixture. The one comment now gives both reasons.
+
+**Baselines and audits:**
+- `audit_loud_failure.py --check`: 0 new and 33 stale. `--write-baseline` removed the 33 and nothing else, so the count went from 258 to 225, and `BASELINE_CEILING` is 225.
+- `audit_fail_open.py --check`: no new fail-open. `--strict` reported a moved denominator, so `--write-baseline` ran: 49 entries removed, all in `assemblyzero/workflows/requirements/`, and the counts moved (sites examined 10,022 to 10,081; findings 468 to 408).
+- `audit_halt_sites.py --check --strict`: every site registered; the denominator moved from 162 halt sites to 188, and `--write-baseline` changed only that count. It then passed.
+
+**The full unit tier,** run once, alone on the machine: 12,161 passed, 66 skipped, 7 deselected and 6 xfailed in 637 s, with no failures.
