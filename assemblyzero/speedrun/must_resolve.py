@@ -12,9 +12,17 @@ happened to be reading the log.
 ## Design decisions
 
 **The halt outcome is never changed by this module.** The roll was already
-halting when it is called. A filing failure -- no network, no auth, no `gh` --
-is loud in the run log and returns a failure result; it never raises, and it
-never converts a `REQUIREMENTS CONFLICT` halt into a different result.
+halting when it is called. A filing failure -- no network, no auth, no `gh`, a
+ledger that cannot be written -- alerts the operator with its cause (ADR 0236)
+and returns a failed result; it never converts a `REQUIREMENTS CONFLICT` halt
+into a different result. A failure here means a conflict the launch gate may
+not see, which is exactly what the operator has to be told.
+
+**The launch gate never reads "could not check" as "nothing open".** When
+GitHub cannot be asked, `open_must_resolve_issues` alerts and returns the
+error, and the launcher refuses. The filed-questions ledger reads as empty only
+when it does not exist; one it cannot read, or a corrupt line in it, alerts and
+raises, because a skipped line can hide an open question.
 
 **Dedupe reads a marker, not prose.** The fingerprint is embedded in the issue
 body as an HTML comment alongside the source issue number. Re-deriving a
@@ -45,9 +53,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.core import alert
 from assemblyzero.core.github_writes import inert_reason, suppress_if_inert
 
 MUST_RESOLVE_LABEL = "must-resolve"
+_WHERE = "assemblyzero/speedrun/must_resolve.py"
 RUN_TAG_ENV = "SPEEDRUN_RUN_TAG"
 RUN_START_ENV = "SPEEDRUN_RUN_START"
 
@@ -156,10 +166,14 @@ def unanswerable_reason(conflict: dict) -> str | None:
 @dataclass
 class FilingResult:
     ok: bool
-    action: str  # filed | commented | skipped | rejected | failed
+    action: str  # filed | commented | skipped | suppressed | rejected | failed
     issue_number: int | None = None
     fingerprint: str | None = None
     detail: str = ""
+
+
+class MustResolveError(RuntimeError):
+    """GitHub could not answer a question the filer needs answered."""
 
 
 def _default_runner(args: list[str]) -> subprocess.CompletedProcess:
@@ -346,18 +360,34 @@ def build_body(
 def _find_existing(
     slug: str, source_issue: int, fingerprint: str, runner
 ) -> int | None:
-    """An open must-resolve issue for the same source issue AND fingerprint."""
+    """An open must-resolve issue for the same source issue AND fingerprint.
+
+    None means GitHub answered and holds no such issue. A query that fails, or
+    an answer that is not a list of issues, raises `MustResolveError`: reading
+    it as "none found" would file a duplicate of a question already open.
+    """
     result = runner([
         "gh", "issue", "list", "--repo", slug,
         "--label", MUST_RESOLVE_LABEL, "--state", "open",
         "--limit", "100", "--json", "number,body",
     ])
     if result.returncode != 0:
-        return None
+        raise MustResolveError(
+            f"gh issue list --repo {slug} exited {result.returncode}: "
+            f"{(result.stderr or '').strip()}"
+        )
     try:
         rows = json.loads(result.stdout or "[]")
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise MustResolveError(
+            f"gh issue list --repo {slug} answered with something that is not "
+            f"JSON ({exc}): {(result.stdout or '')[:200]!r}"
+        ) from exc
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        raise MustResolveError(
+            f"gh issue list --repo {slug} answered with something that is not "
+            f"a list of issues: {(result.stdout or '')[:200]!r}"
+        )
     for row in rows:
         for match in _MARKER_RE.finditer(row.get("body") or ""):
             if (
@@ -368,12 +398,63 @@ def _find_existing(
     return None
 
 
-def _ensure_label(slug: str, runner) -> None:
-    runner([
+def _ensure_label(slug: str, runner) -> subprocess.CompletedProcess:
+    """Create the label, returning gh's answer for the caller to report.
+
+    A failure here is not reported on its own: when the retried issue create
+    then succeeds, the issue carries the label, which proves it exists (the
+    usual case is a label that already existed). When the retry fails, the
+    caller names this answer's exit code and stderr beside the create's.
+    """
+    return runner([
         "gh", "label", "create", MUST_RESOLVE_LABEL, "--repo", slug,
         "--description", "Blocks rolls until an operator rules on the issue text",
         "--color", "B60205",
     ])
+
+
+def _filing_failed(
+    *,
+    what: str,
+    cause: str,
+    consequence: str,
+    repo_root: Path | str,
+    source_issue: int,
+    origin: Origin,
+    log,
+    fingerprint: str | None = None,
+    issue_number: int | None = None,
+    action: str = "failed",
+) -> FilingResult:
+    """Alert the operator about one filing failure and return the failed result.
+
+    The roll is already halting, so nothing more can stop; the alert is what
+    tells the operator that a conflict may have no question on GitHub, or
+    none in the ledger the launch gate reads.
+    """
+    log(f"  [{origin.tag}] ERROR: {what}: {cause}")
+    alert.alert_operator(
+        what=what,
+        where=f"{_WHERE} file_must_resolve ({origin.tag} gate)",
+        cause=cause,
+        consequence=consequence,
+        repo=str(repo_root),
+        issue=source_issue,
+    )
+    return FilingResult(False, action, issue_number, fingerprint, detail=cause)
+
+
+_NOT_FILED = (
+    "no must-resolve question exists for this conflict, so the launch gate "
+    "will not refuse a re-roll on it; the run still halts. Rule on the source "
+    "issue's text before rolling it again"
+)
+
+_NOT_RECORDED = (
+    "the filed-questions ledger does not hold this question, so the run "
+    "summary and the next launch's gate see it only if GitHub lists it; "
+    "the run still halts"
+)
 
 
 def file_must_resolve(
@@ -390,8 +471,12 @@ def file_must_resolve(
 ) -> FilingResult:
     """File (or comment on) the must-resolve issue for one conflict.
 
-    Never raises. The roll is already halting; a filing problem is reported and
-    the halt outcome is unchanged.
+    The roll is already halting, and the halt outcome is unchanged. Every
+    filing failure -- a GitHub call that fails or answers nonsense, an issue
+    created with no number, a ledger line that cannot be written, a conflict
+    with nothing to rule on -- alerts the operator and returns a failed (or
+    rejected) result. Only an alert that cannot be delivered, or an exception
+    out of the runner itself, leaves this function.
 
     `origin` says which gate found it (#2192). The fingerprint deliberately does
     NOT include it: the same contradiction found at the LLD stage and again at
@@ -402,6 +487,12 @@ def file_must_resolve(
         # Brief and idea entry paths carry file input, not an issue number.
         # There is nothing to file against.
         return FilingResult(True, "skipped", detail="entry path has no issue number")
+
+    def failed(what, cause, consequence=_NOT_FILED, **kw) -> FilingResult:
+        return _filing_failed(
+            what=what, cause=cause, consequence=consequence, repo_root=repo_root,
+            source_issue=source_issue, origin=origin, log=log, **kw,
+        )
 
     # #2462: never file a question nothing can answer. Enforced HERE, at the
     # filing boundary, so both gates that file -- N0c and the spec reviewer --
@@ -416,7 +507,15 @@ def file_must_resolve(
         )
         log(f"      A: {conflict.get('criterion_a', '') or '(not stated)'}")
         log(f"      B: {conflict.get('criterion_b', '') or '(not stated)'}")
-        return FilingResult(False, "rejected", detail=unanswerable)
+        return failed(
+            f"file a must-resolve question for a conflict on #{source_issue}",
+            unanswerable,
+            consequence=(
+                "the conflict is not filed, so no question blocks a re-roll; "
+                "the pairing printed in the run log is all there is to rule on"
+            ),
+            action="rejected",
+        )
 
     env_run_id, env_run_start = run_context()
     run_id = run_id or env_run_id
@@ -440,20 +539,46 @@ def file_must_resolve(
             f"A live roll would have raised must-resolve fingerprint {fingerprint} "
             f"against #{source_issue}."
         )
-        record_filed(
-            repo_root, number=None, title=build_title(source_issue, conflict),
-            fingerprint=fingerprint, run_id=run_id, ts=conflict_ts, suppressed=inert,
-        )
+        try:
+            record_filed(
+                repo_root, number=None, title=build_title(source_issue, conflict),
+                fingerprint=fingerprint, run_id=run_id, ts=conflict_ts,
+                suppressed=inert,
+            )
+        except (OSError, ValueError) as exc:
+            return failed(
+                f"record the suppressed must-resolve question for #{source_issue}",
+                f"{type(exc).__name__}: {exc}",
+                consequence=(
+                    "the replay report cannot say this run would have asked a "
+                    "question here; nothing was filed, and the run still halts"
+                ),
+                fingerprint=fingerprint,
+            )
         return FilingResult(True, "suppressed", None, fingerprint, detail=inert)
 
     slug = repo_slug(repo_root, runner=runner)
     if not slug:
-        log(f"  [{origin.tag}] could not file must-resolve: no GitHub remote for {repo_root}")
-        return FilingResult(
-            False, "failed", fingerprint=fingerprint, detail="no origin remote"
+        return failed(
+            f"file a must-resolve question for a conflict on #{source_issue}",
+            f"no GitHub origin remote for {repo_root}",
+            fingerprint=fingerprint,
         )
 
-    existing = _find_existing(slug, source_issue, fingerprint, runner)
+    try:
+        existing = _find_existing(slug, source_issue, fingerprint, runner)
+    except MustResolveError as exc:
+        return failed(
+            f"check {slug} for an open must-resolve question on #{source_issue} "
+            "before filing one",
+            str(exc),
+            consequence=(
+                "nothing is filed, because filing without the check could open "
+                "a duplicate of a question already open; " + _NOT_FILED
+            ),
+            fingerprint=fingerprint,
+        )
+
     if existing is not None:
         comment = runner([
             "gh", "issue", "comment", str(existing), "--repo", slug,
@@ -462,18 +587,32 @@ def file_must_resolve(
             f"Still unresolved; the source issue text has not been ruled on.",
         ])
         if comment.returncode != 0:
-            log(f"  [{origin.tag}] could not comment on #{existing}: {comment.stderr.strip()}")
-            return FilingResult(
-                False, "failed", issue_number=existing, fingerprint=fingerprint,
-                detail=comment.stderr.strip(),
+            return failed(
+                f"comment the recurrence on must-resolve #{existing} in {slug}",
+                f"gh issue comment exited {comment.returncode}: "
+                f"{(comment.stderr or '').strip()}",
+                consequence=(
+                    f"#{existing} does not show this recurrence and it is not "
+                    "recorded in the ledger; the question is still open on "
+                    "GitHub and the run still halts"
+                ),
+                fingerprint=fingerprint, issue_number=existing,
             )
         log(f"  [{origin.tag}] recurrence recorded on existing must-resolve #{existing}")
         # #2179: a recurrence is still an OPEN question blocking this run, so
         # it belongs in the summary and the gate exactly like a fresh filing.
-        record_filed(
-            repo_root, number=existing, title=build_title(source_issue, conflict),
-            fingerprint=fingerprint, run_id=run_id, ts=conflict_ts,
-        )
+        try:
+            record_filed(
+                repo_root, number=existing, title=build_title(source_issue, conflict),
+                fingerprint=fingerprint, run_id=run_id, ts=conflict_ts,
+            )
+        except (OSError, ValueError) as exc:
+            return failed(
+                f"record must-resolve #{existing} in the filed-questions ledger",
+                f"{type(exc).__name__}: {exc}",
+                consequence=_NOT_RECORDED,
+                fingerprint=fingerprint, issue_number=existing,
+            )
         return FilingResult(True, "commented", existing, fingerprint)
 
     title = build_title(source_issue, conflict)
@@ -487,29 +626,62 @@ def file_must_resolve(
     ]
 
     created = runner(create_args)
+    label = None
     if created.returncode != 0:
         # Most likely the target repo has never had the label. Create it and
         # retry exactly once -- a second failure is a real problem, not a
         # missing label, and looping would delay a halt that already happened.
-        _ensure_label(slug, runner)
+        label = _ensure_label(slug, runner)
         created = runner(create_args)
 
     if created.returncode != 0:
-        log(f"  [{origin.tag}] could not file must-resolve issue: {created.stderr.strip()}")
-        return FilingResult(
-            False, "failed", fingerprint=fingerprint, detail=created.stderr.strip()
+        cause = (
+            f"gh issue create exited {created.returncode}: "
+            f"{(created.stderr or '').strip()}"
+        )
+        if label is not None and label.returncode != 0:
+            cause += (
+                f"; before the retry, gh label create exited {label.returncode}: "
+                f"{(label.stderr or '').strip()}"
+            )
+        return failed(
+            f"file a must-resolve question for a conflict on #{source_issue} in {slug}",
+            cause,
+            fingerprint=fingerprint,
         )
 
-    number = _issue_number_from_url((created.stdout or "").strip())
-    log(f"  [{origin.tag}] filed must-resolve issue #{number or '?'} in {slug}")
+    url = (created.stdout or "").strip()
+    number = _issue_number_from_url(url)
+    if number is None:
+        return failed(
+            f"read the number of the must-resolve question just filed for "
+            f"#{source_issue} in {slug}",
+            f"gh issue create succeeded but its output names no issue number: {url!r}",
+            consequence=(
+                "the question may exist on GitHub but is not in the "
+                "filed-questions ledger, so the run summary and the launch "
+                "gate see it only if GitHub lists it; check "
+                f"`gh issue list --repo {slug} --label {MUST_RESOLVE_LABEL}`"
+            ),
+            fingerprint=fingerprint,
+        )
+    log(f"  [{origin.tag}] filed must-resolve issue #{number} in {slug}")
     # #2179: record it HERE, where the number is known. The launcher used to
     # re-derive the list from a live query seconds later, which returns short
     # while GitHub is still indexing -- and that short answer fed both the
     # operator summary and the launch gate.
-    record_filed(
-        repo_root, number=number, title=title,
-        fingerprint=fingerprint, run_id=run_id, ts=conflict_ts,
-    )
+    try:
+        record_filed(
+            repo_root, number=number, title=title,
+            fingerprint=fingerprint, run_id=run_id, ts=conflict_ts,
+        )
+    except (OSError, ValueError) as exc:
+        return failed(
+            f"record must-resolve #{number} in the filed-questions ledger",
+            f"{type(exc).__name__}: {exc}",
+            consequence=_NOT_RECORDED,
+            fingerprint=fingerprint, issue_number=number,
+        )
     return FilingResult(True, "filed", number, fingerprint)
 
 
@@ -519,13 +691,13 @@ def open_must_resolve_issues(
     """Open must-resolve issues in the target repo (#2073).
 
     Returns `(issues, error)`. `error` is non-None when GitHub could not be
-    consulted at all -- the caller warns and proceeds in that case. The
-    availability of GitHub must not brick local rolls; the auto-filer is the
-    enforcement backstop.
+    consulted, and the operator has already been alerted with its cause. It is
+    a failed check, never an empty one (ADR 0236): the launcher refuses to
+    launch on it, and the run summary says the list could not be read.
     """
     slug = repo_slug(repo_root, runner=runner)
     if not slug:
-        return [], f"no GitHub remote for {repo_root}"
+        return _gate_failed(repo_root, f"no GitHub origin remote for {repo_root}")
 
     result = runner([
         "gh", "issue", "list", "--repo", slug,
@@ -533,14 +705,43 @@ def open_must_resolve_issues(
         "--limit", "100", "--json", "number,title",
     ])
     if result.returncode != 0:
-        return [], (result.stderr or "gh issue list failed").strip()
+        return _gate_failed(
+            repo_root,
+            f"gh issue list --repo {slug} exited {result.returncode}: "
+            f"{(result.stderr or '').strip() or 'no stderr'}",
+        )
     try:
         rows = json.loads(result.stdout or "[]")
-    except ValueError:
-        return [], "could not read the issue list response"
+    except ValueError as exc:
+        return _gate_failed(
+            repo_root,
+            f"gh issue list --repo {slug} answered with something that is not "
+            f"JSON ({exc}): {(result.stdout or '')[:200]!r}",
+        )
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return _gate_failed(
+            repo_root,
+            f"gh issue list --repo {slug} answered with something that is not "
+            f"a list of issues: {(result.stdout or '')[:200]!r}",
+        )
     return [
         {"number": r.get("number"), "title": r.get("title", "")} for r in rows
     ], None
+
+
+def _gate_failed(repo_root: Path | str, cause: str) -> tuple[list[dict], str]:
+    """Alert that the open-question check cannot run, and return its error."""
+    alert.alert_operator(
+        what="list the open must-resolve questions in the target repository",
+        where=f"{_WHERE} open_must_resolve_issues",
+        cause=cause,
+        consequence=(
+            "the open-question check cannot run: a launch refuses, and a run "
+            "summary lists only the questions this machine recorded"
+        ),
+        repo=str(repo_root),
+    )
+    return [], cause
 
 
 # ---------------------------------------------------------------------------
@@ -583,10 +784,13 @@ def record_filed(
     ts: str | None = None,
     suppressed: str = "",
 ) -> bool:
-    """Append one filed question to the local ledger. Never raises.
+    """Append one filed question to the local ledger. True once it is on disk.
 
     Append-only JSONL so two rolls writing at once cannot lose each other's
-    line, and so a corrupt line costs one entry rather than the file.
+    line. A line that cannot be written raises `OSError` naming the ledger;
+    the one caller, `file_must_resolve`, alerts the operator with the issue
+    number and returns a failed result. A call with neither a number nor a
+    suppression reason has nothing to record and raises `ValueError`.
 
     ``suppressed`` (#2826) records a filing that was NOT made because GitHub
     writes were inert -- a replay reaching a question. Such a line carries no
@@ -594,7 +798,10 @@ def record_filed(
     counts it while the record that the replay got there survives.
     """
     if not number and not suppressed:
-        return False
+        raise ValueError(
+            "record_filed needs an issue number or a suppression reason; "
+            f"got number={number!r} for {title!r}"
+        )
     row: dict = {
         "number": int(number) if number else None,
         "title": title or "",
@@ -604,16 +811,37 @@ def record_filed(
     }
     if suppressed:
         row["suppressed"] = suppressed
+    path = filed_ledger_path(repo_root)
     try:
-        path = filed_ledger_path(repo_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row) + "\n")
-        return True
-    except OSError:
-        # The roll is already halting. Losing the ledger line costs the
-        # summary a number; raising here would cost the halt.
-        return False
+    except (OSError, ValueError) as exc:
+        raise OSError(
+            f"cannot append to the filed-questions ledger {path}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    return True
+
+
+def _ledger_unreadable(path: Path, cause: str) -> None:
+    alert.alert_operator(
+        what="read the filed-questions ledger",
+        where=f"{_WHERE} read_filed",
+        cause=cause,
+        consequence=(
+            "the questions this machine filed cannot be listed, so the run "
+            "summary and the launch gate built from the ledger stop here"
+        ),
+        repo=str(path.parents[2]),
+    )
+
+
+def _corrupt_line(path: Path, lineno: int, why: str) -> ValueError:
+    """Alert about one ledger line that is not a record; the error to raise."""
+    cause = f"{path}:{lineno} {why}"
+    _ledger_unreadable(path, cause)
+    return ValueError(f"the filed-questions ledger line {cause}")
 
 
 def read_filed(repo_root: Path | str, *, since: str = "") -> list[dict]:
@@ -622,28 +850,42 @@ def read_filed(repo_root: Path | str, *, since: str = "") -> list[dict]:
     `since` is a `_TS_FMT` stamp, which is lexicographically sortable, so the
     comparison needs no parsing. Bounding by the launcher's own start is what
     keeps a question closed last week out of tonight's summary.
+
+    An absent ledger is the legitimate answer "this machine filed nothing"
+    and returns ``[]``. A line with no number is a suppressed filing (#2826)
+    and is left out by contract. A ledger that exists but cannot be read, or
+    a line that is not a JSON object with a whole-number ``number``, alerts
+    the operator and raises: skipping it could hide an open question.
     """
     path = filed_ledger_path(repo_root)
-    entries: list[dict] = []
+    if not path.exists():
+        return []
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
-        return entries
+    except (OSError, UnicodeDecodeError) as exc:
+        _ledger_unreadable(path, f"{type(exc).__name__}: {exc} ({path})")
+        raise
 
-    for line in text.splitlines():
+    entries: list[dict] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         try:
             row = json.loads(line)
-        except ValueError:
-            continue  # one bad line must not cost the rest
-        if not row.get("number"):
+        except ValueError as exc:
+            raise _corrupt_line(path, lineno, f"is not JSON: {exc}") from exc
+        if not isinstance(row, dict):
+            raise _corrupt_line(path, lineno, "is not a JSON object")
+        number = row.get("number")
+        if not number:
             continue
+        if isinstance(number, bool) or not isinstance(number, int):
+            raise _corrupt_line(path, lineno, f"has a number that is not a whole number: {number!r}")
         if since and str(row.get("ts", "")) < since:
             continue
         entries.append({
-            "number": int(row["number"]),
+            "number": number,
             "title": row.get("title", ""),
         })
     return entries
@@ -708,9 +950,14 @@ def file_all_conflicts(
     runner=_default_runner,
     log=print,
 ) -> list[FilingResult]:
-    """One issue per distinct conflict. Never raises."""
+    """One issue per distinct conflict.
+
+    Every conflict is attempted: each filing is its own GitHub write, and one
+    that fails must not leave the others unasked. A filing that raises is an
+    alert and a failed result for that conflict; the halt is unchanged.
+    """
     results = []
-    for conflict in conflicts or []:
+    for index, conflict in enumerate(conflicts or [], start=1):
         try:
             results.append(
                 file_must_resolve(
@@ -718,7 +965,23 @@ def file_all_conflicts(
                     origin=origin, runner=runner, log=log
                 )
             )
-        except Exception as exc:  # noqa: BLE001 - filing must never kill a halt
-            log(f"  [{origin.tag}] must-resolve filing raised, continuing: {exc}")
-            results.append(FilingResult(False, "failed", detail=str(exc)))
+        except Exception as exc:  # noqa: BLE001 - each conflict is filed on its own
+            cause = f"{type(exc).__name__}: {exc}"
+            log(f"  [{origin.tag}] ERROR: must-resolve filing for conflict {index} raised: {cause}")
+            alert.alert_operator(
+                what=(
+                    f"file the must-resolve question for conflict {index} of "
+                    f"{len(conflicts)} on #{source_issue}"
+                ),
+                where=f"{_WHERE} file_all_conflicts ({origin.tag} gate)",
+                cause=cause,
+                consequence=(
+                    f"conflict {index} is not filed, so no question blocks a "
+                    "re-roll on it; the other conflicts are still filed and "
+                    "the run still halts"
+                ),
+                repo=str(repo_root),
+                issue=source_issue,
+            )
+            results.append(FilingResult(False, "failed", detail=cause))
     return results

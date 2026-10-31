@@ -48,6 +48,29 @@ def _bypass_gemini_preflight(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _must_resolve_gate_answers_offline():
+    """The launcher's open-question gate never calls GitHub in a unit test (#3585).
+
+    Since #3585 the gate refuses the launch when GitHub cannot be asked: under
+    ADR 0236 a check that could not run is a failure, never a pass. A unit
+    test's target repo has no GitHub remote, so the real
+    ``open_must_resolve_issues`` always fails there, and every test that drives
+    ``speedrun_roll.main()`` for another reason was refused at the gate. This
+    rebinds only the name ``speedrun_roll`` calls, to "GitHub answered, nothing
+    open". The gate itself is tested with explicit runners in
+    ``test_must_resolve_preflight.py`` and ``test_must_resolve_loud_failure.py``,
+    and a test that patches the name still installs its own answer.
+    """
+    module = sys.modules.get("speedrun_roll")
+    if module is None:
+        yield
+        return
+
+    with patch.object(module, "open_must_resolve_issues", lambda *_a, **_k: ([], None)):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _bypass_box_health_preflight():
     """Unit tests never depend on the health of the machine running them (#2248).
 

@@ -195,3 +195,23 @@ Callers: nothing catches the new raises, so a broken credentials file or a buffe
 - `False` now means only that no source holds the file.
 
 Callers: `workflows/testing/nodes/load_lld.py` `find_lld_path` catches `Exception` around it and prints a WARN (a `# fail-open:` site of the testing package). `tools/speedrun_roll.py` (`_restore_artifact`, `_graveyard_leavings_refs`) lets it out. Baseline: the tag entry leaves.
+
+### speedrun/must_resolve.py (18 sites, and 1 compliant row)
+
+A requirements conflict halts the run and files a must-resolve question that the next launch refuses on. Every failure in that path printed a line to stdout and nothing more, and several read as success.
+
+- **The halt is still never changed; every filing failure now alerts.** A new `_filing_failed` helper writes an ERROR line to the run log, calls `alert_operator` with what, where (the gate), the repository, the source issue, the cause and the consequence, and returns the failed result. That covers no GitHub remote (451), a recurrence comment that fails (465), an issue create that fails after the label retry (498), and a conflict with nothing to rule on (411, action still `rejected`).
+- **A failed dedupe query is a failed filing, never "no existing issue"** (355, 359). `_find_existing` raises the new `MustResolveError` for a non-zero exit, an answer that is not JSON, or one that is not a list of issues; the filer files nothing, because filing without the check could duplicate an open question.
+- **The label's own failure is reported** (372). `_ensure_label` returns gh's answer; when the retried create still fails, the cause names both exit codes and both stderrs. A label failure followed by a successful create is not reported: the created issue carries the label, which proves it exists.
+- **An issue created with no number is a failure** (503): alert, nothing written to the ledger, the output named in the cause.
+- **A ledger line that cannot be written is a failure** (443, 473, 509, 613). `record_filed` raises `OSError` naming the ledger (it returned False, which every call ignored) and `ValueError` for a call with neither a number nor a suppression reason; `file_must_resolve` alerts with the issue number and returns a failed result that still carries the number.
+- **The ledger reads as empty only when it is absent** (630, 639). One that cannot be read alerts and re-raises; a line that is not JSON, not an object, or has a number that is not a whole number alerts and raises `ValueError` naming `path:line`. A line with no number (a suppressed replay filing) is still left out by contract.
+- **The launch gate refuses when it cannot run** (527, 535, 539). `open_must_resolve_issues` keeps its `(issues, error)` contract and alerts on every error (no remote, gh failing, an answer that is not JSON or not a list). Its direct caller, `tools/speedrun_roll.py` at the launch gate, now prints BLOCKED and returns 91 where it warned and launched. `check_prereqs` already refused on the error; the run summary already says the list could not be read.
+- **One conflict's filing raising alerts** (721) and is recorded failed; the remaining conflicts are still filed.
+- 176 is compliant: `_default_runner` models a missing binary as exit 127, which every caller checks.
+
+Callers that still swallow: `workflows/requirements/nodes/analyze_requirements.py` (around `file_all_conflicts`), `workflows/implementation_spec/nodes/review_spec.py` and `compile_manifest.py` (around `file_must_resolve`) catch `Exception` and print a WARNING. After this change only an undeliverable alert or a runner exception reaches them; the filing failures alert before they return. Those files are other branches' work.
+
+Unit isolation: `tests/unit/conftest.py` gains `_must_resolve_gate_answers_offline`, which rebinds `speedrun_roll.open_must_resolve_issues` to "GitHub answered, nothing open". Twenty-three tests drive `speedrun_roll.main()` on a repository with no GitHub remote and relied on the gate warning and launching. The fixture follows the existing box-health bypass beside it.
+
+Compliance: every failure path writes an ERROR line through `alert_operator` with what, where, identity, cause and consequence; the filer's halt is unchanged by contract, and the launch gate stops the launch. Baseline: the `file_all_conflicts` handler entry leaves.
