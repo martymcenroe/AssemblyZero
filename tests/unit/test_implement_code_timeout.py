@@ -198,6 +198,11 @@ class TestWorkflowExitCode:
         )
         from assemblyzero.workflows.testing.state import TestingWorkflowState
 
+        # #3585: a git repository, as N4's worktree always is --
+        # came_from_base raises when git cannot answer.
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+
         # Create required directories
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)

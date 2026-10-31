@@ -5,6 +5,7 @@ Issue #783: Sealed API gate — no more direct CLI/SDK fallback.
 """
 
 import os
+import sys
 import threading
 import time
 
@@ -112,13 +113,18 @@ class ProgressReporter:
 class ImplementationError(Exception):
     """Raised when implementation fails mechanically.
 
-    Graph runner should catch this and exit non-zero.
+    Constructing one is the point of failure: N4 builds it only to raise it,
+    where it cannot produce a file. So the constructor writes the ERROR line,
+    naming the file and the reason, to stderr there (standard 0034, property
+    1), whoever catches it. The runner (``tools/run_implement_from_lld.py``
+    ``main``) alerts the operator on it and exits 1.
     """
     def __init__(self, filepath: str, reason: str, response_preview: str | None = None):
         self.filepath = filepath
         self.reason = reason
         self.response_preview = response_preview
         super().__init__(f"FATAL: Failed to implement {filepath}: {reason}")
+        print(f"ERROR [N4] {self}", file=sys.stderr, flush=True)
 
 
 

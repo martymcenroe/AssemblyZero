@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from assemblyzero.core import retry_gate
+from assemblyzero.core import alert, retry_gate
 from assemblyzero.core.llm_provider import get_cumulative_cost
 from assemblyzero.core.retry_mode import is_regeneration
 from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import (
@@ -79,6 +79,56 @@ CODE_GEN_PROMPT_CAP = 60_000
 # Issue #647: Maximum files per batch call
 BATCH_SIZE = 5
 
+#: The module, as an alert's ``where`` names it.
+_WHERE = "assemblyzero/workflows/testing/nodes/implementation/orchestrator.py"
+
+
+def _patch_fallback(
+    filepath: str, outcome: EditScriptOutcome, repo: str, issue: int | None,
+) -> dict:
+    """The alert record for an edit script N4 could not use (standard 0034).
+
+    The fallback is designed: an implementation file is regenerated whole, a
+    test file is left as it is (#2866). It is still a failure, and the
+    operator is told which file, why, and which of the two happens.
+    """
+    cause = "; ".join(outcome.failures) or "no edit blocks in response"
+    if outcome.blocks:
+        cause = f"{outcome.blocks} edit block(s) in the response: {cause}"
+    return {
+        "what": f"the edit-script patch of {filepath} could not be used",
+        "where": f"{_WHERE} try_edit_script_fix (testing workflow, N4)",
+        "cause": cause,
+        "consequence": (
+            f"{filepath} is not patched this iteration: an implementation "
+            f"file is regenerated whole, a test file is left as it is"
+        ),
+        "repo": repo,
+        "issue": issue,
+    }
+
+
+def _read_or_stop(path: Path, purpose: str) -> str:
+    """Read a file N4 needs, or stop N4 with the reason on stderr.
+
+    Every file N4 reads feeds what comes next: the prompt, the shrink gate,
+    the edit script, or the context the later files are generated against. A
+    read that fails stops the stage (standard 0034): an ERROR line names the
+    file and what it was for, and the exception propagates. The runner
+    (``tools/run_implement_from_lld.py`` ``main``) alerts the operator on it.
+    Before #3585 each of these reads fell back to an empty string.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(
+            f"ERROR [N4] could not read {path} ({purpose}): "
+            f"{type(exc).__name__}: {exc}. N4 stops: what it would build from "
+            f"this file cannot be built without it.",
+            file=sys.stderr, flush=True,
+        )
+        raise
+
 
 def try_edit_script_fix(
     filepath: str,
@@ -88,6 +138,8 @@ def try_edit_script_fix(
     system_prompt: str = "",
     audit_dir: Path | None = None,
     spec_excerpt: str = "",
+    repo: str = "",
+    issue: int | None = None,
 ) -> EditScriptOutcome:
     """One attempt to fix `filepath` with an edit script instead of a rewrite.
 
@@ -97,7 +149,8 @@ def try_edit_script_fix(
     twice to reach the same place, which is the habit #2423 exists to break.
 
     Any failure at any step returns an outcome whose `code` is None, and the
-    caller regenerates.
+    caller falls back. Each such failure alerts the operator first, naming
+    the file, the cause, and ``repo`` and ``issue`` (standard 0034).
     """
     scoped = failures_for_file(failure_context, filepath)
     prompt = build_code_edit_script_prompt(
@@ -122,15 +175,21 @@ def try_edit_script_fix(
                 # is how a model ends up sending a file back.
                 system_prompt=EDIT_SCRIPT_CODE_SYSTEM_PROMPT,
             )
-    except Exception as exc:  # noqa: BLE001 - a patch attempt never costs the roll
-        return EditScriptOutcome(None, failures=[f"edit-script call failed: {exc}"])
+    except Exception as exc:  # noqa: BLE001 - alerted; the fallback regenerates
+        outcome = EditScriptOutcome(
+            None, failures=[f"edit-script call failed: {type(exc).__name__}: {exc}"]
+        )
+        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
+        return outcome
 
     if isinstance(result, tuple) and len(result) == 2:
         response, api_error_raw = result
     else:
         response, api_error_raw = result, ""
     if isinstance(api_error_raw, str) and api_error_raw:
-        return EditScriptOutcome(None, failures=[f"API error: {api_error_raw}"])
+        outcome = EditScriptOutcome(None, failures=[f"API error: {api_error_raw}"])
+        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
+        return outcome
 
     if audit_dir is not None and audit_dir.exists():
         save_audit_file(
@@ -139,11 +198,18 @@ def try_edit_script_fix(
         )
 
     if response_is_a_regeneration(response or ""):
-        return EditScriptOutcome(
+        outcome = EditScriptOutcome(
             None, failures=["model returned a whole file instead of edit blocks"]
         )
+        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
+        return outcome
 
-    return apply_code_edit_script(response or "", existing_content)
+    outcome = apply_code_edit_script(response or "", existing_content)
+    if outcome.code is None:
+        # No blocks, blocks that do not apply, or edits that empty the file
+        # (edit_script_fix.apply_code_edit_script): the fallback is taken here.
+        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
+    return outcome
 
 
 def generate_file_with_retry(
@@ -439,12 +505,32 @@ def came_from_base(repo_root: Path, filepath: str) -> bool:
     Same observation -- "the file is already there" -- with opposite correct
     responses: resume past our own half-written output, never past another
     phase's finished work.
+
+    Exit 1 is git's own answer for an untracked path (``--error-unmatch``:
+    "did not match any file(s) known to git"). Any other exit -- not a
+    repository is 128 -- leaves the question unanswered, and
+    reading it as "untracked" would resume past a base file (standard 0034):
+    an ERROR line names the path and git's stderr, and CalledProcessError is
+    raised.
     """
+    command = ["git", "ls-files", "--error-unmatch", "--", filepath]
     result = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", filepath],
-        cwd=str(repo_root), capture_output=True, text=True,
+        command, cwd=str(repo_root), capture_output=True, text=True, check=False,
     )
-    return result.returncode == 0
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    print(
+        f"ERROR [N4] git ls-files could not say whether {filepath} is tracked "
+        f"in {repo_root} (exit {result.returncode}): "
+        f"{(result.stderr or '').strip()}. N4 stops: without the answer it "
+        f"cannot tell the base's files from this run's own.",
+        file=sys.stderr, flush=True,
+    )
+    raise subprocess.CalledProcessError(
+        result.returncode, command, output=result.stdout, stderr=result.stderr,
+    )
 
 
 def _should_skip_existing_file(
@@ -590,12 +676,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     for tf in test_files:
         tf_path = Path(tf)
         if tf_path.exists():
-            try:
-                test_content += f"# From {tf}\n"
-                test_content += tf_path.read_text(encoding="utf-8")
-                test_content += "\n\n"
-            except Exception:
-                pass
+            test_content += f"# From {tf}\n"
+            test_content += _read_or_stop(tf_path, "a test file for the prompt")
+            test_content += "\n\n"
 
     # Limit files to prevent runaway
     files_to_modify = files_to_modify[:50]
@@ -699,17 +782,31 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
             if api_error:
                 print(f"    [BATCH] API error, falling back to individual: {api_error[:80]}")
+                alert.alert_operator(
+                    what=(
+                        f"the batch generation call for {len(batch)} small "
+                        f"file(s) failed: {', '.join(batch_paths)}"
+                    ),
+                    where=f"{_WHERE} implement_code (testing workflow, N4, batch)",
+                    cause=f"API error: {api_error}",
+                    consequence="each file of the batch is generated on its own, with retries",
+                    repo=str(repo_root), issue=state.get("issue_number"),
+                )
                 batch_failed_specs.extend(batch)
                 continue
 
             parsed = parse_batch_response(response, batch_paths)
 
+            # Every file the batch response could not supply, with why; one
+            # alert for the batch after the loop.
+            unusable: list[str] = []
             for spec in batch:
                 fp = spec["path"]
                 code = parsed.get(fp)
 
                 if code is None:
                     print(f"        [BATCH] Failed to parse {fp}, will retry individually")
+                    unusable.append(f"{fp}: no code block for it in the batch response")
                     batch_failed_specs.append(spec)
                     continue
 
@@ -728,6 +825,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                         f"{val_error} -- falling back to individual "
                         f"generation with retries"
                     )
+                    unusable.append(f"{fp}: validation failed: {val_error}")
                     batch_failed_specs.append(spec)
                     continue
 
@@ -740,6 +838,18 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 print(f"        Written (batch): {target_path}")
                 completed_files.append((fp, code))
                 written_paths.append(str(target_path))
+
+            if unusable:
+                alert.alert_operator(
+                    what=(
+                        f"the batch response could not supply {len(unusable)} of "
+                        f"{len(batch)} file(s)"
+                    ),
+                    where=f"{_WHERE} implement_code (testing workflow, N4, batch)",
+                    cause="; ".join(unusable),
+                    consequence="each of those files is generated on its own, with retries",
+                    repo=str(repo_root), issue=state.get("issue_number"),
+                )
 
     # Merge batch failures back into regular for individual processing
     if batch_failed_specs:
@@ -822,10 +932,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         existing_content = ""
         target_path = repo_root / filepath
         if change_type.lower() == "modify" and target_path.exists():
-            try:
-                existing_content = target_path.read_text(encoding="utf-8")
-            except Exception:
-                pass
+            # The Modify base: the prompt's current file and the shrink gate's
+            # yardstick (#587). Empty would disable the gate.
+            existing_content = _read_or_stop(target_path, "the Modify target")
 
         print(f"\n    [{i+1}/{len(files_to_modify)}] {filepath} ({change_type})...")
 
@@ -915,25 +1024,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             and change_type.lower() == "modify"
             and target_path.exists()
         ):
-            try:
-                edit_script_content = target_path.read_text(encoding="utf-8")
-            except OSError as exc:
-                # fail-open: an unreadable file leaves the edit script with
-                # nothing to SEARCH, which is precisely the condition
-                # `should_use_edit_script` declines on. Continuing lands on
-                # the full-file path, which reads the file itself through the
-                # prompt builder and will report its own failure -- so this is
-                # never worse than the behaviour before #2644. Halting here
-                # would turn a read hiccup into a dead stage.
-                #
-                # Audible on purpose: the silent version of this was what the
-                # fail-open gate objected to, and an edit script that quietly
-                # declines is exactly how run-issue331-092220 went unexplained.
-                edit_script_content = ""
-                print(
-                    f"        [EDIT-SCRIPT] could not read {filepath} "
-                    f"({exc}); falling through to the full-file path"
-                )
+            # #3585: this fell through to the full-file path on a read error,
+            # which regenerated a base file N4 could not see.
+            edit_script_content = _read_or_stop(
+                target_path, "the base file the edit script patches"
+            )
 
         # Validate change type
         if change_type.lower() == "modify" and not target_path.exists():
@@ -1019,16 +1114,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             and filepath not in attributed_paths
             and target_path.exists()
         ):
-            try:
-                unchanged = target_path.read_text(encoding="utf-8")
-            except OSError:
-                # fail-open: the file on disk is left exactly as it is either
-                # way -- this branch changes nothing. What is lost is only the
-                # copy of its text carried as context for the files after it.
-                # The alternative, falling through to a model call on a file
-                # no failure names, is the waste #2851 exists to remove, and a
-                # read hiccup is not a reason to reintroduce it.
-                unchanged = ""
+            # Its text is the context the files after it are generated
+            # against; an empty string in its place would mislead them.
+            unchanged = _read_or_stop(
+                target_path, "an unattributed file's text, the context for later files"
+            )
             print(
                 f"        [EDIT-SCRIPT] no failure attributed to {filepath}; "
                 f"left unchanged this iteration"
@@ -1048,6 +1138,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 seat=select_seat_for_file(filepath, 0, False),
                 system_prompt=stable_system_prompt,
                 audit_dir=audit_dir if audit_dir.exists() else None,
+                repo=str(repo_root),
+                issue=state.get("issue_number"),
             )
             print(f"        {outcome.describe()}")
             code = outcome.code
@@ -1068,14 +1160,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 and target_path.exists()
                 and filepath.replace("\\", "/").split("/")[0] in ("tests", "test")
             ):
-                try:
-                    kept = target_path.read_text(encoding="utf-8")
-                except OSError:
-                    # fail-open: the file on disk is untouched either way;
-                    # only the copy carried as context for later files is
-                    # lost, and regenerating a test file to recover a context
-                    # string would be the exact harm #2866 removes.
-                    kept = ""
+                kept = _read_or_stop(
+                    target_path, "a test file left as it is, the context for later files"
+                )
                 print(
                     "        [EDIT-SCRIPT] patch failed on a test file; left "
                     "unchanged (tests are not regenerated on a failed patch)"
@@ -1123,13 +1210,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             # contract, the copy walled the loop at the cap raising neither.
             spec_suite = repo_root / "tests" / f"test_issue_{state.get('issue_number', 0)}.py"
             if spec_suite.is_file() and target_path.resolve() != spec_suite.resolve():
-                try:
-                    spec_source = spec_suite.read_text(encoding="utf-8")
-                except OSError:
-                    # fail-open: an unreadable spec suite releases nothing and
-                    # the #2905 keep stands as before; the suite's own gate
-                    # reports a suite that cannot be read.
-                    spec_source = ""
+                spec_source = _read_or_stop(
+                    spec_suite, "the spec suite, which decides the contract (#2910)"
+                )
                 contract, released = release_spec_twins(contract, spec_source)
                 if released:
                     print(

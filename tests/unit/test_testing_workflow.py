@@ -1499,6 +1499,9 @@ __pycache__/
             ImplementationError,
         )
 
+        # #3585: a git repository, as N4's worktree always is.
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+
         # Create audit directory
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
@@ -3129,6 +3132,8 @@ class TestImplementCodeFullCoverage:
         """implement_code successfully writes implementation files."""
         from assemblyzero.workflows.testing.nodes.implement_code import implement_code
 
+        # #3585: a git repository, as N4's worktree always is.
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
 
@@ -3171,6 +3176,8 @@ def example():
             ImplementationError,
         )
 
+        # #3585: a git repository, as N4's worktree always is.
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
 
