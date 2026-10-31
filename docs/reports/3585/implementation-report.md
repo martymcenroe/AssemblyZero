@@ -38,6 +38,12 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 - **Kept: no Features section (215).** A README that keeps no feature list has none to add to. Five READMEs in the Projects tree have a Features section and AssemblyZero's has none, while N8 decides to update one from LLD keywords; raising would stop most runs that reach N8. It is left unchanged and said as that, no longer as "no update needed".
 - **Kept: no wiki sidebar (289).** `update_wiki_sidebar` returns False for a wiki with no `_Sidebar.md` or a page already listed, both absences; `generate_wiki_page` makes the wiki directory itself, so a repository with no wiki gets a page and no sidebar. The result is now checked and said, and a sidebar that cannot be read or written raises and is no longer swallowed.
 
+### nodes/mechanical_hooks.py (5 ledger rows: 1 fixed, 4 compliant and pinned)
+
+- **A staging that fails halts (108).** After a successful hook, `git add .` ran with `check=False` and its return code was never read, so a staging that failed went on to the tests as if the hook's output were in the tree. Its exit code is read now: non-zero, or git that cannot start, halts through `_halt` with the directory, the exit code or exception, and git's stderr.
+- **Every halt is an ERROR line (74, 91, 98).** `_halt` now also writes the reason at ERROR on stderr; the unreadable config, the hook that cannot start and the hook that fails were already halts and are pinned.
+- **Kept (70).** No `.unleashed.json` is no hook.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.

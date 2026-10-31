@@ -49,3 +49,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** `test_adversarial_review_halts.py`, `test_cleanup.py`, `test_doc_step_handling.py`, `test_document_assembler.py`, `test_testing_workflow.py` and `test_gate_registry.py`: 392 passed and 1 failed before the change above, which was that test; its class passes after (10).
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new and 4 more stale, the module's four broad handlers, which now re-raise. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff's four findings on the module at HEAD are gone; the new test file is clean.
+
+## nodes/mechanical_hooks.py
+
+**New: `tests/unit/test_mechanical_hooks_loud_failure.py` (9).** The hooks are real shell commands in a temporary directory, and `git` is the real one: the failed staging is git's own exit 128 outside a repository.
+
+**Before the fix, measured** against HEAD's `mechanical_hooks.py`: 5 failed, 4 passed. The two 108 tests failed on the unread return code; 74, 91 and 98 failed only on the new stderr line, since their halts held. The four that passed pin no config, a config naming no command (two cases) and a successful hook's output staged.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** the six files that import the module, with `test_gate_registry.py`: 158 passed.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff finds the module's one issue as at HEAD; the new test file is clean.
