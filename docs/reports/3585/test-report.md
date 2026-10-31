@@ -37,3 +37,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** the 23 files that import the module or `route_after_review`: 798 passed, 1 skipped and 5 failed before the changes above, which were those five tests; their classes pass after (14).
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff finds the module's same 2 issues as at HEAD; the new test file is clean.
+
+## nodes/document.py
+
+**New: `tests/unit/test_document_loud_failure.py` (11).** The lessons template and the execution log are stand-ins; the wiki page, README and sidebar are real files, and each failure is injected at the step it names.
+
+**Before the fix, measured** against HEAD's `document.py`: 9 failed, 2 passed. Every site test failed (two for 182, 215, two for 289, 292, 308, 338, 350); the first tests for 215 and 289 failed on the new wording only, since the kept behaviour, no raise and no change, held. The two that passed pin a README entry added under Features and a README that already names the feature.
+
+**Changed tests:** `test_testing_workflow.py::TestDocumentModule::test_update_readme_no_readme` expects FileNotFoundError.
+
+**Neighbouring suites:** `test_adversarial_review_halts.py`, `test_cleanup.py`, `test_doc_step_handling.py`, `test_document_assembler.py`, `test_testing_workflow.py` and `test_gate_registry.py`: 392 passed and 1 failed before the change above, which was that test; its class passes after (10).
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new and 4 more stale, the module's four broad handlers, which now re-raise. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff's four findings on the module at HEAD are gone; the new test file is clean.

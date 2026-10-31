@@ -31,6 +31,13 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 - **The router half is batch C's.** `route_after_review` in `graph.py` (line 218) sends an error to HALT only when `auto_mode` is off: `if error and not auto_mode`. It must be `if error`. Until then, those five errors continue to N2 under `auto_mode`.
 - **Halt sites unchanged.** The five error returns keep their order, so the gate registry needs no change; the line-579 broad handler and its loud-failure baseline entry stay for that reason.
 
+### nodes/document.py (7 ledger rows: 5 fixed, 2 kept and pinned)
+
+- **An artifact that cannot be written stops N8 (292, 308, 338, 350).** The wiki page, runbook, c/p docs and README steps each printed "SKIPPED" on stdout and went on, the c/p step with a partial list. Each now raises `DocumentationError` naming the issue, the artifact and the cause, after an ERROR line on stderr. N8 has no route to HALT and returns no `error_message`, so the raise reaches the run's entry point, which reports it and alerts.
+- **A missing README raises (182).** When N8 decides a README needs a feature entry and there is no README.md, `update_readme` raises FileNotFoundError naming it. It returned False, printed as "no update needed".
+- **Kept: no Features section (215).** A README that keeps no feature list has none to add to. Five READMEs in the Projects tree have a Features section and AssemblyZero's has none, while N8 decides to update one from LLD keywords; raising would stop most runs that reach N8. It is left unchanged and said as that, no longer as "no update needed".
+- **Kept: no wiki sidebar (289).** `update_wiki_sidebar` returns False for a wiki with no `_Sidebar.md` or a page already listed, both absences; `generate_wiki_page` makes the wiki directory itself, so a repository with no wiki gets a page and no sidebar. The result is now checked and said, and a sidebar that cannot be read or written raises and is no longer swallowed.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.

@@ -2735,7 +2735,13 @@ class TestDocumentModule:
         assert "New Feature" in content
 
     def test_update_readme_no_readme(self, tmp_path):
-        """update_readme returns False when no README."""
+        """update_readme raises naming the README when there is none.
+
+        Ledger 0908, line 182: it returned False, reported as "no update
+        needed".
+        """
+        import pytest
+
         from assemblyzero.workflows.testing.nodes.document import update_readme
 
         state: TestingWorkflowState = {
@@ -2743,9 +2749,8 @@ class TestDocumentModule:
             "lld_content": "# Feature",
         }
 
-        result = update_readme(state, tmp_path)
-
-        assert result is False
+        with pytest.raises(FileNotFoundError, match="README.md"):
+            update_readme(state, tmp_path)
 
     def test_update_readme_already_mentioned(self, tmp_path):
         """update_readme skips when feature already mentioned."""
