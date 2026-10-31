@@ -58,3 +58,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **A missing audit directory raises (121).** `next_file_number` raises FileNotFoundError naming it, after an ERROR line. It answered 1, as if the directory were empty. Every caller checks or creates the directory first.
 - **A lost audit event raises (280).** `log_workflow_execution` raises `WorkflowAuditError` naming the workflow, the event, the issue, the log and the cause, after an ERROR line, when the log's directory cannot be made or the line cannot be appended. It logged a WARNING and went on. The run ends through its entry point's handler, which alerts.
 - **No coverage table still reads 0.0 (320).** `nodes/verify_phases.py`, another batch's file, compares and records the value as a number, so None would raise there. The fix needs that file first; a strict xfail records the open site. N5 already catches the absence with `coverage_report.read_coverage` before it decides a route.
+
+### path_validator.py (3 ledger rows: 2 fixed, 1 compliant and pinned)
+
+- **Every failed context file is said (164, 177).** A rejection, or a read that fails, is an ERROR line naming the file and the cause. The read handler names OSError and UnicodeDecodeError where it caught every exception.
+- **No partial context.** When any file fails, no content comes back, only the errors. The one caller, `tools/run_implement_from_lld.py`, already refuses to start on any error, and its handler alerts.
+- **Kept (65).** A file that cannot be statted is a rejection with its reason.

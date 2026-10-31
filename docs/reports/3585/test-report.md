@@ -109,3 +109,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 616 passed and 1 xfailed across 17 files: the module's importers, and the node tests that number and log audit records.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
+
+## path_validator.py
+
+**New: `tests/unit/test_path_validator_loud_failure.py` (7).**
+
+**Before the fix, measured:** 4 failed, 3 passed. The four site tests failed. The three that passed pin the stat rejection (65), files that all load, and no files.
+
+**Changed tests:** `test_path_validator.py::test_skips_invalid_files` is now `test_one_invalid_file_leaves_no_partial_context` and expects empty content.
+
+**Neighbouring suites:** 75 passed across 4 files, among them the entry point's loud-failure tests and the context-injection tests.
+
+**Audits:** 0 new loud-failure sites, and this module's swallowed handler is now stale in the baseline; no new fail-open; halt sites pass. Ruff finds one fewer issue than at HEAD.
