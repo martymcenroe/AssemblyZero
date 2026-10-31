@@ -56,6 +56,10 @@ Tests added after that run were proved the same way:
 | `tests/unit/test_loud_failure_check.py`, `test_fail_open_audit.py`, `test_gate_registry.py`, within the unit tier | pass; no new baseline site |
 | ruff on the 49 changed Python files, by rule against `769a6136` | 184 findings, 185 at the base; none new |
 
+## N7's labels: `tests/unit/test_n7_labels_its_coverage.py` (3)
+
+With a run's changed lines judged, and with nothing to judge, the console, the test report and the summary each name the figure they show. On a branch without the label the first two fail on the missing text.
+
 ## Not tested
 
 No real Vitest or Jest ran. The shell guard refuses `node_modules/.bin/vitest` because the npm shim contains an `echo`. The stand-in's report is built to the shape read from the installed provider and a real Jest report; see the implementation report's limits.

@@ -48,7 +48,7 @@ The chain in `_verify_green_pytest_single` that guessed a scope from `files_to_m
 ## Limits
 
 - **No real Vitest run was made.** The shell guard refuses `node_modules/.bin/vitest`, because the npm shim contains an `echo`. The flags were read from the installed Vitest 3.2.7 and 4.1.7 CLI definitions, the report shape from the 4.1.7 v8 provider and a real Jest `coverage-final.json`, and the array-flag rule from Jest 29.7's `args.js`. A flag that does not work halts loudly as `COVERAGE MEASUREMENT FAILED`; it cannot pass silently.
-- **A project's `omit` halts.** A changed file the target's coverage config omits is absent from the report, and that is indistinguishable from a broken measurement, so it halts rather than pass unjudged. Of the fleet's `pyproject.toml` files only `dispatch` has an `omit`.
+- **A project's `omit` halts.** A changed file the target's coverage config omits is absent from the report, and that is indistinguishable from a broken measurement, so it halts rather than pass unjudged. Of the fleet's `pyproject.toml` files only one has an `omit`.
 - **Sibling files.** A directory target reports every file in the directory, so an unparseable `.py` beside a changed file fails the report and halts, loudly, with coverage's reason.
 - **Non-editable installs.** A directory target measures the source tree, so a target installed non-editable into site-packages would read zero. Worktrees are provisioned editable (#2637).
 - **Istanbul continuation.** A changed continuation line of an `if` header is not judged, because an `if` holds its body. Its own first line and body are.
@@ -78,3 +78,11 @@ Adds no site to the loud-failure baseline, and `BASELINE_CEILING` is unchanged.
 - #3090: no contradiction. `resolve_coverage_target` removes the issue-only path's `or 80`, which #3090 lists. The mock's 90 stays, and the flag now wins over it.
 - #4312: no contradiction. `parse_pytest_output` is untouched, and `test_320` keeps its xfail. The whole-file figure it yields now decides nothing.
 - #4246: extended, not reversed. A shortfall still routes to N4c for every framework, and N4c still halts on a gap it cannot fill, now naming the lines.
+
+## N7's reports name their figure
+
+`coverage_achieved` is the changed-line figure, or, when nothing was judged, the whole-file figure, which decided nothing. Beside a target of 95 an unlabelled 54% reads as a failure that passed, so `finalize` now sets `coverage_scope`, and the console, the test report and the summary all say `changed lines` or `whole files, not judged`.
+
+## Follow-up
+
+No real Vitest ran. #4445 carries the check, with the exact command.
