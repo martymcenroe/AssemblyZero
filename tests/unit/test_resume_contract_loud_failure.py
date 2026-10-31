@@ -30,7 +30,7 @@ def _unreadable(monkeypatch, target: Path) -> None:
 def _halt_with_input(tmp_path: Path) -> tuple[Path, Path]:
     lld = tmp_path / "LLD-042.md"
     lld.write_text("# LLD\n", encoding="utf-8")
-    contract = rc.build_resume_contract({"issue_number": 42, "lld_path": str(lld)}, "testing")
+    contract = rc.build_resume_contract({"issue_number": 42, "repo_root": str(tmp_path), "lld_path": str(lld)}, "testing")
     rc.save_resume_contract(contract, tmp_path)
     return lld, rc.contract_path("testing", 42, tmp_path)
 
@@ -63,7 +63,7 @@ class TestHashing:
     ):
         lld, _ = _halt_with_input(tmp_path)
         _unreadable(monkeypatch, lld)
-        assert rc.check_and_consume("testing", 42, directory=tmp_path, log=lambda m: None) is False
+        assert rc.check_and_consume("testing", 42, repo_root=tmp_path, directory=tmp_path, log=lambda m: None) is False
         assert len(operator_alerts) == 1
         assert "PermissionError" in operator_alerts[0]["cause"]
 
@@ -76,7 +76,7 @@ class TestTheContractItself:
 
     def test_126_a_corrupt_contract_refuses_the_resume_and_alerts(self, tmp_path, operator_alerts):
         rc.contract_path("testing", 42, tmp_path).write_text("{not json", encoding="utf-8")
-        assert rc.check_and_consume("testing", 42, directory=tmp_path, log=lambda m: None) is False
+        assert rc.check_and_consume("testing", 42, repo_root=tmp_path, directory=tmp_path, log=lambda m: None) is False
         assert len(operator_alerts) == 1
         assert "cannot be verified" in operator_alerts[0]["what"]
         assert "JSONDecodeError" in operator_alerts[0]["cause"]
@@ -85,7 +85,7 @@ class TestTheContractItself:
         assert "fail-open" not in inspect.getsource(rc.load_resume_contract)
 
     def test_no_contract_is_still_a_silent_pass(self, tmp_path, operator_alerts):
-        assert rc.check_and_consume("testing", 42, directory=tmp_path, log=lambda m: None) is True
+        assert rc.check_and_consume("testing", 42, repo_root=tmp_path, directory=tmp_path, log=lambda m: None) is True
         assert operator_alerts == []
 
 
@@ -93,14 +93,14 @@ class TestTheVerdict:
     def test_196_a_changed_world_refuses_and_alerts(self, tmp_path, operator_alerts):
         lld, _ = _halt_with_input(tmp_path)
         lld.write_text("# LLD, edited after the halt\n", encoding="utf-8")
-        assert rc.check_and_consume("testing", 42, directory=tmp_path, log=lambda m: None) is False
+        assert rc.check_and_consume("testing", 42, repo_root=tmp_path, directory=tmp_path, log=lambda m: None) is False
         assert len(operator_alerts) == 1
         assert "world changed" in operator_alerts[0]["what"]
         assert "LLD-042.md" in operator_alerts[0]["cause"]
 
     def test_an_intact_world_is_quiet_and_consumes_the_contract(self, tmp_path, operator_alerts):
         _, path = _halt_with_input(tmp_path)
-        assert rc.check_and_consume("testing", 42, directory=tmp_path, log=lambda m: None) is True
+        assert rc.check_and_consume("testing", 42, repo_root=tmp_path, directory=tmp_path, log=lambda m: None) is True
         assert operator_alerts == []
         assert not path.exists()
 
@@ -116,7 +116,7 @@ class TestTheVerdict:
             return real_unlink(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "unlink", unlink)
-        assert rc.check_and_consume("testing", 42, directory=tmp_path, log=lambda m: None) is True
+        assert rc.check_and_consume("testing", 42, repo_root=tmp_path, directory=tmp_path, log=lambda m: None) is True
         assert len(operator_alerts) == 1
         assert "could not be deleted" in operator_alerts[0]["what"]
 

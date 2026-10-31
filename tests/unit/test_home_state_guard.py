@@ -42,16 +42,20 @@ class TestEveryBindingIsRedirected:
         from assemblyzero.core.state_persistence import save_state_snapshot
 
         before = guard.snapshot()
-        written = save_state_snapshot("testing", 4242, {"k": 1}, trigger="halt")
+        written = save_state_snapshot(
+            "testing", 4242, {"k": 1, "repo_root": str(tmp_path)}, trigger="halt"
+        )
 
         assert written.is_relative_to(tmp_path)
         assert written.name == "testing-4242.json"
         assert guard.snapshot() == before
 
     def test_a_resume_contract_lands_under_tmp_path(self, tmp_path):
-        from assemblyzero.core.resume_contract import contract_path
+        from assemblyzero.core.resume_contract import contract_directory, contract_path
 
-        assert contract_path("testing", 4242).is_relative_to(tmp_path)
+        assert contract_path(
+            "testing", 4242, contract_directory(tmp_path, False)
+        ).is_relative_to(tmp_path)
 
     def test_the_halt_node_binding_is_the_same_directory(self):
         from assemblyzero.core import halt_node, state_persistence
