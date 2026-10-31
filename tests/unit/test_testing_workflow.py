@@ -3738,7 +3738,9 @@ class TestFinalizeFullCoverage:
             "coverage_target": 90,
             "iteration_count": 1,
             "lld_path": str(lld_file),
-            "green_phase_output": "",
+            # Ledger 0908, line 152: an output with no test counts now stops
+            # N7, so this archival test carries a green phase that ran.
+            "green_phase_output": "3 passed in 0.10s",
             "e2e_output": "",
             "skip_e2e": True,
             "workflow_success": True,

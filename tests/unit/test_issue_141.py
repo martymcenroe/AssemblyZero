@@ -82,21 +82,27 @@ def test_070():
 def test_100(caplog):
     """
     Exception during file rename | unit | Valid LLD, mock rename to raise
-    OSError | None returned, error logged | No exception propagated, log
-    contains error message
+    OSError | FinalizeError raised, error logged | the error names the file
+    and the cause
+
+    Ledger 0908, line 74: it returned None and the run reported COMPLETE.
     """
+    from assemblyzero.workflows.testing.nodes.finalize import FinalizeError
+
     # TDD: Arrange
     test_file = Path("/fake/docs/lld/active/141-test.md")
-    
+
     with caplog.at_level(logging.ERROR):
         with patch.object(Path, "exists", return_value=True):
-            with patch.object(Path, "rename", side_effect=OSError("Permission denied")):
-                # TDD: Act
-                result = archive_file_to_done(test_file)
+            with patch.object(Path, "mkdir"):
+                with patch.object(Path, "rename", side_effect=OSError("Permission denied")):
+                    # TDD: Act
+                    with pytest.raises(FinalizeError) as raised:
+                        archive_file_to_done(test_file)
 
     # TDD: Assert
-    assert result is None
-    assert "Failed to archive" in caplog.text
+    assert str(test_file) in str(raised.value)
+    assert "could not archive" in caplog.text
     assert "Permission denied" in caplog.text
 
 
@@ -231,18 +237,22 @@ def test_020(temp_repo, caplog):
 def test_030(caplog):
     """
     LLD not found | integration | State with non-existent LLD path |
-    Warning logged, None returned | No exception, log contains warning
+    FileNotFoundError naming it, error logged
+
+    Ledger 0908, line 46: it was a WARNING and None, and the run reported
+    COMPLETE.
     """
     # TDD: Arrange
     non_existent = Path("/fake/path/docs/lld/active/999-missing.md")
-    
-    with caplog.at_level(logging.WARNING):
+
+    with caplog.at_level(logging.ERROR):
         # TDD: Act
-        result = archive_file_to_done(non_existent)
+        with pytest.raises(FileNotFoundError) as raised:
+            archive_file_to_done(non_existent)
 
     # TDD: Assert
-    assert result is None
-    assert "File not found for archival" in caplog.text
+    assert str(non_existent) in str(raised.value)
+    assert "does not exist" in caplog.text
 
 
 def test_040(temp_repo, caplog):
@@ -321,8 +331,11 @@ def test_060(temp_repo):
 
 def test_080(temp_repo, caplog):
     """
-    Mixed success | integration | Some files exist, some don't | Archive
-    existing, log missing | Partial archival succeeds
+    Mixed success | integration | Some files exist, some don't | the
+    missing one raises, named | no partial archival is reported as done
+
+    Ledger 0908, lines 46 and 216: the missing file joined a "skipped" list
+    nothing read, and the run reported COMPLETE.
     """
     # TDD: Arrange
     existing_file = temp_repo / "docs" / "reports" / "active" / "141-impl.md"
@@ -337,14 +350,14 @@ def test_080(temp_repo, caplog):
         "implementation_report_path": str(existing_file),
     }  # type: ignore
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.ERROR):
         # TDD: Act
-        result = _archive_workflow_artifacts(state)
+        with pytest.raises(FileNotFoundError) as raised:
+            _archive_workflow_artifacts(state)
 
     # TDD: Assert
-    assert len(result["archived"]) == 1
-    assert len(result["skipped"]) == 1
-    assert "File not found for archival" in caplog.text
+    assert missing_file in str(raised.value)
+    assert "does not exist" in caplog.text
 
 
 def test_090(temp_repo):

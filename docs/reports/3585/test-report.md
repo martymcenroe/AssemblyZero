@@ -73,3 +73,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** the six files that import the module or `route_after_revision`, with `test_gate_registry.py`: 381 passed.
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff is clean on the module and the new test file.
+
+## nodes/finalize.py
+
+**New: `tests/unit/test_finalize_loud_failure.py` (10).** Files are real, in a temporary repository; the failed move is a stand-in `rename`. The test report generator is a stand-in where N7 runs whole.
+
+**Before the fix, measured** against HEAD's `finalize.py`: 8 failed, 2 passed. Every site test failed (46, the done/ lookup, 74, two cases of 152, two of 216, and the skipped-list print on its new wording). The two that passed pin a file outside active/ left alone and a green output with counts completing.
+
+**Changed tests:** in `test_issue_141.py`, `test_100` expects `FinalizeError`, and `test_030` and `test_080` expect FileNotFoundError; `test_testing_workflow.py::TestFinalizeFullCoverage::test_finalize_archives_lld` carries a green output with counts.
+
+**Neighbouring suites:** the 21 files that import the module or `route_after_finalize`, with `test_gate_registry.py`: 608 passed, 1 skipped and 4 failed before the changes above, which were those four tests; after, 25 passed in `test_issue_141.py` with the new file, and 18 in the Finalize classes of `test_testing_workflow.py`.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff finds the module's same 2 issues as at HEAD; the new test file is clean.

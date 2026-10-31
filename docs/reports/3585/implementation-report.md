@@ -48,6 +48,14 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 
 - **Pinned, and said where they happen (226, 246, 266, 307).** No requirements, an invalid revisor spec, a failed revision call and a short plan at the revision cap each record a reason that `route_after_revision` sends to HALT. Each now also writes an ERROR line on stderr, naming the spec where there is one. The docstring said these route "to END"; it says HALT now.
 
+### nodes/finalize.py (4 ledger rows: 4 fixed)
+
+- **No test counts, no report (152).** A green-phase output with no passed, failed or error count was reported as 0 of 0 tests passed, and the run as COMPLETE. N7 now raises `FinalizeError` naming the issue and the head of the output, before the report is written or anything archived.
+- **A file to archive that is missing raises (46).** `archive_file_to_done` raises FileNotFoundError naming it when it is in neither active/ nor done/. One already in done/ with no copy in active/ is the file an earlier pass of N7 archived, and its done/ path is returned, so a resumed N7 does not fail on its own work.
+- **A move that fails raises (74).** `FinalizeError` names the source, the destination and the cause, after an ERROR line; it was an ERROR naming the file only, and the run went on to COMPLETE.
+- **Failures are no longer "skipped" (216).** The skipped list held failures nothing read. They raise now; the list holds only files with nothing to archive, and N7 prints it.
+- **Why a raise.** `route_after_finalize` does send `error_message` to HALT, but N7 has no registered halt site and the gate registry is not this batch's file. The raise reaches the entry point, which alerts.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.
