@@ -62,6 +62,10 @@ Evidence that no test wrote the file: the primary checkout's copy has modificati
 
 Calibration, the fastest of 20 and of 50 interleaved rounds, load average 14.8: linear ratio 9.3 and 9.4; quadratic fixture 89.0 and 89.4; overhead 1.06 and 1.04 (typical), 1.03 and 1.01 (cap); 5 ms slower detector 17.67 and 17.70 (typical), 4.54 and 4.53 (cap); ReDoS inputs 0.78 and 1.15.
 
+### #4190 AC2 on CI: the slowed detector is slowed by a multiple of its own cost
+
+PR #4283's first CI run (41160395558) failed one test: `test_the_overhead_check_catches_a_detector_slowed_past_the_old_limit`, `DID NOT RAISE`. Its mutant added a fixed 5 ms per call, which is a smaller multiple of the bare scan wherever the scan is slower, and on CI's runner it stayed inside the 3x bound. The test, renamed `test_the_overhead_check_catches_a_detector_slowed_past_its_limit`, now slows the detector by doing its work five times per call, about 5.25x the bare scan on any machine. The latency class: 5 passed in each of three runs here, and 5 passed under `--cov=assemblyzero` as CI runs it.
+
 ### #3731, requirement 2: no unit test bounds wall-clock time
 
 Added by the parent session after verifying the branch (commit "the last five unit tests that bound wall-clock time show the mechanism instead"). A search of `tests/unit` for files that read a clock (`perf_counter()`, `monotonic()`, `time.time()`) and assert a time against a bound found five such assertions beyond the cascade detector's: `test_credential_backoff.py:264`, `test_emergency_stop_windows_paths.py:218`, `test_llm_idle_timeout.py:150` and `:177`, `test_speedrun_emergency_stop.py:157`. Each now shows the mechanism instead, and each was run against a mutant with the mechanism removed:

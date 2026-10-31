@@ -706,13 +706,20 @@ class TestDetectionLatency:
     def test_detection_grows_linearly_with_input_size(self) -> None:
         _assert_linear(detect_cascade_risk)
 
-    def test_the_overhead_check_catches_a_detector_slowed_past_the_old_limit(self) -> None:
-        """#4190 AC2: 5 ms more per call, the old budget, fails both inputs."""
+    def test_the_overhead_check_catches_a_detector_slowed_past_its_limit(self) -> None:
+        """#4190 AC2: a detector doing five times its work fails both inputs.
+
+        The slowdown is a multiple of the detector's own cost, not a fixed
+        delay. A fixed 5 ms (the old budget) is a smaller multiple wherever the
+        bare scan is slower: on CI's runner the slowed detector stayed inside
+        the 3x bound at the cap and this test did not raise (PR #4283's first
+        run), though it raised on WSL at 4.5x.
+        """
 
         def slowed(text: str) -> CascadeDetectionResult:
-            result = detect_cascade_risk(text)
-            time.sleep(0.005)
-            return result
+            for _ in range(4):
+                detect_cascade_risk(text)
+            return detect_cascade_risk(text)
 
         for text in (TYPICAL_OUTPUT, MAX_OUTPUT):
             with pytest.raises(AssertionError, match="overhead"):
