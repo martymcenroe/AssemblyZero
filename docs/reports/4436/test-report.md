@@ -58,7 +58,7 @@ Tests added after that run were proved the same way:
 
 ## N7's labels: `tests/unit/test_n7_labels_its_coverage.py` (3)
 
-With a run's changed lines judged, and with nothing to judge, the console, the test report and the summary each name the figure they show. On a branch without the label the first two fail on the missing text.
+With a run's changed lines judged, and with nothing to judge, the console, the test report and the summary each name the figure they show. All three assert the labelled text, which does not exist without this change.
 
 ## Not tested
 
