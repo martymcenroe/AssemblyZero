@@ -30,6 +30,11 @@ def store(tmp_path, monkeypatch):
     return directory
 
 
+def _own(repo) -> Path:
+    """The directory a real run on ``repo`` keeps its contract in (#4292)."""
+    return rc.contract_directory(repo, False)
+
+
 def _world(tmp_path) -> dict:
     lld = tmp_path / "docs" / "lld" / "active" / "LLD-331.md"
     lld.parent.mkdir(parents=True)
@@ -39,6 +44,9 @@ def _world(tmp_path) -> dict:
     spec.write_text("# Spec\n", encoding="utf-8")
     return {
         "issue_number": 331,
+        # #4292: a halt names its repository; a bare directory is a repository
+        # git does not know, which is its own root.
+        "repo_root": str(tmp_path),
         "original_lld_path": str(lld),
         "lld_path": str(spec),
         "review_iteration": 3,
@@ -111,16 +119,16 @@ class TestBuildAndVerify:
 
 
 class TestCheckAndConsume:
-    def test_no_contract_is_a_silent_pass(self, store, capsys):
-        assert rc.check_and_consume("testing", 331) is True
+    def test_no_contract_is_a_silent_pass(self, store, tmp_path, capsys):
+        assert rc.check_and_consume("testing", 331, repo_root=tmp_path) is True
         assert capsys.readouterr().out == ""
 
     def test_an_intact_contract_verifies_and_is_consumed(
         self, store, tmp_path, capsys
     ):
         contract = rc.build_resume_contract(_world(tmp_path), "testing")
-        path = rc.save_resume_contract(contract)
-        assert rc.check_and_consume("testing", 331) is True
+        path = rc.save_resume_contract(contract, _own(tmp_path))
+        assert rc.check_and_consume("testing", 331, repo_root=tmp_path) is True
         out = capsys.readouterr().out
         assert "resume contract verified: 2 input(s)" in out
         assert not path.exists(), "verification consumes the contract"
@@ -130,10 +138,10 @@ class TestCheckAndConsume:
     ):
         state = _world(tmp_path)
         path = rc.save_resume_contract(
-            rc.build_resume_contract(state, "testing")
+            rc.build_resume_contract(state, "testing"), _own(tmp_path)
         )
         Path(state["original_lld_path"]).unlink()
-        assert rc.check_and_consume("testing", 331) is False
+        assert rc.check_and_consume("testing", 331, repo_root=tmp_path) is False
         out = capsys.readouterr().out
         assert "refusing before any token is spent" in out
         assert "LLD-331.md" in out
@@ -143,11 +151,11 @@ class TestCheckAndConsume:
     def test_the_override_is_loud_and_consumes(self, store, tmp_path, capsys):
         state = _world(tmp_path)
         path = rc.save_resume_contract(
-            rc.build_resume_contract(state, "testing")
+            rc.build_resume_contract(state, "testing"), _own(tmp_path)
         )
         Path(state["original_lld_path"]).unlink()
         assert rc.check_and_consume(
-            "testing", 331, accept_changed=True
+            "testing", 331, repo_root=tmp_path, accept_changed=True
         ) is True
         out = capsys.readouterr().out
         assert "ACCEPTED" in out
@@ -170,7 +178,7 @@ class TestTheHaltWritesTheContract:
         capsys.readouterr()
 
         assert result["workflow_status"] == "halted"
-        contract = rc.load_resume_contract("testing", 331)
+        contract = rc.load_resume_contract("testing", 331, _own(tmp_path))
         assert contract is not None
         assert len(contract["inputs"]) == 2
         assert contract["state_snapshot"]["sha256"]

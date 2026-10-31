@@ -496,7 +496,10 @@ class TestTheRunsOutcome:
         and the branch are kept for the driver's route."""
         monkeypatch.setattr(merge_driver, "land", _Refused())
 
-        rc, out = _run_main(target_repo, tmp_path, _FakeWorkflow(COMPLETED))
+        # A real final state carries the run's repository, which the HALT node
+        # files its halt under (#4292).
+        finished = {**COMPLETED, "repo_root": str(target_repo)}
+        rc, out = _run_main(target_repo, tmp_path, _FakeWorkflow(finished))
 
         assert rc == 1, out
         assert "Status: SUCCESS" not in out

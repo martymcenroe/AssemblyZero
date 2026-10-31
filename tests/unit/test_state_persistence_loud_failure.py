@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from assemblyzero.core import state_persistence as sp
+from assemblyzero.core.halt_paths import repository_dirname
 
 
 @pytest.fixture
@@ -26,34 +27,34 @@ def state_dir(tmp_path, monkeypatch) -> Path:
 
 
 class TestLoadingASnapshot:
-    def test_77_a_corrupt_snapshot_raises(self, state_dir):
-        state_dir.mkdir()
-        path = state_dir / "requirements-42.json"
+    def test_77_a_corrupt_snapshot_raises(self, state_dir, tmp_path):
+        (state_dir / repository_dirname(tmp_path)).mkdir(parents=True)
+        path = state_dir / repository_dirname(tmp_path) / "requirements-42.json"
         path.write_text("NOT VALID JSON {{{", encoding="utf-8")
 
         with pytest.raises(RuntimeError, match="cannot read the state snapshot") as raised:
-            sp.load_state_snapshot("requirements", 42)
+            sp.load_state_snapshot("requirements", 42, repo_root=tmp_path)
         assert str(path) in str(raised.value)
         assert "JSONDecodeError" in str(raised.value)
 
-    def test_77_an_unreadable_snapshot_raises(self, state_dir):
-        (state_dir / "requirements-42.json").mkdir(parents=True)
+    def test_77_an_unreadable_snapshot_raises(self, state_dir, tmp_path):
+        (state_dir / repository_dirname(tmp_path) / "requirements-42.json").mkdir(parents=True)
 
         with pytest.raises(RuntimeError, match="IsADirectoryError"):
-            sp.load_state_snapshot("requirements", 42)
+            sp.load_state_snapshot("requirements", 42, repo_root=tmp_path)
 
-    def test_an_absent_snapshot_is_none(self, state_dir):
+    def test_an_absent_snapshot_is_none(self, state_dir, tmp_path):
         """Kept: no snapshot was written, which is an answer."""
-        assert sp.load_state_snapshot("requirements", 999) is None
+        assert sp.load_state_snapshot("requirements", 999, repo_root=tmp_path) is None
 
 
 class TestSavingASnapshot:
-    def test_42_wont_do_a_value_json_cannot_hold_is_written_as_text(self, state_dir):
+    def test_42_wont_do_a_value_json_cannot_hold_is_written_as_text(self, state_dir, tmp_path):
         """Won't do (#3797): the snapshot is HALT's record and is written
         before HALT alerts. A raise here would cost the halt its recovery plan
         and its alert; and nothing reads the snapshot back as state."""
         path = sp.save_state_snapshot(
-            "testing", 7, {"worktree": Path("/work/tree"), "n": 1}, trigger="halt",
+            "testing", 7, {"worktree": Path("/work/tree"), "n": 1, "repo_root": str(tmp_path)}, trigger="halt",
         )
 
         payload = json.loads(path.read_text(encoding="utf-8"))

@@ -23,6 +23,7 @@ import assemblyzero.core.resume_contract as rc
 import assemblyzero.core.state_persistence as sp
 from assemblyzero.core import alert
 from assemblyzero.core.halt_node import create_halt_node
+from assemblyzero.core.halt_paths import repository_dirname
 
 
 def _repo_with_record(tmp_path: Path, lines: list[str]) -> Path:
@@ -217,7 +218,8 @@ class TestTheAuditDir:
         missing = tmp_path / "gone"
 
         create_halt_node("testing")(
-            {"issue_number": 7, "audit_dir": str(missing), "error_message": "halt"}
+            {"issue_number": 7, "repo_root": str(tmp_path), "audit_dir": str(missing),
+             "error_message": "halt"}
         )
         capsys.readouterr()
 
@@ -261,12 +263,14 @@ class TestWhenTheReporterFails:
 
         with pytest.raises(alert.AlertDeliveryError):
             create_halt_node("testing")(
-                {"issue_number": 7, "audit_dir": str(audit), "error_message": "halt"}
+                {"issue_number": 7, "repo_root": str(tmp_path), "audit_dir": str(audit),
+                 "error_message": "halt"}
             )
         capsys.readouterr()
 
+        halted_in = store / repository_dirname(tmp_path)
         assert len(delivered) == 1
         assert delivered[0]["what"].startswith("the testing workflow halted")
-        snapshot = json.loads((store / "testing-7.json").read_text(encoding="utf-8"))
+        snapshot = json.loads((halted_in / "testing-7.json").read_text(encoding="utf-8"))
         assert snapshot, "the state snapshot is written before any evidence"
-        assert (store / "recovery-7-testing.json").is_file(), "so is the recovery plan"
+        assert (halted_in / "recovery-7-testing.json").is_file(), "so is the recovery plan"

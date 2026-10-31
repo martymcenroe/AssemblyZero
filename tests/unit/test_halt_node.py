@@ -29,10 +29,11 @@ def halt_fn():
 
 
 @pytest.fixture
-def error_state() -> dict:
+def error_state(tmp_path) -> dict:
     """A state dict with an error (capacity exhausted)."""
     return {
         "issue_number": 102,
+        "repo_root": str(tmp_path),
         "error_message": "api-key-1: Capacity exhausted after 3 retries (503/529)",
         "review_iteration": 1,
         "spec_draft": "# Spec Draft\n...",
@@ -41,10 +42,11 @@ def error_state() -> dict:
 
 
 @pytest.fixture
-def stagnation_state() -> dict:
+def stagnation_state(tmp_path) -> dict:
     """A state dict with stagnation error."""
     return {
         "issue_number": 99,
+        "repo_root": str(tmp_path),
         "error_message": "Two consecutive BLOCKED verdicts with same issues. Halting.",
         "iteration_count": 4,
         "cost_budget_usd": 5.0,
@@ -52,20 +54,22 @@ def stagnation_state() -> dict:
 
 
 @pytest.fixture
-def quota_state() -> dict:
+def quota_state(tmp_path) -> dict:
     """A state dict with quota exhausted error."""
     return {
         "issue_number": 50,
+        "repo_root": str(tmp_path),
         "error_message": "All credentials exhausted: api-key-1: Quota exhausted. Wait for quota reset.",
         "cost_budget_usd": 8.0,
     }
 
 
 @pytest.fixture
-def budget_state() -> dict:
+def budget_state(tmp_path) -> dict:
     """A state dict with budget exceeded error."""
     return {
         "issue_number": 75,
+        "repo_root": str(tmp_path),
         "error_message": "Cost budget exceeded: $5.20 spent of $5.00 budget",
         "cost_budget_usd": 5.0,
     }
@@ -205,7 +209,9 @@ class TestHaltAlerts:
     def test_every_halt_alerts_once_with_workflow_stage_and_cause(
         self, halt_fn, error_state: dict, tmp_path: Path, operator_alerts
     ) -> None:
-        error_state["target_repo"] = "/repos/example"
+        target = tmp_path / "repos" / "example"
+        target.mkdir(parents=True)
+        error_state["target_repo"] = str(target)
         with patch("assemblyzero.core.halt_node.STATE_DIR", tmp_path / "state"):
             result = halt_fn(error_state)
         halt_alerts = [a for a in operator_alerts if "halted" in a["what"]]
@@ -213,7 +219,7 @@ class TestHaltAlerts:
         alert = halt_alerts[0]
         assert "implementation_spec" in alert["what"] and "implementation_spec HALT" in alert["where"]
         assert alert["cause"] == error_state["error_message"]
-        assert alert["issue"] == 102 and alert["repo"] == "/repos/example"
+        assert alert["issue"] == 102 and alert["repo"] == str(target)
         assert result["recovery_plan_path"] in alert["consequence"]
 
     def test_an_undeliverable_alert_raises_after_the_halt_is_on_disk(
