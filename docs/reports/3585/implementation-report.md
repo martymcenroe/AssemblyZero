@@ -37,6 +37,14 @@ Callers: `validate_code_response` is called by N4's retry loop and batch path; n
 - **497, 503, 507** are fallbacks the orchestrator takes; it alerts on them (see orchestrator.py above).
 - The two `# fail-open:` tags are gone.
 
+### deprecated.py (4 rows)
+
+No run calls these batch-mode helpers; they keep the standard while they exist.
+
+- **A read the batch prompt needs stops** (58, 87): an ERROR line naming the file, and the read error propagates.
+- **No invented paths** (190): a code block that names no file is an ERROR line and a ValueError; it used to be written as `implementation_N.py`.
+- **No partial write** (218): an entry with no path or no content is refused before anything is written.
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |

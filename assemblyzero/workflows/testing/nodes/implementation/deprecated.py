@@ -1,15 +1,40 @@
 """Deprecated batch-mode functions maintained for backward compatibility.
 
 Issue #272: These maintain old API while new code uses file-by-file approach.
+
+No run calls them; they keep standard 0034 while they exist (#3585). A read
+that fails is an ERROR line naming the file, and the read error propagates;
+a code block with no path, or an entry with no path or content, is an ERROR
+line and a ValueError.
 """
 
 import re
+import sys
 from pathlib import Path
 
 from assemblyzero.workflows.testing.audit import get_repo_root
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 from .claude_client import call_claude_for_file
+
+
+def _refuse(message: str) -> ValueError:
+    """The ERROR line for a refusal, and the exception to raise."""
+    print(f"ERROR [N4] {message}", file=sys.stderr, flush=True)
+    return ValueError(message)
+
+
+def _read(path: Path, purpose: str) -> str:
+    """Read a file the prompt needs, or stop with an ERROR line naming it."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(
+            f"ERROR [N4] could not read {path} ({purpose}): "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        raise
 
 
 def build_implementation_prompt(state: TestingWorkflowState) -> str:
@@ -51,12 +76,9 @@ def build_implementation_prompt(state: TestingWorkflowState) -> str:
     for tf in test_files:
         tf_path = Path(tf)
         if tf_path.exists():
-            try:
-                test_content += f"# From {tf}\n"
-                test_content += tf_path.read_text(encoding="utf-8")
-                test_content += "\n\n"
-            except Exception:
-                pass
+            test_content += f"# From {tf}\n"
+            test_content += _read(tf_path, "a test file for the batch prompt")
+            test_content += "\n\n"
 
     if test_content:
         prompt += f"""## Tests That Must Pass
@@ -81,11 +103,8 @@ def build_implementation_prompt(state: TestingWorkflowState) -> str:
                 # Include existing content for Modify
                 existing_path = repo_root / path
                 if existing_path.exists():
-                    try:
-                        existing = existing_path.read_text(encoding="utf-8")
-                        prompt += f"Current content:\n```python\n{existing}\n```\n\n"
-                    except Exception:
-                        pass
+                    existing = _read(existing_path, "a Modify file for the batch prompt")
+                    prompt += f"Current content:\n```python\n{existing}\n```\n\n"
 
     # Issue #498: Use structured failure summary when available
     test_failure_summary = state.get("test_failure_summary", "")
@@ -165,7 +184,6 @@ def parse_implementation_response(response: str) -> list[dict[str, str]]:
     # Pattern 3: Any code block with path in first line comment
     pattern3 = re.compile(r"```(?:\w*)\s*\n(.*?)```", re.DOTALL)
 
-    file_counter = 1
     for match in pattern3.finditer(response):
         content = match.group(1).strip()
         if not content:
@@ -186,9 +204,12 @@ def parse_implementation_response(response: str) -> list[dict[str, str]]:
                 content = "\n".join(lines[1:]).strip()
 
         if not path:
-            # Generate a name
-            path = f"implementation_{file_counter}.py"
-            file_counter += 1
+            # #3585: a name used to be invented (implementation_N.py), writing
+            # the code to a file nothing planned.
+            raise _refuse(
+                "a code block in the response names no file path, so where its "
+                f"code belongs is unknown: {content[:80]!r}"
+            )
 
         if content and path not in seen_paths:
             files.append({"path": path, "content": content})
@@ -211,12 +232,20 @@ def write_implementation_files(
     written = []
     test_files = test_files or []
 
+    # #3585: an entry with no path or no content used to be skipped, a
+    # partial write. Every entry is checked before anything is written.
     for file_info in files:
-        path = file_info.get("path", "")
-        content = file_info.get("content", "")
+        if not file_info.get("path", ""):
+            raise _refuse("an implementation entry has no path; nothing was written")
+        if not file_info.get("content", ""):
+            raise _refuse(
+                f"the implementation entry for {file_info['path']} has no content; "
+                f"nothing was written"
+            )
 
-        if not path or not content:
-            continue
+    for file_info in files:
+        path = file_info["path"]
+        content = file_info["content"]
 
         # Skip test files (protected)
         if any(tf.endswith(path) or path in tf for tf in test_files):

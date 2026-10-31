@@ -30,3 +30,10 @@ Each module's new test file was run against the unchanged module first; every si
 - Changed existing test: `test_failure_attribution_by_test_body.py::test_an_unparseable_planned_file_attributes_nothing` becomes `test_an_unparseable_planned_file_stops_attribution` and asserts the SyntaxError.
 - Neighbouring suites (the 13 unit files that import the module or its functions): 192 passed.
 - Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
+
+## deprecated.py
+
+- New: `tests/unit/test_deprecated_loud_failure.py`, 8 tests. Before the fix: 5 failed, 3 passed. After: 8 passed.
+- Changed existing tests in `test_testing_workflow.py`: two `parse_implementation_response` tests that relied on an invented `implementation_N.py` now assert the ValueError.
+- Neighbouring suites (`test_testing_workflow.py`, `test_implement_code_shim_exports.py` and the new file): 294 passed and 2 failed, the two tests above; after the change they pass.
+- Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
