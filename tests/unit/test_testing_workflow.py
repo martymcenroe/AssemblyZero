@@ -1506,6 +1506,9 @@ __pycache__/
             ImplementationError,
         )
 
+        # #3585: a git repository, as N4's worktree always is.
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
+
         # Create audit directory
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
@@ -3164,6 +3167,8 @@ class TestImplementCodeFullCoverage:
         """implement_code successfully writes implementation files."""
         from assemblyzero.workflows.testing.nodes.implement_code import implement_code
 
+        # #3585: a git repository, as N4's worktree always is.
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
 
@@ -3206,6 +3211,8 @@ def example():
             ImplementationError,
         )
 
+        # #3585: a git repository, as N4's worktree always is.
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
 
@@ -4686,14 +4693,18 @@ export function formatData(input) {
 }
 ```
 """
-        files = parse_implementation_response(response)
+        # #3585: the second block's `//` comment is not a path the parser
+        # reads, and a block with no path is refused instead of named
+        # implementation_N.py.
+        with pytest.raises(ValueError, match="no file path"):
+            parse_implementation_response(response)
 
-        # Should extract paths from first-line comments
-        paths = [f["path"] for f in files]
-        assert any("handler.py" in p for p in paths) or any("utils.ts" in p for p in paths)
+        # The first block alone: its `#` comment is the path.
+        files = parse_implementation_response(response.split("```\n\n```python")[0] + "```\n")
+        assert [f["path"] for f in files] == ["src/mymodule/handler.py"]
 
-    def test_parse_response_pattern4_generates_implementation_name(self):
-        """parse_implementation_response generates implementation_N.py when no path found."""
+    def test_parse_response_pattern4_refuses_a_block_with_no_path(self):
+        """#3585: a block with no path is refused; it used to be named implementation_N.py."""
         from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         # Response with Python code but no path hints
@@ -4708,12 +4719,8 @@ class Calculator:
         return a + b
 ```
 """
-        files = parse_implementation_response(response)
-
-        # Should generate a name like implementation_0.py
-        if files:
-            paths = [f["path"] for f in files]
-            assert any("implementation_" in p or "calculate" in str(files) for p in paths)
+        with pytest.raises(ValueError, match="no file path"):
+            parse_implementation_response(response)
 
     def test_build_prompt_with_file_read_exception(self, tmp_path):
         """build_implementation_prompt handles exceptions when reading source files."""

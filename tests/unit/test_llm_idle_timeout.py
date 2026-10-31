@@ -225,11 +225,19 @@ def test_a_cap_below_the_floor_does_not_silently_undo_the_override(monkeypatch):
     assert compute_dynamic_timeout("x" * 2500) == 1800
 
 
-@pytest.mark.parametrize("bad", ["banana", "-5", "0", ""])
-def test_a_bad_override_falls_back_rather_than_failing_the_call(monkeypatch, bad):
-    """An operator setting this is rescuing a stalled run. A typo must not
-    convert a slow call into a dead one."""
+@pytest.mark.parametrize("bad", ["banana", "-5", "0"])
+def test_a_bad_override_raises_naming_the_variable(monkeypatch, bad):
+    """#3585: a typo used to run the call on the default, a limit nobody
+    chose, with a stdout line. It now raises, as AZ_LLM_IDLE_TIMEOUT does
+    since #3780."""
     monkeypatch.setenv(ENV_TIMEOUT_FLOOR, bad)
+    with pytest.raises(ValueError, match=ENV_TIMEOUT_FLOOR):
+        compute_dynamic_timeout("x" * 2500)
+
+
+def test_an_empty_override_is_the_default(monkeypatch):
+    """Kept: an empty variable is an unset one."""
+    monkeypatch.setenv(ENV_TIMEOUT_FLOOR, "")
     assert compute_dynamic_timeout("x" * 2500) == FILE_TIMEOUT_FLOOR
 
 
