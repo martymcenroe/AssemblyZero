@@ -62,6 +62,20 @@ Evidence that no test wrote the file: the primary checkout's copy has modificati
 
 Calibration, the fastest of 20 and of 50 interleaved rounds, load average 14.8: linear ratio 9.3 and 9.4; quadratic fixture 89.0 and 89.4; overhead 1.06 and 1.04 (typical), 1.03 and 1.01 (cap); 5 ms slower detector 17.67 and 17.70 (typical), 4.54 and 4.53 (cap); ReDoS inputs 0.78 and 1.15.
 
+### #3731, requirement 2: no unit test bounds wall-clock time
+
+Added by the parent session after verifying the branch (commit "the last five unit tests that bound wall-clock time show the mechanism instead"). A search of `tests/unit` for files that read a clock (`perf_counter()`, `monotonic()`, `time.time()`) and assert a time against a bound found five such assertions beyond the cascade detector's: `test_credential_backoff.py:264`, `test_emergency_stop_windows_paths.py:218`, `test_llm_idle_timeout.py:150` and `:177`, `test_speedrun_emergency_stop.py:157`. Each now shows the mechanism instead, and each was run against a mutant with the mechanism removed:
+
+| Test | Now asserts | Mutant | Result against it |
+|---|---|---|---|
+| `test_credential_backoff.py::test_backoff_with_notification_wakeup` | the first wait the waiter asks for is at most the 0.3 s cooldown | the cooldown left out of the wait computation | failed: `first wait asked for 0.9999778270721436s, past the 0.3s cooldown` |
+| `test_llm_idle_timeout.py::test_a_silent_call_is_killed_at_the_idle_threshold` | `timeout_kind == "idle"` and the child did not exit 0 | the idle kill removed | failed: `the child ran to its end; the kill did not land` |
+| `test_llm_idle_timeout.py::test_a_call_that_goes_quiet_mid_stream_is_still_killed` | the same | the same | failed: `the child slept out its 60s; the kill did not land` |
+| `test_speedrun_emergency_stop.py::test_stop_lands_while_the_child_is_still_running` (renamed from `test_stop_lands_within_a_poll_interval`) | the watch fired and the child did not exit 0 | KillWatch's tree kill removed | failed: `the child slept out its 30s; the stop did not land` |
+| `test_emergency_stop_windows_paths.py::test_the_launcher_returns_the_kill_verdict` | the kill verdict, and no "finished" marker from a child that writes one when its 120 s are up | not run | Windows-only; skipped on this machine and on CI |
+
+`test_llm_idle_timeout.py::test_a_streaming_call_is_not_killed_however_long_it_runs` asserted a lower bound (`elapsed >= 12`); it now counts the 13 events the child prints. The four files: 54 passed, 11 skipped (Windows-only) with the mechanisms in place.
+
 ### #4242: `TestRunJsGate`
 
 | Run | Result |
