@@ -63,3 +63,10 @@ Each module's new test file was run against the unchanged module first; every si
 - Changed existing tests: none.
 - Neighbouring suites (the nine unit files that import the prompt builders, and the orchestrator's new tests): 480 passed.
 - Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
+
+## context.py
+
+- New: `tests/unit/test_context_loud_failure.py`, 3 tests. Before the fix: 2 failed (both on the new `filepath` keyword), 1 passed. After: 3 passed.
+- Changed existing tests: none.
+- Neighbouring suites (the module's importers and the prompt and context tests): 78 passed.
+- Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.

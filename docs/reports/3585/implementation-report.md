@@ -67,6 +67,10 @@ Callers: N4's validation and, for the pyproject reader, `scaffold_tests.py` (ano
 
 - **The Modify prompt is never built without the file** (153). A Modify file that cannot be read is an ERROR line naming it, and the read error propagates; the model used to be asked to modify a file it was never shown.
 
+### context.py (1 row)
+
+- **A Python file that does not parse is said aloud** (40). The summary for later files still carries its first 50 lines, now with an ERROR line naming the file and the syntax error. The summary is context, not a gate, so it goes on. A file that is not Python is summarized by its head, quietly. The prompt builder passes the path.
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |

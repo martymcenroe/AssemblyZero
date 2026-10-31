@@ -180,7 +180,7 @@ Modify this file according to the LLD specification.
 """
             else:
                 # Earlier files: signatures only to save context
-                summary = summarize_file_for_context(prev_content)
+                summary = summarize_file_for_context(prev_content, filepath=prev_path)
                 prompt += f"""### {prev_path} (signatures)
 
 ```python
