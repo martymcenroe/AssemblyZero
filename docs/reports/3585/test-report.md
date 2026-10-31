@@ -63,3 +63,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 197 passed across 18 files that resolve a framework, scaffold, or run several frameworks.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
+
+## exit_code_router.py
+
+**New: `tests/unit/test_exit_code_router_loud_failure.py` (13).** Four site tests, and nine that pin the descriptions verify_phases prints.
+
+**Before the fix, measured:** 4 failed, 9 passed. The four site tests failed, since the function was there; the nine description tests passed.
+
+**Changed tests:** `test_exit_code_router.py` loses its 16 tests of the deleted function and their import. Its description and constant tests are unchanged.
+
+**Neighbouring suites:** 68 passed and 1 skipped across 5 files: the router's two test files, the verify_phases lint test, the exit-code verify_phases tests and the honest-coverage tests. The skip is the lint test's own: ruff is not importable in the environment.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issue as at HEAD.

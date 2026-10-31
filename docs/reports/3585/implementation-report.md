@@ -37,3 +37,8 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **An unknown framework raises (117).** `resolve_framework` raises `UnknownFrameworkError`, a ValueError, after an ERROR line, naming the value and the four frameworks. It returned None, the same answer as no framework, and `framework_ownership.run_frameworks` reads None on a one-framework run as pytest.
 - **No framework named is still None, quietly.** No config, no `framework` key, or a key holding None is the pytest default every caller documents.
 - **Where the raise goes.** `run_frameworks` does not catch it, and its four callers catch only `TestFileOwnershipError`, so the run ends through the entry point's handler, which alerts. Wrapping it in `TestFileOwnershipError` in `run_frameworks` would end it at HALT instead; that file belongs to another batch.
+
+### exit_code_router.py (4 ledger rows: 4 fixed)
+
+- **The unused router is deleted (47, 60, 68, 71).** `route_by_exit_code` sent a red phase that passed, an interrupted or broken pytest, a timeout and an unknown code to a plain end, never to HALT. Nothing called it: the routing that runs is inline in `nodes/verify_phases.py` on the same constants (see #2690). The ledger allowed routing to HALT or deletion; deletion leaves no second copy with silent ends to wire in, and changes no route.
+- **What verify_phases reads stays.** The constants, `describe_exit_code` and `describe_run_outcome` are unchanged.
