@@ -76,12 +76,18 @@ def test_a_missing_snapshot_file_is_not_a_restore(tmp_path: Path) -> None:
 
 
 def test_restore_trouble_never_raises(tmp_path: Path) -> None:
-    """Restoration must never mask the failure the operator needs to read."""
+    """Restoration must never mask the failure the operator needs to read.
+    #3585: nor does it read as "nothing to restore" any more -- the file it
+    could not restore is named for the halt to carry."""
+    target = tmp_path / "nope" / "x.py"
     best = {"passed": 1, "coverage": 1.0,
-            "files": {str(tmp_path / "nope" / "x.py"): str(tmp_path / "s.py")}}
+            "files": {str(target): str(tmp_path / "s.py")}}
     (tmp_path / "s.py").write_text("ok\n", encoding="utf-8")
 
-    assert restore_best_on_failure({"best_iteration": best}) == ""
+    described = restore_best_on_failure({"best_iteration": best})
+
+    assert "could not be restored" in described
+    assert str(target) in described
 
 
 @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
@@ -103,7 +109,8 @@ def test_collection_death_restores_and_says_so(
         "audit_dir": str(tmp_path / "audit"),
         "file_counter": 1,
         "test_files": [str(live)],
-        "implementation_files": [],
+        # #3585: N5 halts when nothing names a coverage target.
+        "implementation_files": [str(tmp_path / "pkg" / "config.py")],
         "coverage_target": 95,
         "iteration_count": 1,
         "max_iterations": 5,

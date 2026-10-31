@@ -125,7 +125,11 @@ def _make_state(**overrides):
         "iteration_count": 1,
         "max_iterations": 10,
         "coverage_target": 90,
-        "implementation_files": [],
+        # #3585: N5 halts when nothing names a coverage target, and the
+        # full-suite gate's `git status` halts outside a repository, which
+        # /tmp/repo is not; the gate is not this file's subject.
+        "implementation_files": ["/tmp/repo/pkg/mod.py"],
+        "full_suite_validated": True,
         "skip_e2e": True,
         "previous_coverage": -1.0,
         "previous_passed": -1,

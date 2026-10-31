@@ -690,6 +690,22 @@ GATE_REGISTRY: tuple[Gate, ...] = (
               "later resume took the newest attempt instead of the best with "
               "nothing said",
     ),
+    Gate(
+        "impl.phase_step_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "PHASE STEP FAILED",
+        _s(f"{_TS}/nodes/verify_phases.py::_halt_phase_step_failed::return", 0),
+        decided_in=f"{_TS}/nodes/verify_phases.py::PhaseStepError",
+        created_by="#3585 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a step N3 or N5 depends on failed: pytest timed out, could not start "
+              "or has no pytest-cov for a coverage run; the red marker, a test "
+              "file, the spec suite or the audit directory cannot be read or "
+              "written; a snapshot, restore, dropping removal or visual sample "
+              "fails; git status fails; no coverage target can be derived; a "
+              "runner crashed or exited non-zero with no failure; a coverage_type "
+              "is unknown; a passing leg has no coverage figure; or a critical "
+              "test was skipped. Each used to print a warning or '(non-fatal)' "
+              "and go on",
+    ),
     # #2753: `impl.test_file_validation` and `impl.test_execution_failed`
     # stood here until 2026-09-04. Every site either row named lived in
     # `testing/nodes/run_tests.py`, a node no graph ever declared. `git log`

@@ -31,7 +31,8 @@ def _state(**overrides):
         "iteration_count": 1,
         "max_iterations": 5,
         "coverage_target": 95,
-        "implementation_files": [],
+        # #3585: N5 halts when nothing names a coverage target.
+        "implementation_files": ["/tmp/repo/assemblyzero/example.py"],
         "skip_e2e": True,
         "previous_coverage": -1.0,
         "previous_passed": -1,

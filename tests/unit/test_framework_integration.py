@@ -23,6 +23,15 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
 from assemblyzero.workflows.testing.runner_registry import get_framework_config
 
 
+def _a_git_worktree(path: str) -> None:
+    """#3585: the full-suite gate lists the run's droppings with `git
+    status`, which halts the phase outside a repository; a run's worktree
+    always is one."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", path], check=True)
+
+
 # =============================================================================
 # N0: Framework detection wired into load_lld
 # =============================================================================
@@ -351,6 +360,7 @@ class TestN5GreenPhaseNonPytest:
         mock_get_runner.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            _a_git_worktree(tmpdir)
             state = {
                 "test_files": ["tests/app.test.ts"],
                 "repo_root": tmpdir,
@@ -393,6 +403,7 @@ class TestN5GreenPhaseNonPytest:
         mock_get_runner.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            _a_git_worktree(tmpdir)
             state = {
                 "test_files": ["tests/app.spec.ts"],
                 "repo_root": tmpdir,
@@ -564,6 +575,7 @@ class TestN5GreenPhaseNonPytest:
         mock_get_runner.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            _a_git_worktree(tmpdir)
             state = {
                 "test_files": ["tests/app.test.ts"],
                 "repo_root": tmpdir,
