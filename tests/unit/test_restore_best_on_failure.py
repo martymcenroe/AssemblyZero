@@ -23,6 +23,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     verify_green_phase,
 )
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 
 @pytest.fixture()
 def snapshotted(tmp_path: Path) -> tuple[Path, Path, dict]:

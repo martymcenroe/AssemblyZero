@@ -34,6 +34,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     verify_green_phase,
 )
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 #: The live collection death, distilled: pytest's stderr tail.
 COLLECTION_OUTPUT = """\
 Traceback (most recent call last):

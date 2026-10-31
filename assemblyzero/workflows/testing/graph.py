@@ -87,6 +87,7 @@ from assemblyzero.workflows.testing.nodes import (
 )
 
 
+from assemblyzero.workflows.testing.changed_lines import describe_uncovered
 from assemblyzero.workflows.testing.nodes.augment_tests import (
     augment_tests_for_coverage,
 )
@@ -308,12 +309,15 @@ def _stop_after_green(state: dict[str, Any]) -> dict[str, str]:
     # limits as the implement loop, and additionally by its own attempt count
     # -- an LLM that cannot reach the target will not be asked forever.
     if next_node == "N4c_augment_tests":
+        # #4436: a halt on a shortfall names the lines that fell short.
+        uncovered = state.get("uncovered_changed_lines") or {}
+        named = f" Uncovered changed lines: {describe_uncovered(uncovered)}." if uncovered else ""
         if iteration >= max_iterations:
             return {"error_message": (
                 f"Green phase failed after {iteration} iteration(s): coverage "
                 f"for issue {_issue(state)} is under its target and the "
                 f"iteration cap of {max_iterations} is reached, so no further "
-                f"tests can be added"
+                f"tests can be added.{named}"
             )}
         if state.get("coverage_augment_attempts", 0) >= MAX_COVERAGE_AUGMENT_ATTEMPTS:
             return {"error_message": (
@@ -322,7 +326,7 @@ def _stop_after_green(state: dict[str, Any]) -> dict[str, str]:
                 f"reach the coverage target. The run halts rather than route "
                 f"to implementation: the uncovered lines are a test gap, and "
                 f"revising the implementation to close it would reward "
-                f"deleting the code that is not covered"
+                f"deleting the code that is not covered.{named}"
             )}
         if budget > 0 and (cumulative := get_cumulative_cost()) > budget:
             return {"error_message": (

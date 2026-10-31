@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.testing.nodes import verify_phases
 from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import (
     is_attributed,
@@ -39,6 +41,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     run_pytest,
     verify_green_phase,
 )
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 # What pytest printed on run 30, in its own shape.
 RUN_30_OUTPUT = """\

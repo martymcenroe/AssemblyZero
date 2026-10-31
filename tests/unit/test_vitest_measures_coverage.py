@@ -41,6 +41,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import _verify_green_non
 from assemblyzero.workflows.testing.runner_registry import get_runner
 from assemblyzero.workflows.testing.runners import base_runner, jest_runner
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 VITEST_WEB = {"framework": "vitest", "coverage_type": "line", "working_directory": "web"}
 
 

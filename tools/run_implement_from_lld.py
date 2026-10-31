@@ -112,6 +112,58 @@ def get_current_branch(repo_path: Path) -> str:
     return result.stdout.strip()
 
 
+def resolve_run_base(
+    repo_root: Path, issue_number: int, base_branch: str, *, resume: bool,
+) -> tuple[str, str]:
+    """(base_branch, base_commit): what N5 measures the run's changes from (#4436).
+
+    A named base is the answer, and the green phase takes the merge-base with
+    it. With none named there are two runs. Inside an issue's own work branch
+    the commits are the run's, so the base is the branch origin says is the
+    default. Anywhere else the run works in place, its checkpoints move the
+    branch it is on, and a merge-base with that branch would read as nothing
+    changed, so HEAD is frozen here, before anything is written. `--resume`
+    freezes nothing: the state is merged into the checkpoint, which holds the
+    commit the first launch froze, and today's HEAD would replace it.
+
+    Raises:
+        RunFailed: an issue branch with no default branch to measure from, or
+            a HEAD git cannot read. Nothing has run yet, so the run is refused
+            rather than left to halt at the end of the green phase.
+    """
+    if base_branch:
+        return base_branch, ""
+    if is_issue_work_branch(get_current_branch(repo_root), issue_number):
+        result = subprocess.run(
+            ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            cwd=str(repo_root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", check=False,
+        )
+        default = result.stdout.strip()
+        if result.returncode != 0 or not default:
+            raise RunFailed(
+                f"{repo_root} is on issue #{issue_number}'s work branch and the "
+                f"run names no base branch, and origin names no default branch "
+                f"(exit {result.returncode}: {result.stderr.strip()}), so what "
+                "the run changed cannot be measured. Pass --base-branch",
+                consequence=NOTHING_RAN,
+            )
+        return default, ""
+    if resume:
+        return "", ""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"], cwd=str(repo_root),
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if result.returncode != 0:
+        raise RunFailed(
+            f"git rev-parse HEAD failed in {repo_root} (exit {result.returncode}): "
+            f"{result.stderr.strip()}",
+            consequence=NOTHING_RAN,
+        )
+    return "", result.stdout.strip()
+
+
 def _worktree_entries(repo_path: Path) -> list[tuple[Path, str]]:
     """`git worktree list --porcelain` as (path, branch) pairs.
 
@@ -955,7 +1007,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--coverage-target",
         type=int,
-        help="Coverage target percentage (default: from LLD or 90)",
+        help=(
+            "Coverage target, a percentage of the lines the run adds or changes "
+            "(ADR 0207). Wins over the LLD's on every load path, and the run "
+            "says which it uses. Default: the LLD's, else 95"
+        ),
     )
     parser.add_argument(
         "--resume",
@@ -1516,6 +1572,15 @@ def _main(args: argparse.Namespace):
                 print(f"Created worktree: {worktree_path}")
                 repo_root = worktree_path
 
+    # #4436: what the green phase measures the run's changes from. A mock run
+    # measures nothing. Its own names, because `base_branch` is also the PR
+    # base the landing hands the merge driver, and `origin/main` is not one.
+    measured_branch, base_commit = "", ""
+    if not args.mock:
+        measured_branch, base_commit = resolve_run_base(
+            repo_root, args.issue, base_branch, resume=bool(args.resume),
+        )
+
     # Set up checkpoint database (Issue #379: per-issue partitioning; #3547:
     # a mock run's lives under the target's data/mock-runs/; #3548: a real
     # run's under the target's data/speedrun/checkpoints/)
@@ -1683,8 +1748,16 @@ def _main(args: argparse.Namespace):
     if args.lld:
         initial_state["lld_path"] = args.lld
 
-    if args.coverage_target:
+    # #4266: `is not None`: a flag of 0 is still the operator's flag.
+    if args.coverage_target is not None:
         initial_state["coverage_target"] = args.coverage_target
+
+    # #4436: only what is known. An empty value here would overwrite what a
+    # resumed run's checkpoint holds.
+    if measured_branch:
+        initial_state["base_branch"] = measured_branch
+    if base_commit:
+        initial_state["base_commit"] = base_commit
 
     if args.sandbox_repo:
         initial_state["sandbox_repo"] = args.sandbox_repo

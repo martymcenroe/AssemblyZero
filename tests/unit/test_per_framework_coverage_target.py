@@ -32,6 +32,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import _verify_green_non
 from assemblyzero.workflows.testing.runner_registry import get_framework_config
 from assemblyzero.workflows.testing.runners import base_runner, jest_runner
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 SPEC = """# 7 - Engine replay
 
 **Status:** APPROVED

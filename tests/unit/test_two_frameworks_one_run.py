@@ -34,6 +34,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
 )
 from assemblyzero.workflows.testing.runners import base_runner, jest_runner
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 #: The module itself: `nodes/__init__` exports the `load_lld` function under
 #: the same name, so `from ...nodes import load_lld` would give the function.
 load_lld_module = importlib.import_module("assemblyzero.workflows.testing.nodes.load_lld")

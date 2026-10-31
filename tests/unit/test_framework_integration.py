@@ -23,6 +23,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
 )
 from assemblyzero.workflows.testing.runner_registry import get_framework_config
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 
 def _a_git_worktree(path: str) -> None:
     """#3585: the full-suite gate lists the run's droppings with `git

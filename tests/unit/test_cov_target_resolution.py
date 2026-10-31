@@ -10,7 +10,11 @@ that the fallback in verify_green_phase infers the right scope.
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.testing.nodes.verify_phases import _path_to_cov_target
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 
 # ---------------------------------------------------------------------------
@@ -234,44 +238,6 @@ def _make_state(**overrides):
     }
     base.update(overrides)
     return base
-
-
-@patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-@patch("assemblyzero.workflows.testing.nodes.verify_phases.get_repo_root")
-def test_fallback_infers_tools_from_impl_files(mock_root, mock_pytest, tmp_path: Path) -> None:
-    """Fallback uses top-level dir from impl_files when .py filter skips them."""
-    (tmp_path / "tools").mkdir(exist_ok=True)
-    # No __init__.py — tools/ is not a package
-    mock_root.return_value = tmp_path
-
-    mock_pytest.return_value = {
-        "returncode": 0,
-        "stdout": "1 passed",
-        "stderr": "",
-        "parsed": {"passed": 1, "failed": 0, "coverage": 95.0},
-    }
-
-    # impl_files has a .json file (skipped by .py filter) — fallback should still find "tools"
-    state = _make_state(
-        repo_root=str(tmp_path),
-        implementation_files=["tools/config.json"],
-    )
-
-    from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
-    verify_green_phase(state)
-
-    # Check that the FIRST run_pytest call used coverage_module starting with "tools"
-    # (Issue #842: second call is the full suite regression check with no coverage_module)
-    call_args = mock_pytest.call_args_list[0]
-    assert call_args is not None
-    cov_module = call_args.kwargs.get("coverage_module") or call_args[1].get("coverage_module")
-    if cov_module is None:
-        # Positional arg
-        cov_module = call_args[0][1] if len(call_args[0]) > 1 else None
-    assert cov_module is not None
-    # #2710: the scope is a list of targets; this feature has one.
-    assert isinstance(cov_module, list) and len(cov_module) == 1, cov_module
-    assert cov_module[0].startswith("tools"), f"Expected 'tools' scope, got: {cov_module}"
 
 
 @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")

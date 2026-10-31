@@ -1,4 +1,4 @@
-"""N4c: add tests for uncovered lines (#2327).
+"""N4c: add tests for the uncovered lines the run changed (#2327, #4436).
 
 A green-but-under-covered result is a TEST problem wearing an implementation
 problem's clothes. Every test passes; the shortfall is in lines no test
@@ -26,6 +26,11 @@ spent allowance (generation attempts, the one repair pass, no added test
 passing) through `_halt_augment_spent`. `route_after_augment` sends either
 to HALT, which alerts. The suite left on disk always passes: what was there,
 plus only the additions that ran and passed.
+
+#4436: N5 judges the lines the run added or changed and names the uncovered
+ones in `uncovered_changed_lines`, and this node writes tests for those lines
+and no others. It used to read every uncovered line of the whole module from
+the term-missing report, so it was asked to test code the run never touched.
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.changed_lines import describe_uncovered, line_ranges
 from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
     call_claude_for_file,
 )
@@ -260,8 +266,9 @@ def build_augment_prompt(
 ) -> str:
     """Ask for ADDITIONAL tests against named lines, and nothing else."""
     sections = [
-        f"The test suite passes in full. Coverage is {coverage_achieved:.1f}% "
-        f"against a target of {coverage_target}%.",
+        f"The test suite passes in full. Coverage of the lines this change "
+        f"added or modified is {coverage_achieved:.1f}% against a target of "
+        f"{coverage_target}%.",
         "",
         "Write ADDITIONAL pytest test functions that exercise the uncovered "
         "lines quoted below. The uncovered code is usually error handling and "
@@ -269,6 +276,10 @@ def build_augment_prompt(
         "missing files, malformed input, permission errors, platform branches.",
         "",
         "Rules:",
+        (
+            "- Test ONLY the lines marked as uncovered. Everything else in these "
+            "files predates this change, and no test is owed for it here."
+        ),
         "- Do NOT modify the implementation. It is correct; the tests are the gap.",
         "- Do NOT rewrite or restate the existing tests. Emit only NEW functions.",
         "- Every new test must assert real behaviour. Never `assert True`, "
@@ -563,11 +574,13 @@ def _halt_gap_not_augmentable(state: TestingWorkflowState, framework: str) -> di
     that raises coverage is deleting the code no test reaches."""
     achieved = float(state.get("coverage_achieved", 0) or 0)
     target = state.get("coverage_target", 90)
+    uncovered = state.get("uncovered_changed_lines") or {}
+    named = f" Uncovered changed lines: {describe_uncovered(uncovered)}." if uncovered else ""
     message = (
         f"[N4c] the {framework} suite's coverage is {achieved:.1f}% against "
         f"a target of {target}%, and N4c adds pytest tests only: it cannot "
-        f"add {framework} tests for the uncovered lines. The run stops here "
-        f"rather than send a test gap to implementation (#2327, #4246)."
+        f"add {framework} tests for the uncovered lines.{named} The run stops "
+        f"here rather than send a test gap to implementation (#2327, #4246)."
     )
     print(f"ERROR {message}", file=sys.stderr)
     return {"next_node": "end", "error_message": message}
@@ -612,7 +625,8 @@ def _restore_passing(test_path: Path, existing: str, kept: str) -> None:
 
 
 def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
-    """N4c: append tests targeting uncovered lines (#2327).
+    """N4c: append tests targeting the uncovered lines the run changed
+    (#2327, #4436).
 
     Returns to N5 when tests were added. #3585: any failure halts, with the
     reason in error_message; it used to return to N5 with none. Either way it
@@ -622,15 +636,13 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     gate_log("[N4c] Adding tests for uncovered lines...")
 
     # #4246: N5 routes every framework's coverage shortfall here, never to
-    # the coder. This node reads pytest-cov's term-missing report and writes
-    # and vets pytest functions, so a gap in any other framework's suite is
-    # one it cannot fill. A state with no framework named is from before
-    # #4246, when only pytest's shortfall came here.
+    # the coder. This node writes and vets pytest functions, so a gap in any
+    # other framework's suite is one it cannot fill. A state with no framework
+    # named is from before #4246, when only pytest's shortfall came here.
     gap = state.get("coverage_gap_framework") or "pytest"
     if gap != "pytest":
         return _halt_gap_not_augmentable(state, gap)
 
-    output = state.get("green_phase_output", "") or ""
     coverage_achieved = float(state.get("coverage_achieved", 0) or 0)
     coverage_target = int(state.get("coverage_target", 90) or 90)
     test_files = state.get("test_files", []) or []
@@ -643,26 +655,29 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
             f"{coverage_achieved:.1f}% against a target of {coverage_target}%"
         )
 
-    # #2637: read the report ONCE, through the accessor N5 also uses. This
-    # branch used to render an ABSENT target as "no uncovered lines" -- an
-    # all-clear -- while N5 rendered the same empty report as "0.0%" and
-    # routed here. Neither had measured anything, and the two bounced until a
-    # stagnation halt blamed the LLD and spec.
-    from assemblyzero.workflows.testing.coverage_report import read_coverage
-
-    reading = read_coverage(output, state.get("coverage_module", "") or "")
-    if not reading.measured:
-        print(f"    [N4c] {reading.failure_message()}")
-        return {"next_node": "end", "error_message": reading.failure_message()}
-
-    uncovered = reading.uncovered
+    # #2637: the report is read ONCE. N5 read it, judged the run's changed
+    # lines and halted if it could not, so this node reads what N5 named and
+    # never a second parse of the same report (#4436). Nothing named is a
+    # shortfall nobody can locate.
+    uncovered = {
+        path: line_ranges(lines)
+        for path, lines in (state.get("uncovered_changed_lines") or {}).items()
+    }
     if not uncovered:
         # #3585 (ledger 0908, augment_tests.py:554): it returned to N5, which
         # measured the same shortfall and sent it back, uncounted.
         return _halt_augment_cannot_run(
             f"coverage is {coverage_achieved:.1f}% against a target of "
-            f"{coverage_target}%, and the coverage report names no uncovered "
+            f"{coverage_target}%, and the run's state names no uncovered "
             f"line to target"
+        )
+
+    # #4436: a shortfall in Python source with no Python test file in the run
+    # (its framework was judged on its whole suite) has nowhere to append to.
+    if not any(str(f).endswith(".py") for f in test_files):
+        return _halt_augment_cannot_run(
+            f"the run has no Python test file to extend, and its uncovered "
+            f"changed lines are {describe_uncovered(state['uncovered_changed_lines'])}"
         )
 
     # #2899's record of the prompt and every response. #3585 (ledger 0908,
