@@ -37,6 +37,7 @@ arc across multiple takes).
 from __future__ import annotations
 
 import argparse
+import filecmp
 import json
 import os
 import shutil
@@ -188,12 +189,112 @@ def remove_worktree(repo_root: Path, issue: int) -> bool:
             parent / f"{repo_root.name}-{suffix}",
         ]
         for worktree_path in candidates:
-            if _remove_worktree_at(repo_root, worktree_path):
+            if _remove_worktree_at(repo_root, worktree_path, issue):
                 removed_any = True
     return removed_any
 
 
-def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
+#: Ignored directories whose contents tooling rebuilds and nobody authored
+#: (#4219). A closed list, authored here: a path with one of these as a
+#: component is counted and named in the output but not copied, because
+#: copying and comparing a `node_modules` tree would make every reset take
+#: minutes and fill the disk with something `npm ci` makes again. Anything
+#: else the worktree ignores is evidence and is copied.
+REGENERABLE_IGNORED_DIRS = frozenset({
+    "node_modules", "__pycache__", ".venv", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache",
+})
+
+
+def preserve_ignored_files(
+    repo_root: Path, worktree_path: Path, issue: int,
+) -> Path | None:
+    """Copy a clean worktree's ignored files out, and compare each copy (#4219).
+
+    Git does not count ignored files as changes, so `git worktree remove`
+    deletes them and nothing says so. The impl stage keeps its lineage,
+    `calls.jsonl` included, inside the worktree, and a target repository may
+    ignore `docs/lineage/`; that record was lost on every reset of a clean
+    worktree. Standard 0027: preserve every emission before restoring.
+
+    Copies land under `data/speedrun/reset-artifacts/issue-{N}/worktree-ignored/
+    <worktree name>/`, at the same relative paths (stamped when an earlier
+    reset already used that directory, so a second reset cannot overwrite the
+    first one's evidence). Each copy is compared byte for byte with its
+    source. Returns the destination, or None when there was nothing to copy.
+
+    Raises `ResetPreservationError`, after alerting the operator, when the
+    ignored files cannot be listed, a copy fails, or a copy differs from its
+    source. The caller then leaves the worktree where it is.
+    """
+    where = "preserve_ignored_files"
+
+    def refuse(cause: str) -> None:
+        _refuse(
+            repo_root, issue, where,
+            f"preserving the ignored files of worktree {worktree_path} (#{issue})",
+            cause,
+            f"the worktree {worktree_path} was not removed",
+        )
+
+    listed = _run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+        cwd=worktree_path,
+    )
+    if listed.returncode != 0:
+        refuse(
+            f"git ls-files exited {listed.returncode}: "
+            f"{(listed.stderr or '').strip()[:200]}"
+        )
+    relatives = [name for name in listed.stdout.split("\0") if name]
+    regenerable = [
+        name for name in relatives
+        if REGENERABLE_IGNORED_DIRS.intersection(Path(name).parts)
+    ]
+    skipped = set(regenerable)
+    wanted = [name for name in relatives if name not in skipped]
+    if regenerable:
+        print(
+            f"  Not copying {len(regenerable)} regenerable ignored file(s) in "
+            f"{worktree_path.name} (under {', '.join(sorted(REGENERABLE_IGNORED_DIRS))})"
+        )
+    if not wanted:
+        return None
+
+    holder = (
+        repo_root / "data" / "speedrun" / "reset-artifacts"
+        / f"issue-{issue}" / "worktree-ignored"
+    )
+    destination = holder / worktree_path.name
+    if destination.exists():
+        destination = holder / f"{worktree_path.name}-{_disposal_stamp()}"
+    for name in wanted:
+        source = worktree_path / name
+        target = destination / name
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_symlink():
+                os.symlink(os.readlink(source), target)
+                same = os.readlink(source) == os.readlink(target)
+            elif source.is_file():
+                shutil.copy2(source, target)
+                same = filecmp.cmp(source, target, shallow=False)
+            else:
+                refuse(f"{name} is neither a regular file nor a symbolic link")
+                same = False
+        except OSError as exc:
+            refuse(f"copying {name} failed: {type(exc).__name__}: {exc}")
+            same = False
+        if not same:
+            refuse(f"the copy of {name} at {target} differs from its source")
+    print(
+        f"  Preserved {len(wanted)} ignored file(s) of {worktree_path.name}: "
+        f"{destination.relative_to(repo_root)}"
+    )
+    return destination
+
+
+def _remove_worktree_at(repo_root: Path, worktree_path: Path, issue: int) -> bool:
     """
     Remove one worktree directory if it exists.
 
@@ -202,9 +303,23 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
     and that refusal is a signal to respect, not to route around: this
     function never force-removes and never deletes a dirty directory. A
     worktree holding work is reported and left for the operator (#1762).
+
+    #4219: a clean worktree's ignored files are copied out and compared
+    before `git worktree remove` runs, because git does not count them as
+    changes and deletes them with the tree. When the copy fails, the
+    worktree stays and `ResetPreservationError` says why (callers that
+    cannot let it propagate catch it).
     """
     if not worktree_path.exists():
         return False
+
+    if worktree_is_dirty(worktree_path):
+        print(f"  SKIPPED worktree {worktree_path} — it holds uncommitted work.")
+        print("    Left in place. Inspect it, then remove it yourself once")
+        print("    you have salvaged anything worth keeping.")
+        return False
+
+    preserve_ignored_files(repo_root, worktree_path, issue)
 
     result = _run(
         ["git", "worktree", "remove", str(worktree_path)],
@@ -213,12 +328,6 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
     if result.returncode == 0:
         print(f"  Removed worktree: {worktree_path}")
         return True
-
-    if worktree_is_dirty(worktree_path):
-        print(f"  SKIPPED worktree {worktree_path} — it holds uncommitted work.")
-        print("    Left in place. Inspect it, then remove it yourself once")
-        print("    you have salvaged anything worth keeping.")
-        return False
 
     # Clean, but git would not remove it — typically a directory that is no
     # longer registered as a worktree. #3518: "clean" is not "nothing at

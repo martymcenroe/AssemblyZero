@@ -211,7 +211,7 @@ class TestTheSitesThatBecameMoveAsides:
         _git(clone, "add", ".")
         _git(clone, "commit", "-qm", "unpushed")
 
-        _remove_worktree_at(repo, clone)
+        _remove_worktree_at(repo, clone, 42)
 
         backups = list(tmp_path.glob("Repo-42.bak-*"))
         assert len(backups) == 1

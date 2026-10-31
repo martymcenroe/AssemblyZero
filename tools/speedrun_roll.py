@@ -2959,18 +2959,24 @@ def restore_repo(
     """
     log.write("RESTORE returning the repo to its default branch")
 
+    failures: list[str] = []
     for issue in issues:
-        reset.remove_worktree(repo_root, issue)
+        try:
+            reset.remove_worktree(repo_root, issue)
+        except reset.ResetPreservationError as err:
+            # #4219: the worktree's ignored files could not be copied out, so
+            # it was kept, and the operator was alerted where it failed.
+            # RESTORE goes on with the other issues and says so at the end.
+            log.write(f"RESTORE kept #{issue}'s worktree: {err}")
+            failures.append(f"worktree for #{issue} kept: {err}")
 
     base = attempt.default_branch(repo_root)
     if not base:
-        return ["cannot resolve origin/HEAD; leaving the checkout as it is"]
+        return [*failures, "cannot resolve origin/HEAD; leaving the checkout as it is"]
 
     checkout = _run(["git", "checkout", base], cwd=repo_root)
     if checkout.returncode != 0:
-        return [f"could not check out {base}: {(checkout.stderr or '').strip()}"]
-
-    failures: list[str] = []
+        return [*failures, f"could not check out {base}: {(checkout.stderr or '').strip()}"]
 
     # #2310: a removed worktree leaves its branch standing. Dispose of it here
     # -- AFTER the checkout has moved to the base, so the branch being freed is

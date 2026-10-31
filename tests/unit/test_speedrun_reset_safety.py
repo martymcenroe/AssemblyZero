@@ -378,6 +378,158 @@ class TestNoBranchIsDeletedBeforeItsTipIsRecoverable:
 
 
 # ---------------------------------------------------------------------------
+# #4219: a clean worktree's ignored files are copied out before it is removed
+# ---------------------------------------------------------------------------
+
+LINEAGE_FILE = Path("docs") / "lineage" / "active" / "7-testing" / "calls.jsonl"
+
+
+@pytest.fixture
+def ignoring_repo(repo: Path) -> Path:
+    """A target whose .gitignore ignores `docs/lineage/` and `node_modules/`."""
+    (repo / ".gitignore").write_text("docs/lineage/\nnode_modules/\ndata/\n", encoding="utf-8")
+    git(repo, "add", ".gitignore")
+    _must(git(repo, "commit", "-m", "ignore lineage"))
+    return repo
+
+
+def add_worktree(repo: Path, issue: int = 7) -> Path:
+    path = repo / "data" / "worktrees" / str(issue)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _must(git(repo, "worktree", "add", str(path), "-b", f"issue-{issue}", "main"))
+    return path
+
+
+def holder(repo: Path, issue: int = 7) -> Path:
+    return repo / "data" / "speedrun" / "reset-artifacts" / f"issue-{issue}" / "worktree-ignored"
+
+
+class TestIgnoredFilesAreCopiedOutBeforeTheWorktreeGoes:
+    def test_a_clean_worktrees_ignored_lineage_is_in_reset_artifacts_with_the_same_bytes(
+        self, ignoring_repo: Path
+    ):
+        """T1 (R1)."""
+        worktree = add_worktree(ignoring_repo)
+        calls = worktree / LINEAGE_FILE
+        calls.parent.mkdir(parents=True)
+        payload = b'{"call": 1}\n{"call": 2, "bytes": "\xff\xfe"}\n'
+        calls.write_bytes(payload)
+        assert _must(git(worktree, "status", "--porcelain")) == "", "the worktree is clean to git"
+
+        assert reset.remove_worktree(ignoring_repo, 7) is True
+
+        assert not worktree.exists()
+        copy = holder(ignoring_repo) / "7" / LINEAGE_FILE
+        assert copy.read_bytes() == payload
+
+    def test_a_failed_copy_keeps_the_worktree_and_says_why(
+        self, ignoring_repo: Path, monkeypatch, alerts: list[dict]
+    ):
+        """T2 (R2)."""
+        worktree = add_worktree(ignoring_repo)
+        (worktree / LINEAGE_FILE).parent.mkdir(parents=True)
+        (worktree / LINEAGE_FILE).write_text("evidence\n", encoding="utf-8")
+
+        def full_disk(*_a, **_k):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(reset.shutil, "copy2", full_disk)
+
+        with pytest.raises(reset.ResetPreservationError) as caught:
+            reset.remove_worktree(ignoring_repo, 7)
+
+        assert worktree.exists() and (worktree / LINEAGE_FILE).read_text(encoding="utf-8") == "evidence\n"
+        assert str(worktree) in _must(git(ignoring_repo, "worktree", "list", "--porcelain"))
+        assert "calls.jsonl" in str(caught.value) and "No space left" in str(caught.value)
+        assert len(alerts) == 1 and alerts[0]["issue"] == 7
+
+    def test_a_copy_that_differs_from_its_source_keeps_the_worktree(
+        self, ignoring_repo: Path, monkeypatch, alerts: list[dict]
+    ):
+        worktree = add_worktree(ignoring_repo)
+        (worktree / LINEAGE_FILE).parent.mkdir(parents=True)
+        (worktree / LINEAGE_FILE).write_text("evidence\n", encoding="utf-8")
+
+        def truncating_copy(src, dst, **_k):
+            Path(dst).write_text("evid", encoding="utf-8")
+
+        monkeypatch.setattr(reset.shutil, "copy2", truncating_copy)
+
+        with pytest.raises(reset.ResetPreservationError) as caught:
+            reset.remove_worktree(ignoring_repo, 7)
+
+        assert worktree.exists()
+        assert "differs from its source" in str(caught.value)
+
+    def test_a_dirty_worktree_is_left_alone_and_nothing_is_copied(self, ignoring_repo: Path):
+        worktree = add_worktree(ignoring_repo)
+        (worktree / "scratch.txt").write_text("uncommitted\n", encoding="utf-8")
+        (worktree / LINEAGE_FILE).parent.mkdir(parents=True)
+        (worktree / LINEAGE_FILE).write_text("evidence\n", encoding="utf-8")
+
+        assert reset.remove_worktree(ignoring_repo, 7) is False
+
+        assert worktree.exists()
+        assert not holder(ignoring_repo).exists()
+
+    def test_regenerable_ignored_dirs_are_named_not_copied(
+        self, ignoring_repo: Path, capsys
+    ):
+        worktree = add_worktree(ignoring_repo)
+        (worktree / "node_modules" / "left-pad").mkdir(parents=True)
+        (worktree / "node_modules" / "left-pad" / "index.js").write_text("x\n", encoding="utf-8")
+        (worktree / LINEAGE_FILE).parent.mkdir(parents=True)
+        (worktree / LINEAGE_FILE).write_text("evidence\n", encoding="utf-8")
+
+        assert reset.remove_worktree(ignoring_repo, 7) is True
+
+        assert (holder(ignoring_repo) / "7" / LINEAGE_FILE).exists()
+        assert not (holder(ignoring_repo) / "7" / "node_modules").exists()
+        assert "Not copying 1 regenerable ignored file" in capsys.readouterr().out
+
+    def test_a_worktree_with_no_ignored_files_is_removed_without_a_copy(
+        self, ignoring_repo: Path
+    ):
+        worktree = add_worktree(ignoring_repo)
+        assert reset.remove_worktree(ignoring_repo, 7) is True
+        assert not worktree.exists() and not holder(ignoring_repo).exists()
+
+    def test_a_second_reset_does_not_overwrite_the_first_ones_copy(self, ignoring_repo: Path):
+        for text in ("first\n", "second\n"):
+            worktree = add_worktree(ignoring_repo)
+            (worktree / LINEAGE_FILE).parent.mkdir(parents=True)
+            (worktree / LINEAGE_FILE).write_text(text, encoding="utf-8")
+            assert reset.remove_worktree(ignoring_repo, 7) is True
+            git(ignoring_repo, "branch", "-d", "issue-7")
+        copies = sorted(p.read_text(encoding="utf-8") for p in holder(ignoring_repo).rglob("calls.jsonl"))
+        assert copies == ["first\n", "second\n"]
+
+    def test_the_end_of_roll_restore_keeps_a_worktree_it_could_not_preserve(
+        self, ignoring_repo: Path, monkeypatch, alerts: list[dict]
+    ):
+        """The restore calls the same `remove_worktree`, and it runs from a
+        `finally`, so a failed copy must come back as a named failure and not
+        as an exception that skips the rest of the restore."""
+        worktree = add_worktree(ignoring_repo)
+        (worktree / LINEAGE_FILE).parent.mkdir(parents=True)
+        (worktree / LINEAGE_FILE).write_text("evidence\n", encoding="utf-8")
+        monkeypatch.setattr(
+            reset.shutil, "copy2", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+        )
+
+        class Log:
+            lines: list[str] = []
+
+            def write(self, line: str) -> None:
+                self.lines.append(line)
+
+        failures = roll.restore_repo(ignoring_repo, [7], Log())
+
+        assert worktree.exists()
+        assert any("worktree for #7 kept" in f and "disk full" in f for f in failures), failures
+
+
+# ---------------------------------------------------------------------------
 # #4217: the live-orchestrator refusal reads the lock where the writer puts it
 # ---------------------------------------------------------------------------
 
