@@ -51,7 +51,10 @@ def _wsl_runner(which_rc: int, which_out: str, home: str = "/home/someone", test
 
 
 # --- discovery -----------------------------------------------------------------
+# #4253: these test the lookup itself, so they carry `real_agy_lookup` and
+# patch every input it reads; the suite's no-agy stand-in would answer for it.
 
+@pytest.mark.real_agy_lookup
 def test_windows_uses_the_wsl_agy_found_by_which(tmp_path):
     run, calls = _wsl_runner(0, WSL_AGY + "\n")
     with patch.object(gc, "_ON_WINDOWS", True), \
@@ -62,6 +65,7 @@ def test_windows_uses_the_wsl_agy_found_by_which(tmp_path):
     assert all(c[1] == "--exec" for c in calls), "every WSL lookup is argv-only, no shell"
 
 
+@pytest.mark.real_agy_lookup
 def test_windows_falls_back_to_home_local_bin():
     run, _ = _wsl_runner(1, "")
     with patch.object(gc, "_ON_WINDOWS", True), \
@@ -71,6 +75,7 @@ def test_windows_falls_back_to_home_local_bin():
     assert client._agy_cli == gc.AGY_WSL_PREFIX + "/home/someone/.local/bin/agy"
 
 
+@pytest.mark.real_agy_lookup
 def test_windows_never_returns_a_windows_agy_exe(tmp_path, monkeypatch):
     """Test 1: an agy.exe on PATH and at the old install location is ignored."""
     exe = tmp_path / "AppData" / "Local" / "agy" / "bin" / "agy.exe"
@@ -90,6 +95,7 @@ def test_windows_never_returns_a_windows_agy_exe(tmp_path, monkeypatch):
     assert "agy.exe" not in client._agy_cli
 
 
+@pytest.mark.real_agy_lookup
 def test_windows_without_wsl_agy_is_not_found():
     """Test 2."""
     run, _ = _wsl_runner(1, "", test_rc=1)
@@ -100,6 +106,7 @@ def test_windows_without_wsl_agy_is_not_found():
     assert client._agy_cli is None
 
 
+@pytest.mark.real_agy_lookup
 def test_windows_without_wsl_at_all_is_not_found():
     with patch.object(gc, "_ON_WINDOWS", True), \
          patch.object(gc.shutil, "which", side_effect=lambda n: None if n.startswith("wsl") else "C:/agy/agy.exe"):
@@ -107,6 +114,7 @@ def test_windows_without_wsl_at_all_is_not_found():
     assert client._agy_cli is None
 
 
+@pytest.mark.real_agy_lookup
 def test_off_windows_uses_path():
     """Test 3."""
     with patch.object(gc, "_ON_WINDOWS", False), \

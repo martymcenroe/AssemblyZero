@@ -7,6 +7,7 @@ Tests: T010, T030, T040, T050, T060, T080, T110, T120, T200, T210
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from assemblyzero.hooks.cascade_detector import (
+    _PERMISSION_PATTERNS,
     MAX_INPUT_LENGTH,
     compute_risk_score,
     detect_cascade_risk,
@@ -41,7 +43,12 @@ from assemblyzero.telemetry.cascade_events import (
 
 # ── Fixture loading ──
 
-FIXTURES_PATH = Path("tests/fixtures/cascade_samples.json")
+#: #4167: both inputs read from the checkout, never the working directory. A
+#: run started anywhere else found neither, so the fixture tests errored and
+#: the CLAUDE.md tests failed while CI, which runs from the checkout, passed.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURES_PATH = REPO_ROOT / "tests" / "fixtures" / "cascade_samples.json"
+CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 
 
 @pytest.fixture
@@ -222,29 +229,36 @@ class TestCorruptConfigFallback:
 
 
 class TestReDoSResistance:
-    """T080: Pathological input completes fast (REQ-6)."""
+    """T080: Pathological input completes fast (REQ-6).
+
+    #4190, #3731: these asserted an absolute 100 ms, a statement about how
+    busy the machine was. They now compare the pathological input with a
+    benign one of the same length, timed in the same rounds, so load slows
+    both alike; catastrophic backtracking costs hundreds of times the benign
+    scan, and this bound is ten.
+    """
 
     def test_redos_resistance(self) -> None:
         # Pathological input: lots of repetitive characters
         adversarial = "a" * 10000 + " Should I " + "b" * 10000
         adversarial = adversarial[:MAX_INPUT_LENGTH]  # Respect cap
 
-        start = time.perf_counter()
-        result = detect_cascade_risk(adversarial)
-        elapsed = time.perf_counter() - start
-
-        assert elapsed < 0.1, f"ReDoS: detection took {elapsed:.3f}s (limit: 0.1s)"
+        _assert_no_blowup(detect_cascade_risk, adversarial)
 
     def test_redos_with_nested_quantifiers(self) -> None:
         """Ensure patterns don't cause catastrophic backtracking."""
         adversarial = "Should I " * 500 + "continue"
         adversarial = adversarial[:MAX_INPUT_LENGTH]
 
-        start = time.perf_counter()
-        _ = detect_cascade_risk(adversarial)
-        elapsed = time.perf_counter() - start
+        _assert_no_blowup(detect_cascade_risk, adversarial)
 
-        assert elapsed < 0.1, f"ReDoS: detection took {elapsed:.3f}s (limit: 0.1s)"
+    def test_the_check_catches_a_backtracking_pattern(self) -> None:
+        """The bound is not vacuous: one pattern that rescans the rest of the
+        input from every position fails it."""
+        backtracking = _with_extra_pattern(r"(?s)z.*?QQQ")
+
+        with pytest.raises(AssertionError, match="blow-up"):
+            _assert_no_blowup(backtracking, "z" * 2000, rounds=3)
 
 
 # ── T090: Event logging structure ──
@@ -571,38 +585,152 @@ class TestMergePatternsOverride:
 # ── T200/T210: Performance latency ──
 
 
+#: T200 and T210's inputs: a typical 2,000-character output and one at the cap.
+TYPICAL_OUTPUT = ("Here is a summary of the changes I made. " * 50)[:2000]
+MAX_OUTPUT = ("Model output content with various words. " * 250)[:MAX_INPUT_LENGTH]
+
+#: How many times detection may cost the bare scan of its own patterns. It
+#: measured 1.01 to 1.06 on WSL under a load average of 14 (2026-10-30); a
+#: detector that spends 5 ms more per call, the old budget, measured 4.5 at
+#: the cap and 17.7 on the typical input.
+OVERHEAD_BOUND = 3.0
+
+#: How many times a 10x longer input may cost. Linear measured 9.3 to 9.4; a
+#: detector with one quadratic pattern measured 89.
+SCALING_BOUND = 30.0
+
+#: How many times a pathological input may cost a benign one of its length.
+#: Measured 0.78 and 1.15; a rescanning pattern measured in the hundreds.
+BLOWUP_BOUND = 10.0
+
+
+def _fastest(calls, rounds: int) -> list[float]:
+    """The fastest single run of each call, the calls interleaved round by round.
+
+    Load only ever adds time, so the fastest run is the one closest to the
+    work itself; interleaving means a busy stretch slows every call alike.
+    """
+    best = [math.inf] * len(calls)
+    for _ in range(rounds):
+        for i, call in enumerate(calls):
+            start = time.perf_counter()
+            call()
+            best[i] = min(best[i], time.perf_counter() - start)
+    return best
+
+
+def _bare_scan(text: str) -> None:
+    """The regex work detection cannot avoid: every pattern it runs, compiled
+    once, searched over the same text."""
+    stripped = text.strip()
+    for pattern in _PERMISSION_PATTERNS:
+        pattern.search(stripped)
+    for pattern in _COMPILED_DEFAULTS:
+        pattern.search(text)
+
+
+_COMPILED_DEFAULTS = [re.compile(p["regex"]) for p in load_default_patterns()]
+
+
+def _with_extra_pattern(regex: str):
+    """A detector that also runs one more pattern: the meta-tests' slow one."""
+    extra: CascadePattern = {
+        "id": "CP-SLOW", "category": "scope_expansion", "regex": regex,
+        "description": "a deliberately slow pattern", "risk_weight": 0.1,
+        "examples": [],
+    }
+
+    def detect(text: str) -> CascadeDetectionResult:
+        return detect_cascade_risk(text, patterns=[*load_default_patterns(), extra])
+
+    return detect
+
+
+def _assert_little_overhead(detect, text: str, rounds: int = 30) -> None:
+    spent, scan = _fastest([lambda: detect(text), lambda: _bare_scan(text)], rounds)
+    assert spent <= OVERHEAD_BOUND * scan, (
+        f"overhead: detection took {spent * 1000:.3f} ms, {spent / scan:.1f}x the "
+        f"bare scan of its patterns ({scan * 1000:.3f} ms); the bound is {OVERHEAD_BOUND}x"
+    )
+
+
+def _assert_linear(detect, rounds: int = 30) -> None:
+    short_text = MAX_OUTPUT[: MAX_INPUT_LENGTH // 10]
+    short, long = _fastest([lambda: detect(short_text), lambda: detect(MAX_OUTPUT)], rounds)
+    assert long <= SCALING_BOUND * short, (
+        f"scaling: 10x the input cost {long / short:.1f}x the time "
+        f"({short * 1000:.3f} ms -> {long * 1000:.3f} ms); the bound is {SCALING_BOUND}x"
+    )
+
+
+def _assert_no_blowup(detect, adversarial: str, rounds: int = 30) -> None:
+    benign = (MAX_OUTPUT * 2)[: len(adversarial)]
+    hostile, plain = _fastest([lambda: detect(adversarial), lambda: detect(benign)], rounds)
+    assert hostile <= BLOWUP_BOUND * plain, (
+        f"blow-up: the pathological input cost {hostile / plain:.1f}x a benign one "
+        f"of its length ({plain * 1000:.3f} ms -> {hostile * 1000:.3f} ms); "
+        f"the bound is {BLOWUP_BOUND}x"
+    )
+
+
 class TestDetectionLatency:
-    """T200/T210: Detection completes under 5ms (REQ-6)."""
+    """T200/T210: detection costs little beyond its own regex scan (REQ-6).
+
+    #4190, #3731: these used to assert a 5 ms average of wall-clock time, which
+    said how busy the machine was rather than what the code did. On WSL they
+    failed under full-suite load and passed alone, and most of the 5 ms was
+    the read of the checkout's cascade config on ``/mnt/c`` that every call
+    made (2.2 to 3.8 ms of it, measured 2026-10-30; #4249 points that path at
+    a per-test directory now).
+
+    Each check now compares two costs timed in the same interleaved rounds, so
+    load slows both alike and the ratio is what the code controls:
+
+    - overhead: detection against the bare scan of its own patterns (T200 on
+      the typical input, T210 at the cap);
+    - scaling: the cap against a tenth of it.
+
+    The absolute 5 ms budget is a genuine timing check, so it moved to the
+    benchmark tier, ``tests/benchmark/test_cascade_detector_latency.py``, run
+    alone with ``-m benchmark``; it does not gate merges.
+    """
 
     def test_typical_input_latency(self) -> None:
         """T200: 2000-char model output."""
-        text = "Here is a summary of the changes I made. " * 50
-        text = text[:2000]
-
-        total = 0.0
-        runs = 100
-        for _ in range(runs):
-            start = time.perf_counter()
-            detect_cascade_risk(text)
-            total += time.perf_counter() - start
-
-        avg = total / runs
-        assert avg < 0.005, f"Average detection time {avg*1000:.2f}ms exceeds 5ms limit"
+        _assert_little_overhead(detect_cascade_risk, TYPICAL_OUTPUT)
 
     def test_max_input_latency(self) -> None:
         """T210: 10000-char model output (max cap)."""
-        text = "Model output content with various words. " * 250
-        text = text[:10000]
+        _assert_little_overhead(detect_cascade_risk, MAX_OUTPUT)
 
-        total = 0.0
-        runs = 100
-        for _ in range(runs):
-            start = time.perf_counter()
-            detect_cascade_risk(text)
-            total += time.perf_counter() - start
+    def test_detection_grows_linearly_with_input_size(self) -> None:
+        _assert_linear(detect_cascade_risk)
 
-        avg = total / runs
-        assert avg < 0.005, f"Average detection time {avg*1000:.2f}ms exceeds 5ms limit"
+    def test_the_overhead_check_catches_a_detector_slowed_past_its_limit(self) -> None:
+        """#4190 AC2: a detector doing five times its work fails both inputs.
+
+        The slowdown is a multiple of the detector's own cost, not a fixed
+        delay. A fixed 5 ms (the old budget) is a smaller multiple wherever the
+        bare scan is slower: on CI's runner the slowed detector stayed inside
+        the 3x bound at the cap and this test did not raise (PR #4283's first
+        run), though it raised on WSL at 4.5x.
+        """
+
+        def slowed(text: str) -> CascadeDetectionResult:
+            for _ in range(4):
+                detect_cascade_risk(text)
+            return detect_cascade_risk(text)
+
+        for text in (TYPICAL_OUTPUT, MAX_OUTPUT):
+            with pytest.raises(AssertionError, match="overhead"):
+                _assert_little_overhead(slowed, text, rounds=5)
+
+    def test_the_scaling_check_catches_a_quadratic_detector(self) -> None:
+        """#3731: a detector made quadratic in a fixture fails the scaling check."""
+        quadratic = _with_extra_pattern(r"(?s)\w+ .*?QQQ")
+
+        with pytest.raises(AssertionError, match="scaling"):
+            _assert_linear(quadratic, rounds=3)
 
 
 # ── T260/T270/T280: CLAUDE.md validation ──
@@ -620,8 +748,9 @@ def _validate_claude_md_cascade_rule(
     }
 
     path = Path(claude_md_path)
-    if not path.exists():
-        return result
+    # #4167: a missing file used to come back as "no rule", which read as a
+    # finding about CLAUDE.md when the test had only looked in the wrong place.
+    assert path.is_file(), f"{path} not found: the check cannot run without it"
 
     content = path.read_text(encoding="utf-8")
     content_lower = content.lower()
@@ -676,28 +805,28 @@ class TestClaudeMdCascadeRule:
 
     def test_rule_present(self) -> None:
         """T260: CLAUDE.md contains cascade prevention rule."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["rule_present"] is True, (
             "CLAUDE.md must contain a cascade prevention rule."
         )
 
     def test_open_ended_phrasing(self) -> None:
         """T270: CLAUDE.md rule uses open-ended phrasing."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["contains_open_ended"] is True, (
             "CLAUDE.md cascade rule must contain open-ended phrasing."
         )
 
     def test_forbids_numbered_options(self) -> None:
         """T270: CLAUDE.md rule forbids numbered yes/no options."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["forbids_numbered_options"] is True, (
             "CLAUDE.md cascade rule must explicitly forbid numbered yes/no options."
         )
 
     def test_section_correct(self) -> None:
         """T280: CLAUDE.md rule is in correct section."""
-        result = _validate_claude_md_cascade_rule("CLAUDE.md")
+        result = _validate_claude_md_cascade_rule(CLAUDE_MD)
         assert result["section_correct"] is True, (
             "CLAUDE.md cascade rule must be in a top-level ## section."
         )

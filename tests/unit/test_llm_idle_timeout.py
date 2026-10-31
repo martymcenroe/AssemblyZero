@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import time
 
 import pytest
 
@@ -96,17 +95,16 @@ def test_a_streaming_call_is_not_killed_however_long_it_runs():
     killed only for going quiet, so elapsed time stops being the question.
     """
     proc = _spawn(_STREAMER, "12", "1.0")
-    started = time.monotonic()
     outcome = _stream_with_idle_timeout(
         proc, content="", idle_timeout=3, wall_timeout=None
     )
-    elapsed = time.monotonic() - started
 
     assert not outcome.timed_out, "a call that never went quiet was killed"
     assert outcome.returncode == 0
-    assert elapsed >= 12, "the call should have been allowed to finish"
-    # 4x over the idle threshold, and it lived, because output kept arriving.
-    assert elapsed > 4 * 3
+    # The child sleeps 1s after each of its 12 lines, 4x the idle threshold in
+    # all, so every line and the result arriving is the call allowed to finish.
+    # Counted, not timed (#3731).
+    assert outcome.total_events == 13, "the call should have been allowed to finish"
 
 
 def test_the_result_event_survives_the_delta_flood():
@@ -137,17 +135,18 @@ def test_the_result_event_survives_the_delta_flood():
 def test_a_silent_call_is_killed_at_the_idle_threshold():
     """A process producing nothing dies at the threshold, not at the backstop."""
     proc = _spawn(_SILENT, "60")
-    started = time.monotonic()
     outcome = _stream_with_idle_timeout(
         proc, content="", idle_timeout=2, wall_timeout=600
     )
-    elapsed = time.monotonic() - started
 
     assert outcome.timed_out
+    # The point of the mechanism: the idle threshold fired, not the 600s
+    # backstop, which would report "wall".
     assert outcome.timeout_kind == "idle"
     assert outcome.silent_seconds >= 2
-    # The point of the mechanism: it did not wait out the 600s backstop.
-    assert elapsed < 15, f"idle kill took {elapsed:.1f}s"
+    # And the kill landed: a child left to sleep out its 60s exits 0 (#3731:
+    # shown by how the child ended, not by a wall-clock bound).
+    assert proc.wait() != 0, "the child ran to its end; the kill did not land"
 
 
 def test_a_call_that_goes_quiet_mid_stream_is_still_killed():
@@ -165,16 +164,14 @@ def test_a_call_that_goes_quiet_mid_stream_is_still_killed():
         "time.sleep(60)\n"
     )
     proc = _spawn(hangs_after_burst)
-    started = time.monotonic()
     outcome = _stream_with_idle_timeout(
         proc, content="", idle_timeout=2, wall_timeout=None
     )
-    elapsed = time.monotonic() - started
 
     assert outcome.timed_out
     assert outcome.timeout_kind == "idle"
     assert outcome.total_events == 1, "it did produce something, once"
-    assert elapsed < 15
+    assert proc.wait() != 0, "the child slept out its 60s; the kill did not land"
 
 
 def test_the_wall_backstop_still_exists_for_a_call_that_streams_forever():

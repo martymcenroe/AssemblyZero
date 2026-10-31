@@ -1467,6 +1467,30 @@ class TestNpmTestScript:
         assert dependabot_review._npm_test_script(tmp_path) is None
 
 
+def _git_in(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+    )
+
+
+@pytest.fixture
+def linked_worktree(tmp_path):
+    """A throwaway repository and one linked worktree of it, both real git
+    state: ``_remove_node_modules`` decides by asking git (#3518, #4242)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_in(repo, "init", "-b", "main")
+    _git_in(repo, "config", "user.email", "t@example.com")
+    _git_in(repo, "config", "user.name", "Test")
+    (repo / "f.txt").write_text("x", encoding="utf-8")
+    _git_in(repo, "add", "f.txt")
+    _git_in(repo, "-c", "commit.gpgsign=false", "commit", "-m", "init")
+    wt = tmp_path / "wt"
+    _git_in(repo, "worktree", "add", "-b", "wt-branch", str(wt))
+    return repo, wt
+
+
 class TestRunJsGate:
     """#1839: npm install + test per touched dir, node_modules cleanup."""
 
@@ -1541,26 +1565,54 @@ class TestRunJsGate:
         assert calls[0]["cwd"] == str(tmp_path / "dashboard")
         assert "'dashboard'" in desc
 
-    def test_node_modules_removed_after_gate(self, monkeypatch, tmp_path):
-        self._pkg(tmp_path)
-        nm = tmp_path / "node_modules" / "leftover"
+    # #4242: since #3518, `_remove_node_modules` removes node_modules only
+    # inside a LINKED worktree (the audit's own) and never in a main checkout,
+    # whose node_modules is the operator's. These two ran on a bare tmp_path,
+    # which is not a repository, so the gate refused and they failed. They now
+    # run where the audit really runs: a linked worktree of a throwaway repo.
+
+    def test_node_modules_removed_after_gate(self, monkeypatch, linked_worktree):
+        _, wt = linked_worktree
+        self._pkg(wt)
+        nm = wt / "node_modules" / "leftover"
         nm.mkdir(parents=True)
         (nm / "file.js").write_text("x", encoding="utf-8")
         calls: list = []
         self._stub_run(monkeypatch, calls)
-        dependabot_review.run_js_gate(tmp_path, ["."])
-        assert not (tmp_path / "node_modules").exists(), (
+        dependabot_review.run_js_gate(wt, ["."])
+        assert not (wt / "node_modules").exists(), (
             "node_modules must be removed -- git worktree remove (no "
             "--force) refuses on untracked files"
         )
 
-    def test_node_modules_removed_even_on_failure(self, monkeypatch, tmp_path):
-        self._pkg(tmp_path)
-        (tmp_path / "node_modules").mkdir()
+    def test_node_modules_removed_even_on_failure(self, monkeypatch, linked_worktree):
+        _, wt = linked_worktree
+        self._pkg(wt)
+        (wt / "node_modules").mkdir()
         calls: list = []
         self._stub_run(monkeypatch, calls, test_exit=1)
-        dependabot_review.run_js_gate(tmp_path, ["."])
-        assert not (tmp_path / "node_modules").exists()
+        dependabot_review.run_js_gate(wt, ["."])
+        assert not (wt / "node_modules").exists()
+
+    @pytest.mark.parametrize("where", ["main checkout", "not a repository"])
+    def test_node_modules_left_in_place_outside_a_linked_worktree(
+            self, monkeypatch, linked_worktree, tmp_path, capsys, where):
+        """#4242 R2: the ownership gate refuses, says so on stderr, and the
+        operator's node_modules survives. Fails if the gate is removed."""
+        repo, _ = linked_worktree
+        pkg_dir = repo if where == "main checkout" else tmp_path / "plain"
+        self._pkg(pkg_dir)
+        kept = pkg_dir / "node_modules" / "theirs.js"
+        kept.parent.mkdir()
+        kept.write_text("x", encoding="utf-8")
+        calls: list = []
+        self._stub_run(monkeypatch, calls)
+
+        dependabot_review.run_js_gate(pkg_dir, ["."])
+
+        assert kept.is_file(), f"node_modules in a {where} must be left in place"
+        err = capsys.readouterr().err
+        assert "REFUSED:" in err and "not inside a linked worktree" in err
 
     def test_env_strips_virtual_env(self, monkeypatch, tmp_path):
         """Compose with #1415: npm subprocesses get the cleaned env too."""

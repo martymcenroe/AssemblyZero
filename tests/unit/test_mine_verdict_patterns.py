@@ -3,7 +3,6 @@
 Issue #308: Tests for parse_verdict_file, classify_issue, mine_patterns.
 """
 
-import pytest
 from pathlib import Path
 
 from tools.mine_verdict_patterns import (
@@ -199,9 +198,15 @@ class TestMain:
         assert exit_code == 1
 
     def test_runs_on_real_lineage(self):
-        """Integration test: runs on actual lineage if available."""
-        lineage = Path("docs/lineage/active")
-        if not lineage.exists():
-            pytest.skip("No lineage directory")
-        exit_code = main(["--dry-run"])
+        """Integration test: runs on the checkout's own lineage.
+
+        #4167: it read ``docs/lineage/active`` under the working directory and
+        skipped when that was absent, so from anywhere but the checkout it
+        either skipped, which read as a pass, or mined another directory and
+        failed. The lineage is tracked, so it is always there to mine; its
+        absence is a failure, named.
+        """
+        lineage = Path(__file__).resolve().parents[2] / "docs" / "lineage" / "active"
+        assert lineage.is_dir(), f"{lineage} not found: the tracked lineage is missing"
+        exit_code = main(["--dry-run", "--lineage-dir", str(lineage)])
         assert exit_code == 0

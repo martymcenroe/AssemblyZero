@@ -72,8 +72,11 @@ def _spawn_tree() -> tuple[subprocess.Popen, int]:
     return parent, child_pid
 
 
-def _only_the_orchestrate_child():
+def _only_the_orchestrate_child(finished_marker=None):
     """Replace ONLY the orchestrate child with a long sleeper.
+
+    Given `finished_marker`, the sleeper writes that file when its 120 seconds
+    are up, so a test can tell a child the kill stopped from one that ran out.
 
     `monkeypatch.setattr(sr.subprocess, "Popen", ...)` patches the shared
     `subprocess` module, and `subprocess.run` builds on `Popen` -- so a
@@ -94,8 +97,20 @@ def _only_the_orchestrate_child():
         if not is_orchestrate:
             return real_popen(cmd, **kwargs)
         kwargs.pop("env", None)
+        if finished_marker is None:
+            return real_popen(
+                [sys.executable, "-c", "import time; time.sleep(120)"], **kwargs,
+            )
         return real_popen(
-            [sys.executable, "-c", "import time; time.sleep(120)"], **kwargs,
+            [
+                sys.executable, "-c",
+                (
+                    "import pathlib, sys, time; time.sleep(120); "
+                    "pathlib.Path(sys.argv[1]).write_text('')"
+                ),
+                str(finished_marker),
+            ],
+            **kwargs,
         )
 
     return popen
@@ -199,7 +214,10 @@ class TestTheKillFileStopsTheRealLauncherMidCall:
         log_dir.mkdir()
 
         monkeypatch.setattr(sr, "ensure_base", lambda *_a, **_k: "arc")
-        monkeypatch.setattr(sr.subprocess, "Popen", _only_the_orchestrate_child())
+        finished = tmp_path / "child-finished"
+        monkeypatch.setattr(
+            sr.subprocess, "Popen", _only_the_orchestrate_child(finished),
+        )
 
         # Drop the stop file once the child is genuinely mid-call.
         import threading
@@ -210,14 +228,14 @@ class TestTheKillFileStopsTheRealLauncherMidCall:
 
         threading.Thread(target=drop, daemon=True).start()
 
-        started = time.time()
         code = sr.roll_issue(repo, 1, log_dir, tmp_path, [])
-        elapsed = time.time() - started
 
         assert code == KILL_EXIT_CODE
-        assert elapsed < 60, (
-            f"the stop took {elapsed:.0f}s; the child sleeps 120s, so a value "
-            "near that means the kill did not land mid-call"
+        # The child writes `finished` when its 120s are up, so its absence is
+        # the kill landing mid-call. Shown by how the child ended, not by a
+        # wall-clock bound (#3731).
+        assert not finished.exists(), (
+            "the child slept out its 120s; the kill did not land mid-call"
         )
 
     def test_the_run_log_records_an_ordered_stop(self, repo, tmp_path, monkeypatch):

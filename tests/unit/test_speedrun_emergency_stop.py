@@ -139,22 +139,26 @@ class TestKillWatchMidCall:
         assert any(KILLED_MARKER in m for m in messages)
         assert any("mid-call" in m for m in messages)
 
-    def test_stop_lands_within_a_poll_interval(self, repo):
-        """The operator has already decided; the stop should land in seconds."""
+    def test_stop_lands_while_the_child_is_still_running(self, repo):
+        """The operator has already decided; the stop lands before the child
+        would have ended on its own.
+
+        A child left alone sleeps out its 30s and exits 0, so a non-zero exit
+        is the kill landing mid-call. That is shown by how the child ended, not
+        by a wall-clock bound (#3731).
+        """
         proc = self._sleeper()
         watch = KillWatch(repo, 1, poll_seconds=0.05)
         try:
             with watch.watch(proc):
                 time.sleep(0.1)
-                dropped = time.monotonic()
                 (repo / "data" / "speedrun" / "KILL").write_text("", encoding="utf-8")
-                proc.wait(timeout=15)
-                elapsed = time.monotonic() - dropped
+                returncode = proc.wait()
         finally:
             if proc.poll() is None:  # pragma: no cover
                 proc.kill()
         assert watch.fired is True
-        assert elapsed < 10, f"stop took {elapsed:.1f}s to land"
+        assert returncode != 0, "the child slept out its 30s; the stop did not land"
 
     def test_child_finishing_on_its_own_does_not_fire(self, repo):
         """No stop file, no kill -- the watch must not invent one."""
