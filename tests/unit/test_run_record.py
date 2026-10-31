@@ -190,13 +190,14 @@ class TestTheToolsWriteTheRecord:
             "--type", "lld", "--issue", "42", "--mock",
             "--repo", str(target_repo), "--base-branch", "main",
         ])
+        # #4100 (ledger 0908, line 931): the crash is recorded, then raised
+        # for main's handler to alert; it is no longer swallowed into a 1.
         with patch(
             "tools.run_requirements_workflow.create_requirements_graph",
             side_effect=RuntimeError("graph exploded"),
-        ):
-            rc = run_single_workflow(args, target_repo.parent, target_repo)
+        ), pytest.raises(RuntimeError, match="graph exploded"):
+            run_single_workflow(args, target_repo.parent, target_repo)
 
-        assert rc == 1
         runs = target_repo / "data" / "speedrun" / "runs"
         events = list(runs.glob("lld-issue42-*-events.log"))
         assert len(events) == 1

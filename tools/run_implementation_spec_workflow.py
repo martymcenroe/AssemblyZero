@@ -42,6 +42,7 @@ import argparse
 import os
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,20 @@ from assemblyzero.workflows.implementation_spec.graph import (
 )
 from assemblyzero.workflows.implementation_spec.nodes.load_lld import find_lld_path
 from assemblyzero.workflows.implementation_spec.state import ImplementationSpecState
+
+#: This entry point, as its alerts and its start-up check name it.
+ENTRY = "tools/run_implementation_spec_workflow.py"
+
+
+class RunFailed(Exception):
+    """A failure this entry point names itself (ADR 0236, #4098).
+
+    Raised for what the tool owns: a bad argument, a target it cannot
+    resolve, an LLD that is not there, a refused resume, a run that ended in
+    an error the HALT node never saw. ``main``'s one handler prints it as one
+    ERROR line on stderr, alerts the operator, and returns 1; any other
+    exception gets its traceback as well.
+    """
 
 
 # =============================================================================
@@ -278,8 +293,14 @@ def _detect_repo_from_cwd() -> Path:
     """Detect git repo from current working directory.
 
     Returns:
-        Path to git repo root, or CWD if not in a git repo.
+        Path to git repo root.
+
+    Raises:
+        RunFailed: git timed out or is not installed (ledger 0908, line 293),
+            or the working directory is in no repository (line 296). Each
+            used to return the working directory as the target.
     """
+    cwd = Path.cwd()
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -288,12 +309,22 @@ def _detect_repo_from_cwd() -> Path:
             encoding="utf-8",
             timeout=10,
         )
-        if result.returncode == 0:
-            return Path(result.stdout.strip()).resolve()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    return Path.cwd().resolve()
+    except subprocess.TimeoutExpired as exc:
+        raise RunFailed(
+            f"git rev-parse --show-toplevel timed out after {exc.timeout}s in {cwd}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise RunFailed(
+            f"git not found: cannot find the repository that holds the working "
+            f"directory {cwd}; pass --repo"
+        ) from exc
+    if result.returncode != 0:
+        raise RunFailed(
+            f"no --repo was given and the working directory {cwd} is in no git "
+            f"repository (git rev-parse exited {result.returncode}): "
+            f"{(result.stderr or '').strip()}. Pass --repo with the target repository"
+        )
+    return Path(result.stdout.strip()).resolve()
 
 
 def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
@@ -305,13 +336,19 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
     Priority for target_repo:
     1. --repo flag (explicit override)
     2. Git repo of current working directory
-    3. Current working directory (fallback)
+
+    A working directory in no repository is refused rather than used as the
+    target (ledger 0908, line 296).
 
     Args:
         args: Parsed CLI arguments.
 
     Returns:
         Tuple of (assemblyzero_root, target_repo) as Path objects.
+
+    Raises:
+        RunFailed: the target cannot be resolved, or it is the AssemblyZero
+            root without --no-worktree.
     """
     # assemblyzero_root: from env var or package location
     assemblyzero_root_env = os.environ.get("ASSEMBLYZERO_ROOT")
@@ -327,24 +364,16 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
     else:
         target_repo = _detect_repo_from_cwd()
 
-    # Issue #825: Enforce worktree isolation for AssemblyZero itself
+    # Issue #825: Enforce worktree isolation for AssemblyZero itself.
+    # Ledger 0908, line 335: this printed on stdout and exited 1, no alert.
     if target_repo.resolve() == assemblyzero_root.resolve():
         if not getattr(args, "no_worktree", False):
-            print()
-            print("=" * 60)
-            print("ERROR: Refusing to run in the AssemblyZero root directory.")
-            print("=" * 60)
-            print("To prevent branch pollution, you must run in an isolated worktree.")
-            print()
-            print("1. Create a worktree:")
-            print("   git worktree add ../AssemblyZero-ISSUE -b branch-name")
-            print()
-            print("2. Run the workflow pointing to the worktree:")
-            print("   python tools/run_implementation_spec_workflow.py ... --repo ../AssemblyZero-ISSUE")
-            print()
-            print("If you MUST run on main, use the --no-worktree escape hatch.")
-            print("=" * 60)
-            sys.exit(1)
+            raise RunFailed(
+                f"refusing to run in the AssemblyZero root {assemblyzero_root}: a "
+                "run there pollutes its branches. Create a worktree (git worktree "
+                "add --relative-paths ../AssemblyZero-ISSUE -b branch-name) and pass "
+                "--repo ../AssemblyZero-ISSUE, or use --no-worktree if you must run on main"
+            )
 
     return assemblyzero_root, target_repo
 
@@ -377,6 +406,29 @@ def apply_review_config(args: argparse.Namespace) -> None:
 # =============================================================================
 
 
+def resolve_lld_path(args: argparse.Namespace, target_repo: Path) -> Path:
+    """The LLD this run reads: --lld (relative to the target unless
+    absolute), or the one find_lld_path discovers for the issue.
+
+    Raises:
+        RunFailed: there is no such file (ledger 0908, line 414). The path
+            used to be left empty and the workflow started anyway.
+    """
+    if args.lld:
+        p = Path(args.lld)
+        lld = (p if p.is_absolute() else target_repo / p).resolve()
+        if not lld.is_file():
+            raise RunFailed(f"--lld {args.lld}: no LLD file at {lld}")
+        return lld
+    found = find_lld_path(args.issue, target_repo)
+    if not found:
+        raise RunFailed(
+            f"no LLD for issue #{args.issue} under {target_repo}: the spec "
+            "workflow needs an approved LLD (pass --lld to name one)"
+        )
+    return Path(found)
+
+
 def build_initial_state(
     args: argparse.Namespace,
     assemblyzero_root: Path,
@@ -391,6 +443,9 @@ def build_initial_state(
 
     Returns:
         Initialized ImplementationSpecState.
+
+    Raises:
+        RunFailed: there is no LLD to read (``resolve_lld_path``).
     """
     # #3563: the run's model profile, snapshotted into state below.
     from assemblyzero.core.seats import describe, profile_from_args, seat_in
@@ -399,20 +454,8 @@ def build_initial_state(
         args, target_repo, {"drafter": ("spec.draft",), "reviewer": ("spec.review",)},
     )
 
-    # Resolve LLD path
-    lld_path = ""
-    if args.lld:
-        # Resolve relative to target_repo if not absolute
-        p = Path(args.lld)
-        if not p.is_absolute():
-            lld_path = str((target_repo / p).resolve())
-        else:
-            lld_path = str(p.resolve())
-    else:
-        # Auto-discover LLD from issue number
-        found = find_lld_path(args.issue, target_repo)
-        if found:
-            lld_path = str(found)
+    # Resolve LLD path (raises when there is none, ledger 0908, line 414)
+    lld_path = str(resolve_lld_path(args, target_repo))
 
     # Issue #525: Create lineage dir so drafts are persisted (survives crashes)
     lineage_base = target_repo / "docs" / "lineage" / "active"
@@ -523,7 +566,7 @@ def print_result(final_state: dict[str, Any]) -> None:
 
     if final_state.get("error_message"):
         print("Status:   ERROR")
-        print(f"Error:    {final_state['error_message']}")
+        print(f"ERROR: {final_state['error_message']}", file=sys.stderr)
     else:
         verdict = final_state.get("review_verdict", "UNKNOWN")
         spec_path = final_state.get("spec_path", "")
@@ -542,20 +585,20 @@ def print_result(final_state: dict[str, Any]) -> None:
         for node_name, cost in sorted(node_costs.items()):
             if cost > 0:
                 print(f"  {node_name}: ${cost:.4f}")
-        try:
-            from assemblyzero.telemetry import emit
-            emit(
-                "workflow.cost",
-                repo="AssemblyZero",
-                metadata={
-                    "workflow_type": "implementation_spec",
-                    "issue_number": final_state.get("issue_number", 0),
-                    "total_cost_usd": round(total, 6),
-                    "cost_by_node": {k: round(v, 6) for k, v in node_costs.items()},
-                },
-            )
-        except ImportError:
-            pass
+        # Ledger 0908, line 557: an ImportError here dropped the cost
+        # telemetry silently. The module is part of AssemblyZero; a run that
+        # cannot import it fails.
+        from assemblyzero.telemetry import emit
+        emit(
+            "workflow.cost",
+            repo="AssemblyZero",
+            metadata={
+                "workflow_type": "implementation_spec",
+                "issue_number": final_state.get("issue_number", 0),
+                "total_cost_usd": round(total, 6),
+                "cost_by_node": {k: round(v, 6) for k, v in node_costs.items()},
+            },
+        )
 
     print("=" * 60)
 
@@ -614,7 +657,13 @@ def run_workflow(
         target_repo: Path to target repository.
 
     Returns:
-        Exit code (0 for success, non-zero for error).
+        0 when the spec workflow finished, 1 when it halted (the HALT node
+        alerted), 130 when the operator interrupted it.
+
+    Raises:
+        RunFailed: no LLD (ledger 0908, line 414), a refused resume contract
+            (line 635), or an error that ended the run without HALT (line 683).
+        Exception: anything the graph raised (line 696); main's handler alerts.
     """
     # Print header
     print_header(args, assemblyzero_root, target_repo)
@@ -623,16 +672,31 @@ def run_workflow(
     if args.dry_run:
         return run_dry_run(args, target_repo)
 
+    # Ledger 0908, line 414: the LLD is found, or the run refuses, before the
+    # resume contract is consumed and before any state or lineage is built.
+    resolve_lld_path(args, target_repo)
+
     # #2570: a resume finds the world the halt described, or refuses by
     # name -- before any state is built and any token is spent. A fresh
     # run has no contract and passes silently.
     from assemblyzero.core.resume_contract import check_and_consume
 
+    # Ledger 0908, line 635: a refusal returned 1 with no alert. Its lines
+    # still print as they come, and become the alert's cause.
+    contract_lines: list[str] = []
+
+    def _contract_log(line: str) -> None:
+        print(line)
+        contract_lines.append(line.strip())
+
     if not check_and_consume(
         "implementation_spec", args.issue,
         accept_changed=args.accept_changed_inputs,
+        log=_contract_log,
     ):
-        return 1
+        raise RunFailed(
+            "the resume contract refused the run: " + "; ".join(contract_lines)
+        )
 
     # Build initial state
     state = build_initial_state(args, assemblyzero_root, target_repo)
@@ -677,29 +741,31 @@ def run_workflow(
                 if node_output:
                     final_state.update(node_output)
 
-                # Check for errors from nodes (node_output may be None)
+                # Check for errors from nodes (node_output may be None).
+                # Ledger 0908, line 683: on stdout; it is on stderr now.
                 error = (node_output or {}).get("error_message", "")
                 if error:
-                    print(f"\n[ERROR] {error}")
-
-        print_result(final_state)
-
-        if final_state.get("error_message"):
-            return 1
-
-        return 0
+                    print(f"\n[ERROR] {error}", file=sys.stderr)
 
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted. Re-run the same command to auto-recover.")
         return 130
 
-    except Exception as e:
-        print(f"\nERROR: {e}")
-        if args.debug:
-            import traceback
+    # Ledger 0908, line 696: a graph exception printed on stdout with no
+    # type, a traceback only under --debug, and no alert. It propagates now;
+    # main's handler prints its type and traceback and alerts.
 
-            traceback.print_exc()
-        return 1
+    print_result(final_state)
+
+    error = final_state.get("error_message")
+    if error:
+        if final_state.get("workflow_status") == "halted":
+            # The HALT node saved the state and alerted the operator.
+            return 1
+        # An error that reached the end without HALT has alerted no one.
+        raise RunFailed(f"the spec workflow ended in an error HALT never saw: {error}")
+
+    return 0
 
 
 # =============================================================================
@@ -710,6 +776,11 @@ def run_workflow(
 def main() -> int:
     """Main entry point.
 
+    #4098 (ADR 0236): one handler owns every failure below it. It prints the
+    failure at ERROR on stderr, with its traceback when the tool did not name
+    it itself, alerts the operator, and returns 1. A run that halted returns
+    1 without a second alert: the HALT node sent one.
+
     Returns:
         Exit code (0 for success, non-zero for error).
     """
@@ -718,8 +789,29 @@ def main() -> int:
     # #3729 (ADR 0236): every failure alerts, so a run whose alert channel
     # cannot work refuses before its first node. Mock and dry runs too.
     from assemblyzero.core import alert
-    alert.require_alert_channel("tools/run_implementation_spec_workflow.py")
+    alert.require_alert_channel(ENTRY)
 
+    try:
+        return _run(args)
+    except Exception as exc:  # noqa: BLE001 - the one handler: reported and alerted below
+        named = isinstance(exc, RunFailed)
+        cause = str(exc) if named else f"{type(exc).__name__}: {exc}"
+        print(f"[spec] ERROR: {cause}", file=sys.stderr)
+        if not named:
+            traceback.print_exc(file=sys.stderr)
+        alert.alert_operator(
+            what="the implementation spec workflow failed",
+            where=f"{ENTRY} main",
+            cause=cause,
+            consequence="the run stopped and exited 1; nothing after the failure ran",
+            repo=getattr(args, "resolved_repo", "") or (args.repo or ""),
+            issue=args.issue,
+        )
+        return 1
+
+
+def _run(args: argparse.Namespace) -> int:
+    """Everything main guards. Raises on every failure."""
     # Issue #773: Set API policy before any providers are created
     from assemblyzero.core.llm_provider import set_api_policy
     set_api_policy(args.allow_api)
@@ -727,21 +819,22 @@ def main() -> int:
     # Apply review configuration
     apply_review_config(args)
 
-    # Validate issue number
+    # Validate issue number (ledger 0908, line 727: stdout, no alert)
     if args.issue <= 0:
-        print("ERROR: --issue must be a positive integer")
-        return 1
+        raise RunFailed(f"--issue must be a positive integer, not {args.issue}")
 
     # Resolve paths
     assemblyzero_root, target_repo = resolve_roots(args)
+    # The alert of a later failure names the repository the run resolved.
+    args.resolved_repo = str(target_repo)
 
     if args.debug:
         print(f"DEBUG: assemblyzero_root = {assemblyzero_root}")
         print(f"DEBUG: target_repo = {target_repo}")
 
+    # Ledger 0908, line 738: stdout, no alert.
     if not target_repo.exists():
-        print(f"ERROR: Repository path does not exist: {target_repo}")
-        return 1
+        raise RunFailed(f"repository path does not exist: {target_repo}")
 
     # Set environment variables for mode flags
     if not args.human_gate_enabled:

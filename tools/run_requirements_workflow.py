@@ -37,6 +37,7 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,25 @@ from assemblyzero.workflows.requirements.step_budget import (  # noqa: E402  (#2
     invoke_with_budget,
 )
 
+#: This entry point, as its alerts and its start-up check name it.
+ENTRY = "tools/run_requirements_workflow.py"
+
+
+class RunFailed(Exception):
+    """A failure this entry point names itself (ADR 0236, #4100).
+
+    Raised for what the tool owns: a bad argument, an input that is missing or
+    cannot be read, a refused start, a run that ended without its product.
+    ``main``'s one handler prints it as one ERROR line on stderr, alerts the
+    operator, and returns 1; any other exception gets its traceback as well.
+    ``alerted`` is True when the HALT node already alerted for the same
+    failure, so ``main`` reports it without a second alert.
+    """
+
+    def __init__(self, message: str, *, alerted: bool = False) -> None:
+        super().__init__(message)
+        self.alerted = alerted
+
 
 # =============================================================================
 # Checkpoint Database (SQLite)
@@ -101,22 +121,33 @@ def get_checkpoint_db_path() -> Path:
 def checkpoint_exists(slug: str) -> bool:
     """Check if checkpoint exists for a slug.
 
+    False means the database holds no checkpoint for the slug, which is a
+    legitimate answer: sqlite creates an empty database on first use. A
+    database that cannot be opened or read raises naming it (ledger 0908, line
+    118); it used to return False, and a resume read that as "no checkpoint".
+
     Args:
         slug: Workflow slug to check.
 
     Returns:
         True if checkpoint exists.
-    """
-    try:
-        from langgraph.checkpoint.sqlite import SqliteSaver
 
-        db_path = get_checkpoint_db_path()
+    Raises:
+        RunFailed: the checkpoint database cannot be read.
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    db_path = get_checkpoint_db_path()
+    try:
         with SqliteSaver.from_conn_string(str(db_path)) as memory:
             config = {"configurable": {"thread_id": slug}}
             checkpoints = list(memory.list(config))
             return len(checkpoints) > 0
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RunFailed(
+            f"cannot read the checkpoint database {db_path}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def audit_dir_exists(slug: str, target_repo: Path) -> bool:
@@ -136,16 +167,25 @@ def audit_dir_exists(slug: str, target_repo: Path) -> bool:
 def list_briefs(target_repo: Path) -> list[Path]:
     """List all brief files in ideas/active/.
 
+    An empty list means the directory holds no briefs, which is an answer. A
+    missing directory raises (ledger 0908, line 1203): it used to return an
+    empty list, and --all exited 0 as if the batch were done.
+
     Args:
         target_repo: Target repository path.
 
     Returns:
         List of paths to brief files.
+
+    Raises:
+        RunFailed: ideas/active/ does not exist.
     """
     ideas_dir = target_repo / IDEAS_ACTIVE_DIR
 
-    if not ideas_dir.exists():
-        return []
+    if not ideas_dir.is_dir():
+        raise RunFailed(
+            f"no ideas/active/ directory at {ideas_dir}: --all has no briefs to process"
+        )
 
     # Find all .md files, sorted alphabetically
     briefs = sorted(ideas_dir.glob("*.md"))
@@ -164,16 +204,23 @@ def extract_brief_title(brief_path: Path) -> str:
         brief_path: Path to brief file.
 
     Returns:
-        Title string or "(no title)" if not found.
+        Title string, or "(no title)" when the brief has no "# " heading,
+        which is an answer about its content.
+
+    Raises:
+        RunFailed: the brief cannot be read (ledger 0908, line 175); it used
+            to be titled "(no title)" as if it were empty.
     """
     try:
         content = brief_path.read_text(encoding="utf-8", errors="replace")
-        for line in content.split("\n"):
-            line = line.strip()
-            if line.startswith("# "):
-                return line[2:].strip()
-    except (OSError, UnicodeDecodeError):
-        pass
+    except OSError as exc:
+        raise RunFailed(
+            f"cannot read the brief {brief_path}: {type(exc).__name__}: {exc}"
+        ) from exc
+    for line in content.split("\n"):
+        line = line.strip()
+        if line.startswith("# "):
+            return line[2:].strip()
     return "(no title)"
 
 
@@ -184,20 +231,28 @@ def select_brief_file(target_repo: Path) -> str | None:
         target_repo: Path to target repository.
 
     Returns:
-        Selected brief file path (relative to repo), or None if cancelled.
+        Selected brief file path (relative to repo), or None when the operator
+        quits the menu. Nothing else returns None.
+
+    Raises:
+        RunFailed: ideas/active/ is missing or holds no brief (ledger 0908,
+            lines 192 and 199); both used to return None, which main read as
+            a cancel and exited 0.
     """
     ideas_dir = target_repo / "ideas" / "active"
 
-    if not ideas_dir.exists():
-        print(f"ERROR: ideas/active/ directory not found at {ideas_dir}")
-        return None
+    if not ideas_dir.is_dir():
+        raise RunFailed(
+            f"no ideas/active/ directory at {ideas_dir}: --select has no brief to offer"
+        )
 
     # Find markdown files
     briefs = sorted(ideas_dir.glob("*.md"))
 
     if not briefs:
-        print("ERROR: No brief files (*.md) found in ideas/active/")
-        return None
+        raise RunFailed(
+            f"no brief files (*.md) in {ideas_dir}: --select has no brief to offer"
+        )
 
     # Display menu
     print(f"\n{'=' * 60}")
@@ -241,7 +296,14 @@ def select_github_issue(target_repo: Path) -> int | None:
         target_repo: Path to target repository (for gh CLI context).
 
     Returns:
-        Selected issue number, or None if cancelled.
+        Selected issue number, or None when the operator quits the menu.
+        Nothing else returns None.
+
+    Raises:
+        RunFailed: gh fails, times out, is missing or prints something that
+            is not JSON (ledger 0908, lines 259-270), or there is no open
+            issue to offer (line 1668). Each used to return None, which main
+            read as a cancel and exited 0.
     """
     print("\nFetching open issues from GitHub...")
 
@@ -254,26 +316,33 @@ def select_github_issue(target_repo: Path) -> int | None:
             timeout=30,
             cwd=str(target_repo),
         )
+    except subprocess.TimeoutExpired as exc:
+        raise RunFailed(
+            f"gh issue list timed out after {exc.timeout}s in {target_repo}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise RunFailed(
+            "gh CLI not found. Install GitHub CLI: https://cli.github.com/"
+        ) from exc
 
-        if result.returncode != 0:
-            print(f"ERROR: Failed to fetch issues: {result.stderr.strip()}")
-            return None
+    if result.returncode != 0:
+        raise RunFailed(
+            f"gh issue list failed in {target_repo} (exit {result.returncode}): "
+            f"{(result.stderr or '').strip()}"
+        )
 
+    try:
         issues = json.loads(result.stdout)
-
-    except subprocess.TimeoutExpired:
-        print("ERROR: Timeout fetching issues from GitHub")
-        return None
-    except FileNotFoundError:
-        print("ERROR: gh CLI not found. Install GitHub CLI: https://cli.github.com/")
-        return None
-    except json.JSONDecodeError:
-        print("ERROR: Failed to parse GitHub response")
-        return None
+    except json.JSONDecodeError as exc:
+        raise RunFailed(
+            f"gh issue list printed output that is not JSON ({exc}): "
+            f"{(result.stdout or '').strip()[:200]}"
+        ) from exc
 
     if not issues:
-        print("No open issues found.")
-        return None
+        raise RunFailed(
+            f"no open issues in {target_repo}: --select has no issue to offer"
+        )
 
     # Display menu
     print(f"\n{'=' * 60}")
@@ -542,7 +611,13 @@ def _detect_repo_from_path(file_path: Path) -> Path | None:
         file_path: Path to a file or directory.
 
     Returns:
-        Path to git repo root, or None if not in a git repo.
+        Path to git repo root, or None when git says the path is in no
+        repository. That is an answer: resolve_roots then takes the working
+        directory's repository, the documented order (#115).
+
+    Raises:
+        RunFailed: git timed out or is not installed (ledger 0908, line 560);
+            it used to fall back to the working directory's repository.
     """
     # Start from file's directory
     search_dir = file_path.parent if file_path.is_file() else file_path
@@ -555,10 +630,17 @@ def _detect_repo_from_path(file_path: Path) -> Path | None:
             encoding="utf-8",
             timeout=10,
         )
-        if result.returncode == 0:
-            return Path(result.stdout.strip()).resolve()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
+    except subprocess.TimeoutExpired as exc:
+        raise RunFailed(
+            f"git rev-parse --show-toplevel timed out after {exc.timeout}s in "
+            f"{search_dir}, the brief's directory"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise RunFailed(
+            f"git not found: cannot find the repository that holds {search_dir}"
+        ) from exc
+    if result.returncode == 0:
+        return Path(result.stdout.strip()).resolve()
 
     return None
 
@@ -567,8 +649,14 @@ def _detect_repo_from_cwd() -> Path:
     """Detect git repo from current working directory.
 
     Returns:
-        Path to git repo root, or CWD if not in a git repo.
+        Path to git repo root.
+
+    Raises:
+        RunFailed: git timed out, is not installed, or says the working
+            directory is in no repository (ledger 0908, lines 582 and 585).
+            Each used to return the working directory itself as the target.
     """
+    cwd = Path.cwd()
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -577,12 +665,22 @@ def _detect_repo_from_cwd() -> Path:
             encoding="utf-8",
             timeout=10,
         )
-        if result.returncode == 0:
-            return Path(result.stdout.strip()).resolve()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    return Path.cwd().resolve()
+    except subprocess.TimeoutExpired as exc:
+        raise RunFailed(
+            f"git rev-parse --show-toplevel timed out after {exc.timeout}s in {cwd}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise RunFailed(
+            f"git not found: cannot find the repository that holds the working "
+            f"directory {cwd}"
+        ) from exc
+    if result.returncode != 0:
+        raise RunFailed(
+            f"no --repo was given and the working directory {cwd} is in no git "
+            f"repository (git rev-parse exited {result.returncode}): "
+            f"{(result.stderr or '').strip()}"
+        )
+    return Path(result.stdout.strip()).resolve()
 
 
 def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
@@ -595,13 +693,19 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
     1. --repo flag (explicit override)
     2. Git repo containing the --brief file
     3. Git repo of current working directory
-    4. Current working directory (fallback)
+
+    A working directory in no repository is refused rather than used as the
+    target (ledger 0908, line 585).
 
     Args:
         args: Parsed CLI arguments.
 
     Returns:
         Tuple of (assemblyzero_root, target_repo) as Path objects.
+
+    Raises:
+        RunFailed: git cannot answer, the working directory is in no
+            repository, or the target is the AssemblyZero root.
     """
     # assemblyzero_root: from env var or package location
     assemblyzero_root_env = os.environ.get("ASSEMBLYZERO_ROOT")
@@ -627,20 +731,16 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
         # Fall back to CWD detection
         target_repo = _detect_repo_from_cwd()
 
-    # Issue #825: Worktree isolation — prevent running directly on AssemblyZero main
+    # Issue #825: Worktree isolation — prevent running directly on AssemblyZero main.
+    # Ledger 0908, line 633: it printed and exited 1 here, with no alert.
     if target_repo == assemblyzero_root and not getattr(args, "no_worktree", False):
-        print(
-            "\n[FAIL] ERROR: Target repo resolves to AssemblyZero root.\n"
-            "\n"
-            "Running workflows directly on the main branch risks polluting the\n"
-            "repository and causing conflicts with other agents.\n"
-            "\n"
-            "Options:\n"
-            "  1. Create a worktree:  git worktree add ../AssemblyZero-worktrees/825 -b 825-feature\n"
-            "  2. Use --no-worktree flag to override this check\n",
-            file=sys.stderr,
+        raise RunFailed(
+            f"the target repository resolves to the AssemblyZero root "
+            f"{assemblyzero_root}. A run there writes onto that checkout and "
+            "conflicts with other agents: run it from a worktree (git worktree "
+            "add --relative-paths ../AssemblyZero-worktrees/825 -b 825-feature), "
+            "or pass --no-worktree to override this check"
         )
-        sys.exit(1)
 
     return assemblyzero_root, target_repo
 
@@ -783,7 +883,14 @@ def run_single_workflow(
         target_repo: Path to target repository.
 
     Returns:
-        Exit code (0 for success, non-zero for error).
+        0 when the run produced its issue or LLD (or the operator chose manual
+        handling at a gate), 130 when the operator interrupted it.
+
+    Raises:
+        RunFailed: the run ended in an error, or ended without its product
+            (ledger 0908, lines 1541, 1551 and 1558).
+        Exception: anything the graph raised, after the run record and the
+            speed-run log keep it (line 931); main's handler alerts.
     """
     # #3503: the record opens before anything is printed, so the tag and the
     # log path are the first line and the header is already in the log. A
@@ -796,8 +903,16 @@ def run_single_workflow(
     # Print header
     print_header(args)
 
-    # Build initial state
-    state = build_initial_state(args, assemblyzero_root, target_repo)
+    # Build initial state. Ledger 0908, line 1698: a refusal here (a work
+    # branch as the base, a bad profile) escaped main as a bare traceback and
+    # left the record open; the record keeps it, and main's handler alerts.
+    try:
+        state = build_initial_state(args, assemblyzero_root, target_repo)
+    except Exception as e:
+        if record:
+            record.crash(e)
+            record.finish("halt", str(e))
+        raise
 
     if args.debug:
         print(f"DEBUG: Initial state keys: {list(state.keys())}")
@@ -907,19 +1022,6 @@ def run_single_workflow(
                 max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
             )
 
-        print_result(final_state)
-
-        if final_state.get("error_message"):
-            _finalize_speedrun("fail", fstate=final_state, error_msg=final_state.get("error_message", ""))
-            if record:
-                record.finish("fail", final_state.get("error_message", ""))
-            return 1
-
-        _finalize_speedrun("success", fstate=final_state)
-        if record:
-            record.finish("success")
-        return 0
-
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted by user.")
         _finalize_speedrun("halt", error_msg="user interrupt", notes="KeyboardInterrupt")
@@ -928,15 +1030,61 @@ def run_single_workflow(
         return 130
 
     except Exception as e:
-        print(f"\nERROR: {e}")
-        if args.debug:
-            import traceback
-            traceback.print_exc()
+        # Ledger 0908, line 931: this printed the message on stdout, with a
+        # traceback only under --debug, and returned 1 with no alert. The
+        # record and the speed-run log keep the crash; main's handler prints
+        # it at ERROR with its type and traceback and alerts.
         _finalize_speedrun("halt", error_msg=str(e), notes=f"exception:{type(e).__name__}")
         if record:
             record.crash(e)
             record.finish("halt", str(e))
-        return 1
+        raise
+
+    print_result(final_state)
+
+    failure = _run_failure(final_state)
+    if failure is not None:
+        _finalize_speedrun("fail", fstate=final_state, error_msg=str(failure))
+        if record:
+            record.finish("fail", str(failure))
+        raise failure
+
+    _finalize_speedrun("success", fstate=final_state)
+    if record:
+        record.finish("success")
+    return 0
+
+
+def _run_failure(final_state: dict[str, Any]) -> RunFailed | None:
+    """Why the ended run failed, or None when it produced what it was for.
+
+    The issue workflow's product is a filed issue (``issue_url``), the LLD
+    workflow's a saved LLD (``final_lld_path``). An error in the final state
+    is a failure; when the HALT node ran (it sets ``recovery_plan_path``) it
+    has already alerted, so the failure says so and main does not alert
+    twice. An end with neither a product nor an error is a failure too
+    (ledger 0908, lines 1551 and 1558; both exited 0). The one end without a
+    product that is not a failure is the operator choosing manual handling at
+    a human gate, which sets ``next_node`` to END: that is his decision.
+    """
+    error = (final_state.get("error_message") or "").strip()
+    if error:
+        return RunFailed(
+            f"the workflow ended in an error: {error}",
+            alerted=bool(final_state.get("recovery_plan_path")),
+        )
+    if final_state.get("next_node") == "END":
+        return None
+    if final_state.get("workflow_type", "lld") == "issue":
+        if not final_state.get("issue_url"):
+            return RunFailed(
+                "the issue workflow ended without filing an issue and recorded no error"
+            )
+    elif not final_state.get("final_lld_path"):
+        return RunFailed(
+            "the LLD workflow ended without saving an LLD and recorded no error"
+        )
+    return None
 
 
 def run_resume_review(
@@ -957,16 +1105,37 @@ def run_resume_review(
         target_repo: Path to target repository.
 
     Returns:
-        Exit code (0 for success, non-zero for error).
+        0 when the review run saved the LLD (or the operator chose manual
+        handling at a gate), 130 when the operator interrupted it.
+
+    Raises:
+        RunFailed: no resumable draft (ledger 0908, line 967), no
+            001-issue.md in its lineage (line 991), or the run ended in an
+            error or without an LLD.
+        Exception: anything the graph raised, after the run record keeps it
+            (line 1175); main's handler alerts.
     """
     issue_number = args.issue
 
     # Check that a resumable draft exists
     resume_info = _draft_is_resumable(issue_number, target_repo)
     if not resume_info:
-        print(f"ERROR: No resumable draft found for issue #{issue_number}")
-        print("  A resumable draft requires lineage with a draft file but no subsequent verdict.")
-        return 1
+        lineage = target_repo / AUDIT_ACTIVE_DIR / f"{issue_number}-lld"
+        raise RunFailed(
+            f"no resumable draft for issue #{issue_number}: --resume-review needs "
+            f"{lineage} to hold a draft with no verdict after it"
+        )
+
+    # Ledger 0908, line 991: the review used to run without the issue's body
+    # and title when the lineage had no 001-issue.md. It refuses before the
+    # record opens, since nothing has run.
+    issue_file = resume_info["lineage_dir"] / "001-issue.md"
+    if not issue_file.is_file():
+        raise RunFailed(
+            f"the lineage {resume_info['lineage_dir']} has no 001-issue.md: a "
+            "resumed review needs the issue's title and body, and would review "
+            "the draft without them"
+        )
 
     # #3503: a resumed run is a run; it leaves the same record.
     from assemblyzero.core.run_record import RunRecord
@@ -978,8 +1147,14 @@ def run_resume_review(
     print(f"  Draft iterations: {resume_info['draft_count']}")
     print()
 
-    # Build initial state and inject the existing draft
-    state = build_initial_state(args, assemblyzero_root, target_repo)
+    # Build initial state and inject the existing draft. Ledger 0908, line
+    # 1698: a refusal here keeps its record too.
+    try:
+        state = build_initial_state(args, assemblyzero_root, target_repo)
+    except Exception as e:
+        record.crash(e)
+        record.finish("halt", str(e))
+        raise
     state["current_draft"] = resume_info["draft_content"]
     state["current_draft_path"] = str(resume_info["draft_path"])
     state["audit_dir"] = str(resume_info["lineage_dir"])
@@ -987,15 +1162,13 @@ def run_resume_review(
     state["iteration_count"] = resume_info["draft_count"]
 
     # Load issue content from lineage (001-issue.md)
-    issue_file = resume_info["lineage_dir"] / "001-issue.md"
-    if issue_file.exists():
-        issue_content = issue_file.read_text(encoding="utf-8")
-        # Parse title from content
-        for line in issue_content.splitlines():
-            if line.startswith("# Issue #"):
-                state["issue_title"] = line.split(":", 1)[-1].strip() if ":" in line else ""
-                break
-        state["issue_body"] = issue_content
+    issue_content = issue_file.read_text(encoding="utf-8")
+    # Parse title from content
+    for line in issue_content.splitlines():
+        if line.startswith("# Issue #"):
+            state["issue_title"] = line.split(":", 1)[-1].strip() if ":" in line else ""
+            break
+    state["issue_body"] = issue_content
 
     if args.debug:
         print(f"DEBUG: Resume state keys: {list(state.keys())}")
@@ -1157,28 +1330,28 @@ def run_resume_review(
                     max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
                 )
 
-            print_result(final_state)
-
-            if final_state.get("error_message"):
-                record.finish("fail", final_state.get("error_message", ""))
-                return 1
-
-            record.finish("success")
-            return 0
-
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted by user.")
         record.finish("halt", "user interrupt")
         return 130
 
     except Exception as e:
-        print(f"\nERROR: {e}")
-        if args.debug:
-            import traceback
-            traceback.print_exc()
+        # Ledger 0908, line 1175: stdout, a traceback only under --debug,
+        # return 1 and no alert. The record keeps the crash; main's handler
+        # prints it at ERROR with its traceback and alerts.
         record.crash(e)
         record.finish("halt", str(e))
-        return 1
+        raise
+
+    print_result(final_state)
+
+    failure = _run_failure(final_state)
+    if failure is not None:
+        record.finish("fail", str(failure))
+        raise failure
+
+    record.finish("success")
+    return 0
 
 
 def run_all_briefs(
@@ -1193,19 +1366,29 @@ def run_all_briefs(
         assemblyzero_root: Path to AssemblyZero installation.
         target_repo: Path to target repository.
 
+    A brief that fails stops the batch (ADR 0236: a loop stops when one item
+    fails, and the batch's summary is shaped by every item). The failure
+    raises out of run_single_workflow, and main's handler names the brief and
+    alerts. Ledger 0908, line 1241: it used to print FAILED on stdout, go on
+    to the next brief, and exit 1 at the end with no alert.
+
     Returns:
-        Exit code (0 for success, non-zero for partial/full failure).
+        0 when every brief was processed or skipped, including when
+        ideas/active/ holds none: zero briefs is the whole batch done. 130
+        when the operator interrupted a brief; the batch stops with it.
+
+    Raises:
+        RunFailed: ideas/active/ is missing (line 1203), or a brief failed.
     """
     briefs = list_briefs(target_repo)
 
     if not briefs:
-        print("No briefs found in ideas/active/")
+        print("No briefs found in ideas/active/: nothing to process")
         return 0
 
     total = len(briefs)
     processed = 0
     skipped = 0
-    failed = 0
 
     print()
     print("=" * 60)
@@ -1233,12 +1416,15 @@ def run_all_briefs(
         print("        Status: PROCESSING...")
         exit_code = run_single_workflow(args, assemblyzero_root, target_repo)
 
-        if exit_code == 0:
-            processed += 1
-            print("        Result: SUCCESS")
-        else:
-            failed += 1
-            print(f"        Result: FAILED (exit code {exit_code})")
+        if exit_code != 0:
+            print(
+                f"        Result: INTERRUPTED (exit code {exit_code}); the batch "
+                f"stops at {brief_path.name}",
+                file=sys.stderr,
+            )
+            return exit_code
+        processed += 1
+        print("        Result: SUCCESS")
 
     # Print summary
     print()
@@ -1248,11 +1434,8 @@ def run_all_briefs(
     print(f"  Total:     {total}")
     print(f"  Processed: {processed}")
     print(f"  Skipped:   {skipped}")
-    print(f"  Failed:    {failed}")
     print("=" * 60)
 
-    if failed > 0:
-        return 1
     return 0
 
 
@@ -1269,7 +1452,13 @@ def run_resume_workflow(
         target_repo: Path to target repository.
 
     Returns:
-        Exit code (0 for success, non-zero for error).
+        What run_single_workflow returns.
+
+    Raises:
+        RunFailed: the brief is in none of the places --resume looks (ledger
+            0908, lines 1306 and 1330), the checkpoint database cannot be
+            read, or there is nothing to resume (line 1291): it used to
+            print a WARNING and start a fresh workflow.
     """
     brief_file = args.resume
     slug = generate_slug(brief_file)
@@ -1282,32 +1471,17 @@ def run_resume_workflow(
     print(f"Slug:  {slug}")
     print("=" * 60)
 
+    brief_path = _resolve_resume_brief(brief_file, target_repo)
+
     # Check if audit directory exists
     has_audit = audit_dir_exists(slug, target_repo)
     has_checkpoint = checkpoint_exists(slug)
 
     if not has_audit and not has_checkpoint:
-        print()
-        print("WARNING: No checkpoint or audit directory found for this brief.")
-        print("         Starting fresh workflow instead.")
-        print()
-
-        # Resolve the brief path
-        brief_path = Path(brief_file)
-        if not brief_path.is_absolute():
-            # Try ideas/active/ first
-            ideas_path = target_repo / IDEAS_ACTIVE_DIR / brief_file
-            if ideas_path.exists():
-                brief_path = ideas_path
-            else:
-                brief_path = target_repo / brief_file
-
-        if not brief_path.exists():
-            print(f"ERROR: Brief file not found: {brief_file}")
-            return 1
-
-        args.brief = str(brief_path.relative_to(target_repo))
-        return run_single_workflow(args, assemblyzero_root, target_repo)
+        raise RunFailed(
+            f"--resume {brief_file}: no checkpoint and no audit directory for "
+            f"'{slug}', so there is nothing to resume; start it with --brief instead"
+        )
 
     # Resume: set brief and run
     print()
@@ -1317,21 +1491,27 @@ def run_resume_workflow(
         print(f"Found audit directory for '{slug}', resuming...")
     print()
 
-    # Resolve the brief path
-    brief_path = Path(brief_file)
-    if not brief_path.is_absolute():
-        ideas_path = target_repo / IDEAS_ACTIVE_DIR / brief_file
-        if ideas_path.exists():
-            brief_path = ideas_path
-        else:
-            brief_path = target_repo / brief_file
-
-    if not brief_path.exists():
-        print(f"ERROR: Brief file not found: {brief_file}")
-        return 1
-
     args.brief = str(brief_path.relative_to(target_repo))
     return run_single_workflow(args, assemblyzero_root, target_repo)
+
+
+def _resolve_resume_brief(brief_file: str, target_repo: Path) -> Path:
+    """The brief --resume names: an absolute path as given, else
+    ideas/active/<name>, else <repo>/<name>.
+
+    Raises:
+        RunFailed: the brief is in none of those places.
+    """
+    brief_path = Path(brief_file)
+    if brief_path.is_absolute():
+        candidates = [brief_path]
+    else:
+        candidates = [target_repo / IDEAS_ACTIVE_DIR / brief_file, target_repo / brief_file]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    looked = ", ".join(str(c) for c in candidates)
+    raise RunFailed(f"--resume: brief file not found: {brief_file} (looked at {looked})")
 
 
 def _draft_is_resumable(issue_number: int, target_repo: Path) -> dict | None:
@@ -1417,7 +1597,13 @@ def check_and_shift_existing_lld(
         yes: If True, auto-confirm and skip interactive prompt.
 
     Returns:
-        True if we should proceed with generation, False to abort.
+        True if we should proceed with generation, False when the operator
+        answered the confirmation prompt with anything but YES.
+
+    Raises:
+        RunFailed: a resumable draft exists and --yes was not given (ledger
+            0908, line 1446). It used to return False, and main exited 0 as
+            "User aborted" with nothing generated and no choice asked for.
     """
     existing = check_existing_lld(issue_number, target_repo)
 
@@ -1443,7 +1629,11 @@ def check_and_shift_existing_lld(
         print("  To re-draft from scratch:             --yes (discards existing draft)")
         print()
         if not yes:
-            return False  # Abort — user should choose explicitly
+            raise RunFailed(
+                f"issue #{issue_number} has a resumable draft at {draft_rel}, and "
+                "the run will not choose for you: pass --resume-review to review "
+                "that draft, or --yes to discard it and draft again"
+            )
 
     # Something exists - warn user
     print()
@@ -1537,25 +1727,32 @@ def print_result(final_state: dict[str, Any]) -> None:
     print("Workflow Complete")
     print("=" * 60)
 
+    # Ledger 0908, line 1541: the error went to stdout only. The run's caller
+    # raises it (_run_failure), and main alerts unless HALT already did.
     if final_state.get("error_message"):
-        print(f"ERROR: {final_state['error_message']}")
+        print(f"ERROR: {final_state['error_message']}", file=sys.stderr)
         return
 
     workflow_type = final_state.get("workflow_type", "lld")
+    manual = final_state.get("next_node") == "END"
 
     if workflow_type == "issue":
         issue_url = final_state.get("issue_url", "")
         if issue_url:
             print(f"Issue URL: {issue_url}")
+        elif manual:
+            print("Issue was not filed: manual handling was chosen at a human gate")
         else:
-            print("Issue was not filed (manual mode or error)")
+            print("Issue was not filed")
     else:
         lld_path = final_state.get("final_lld_path", "")
         if lld_path:
             print(f"LLD Path: {lld_path}")
             print(f"Status:   {final_state.get('lld_status', 'UNKNOWN')}")
+        elif manual:
+            print("LLD was not saved: manual handling was chosen at a human gate")
         else:
-            print("LLD was not saved (manual mode or error)")
+            print("LLD was not saved")
 
     print(f"Drafts:   {final_state.get('draft_count', 0)}")
     print(f"Reviews:  {final_state.get('verdict_count', 0)}")
@@ -1585,6 +1782,14 @@ def print_result(final_state: dict[str, Any]) -> None:
 def main() -> int:
     """Main entry point.
 
+    #4100 (ADR 0236): one handler owns every failure below it (ledger 0908,
+    line 1698). It prints the failure at ERROR on stderr, with its traceback
+    when the tool did not name it itself, alerts the operator unless the HALT
+    node already did, and returns 1. Everything below it raises with its
+    cause. Two ends return 0 without a product, because each is the
+    operator's own decision: quitting a --select menu, and answering the
+    regeneration prompt with anything but YES. An interrupt returns 130.
+
     Returns:
         Exit code (0 for success, non-zero for error).
     """
@@ -1593,8 +1798,46 @@ def main() -> int:
     # #3729 (ADR 0236): every failure alerts, so a run whose alert channel
     # cannot work refuses before its first node. Mock and dry runs too.
     from assemblyzero.core import alert
-    alert.require_alert_channel("tools/run_requirements_workflow.py")
+    alert.require_alert_channel(ENTRY)
 
+    try:
+        return _run(args)
+    except Exception as exc:  # noqa: BLE001 - the one handler: reported and alerted below
+        named = isinstance(exc, RunFailed)
+        cause = str(exc) if named else f"{type(exc).__name__}: {exc}"
+        print(f"[requirements] ERROR: {cause}", file=sys.stderr)
+        if not named:
+            traceback.print_exc(file=sys.stderr)
+        if not getattr(exc, "alerted", False):
+            alert.alert_operator(
+                what=f"the {args.type} requirements workflow failed",
+                where=f"{ENTRY} main{_subject(args)}",
+                cause=cause,
+                consequence=_consequence(args),
+                repo=getattr(args, "resolved_repo", "") or (args.repo or ""),
+                issue=args.issue or None,
+            )
+        return 1
+
+
+def _subject(args: argparse.Namespace) -> str:
+    """The issue or brief a failure belongs to, for the alert's ``where``."""
+    if args.type == "lld" and args.issue:
+        return f", issue #{args.issue}"
+    brief = args.brief or args.resume
+    return f", brief {brief}" if brief else ""
+
+
+def _consequence(args: argparse.Namespace) -> str:
+    text = "the run stopped and exited 1; nothing after the failure ran"
+    if args.all:
+        text += "; the --all batch stopped here, and the briefs after this one were not processed"
+    return text
+
+
+def _run(args: argparse.Namespace) -> int:
+    """Everything main guards: arguments, roots, selection, the
+    pre-generation check, and the workflow. Raises on every failure."""
     # Issue #773: Set API policy before any providers are created
     from assemblyzero.core.llm_provider import set_api_policy
     set_api_policy(args.allow_api)
@@ -1612,35 +1855,32 @@ def main() -> int:
         else:
             args.review = gates_val
 
-    # Validate --all and --resume are only for issue workflow
+    # Validate --all and --resume are only for issue workflow. Ledger 0908,
+    # lines 1612-1634: each refusal printed on stdout with no alert.
     if args.all and args.type != "issue":
-        print("ERROR: --all is only supported for issue workflow")
-        return 1
+        raise RunFailed("--all is only supported for issue workflow")
 
     if args.resume and args.type != "issue":
-        print("ERROR: --resume is only supported for issue workflow")
-        return 1
+        raise RunFailed("--resume is only supported for issue workflow")
 
     # Issue #536: Validate --resume-review is only for LLD workflow
     if getattr(args, "resume_review", False) and args.type != "lld":
-        print("ERROR: --resume-review is only supported for LLD workflow")
-        return 1
+        raise RunFailed("--resume-review is only supported for LLD workflow")
 
     if getattr(args, "resume_review", False) and not args.issue:
-        print("ERROR: --resume-review requires --issue")
-        return 1
+        raise RunFailed("--resume-review requires --issue")
 
     # Validate arguments
     if args.type == "issue" and not args.brief and not args.select and not args.all and not args.resume:
-        print("ERROR: --brief, --select, --all, or --resume required for issue workflow")
-        return 1
+        raise RunFailed("--brief, --select, --all, or --resume required for issue workflow")
 
     if args.type == "lld" and not args.issue and not args.select:
-        print("ERROR: --issue or --select required for LLD workflow")
-        return 1
+        raise RunFailed("--issue or --select required for LLD workflow")
 
     # Resolve paths (needed for --select, --all, --resume)
     assemblyzero_root, target_repo = resolve_roots(args)
+    # The alert of a later failure names the repository the run resolved.
+    args.resolved_repo = str(target_repo)
 
     if args.debug:
         print(f"DEBUG: assemblyzero_root = {assemblyzero_root}")
@@ -1658,7 +1898,10 @@ def main() -> int:
     if getattr(args, "resume_review", False):
         return run_resume_review(args, assemblyzero_root, target_repo)
 
-    # Handle --select: interactive selection
+    # Handle --select: interactive selection. Ledger 0908, lines 1662 and
+    # 1668: None meant a cancel AND every failure to offer a choice, and both
+    # exited 0. The selectors now raise on failure, so None is only the
+    # operator quitting the menu: his decision, which exits 0.
     if args.select:
         if args.type == "issue":
             selected = select_brief_file(target_repo)
@@ -1689,10 +1932,14 @@ def main() -> int:
 
         reason = merge_driver.check_configured()
         if reason:
-            print(f"[preflight] {reason}")
-            return 1
+            # Ledger 0908, line 1687: stdout and return 1, no alert.
+            raise RunFailed(f"[preflight] {reason}")
+        # Ledger 0908, line 1690: a resumable draft without --yes reached the
+        # exit 0 below; it now raises inside the check. False is only the
+        # operator declining the regeneration at the prompt.
         if not check_and_shift_existing_lld(args.issue, target_repo, args.yes):
-            return 0  # User aborted
+            print("Nothing was generated: the regeneration was declined at the prompt.")
+            return 0
 
     # Run single workflow
     return run_single_workflow(args, assemblyzero_root, target_repo)
