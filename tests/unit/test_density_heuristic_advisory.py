@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
     check_change_instructions_specific,
     validate_completeness,
@@ -36,6 +38,19 @@ def _block(tag: str, i: int = 0) -> str:
     return f"```{tag}\ncontent {i}\n```"
 
 
+#: #3585: N3 halts without a repo root or an LLD whose criteria it can read,
+#: so the node is driven with both.
+TAGGED_LLD = (
+    "# LLD\n\n| ID | Scenario | Pass Criteria |\n|----|----------|---------------|\n"
+    "| 010 | the change (REQ-1) | works |\n"
+)
+
+
+@pytest.fixture
+def repo(tmp_path) -> str:
+    return str(tmp_path)
+
+
 class TestTheObservedCase:
     """454 lines, 8 blocks — the killed draft's exact shape."""
 
@@ -47,7 +62,7 @@ class TestTheObservedCase:
         assert "found 8" in result["details"]
         assert "by tag: python=8" in result["details"]
 
-    def test_the_node_advisory_flags_and_never_hard_blocks(self):
+    def test_the_node_advisory_flags_and_never_hard_blocks(self, repo):
         """The acceptance: this shape passes-or-advisory-flags, never gates.
         The N5 reviewer judges concreteness directly; the heuristic's veto
         is revoked at the node."""
@@ -61,11 +76,13 @@ class TestTheObservedCase:
                 "spec_draft": self.OBSERVED,
                 "files_to_modify": [],
                 "pattern_references": [],
-                "repo_root": "",
-                "lld_content": "",
+                "repo_root": repo,
+                "lld_content": TAGGED_LLD,
                 "review_iteration": 0,
                 "max_iterations": 3,
             })
+        # #3585: the checks ran; a halt would make the assertions below vacuous.
+        assert "completeness_cannot_check" not in out
         assert "change_instructions_specific" not in " ".join(
             out["completeness_issues"]
         ), "the density heuristic must never enter the blocking issue list"
@@ -74,13 +91,13 @@ class TestTheObservedCase:
             for issue in out["completeness_issues"]
         )
 
-    def test_the_advisory_is_visible_not_silent(self, capsys):
+    def test_the_advisory_is_visible_not_silent(self, capsys, repo):
         validate_completeness({
             "spec_draft": self.OBSERVED,
             "files_to_modify": [],
             "pattern_references": [],
-            "repo_root": "",
-            "lld_content": "",
+            "repo_root": repo,
+            "lld_content": TAGGED_LLD,
         })
         printed = capsys.readouterr().out
         assert "[ADVISORY]" in printed
@@ -118,6 +135,10 @@ class TestCompliedWithoutEffect:
     counts moving is the drafter complying and the check absorbing it —
     marked at the cap halt as evidence against the check."""
 
+    @pytest.fixture(autouse=True)
+    def _target_repo(self, repo):
+        self.repo = repo
+
     def _at_cap(self, details_now: str, prior_failures: list[str]):
         with patch(
             "assemblyzero.workflows.implementation_spec.nodes."
@@ -129,8 +150,8 @@ class TestCompliedWithoutEffect:
                 "spec_draft": "# Spec\n\n" + ("body line\n" * 40),
                 "files_to_modify": [],
                 "pattern_references": [],
-                "repo_root": "",
-                "lld_content": "",
+                "repo_root": self.repo,
+                "lld_content": TAGGED_LLD,
                 "review_iteration": 3,
                 "max_iterations": 3,
                 "checks_shown_to_drafter": [],

@@ -96,11 +96,46 @@ def prior_run_dirs(spec_lineage: Path, exclude: Path | None = None) -> list[Path
     return found
 
 
+class LineageReadError(RuntimeError):
+    """A prior spec run's lineage file cannot be read, or a verdict is empty (#3585).
+
+    The message names the file. The orchestrator's spec stage fails on it,
+    and ``--fresh`` relaunches without resuming.
+    """
+
+
 def _read(path: Path) -> str:
+    """The file's text; raises LineageReadError naming it when it cannot be read.
+
+    #3585: it used to return "", so a run whose newest draft or verdict could
+    not be read was skipped as non-resumable, and its paid work was replaced
+    by an older seed or a fresh draw without a word.
+    """
     try:
         return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
+    except OSError as exc:
+        raise LineageReadError(
+            f"cannot read {path} from a prior spec run's lineage: "
+            f"{type(exc).__name__}: {exc}; fix its permissions, or relaunch with "
+            f"--fresh to draw without resuming"
+        ) from exc
+
+
+def _read_verdict(path: Path) -> str:
+    """A verdict file's text; an empty one raises (#3585).
+
+    review_spec never writes an empty verdict, so an empty file is a damaged
+    record. It used to be dropped from the history, which blinded #2382's
+    stagnation check to that round.
+    """
+    text = _read(path)
+    if not text.strip():
+        raise LineageReadError(
+            f"the verdict {path} in a prior spec run's lineage is empty, so the "
+            f"review history cannot be seeded whole; restore it, or relaunch with "
+            f"--fresh to draw without resuming"
+        )
+    return text
 
 
 def seed_from_lineage(
@@ -109,13 +144,20 @@ def seed_from_lineage(
     """The most recent prior run's resumable state, or None.
 
     None means there is nothing to resume onto and the caller should draw
-    fresh -- which is always safe, and is what every failure path here returns
-    rather than a half-seed. A draft with no verdict is such a failure: without
-    feedback the seeded round is not a revision, so it would redraw anyway while
-    reporting that it resumed.
+    fresh, never a half-seed. A draft with no verdict is nothing to resume
+    onto: without feedback the seeded round is not a revision, so it would
+    redraw anyway while reporting that it resumed. A file that cannot be read
+    is not "nothing": it raises (#3585).
 
     ``exclude`` is the current run's own directory, which the caller has already
     created and which must never be read as a prior run.
+
+    An empty newest draft is a failed draw, not paid work, so that run is
+    passed over like a run with no draft.
+
+    Raises:
+        LineageReadError: the newest run's draft or any of its verdicts cannot
+            be read, or a verdict is empty (#3585). Each used to be skipped.
     """
     for run_dir in reversed(prior_run_dirs(spec_lineage, exclude)):
         drafts = sorted(run_dir.glob(DRAFT_GLOB))
@@ -124,9 +166,11 @@ def seed_from_lineage(
             continue
 
         draft_text = _read(drafts[-1])
-        feedback_text = _read(verdicts[-1])
-        if not draft_text.strip() or not feedback_text.strip():
+        if not draft_text.strip():
             continue
+        # Every verdict, oldest first; the newest is the outstanding feedback.
+        prior_feedbacks = [_read_verdict(v) for v in verdicts]
+        feedback_text = prior_feedbacks[-1]
 
         return Seed(
             run_dir=str(run_dir),
@@ -134,11 +178,7 @@ def seed_from_lineage(
             draft_path=str(drafts[-1]),
             feedback=feedback_text,
             feedback_path=str(verdicts[-1]),
-            prior_feedbacks=[
-                text
-                for text in (_read(v) for v in verdicts)
-                if text.strip()
-            ],
+            prior_feedbacks=prior_feedbacks,
             # #2536: lineage files carry zero-padded sequence prefixes
             # (make_run_id ordering), so name order is generation order —
             # a draft whose name sorts after the last verdict's was never

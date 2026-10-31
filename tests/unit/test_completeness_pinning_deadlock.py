@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
     _apply_pinning,
 )
@@ -219,6 +221,13 @@ class TestNamedLineRanges:
         ]
 
 
+#: #3585: an LLD whose pass criteria N3 can read.
+TAGGED_LLD = (
+    "# LLD\n\n| ID | Scenario | Pass Criteria |\n|----|----------|---------------|\n"
+    "| 010 | the change (REQ-1) | works |\n"
+)
+
+
 class TestTheHaltNamesEnforcement:
     """#2556: the cap halt consults the pinning record before reading an
     identical complaint as the-drafter-left-it-unchanged. A reverted
@@ -234,13 +243,19 @@ class TestTheHaltNamesEnforcement:
         "lines 81-83 (```python) — SyntaxError: invalid decimal literal"
     )
 
+    @pytest.fixture(autouse=True)
+    def _target_repo(self, tmp_path):
+        # #3585: N3 halts without a repo root or an LLD whose criteria it can
+        # read, so the cap is tested with both.
+        self.repo = str(tmp_path)
+
     def _state(self, iteration=3, shown=(), breakdown=(), pinning_events=()):
         return {
             "spec_draft": "# Spec\n\n" + ("body line\n" * 40),
             "files_to_modify": [],
             "pattern_references": [],
-            "repo_root": "",
-            "lld_content": "",
+            "repo_root": self.repo,
+            "lld_content": TAGGED_LLD,
             "review_iteration": iteration,
             "max_iterations": 3,
             "checks_shown_to_drafter": list(shown),

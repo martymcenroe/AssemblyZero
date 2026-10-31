@@ -123,7 +123,9 @@ class _Scripted:
 
     def invoke(self, system, prompt, **_kwargs):
         self.calls.append((system, prompt))
-        return SimpleNamespace(response=self.answers.pop(0))
+        # #3585: a call that did not succeed raises ReviewerCallError, so a
+        # scripted answer says it succeeded.
+        return SimpleNamespace(response=self.answers.pop(0), success=True)
 
 
 JSON_ANSWER = json.dumps({

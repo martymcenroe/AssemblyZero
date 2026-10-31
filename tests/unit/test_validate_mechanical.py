@@ -961,13 +961,17 @@ class TestValidateTitleIssueNumber:
         assert "199" in errors[0].message
         assert "306" in errors[0].message
 
-    def test_missing_number_returns_warning(self):
-        """T030: Missing number in title returns WARNING."""
+    def test_missing_number_returns_block_error(self):
+        """T030: Missing number in title returns BLOCK (ERROR severity).
+
+        #3585: a title the check cannot read is a check that did not run,
+        so it blocks the draft rather than warning.
+        """
         content = "# Feature: Test Title\n\n## 1. Context"
         errors = validate_title_issue_number(content, 306)
 
         assert len(errors) == 1
-        assert errors[0].severity == ValidationSeverity.WARNING
+        assert errors[0].severity == ValidationSeverity.ERROR
         assert "extract" in errors[0].message.lower()
 
     def test_leading_zeros_match(self):
@@ -988,13 +992,13 @@ class TestValidateTitleIssueNumber:
         errors = validate_title_issue_number(content, 306)
         assert len(errors) == 0
 
-    def test_no_h1_returns_warning(self):
-        """T070: No H1 heading returns WARNING."""
+    def test_no_h1_returns_block_error(self):
+        """T070: No H1 heading returns BLOCK (ERROR severity) (#3585)."""
         content = "## 306 - Not an H1 Title\n\nContent here"
         errors = validate_title_issue_number(content, 306)
 
         assert len(errors) == 1
-        assert errors[0].severity == ValidationSeverity.WARNING
+        assert errors[0].severity == ValidationSeverity.ERROR
         assert "H1" in errors[0].message
 
     def test_multi_digit_numbers_work(self):

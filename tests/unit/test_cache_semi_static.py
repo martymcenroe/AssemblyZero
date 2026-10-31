@@ -148,14 +148,19 @@ class TestAnalyzeCodebasePopulatesRepoStructure:
         (repo_root / "assemblyzero").mkdir()
         (repo_root / "tests").mkdir()
 
+        # #3585: an empty plan now halts, so the plan carries one Add.
         state = {
             "repo_root": str(repo_root),
             "lld_content": "# LLD\n\nSome content",
-            "files_to_modify": [],
+            "files_to_modify": [{
+                "path": "assemblyzero/new_module.py", "change_type": "Add",
+                "description": "New", "current_content": None,
+            }],
         }
 
         result = analyze_codebase(state)
 
+        assert result["error_message"] == ""
         assert "repo_structure" in result
         assert isinstance(result["repo_structure"], str)
 

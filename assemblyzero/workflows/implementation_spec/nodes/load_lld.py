@@ -11,9 +11,17 @@ This node populates:
 - lld_content: Raw LLD markdown
 - files_to_modify: List[FileToModify] parsed from Section 2.1
 - error_message: "" on success, error text on failure
+
+#3585 (ADR 0236): every failure returns an ``error_message`` naming the issue
+and the LLD's path, which ``route_after_load`` sends to HALT. A missing
+repo_root no longer falls back to the working directory; a Section 2.1 table
+that is absent, lists no files or carries a change type nobody can act on
+halts; and approval needs an explicit marker, never the word APPROVED
+anywhere in the text.
 """
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +35,13 @@ from assemblyzero.workflows.implementation_spec.state import (
 LLD_ACTIVE_DIR = Path("docs/lld/active")
 LLD_DONE_DIR = Path("docs/lld/done")
 LLD_DRAFTS_DIR = Path("docs/lld/drafts")
+
+
+def _failure(issue_number: int, reason: str) -> str:
+    """The node's failure message, written loud on stderr (#3585)."""
+    message = f"[N0] load_lld for issue #{issue_number}: {reason}"
+    print(f"ERROR {message}", file=sys.stderr, flush=True)
+    return message
 
 
 def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
@@ -87,7 +102,15 @@ def parse_files_to_modify(lld_content: str) -> list[FileToModify]:
 
     Returns:
         List of FileToModify dicts with path, change_type, description,
-        and current_content (always None at this stage).
+        and current_content (always None at this stage). Directory rows are
+        skipped, so a table of directories alone returns [], which load_lld
+        halts on.
+
+    Raises:
+        ValueError: there is no Section 2.1 Files Changed table, or a row's
+            change type is not one this workflow can act on (#3585). The first
+            used to return [], indistinguishable from an empty table; the
+            second used to default to "Add".
     """
     files: list[FileToModify] = []
 
@@ -103,7 +126,11 @@ def parse_files_to_modify(lld_content: str) -> list[FileToModify]:
 
     match = table_pattern.search(lld_content)
     if not match:
-        return files
+        raise ValueError(
+            "the LLD has no Section 2.1 Files Changed table (a `2.1 ... Files "
+            "Changed` heading followed by a header row, a separator row and at "
+            "least one body row)"
+        )
 
     table_rows = match.group(1)
 
@@ -121,12 +148,16 @@ def parse_files_to_modify(lld_content: str) -> list[FileToModify]:
         if path.lower() in ("file", "path", "filename"):
             continue
 
-        # Normalize change type (Issue #334 pattern)
-        change_type = _normalize_change_type(raw_change_type)
-
-        # Skip directory entries (e.g., "Add (Directory)")
+        # Skip directory entries (e.g., "Add (Directory)"), before the change
+        # type is read: a directory is not a file to specify, whatever its type.
         if "(directory)" in raw_change_type.lower():
             continue
+
+        # Normalize change type (Issue #334 pattern)
+        try:
+            change_type = _normalize_change_type(raw_change_type)
+        except ValueError as exc:
+            raise ValueError(f"Section 2.1 row for `{path}`: {exc}") from exc
 
         files.append(FileToModify(
             path=path,
@@ -148,6 +179,11 @@ def _normalize_change_type(raw: str) -> str:
 
     Returns:
         Normalized change type: "Add", "Modify", or "Delete".
+
+    Raises:
+        ValueError: the type is none of those spellings (#3585). It used to
+            default to "Add", so a file the LLD meant to modify or delete was
+            specified as new.
     """
     cleaned = raw.strip().lower()
 
@@ -161,26 +197,31 @@ def _normalize_change_type(raw: str) -> str:
     elif cleaned in ("delete", "remove"):
         return "Delete"
 
-    # Default to Add for unknown types
-    return "Add"
+    raise ValueError(
+        f"change type {raw!r} is not one of add/new/create, "
+        f"modify/update/change/edit or delete/remove"
+    )
 
 
 def _check_approved_status(lld_content: str) -> bool:
     """Check if the LLD has an APPROVED status marker.
 
-    Looks for approval markers in common locations:
+    Looks for an explicit approval marker:
     - Status field: "* **Status:** Approved ..."
-    - Final Status: "**Final Status:** APPROVED"
-    - Review Log: "APPROVED" in appendix
+    - Final Status: "**Final Status:** APPROVED" (the LLD stage always
+      writes this one, through embed_review_evidence)
+    - Review table: "Verdict | Key Issue ... APPROVED"
+
+    #3585: the word APPROVED anywhere in the text no longer counts. That
+    fallback passed an LLD whose final verdict was BLOCKED because an earlier
+    review row said APPROVED: a gate that could not verify, passing.
 
     Args:
         lld_content: Full LLD markdown content.
 
     Returns:
-        True if LLD appears to be approved, False otherwise.
+        True if LLD carries an explicit approval marker, False otherwise.
     """
-    content_upper = lld_content.upper()
-
     # Check for explicit status markers
     status_patterns = [
         r"\*\s*\*\*Status:\*\*\s*Approved",
@@ -188,12 +229,10 @@ def _check_approved_status(lld_content: str) -> bool:
         r"Verdict\s*\|\s*Key\s*Issue.*?APPROVED",
     ]
 
-    for pattern in status_patterns:
-        if re.search(pattern, lld_content, re.IGNORECASE):
-            return True
-
-    # Fallback: look for "APPROVED" anywhere in the document
-    return "APPROVED" in content_upper
+    return any(
+        re.search(pattern, lld_content, re.IGNORECASE)
+        for pattern in status_patterns
+    )
 
 
 def load_lld(state: ImplementationSpecState) -> dict[str, Any]:
@@ -231,7 +270,14 @@ def load_lld(state: ImplementationSpecState) -> dict[str, Any]:
     # Resolve LLD file path
     lld_path_str = state.get("lld_path", "")
     repo_root_str = state.get("repo_root", "")
-    repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+    # #3585: never the working directory (#391's rule, which N1 already kept).
+    if not repo_root_str:
+        return {
+            "error_message": _failure(
+                issue_number, "repo_root is not set in state; pass --repo to the CLI"
+            )
+        }
+    repo_root = Path(repo_root_str)
 
     if lld_path_str:
         lld_path_obj = Path(lld_path_str)
@@ -254,18 +300,31 @@ def load_lld(state: ImplementationSpecState) -> dict[str, Any]:
 
     print(f"    LLD path: {lld_path_obj}")
 
-    # Read LLD content
+    # Read LLD content (#3585: the message names the issue, the path and the
+    # exception type, and a file that is not UTF-8 is reported the same way
+    # instead of raising past the node)
     try:
         lld_content = lld_path_obj.read_text(encoding="utf-8")
-    except OSError as e:
-        return {"error_message": f"Failed to read LLD: {e}"}
+    except (OSError, UnicodeDecodeError) as e:
+        return {
+            "error_message": _failure(
+                issue_number,
+                f"Failed to read LLD {lld_path_obj}: {type(e).__name__}: {e}",
+            )
+        }
 
     # --------------------------------------------------------------------------
     # GUARD: LLD content must be non-trivial
     # --------------------------------------------------------------------------
     if not lld_content or len(lld_content) < 100:
         print(f"    [GUARD] BLOCKED: LLD content too short ({len(lld_content)} chars)")
-        return {"error_message": "GUARD: LLD content too short"}
+        return {
+            "error_message": (
+                f"GUARD: LLD content too short: {lld_path_obj} for issue "
+                f"#{issue_number} is {len(lld_content)} chars, under the 100-char "
+                f"minimum"
+            )
+        }
     # --------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------
@@ -283,12 +342,28 @@ def load_lld(state: ImplementationSpecState) -> dict[str, Any]:
 
     print("    LLD status: APPROVED")
 
-    # Parse files to modify from Section 2.1
-    files_to_modify = parse_files_to_modify(lld_content)
+    # Parse files to modify from Section 2.1 (#3585: an absent table and an
+    # unknown change type raise; they used to read as no files and as "Add")
+    try:
+        files_to_modify = parse_files_to_modify(lld_content)
+    except ValueError as e:
+        return {
+            "error_message": _failure(
+                issue_number, f"cannot read the files to change from {lld_path_obj}: {e}"
+            )
+        }
     print(f"    Found {len(files_to_modify)} files to modify")
 
+    # #3585: a table that lists no files used to print a WARNING and pass, and
+    # the spec was drafted for a plan with nothing in it.
     if not files_to_modify:
-        print("    [GUARD] WARNING: No files found in Section 2.1 table")
+        return {
+            "error_message": _failure(
+                issue_number,
+                f"the Section 2.1 Files Changed table in {lld_path_obj} lists no "
+                f"files (directory rows are not files to specify)",
+            )
+        }
 
     # Log file breakdown by change type
     add_count = sum(1 for f in files_to_modify if f["change_type"] == "Add")

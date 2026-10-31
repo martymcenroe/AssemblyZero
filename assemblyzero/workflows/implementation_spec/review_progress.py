@@ -67,11 +67,21 @@ EMPTY = "empty"
 
 
 def hard_ceiling(max_iterations: int) -> int:
-    """The most rounds a converging loop may run to."""
+    """The most rounds a converging loop may run to.
+
+    Raises:
+        ValueError: ``max_iterations`` is not an integer (#3585). It used to
+            stand in a base cap of 3, so a misconfigured run reviewed to a
+            ceiling nobody set.
+    """
     try:
         base = max(0, int(max_iterations))
-    except (TypeError, ValueError):
-        base = 3
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"max_iterations must be an integer, got {max_iterations!r} "
+            f"({type(exc).__name__}: {exc}); the review ceiling is "
+            f"{CEILING_MULTIPLIER}x it, so it cannot be guessed"
+        ) from exc
     return base * CEILING_MULTIPLIER
 
 

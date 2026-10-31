@@ -65,16 +65,20 @@ LLD = """# LLD-999: Add a greeting
 
 ## 2. Files Changed
 
-| file | change |
-|---|---|
-| `src/greet.py` | Add |
+### 2.1 Files Changed
+
+| file | change | description |
+|---|---|---|
+| `src/greet.py` | Add | the greeting |
 
 ## 10. Test Plan
 
 | id | scenario | expects |
 |---|---|---|
-| S1 | greet("world") | returns "hello, world" |
+| S1 | REQ-1: greet("world") | returns "hello, world" |
 """
+# #3585: N3 joins criteria to tests on REQ tags and halts on an untagged
+# table, so the scenario carries its requirement and the spec's test cites it.
 
 SPEC = """# Implementation Spec: greeting
 
@@ -86,12 +90,20 @@ Implements REQ-1.
 
 - `src/greet.py` (Add)
 
+## 6. Change Instructions
+
+```python
+def greet(name):
+    return f"hello, {name}"
+```
+
 ## 10. Test Plan
 
 ### 10.1 Test Functions
 
 ```python
 def test_S1_greet_world():
+    \"\"\"REQ-1: greet("world") returns "hello, world".\"\"\"
     from greet import greet
     assert greet("world") == "hello, world"
 ```
@@ -147,6 +159,14 @@ def workspace(tmp_path: Path):
     (repo / "README.md").write_text("base\n", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "base")
+    # #3585: the run's base is read from origin only, so the target has one.
+    origin = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", "-b", "main", str(origin)],
+        capture_output=True, text=True, check=True,
+    )
+    _git(repo, "remote", "add", "origin", str(origin))
+    _git(repo, "push", "-q", "origin", "main")
 
     lld_path = tmp_path / "LLD-999.md"
     lld_path.write_text(LLD, encoding="utf-8")
@@ -187,6 +207,10 @@ def _rmtree(path: Path) -> None:
 
 
 def _state(tmp_path: Path, repo: Path, lld_path: Path) -> dict:
+    # #3585: generate_spec halts when the lineage directory is missing, as the
+    # orchestrator and the standalone runner always create it first. N5 used to
+    # create it here, after N2's first draft had gone unsaved.
+    (tmp_path / "lineage").mkdir(exist_ok=True)
     return {
         "issue_number": 999,
         "lld_path": str(lld_path),

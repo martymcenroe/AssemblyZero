@@ -119,6 +119,12 @@ class WorkflowConfig:
             else:
                 self.review_prompt_path = Path("docs/skills/0702c-LLD-Review-Prompt.md")
 
+        # #3585: validated when built. `validate` had no caller, so a bad spec
+        # or cap reached whatever used the config without a word.
+        errors = self.validate()
+        if errors:
+            raise ValueError("invalid requirements WorkflowConfig: " + "; ".join(errors))
+
     def validate(self) -> list[str]:
         """Validate configuration and return list of errors.
 

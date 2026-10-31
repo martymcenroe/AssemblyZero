@@ -229,7 +229,9 @@ class TestItLooksAtTheTableThatIsActuallyThere:
         verdict = next(
             line for line in rendered.splitlines() if line.startswith("RESULT:")
         )
-        assert "VACUOUS on tables" in verdict
+        # #3585: the verdict is NOT CHECKED and names the unexamined tables.
+        assert verdict.startswith("RESULT: NOT CHECKED")
+        assert "decision tables (1 present, none of the checked kind)" in verdict
         assert "Decision tables: 0 found" not in rendered
         assert "bezel" not in "\n".join(str(v) for v in report.violations)
 
@@ -342,7 +344,8 @@ class TestVacuousStatesAreDisclosed:
         assert report.vacuous
         assert "NOT CHECKED" in report.disclosure()
         assert "no scope enumeration" in report.disclosure()
-        assert report.ok  # nothing was found wrong, and nothing was judged
+        # #3585: nothing was judged, so the report is not ok
+        assert not report.ok
 
     def test_no_criteria_table_is_not_checked(self) -> None:
         report = check_scope_coverage(TITLE_331, LEDE_331)
@@ -369,7 +372,7 @@ class TestVacuousStatesAreDisclosed:
     def test_an_empty_body_never_raises(self) -> None:
         report = check_scope_coverage("", "")
         assert report.vacuous
-        assert report.ok
+        assert not report.ok  # #3585: vacuous is not ok
 
 
 # ---------------------------------------------------------------------------
@@ -422,16 +425,19 @@ class TestItRunsAtLauncherPreflight:
         )
         assert "scope coverage: NOT CHECKED" in text
 
-    def test_a_scope_crash_never_costs_the_form_check_its_verdict(
-        self, tmp_path, monkeypatch
+    def test_a_scope_crash_refuses_the_launch(
+        self, tmp_path, monkeypatch, operator_alerts
     ) -> None:
-        """The declared fail-open, exercised rather than asserted about."""
+        """#3585: the fail-open is withdrawn. A crashed scope check is a check
+        that did not run, so it alerts and the preflight refuses."""
         monkeypatch.setattr(
             form_gate, "check_scope_coverage",
             lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
         )
         result = form_gate.check_issue(tmp_path, 331, _fetch(TITLE_331, BODY_331))
         assert result.scope is None
-        assert result.report is not None  # the form check still reached a verdict
-        text, _ = form_gate.render([result])
-        assert "scope coverage" not in text  # absent, never a passing line
+        assert "scope-coverage check crashed: RuntimeError: boom" in result.error
+        assert len(operator_alerts) == 1
+        text, refuse = form_gate.render([result])
+        assert refuse is True
+        assert "scope coverage:" not in text  # never a passing line

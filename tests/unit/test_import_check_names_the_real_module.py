@@ -65,6 +65,11 @@ def test_a_module_only_on_the_base_is_suggested(tmp_path):
     (repo / "src" / "boostgauge" / "skins" / "stingray.py").write_text("x = 1\n", encoding="utf-8")
     run("add", ".")
     run("commit", "-qm", "arc work")
+    # #3585: the base is read from origin only, so the arc is pushed there.
+    upstream = tmp_path / "up.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(upstream)], check=True)
+    run("remote", "add", "origin", str(upstream))
+    run("push", "-q", "origin", "main", "arc")
     run("switch", "-q", "main")
     assert not (repo / "src" / "boostgauge" / "skins").exists()
 

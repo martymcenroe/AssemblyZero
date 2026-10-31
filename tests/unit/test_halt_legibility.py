@@ -186,16 +186,28 @@ class TestTheHaltNodeUsesIt:
         assert captured["error_message"].startswith("Spec review BLOCKED")
 
 
+#: #3585: N3 halts without a repo root or an LLD whose criteria it can read,
+#: so the cap is tested with both.
+TAGGED_LLD = (
+    "# LLD\n\n| ID | Scenario | Pass Criteria |\n|----|----------|---------------|\n"
+    "| 010 | the change (REQ-1) | works |\n"
+)
+
+
 class TestTheCompletenessCap:
     """The other iteration-cap halt in the same workflow."""
+
+    @pytest.fixture(autouse=True)
+    def _target_repo(self, tmp_path):
+        self.repo = str(tmp_path)
 
     def _state(self, iteration, max_iterations=3, shown=()):
         return {
             "spec_draft": "# Spec\n\n" + ("body line\n" * 40),
             "files_to_modify": [],
             "pattern_references": [],
-            "repo_root": "",
-            "lld_content": "",
+            "repo_root": self.repo,
+            "lld_content": TAGGED_LLD,
             "review_iteration": iteration,
             "max_iterations": max_iterations,
             # #2304: a check that has never reached a revision prompt now earns
@@ -278,11 +290,24 @@ class TestTheCompletenessCap:
         assert out["validation_passed"] is False
 
     def test_a_pass_at_the_cap_records_nothing(self, capsys):
-        out = validate_completeness(self._state(iteration=3))
+        # #3585: a spec that passes every check, so the pass is asserted, not
+        # assumed; the generic spec above no longer passes once N3 checks
+        # Section 10 and the LLD's criteria. It carries one raise-free
+        # implementation fence, because a spec with none is an error-path
+        # check that cannot run, which is not a pass.
+        state = self._state(iteration=3)
+        state["spec_draft"] = (
+            "# Spec\n\nThe change, and the test that pins it.\n\n"
+            "```python\ndef build():\n    return None\n```\n\n"
+            "## 10. Test Mapping\n\n```python\nimport math\n\n\n"
+            'def test_the_change():\n    """REQ-1"""\n'
+            "    assert math.isclose(1 + 1, 2)\n```\n"
+        )
+        out = validate_completeness(state)
         capsys.readouterr()
 
-        if out["validation_passed"]:
-            assert out["error_message"] == ""
+        assert out["validation_passed"] is True, out["completeness_issues"]
+        assert out["error_message"] == ""
 
 
 class TestTheRepairPathIsUntouched:

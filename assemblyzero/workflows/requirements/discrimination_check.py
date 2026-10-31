@@ -148,7 +148,10 @@ class DiscriminationReport:
 
     @property
     def ok(self) -> bool:
-        return not self.violations
+        """No violation, and an Acceptance Criteria section was there to judge
+        (#3585: with none, the report used to be ``ok``; only its disclosure
+        said NOT CHECKED)."""
+        return not self.violations and self.criteria_section_found
 
     @property
     def vacuous(self) -> bool:

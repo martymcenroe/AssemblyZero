@@ -318,35 +318,27 @@ class TestAnalyzeCodebaseRealPaths:
 
 
 class TestAnalyzeCodebaseNoRepoPath:
-    """T150: Returns empty context when repo_path is None, logs warning."""
+    """T150, #3585: no repo path halts. It used to return an empty context
+    with a warning, and the drafter designed against nothing."""
 
-    def test_returns_empty_context(self):
-        """State with repo_path=None produces empty CodebaseContext."""
+    def test_halts(self):
         state = _make_state(repo_path=None, issue_text="some issue")
         result = analyze_codebase(state)
 
-        assert "codebase_context" in result
-        ctx = result["codebase_context"]
-        assert ctx["project_description"] == ""
-        assert ctx["conventions"] == []
-        assert ctx["frameworks"] == []
-        assert ctx["key_file_excerpts"] == {}
-        assert ctx["related_code"] == {}
+        assert "no repo path" in result["error_message"]
+        assert "codebase_context" not in result
 
-    def test_logs_warning(self, caplog):
-        """A warning should be logged when repo_path is None."""
+    def test_logs_error(self, caplog):
         state = _make_state(repo_path=None)
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.ERROR):
             analyze_codebase(state)
-        assert any("No repo path" in msg for msg in caplog.messages)
+        assert any("no repo path" in msg for msg in caplog.messages)
 
     def test_empty_string_repo_path(self):
-        """An empty string repo_path should also produce empty context."""
+        """An empty string repo_path halts the same way."""
         state = {"repo_path": "", "issue_text": "test"}
         result = analyze_codebase(state)
-        ctx = result["codebase_context"]
-        assert ctx["project_description"] == ""
-        assert ctx["conventions"] == []
+        assert "no repo path" in result["error_message"]
 
 
 # ---------------------------------------------------------------------------
@@ -355,28 +347,22 @@ class TestAnalyzeCodebaseNoRepoPath:
 
 
 class TestAnalyzeCodebaseMissingRepo:
-    """T160: Returns empty context when repo_path doesn't exist."""
+    """T160, #3585: a repo_path that does not exist halts, naming it."""
 
-    def test_returns_empty_context(self, tmp_path):
-        """Non-existent repo_path produces empty CodebaseContext."""
+    def test_halts_naming_the_path(self, tmp_path):
         nonexistent = tmp_path / "nonexistent_repo"
         state = _make_state(repo_path=nonexistent, issue_text="some issue")
         result = analyze_codebase(state)
 
-        ctx = result["codebase_context"]
-        assert ctx["project_description"] == ""
-        assert ctx["conventions"] == []
-        assert ctx["frameworks"] == []
-        assert ctx["key_file_excerpts"] == {}
-        assert ctx["related_code"] == {}
+        assert str(nonexistent) in result["error_message"]
+        assert "codebase_context" not in result
 
-    def test_logs_warning(self, tmp_path, caplog):
-        """A warning should be logged when repo_path doesn't exist."""
+    def test_logs_error(self, tmp_path, caplog):
         nonexistent = tmp_path / "does_not_exist"
         state = _make_state(repo_path=nonexistent)
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.ERROR):
             analyze_codebase(state)
-        assert any("does not exist" in msg for msg in caplog.messages)
+        assert any("not a directory" in msg for msg in caplog.messages)
 
 
 # ---------------------------------------------------------------------------

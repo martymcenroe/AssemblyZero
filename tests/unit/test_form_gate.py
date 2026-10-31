@@ -365,14 +365,15 @@ class TestPresentation:
 
 
 class TestAReadFailureIsNotAVerdict:
-    def test_an_unreadable_issue_reports_and_proceeds(self, tmp_path):
-        """Offline must not brick a local roll -- the same stance the
-        must-resolve gate takes. But it must not read as a pass either."""
+    def test_an_unreadable_issue_reports_alerts_and_refuses(self, tmp_path, operator_alerts):
+        """It must not read as a pass, and since #3585 it does not proceed
+        either: a check that could not run makes the launch unchecked."""
         text, refuse = check_form_at_preflight(tmp_path, [7], _fetch({}))
 
-        assert not refuse
+        assert refuse
         assert "could not be checked" in text
         assert "Nothing about this issue's form has been verified" in text
+        assert len(operator_alerts) == 1
 
     def test_an_empty_body_is_not_a_pass(self, tmp_path):
         result = check_issue(tmp_path, 7, _fetch({7: "   \n"}))

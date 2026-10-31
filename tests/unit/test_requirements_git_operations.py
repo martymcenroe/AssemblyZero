@@ -169,6 +169,7 @@ class TestCommitAndPush:
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # git add
             Mock(returncode=0, stdout="[main abc123def] commit msg", stderr=""),  # git commit
+            Mock(returncode=0, stdout="abc123def\n", stderr=""),  # git rev-parse (#3585)
             Mock(returncode=0, stdout="", stderr=""),  # git push
         ]
 
@@ -182,24 +183,28 @@ class TestCommitAndPush:
         assert result == "abc123def"
 
     @patch("subprocess.run")
-    def test_handles_commit_output_without_sha(self, mock_run, tmp_path):
-        """Test handles commit output that doesn't match expected format."""
-        from assemblyzero.workflows.requirements.git_operations import commit_and_push
+    def test_a_commit_whose_sha_cannot_be_read_raises(self, mock_run, tmp_path):
+        """#3585: the SHA is read with rev-parse, and an unreadable one raises
+        before anything is pushed; it used to be "" without a word."""
+        from assemblyzero.workflows.requirements.git_operations import (
+            GitOperationError,
+            commit_and_push,
+        )
 
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # git add
             Mock(returncode=0, stdout="", stderr=""),  # git commit (no stdout)
-            Mock(returncode=0, stdout="", stderr=""),  # git push
+            Mock(returncode=128, stdout="", stderr="fatal: bad HEAD"),  # rev-parse
         ]
 
-        result = commit_and_push(
-            created_files=["file.md"],
-            workflow_type="lld",
-            target_repo=tmp_path,
-            issue_number=42,
-        )
-
-        assert result == ""  # No SHA extracted
+        with pytest.raises(GitOperationError, match="rev-parse HEAD"):
+            commit_and_push(
+                created_files=["file.md"],
+                workflow_type="lld",
+                target_repo=tmp_path,
+                issue_number=42,
+            )
+        assert mock_run.call_count == 3  # nothing pushed
 
     @patch("subprocess.run")
     def test_uses_path_as_cwd(self, mock_run, tmp_path):

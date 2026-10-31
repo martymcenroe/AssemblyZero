@@ -15,10 +15,17 @@ CRITICAL PATH RULES:
 - Outputs (LLDs, audit trails, status files) are written to target_repo
 - Never use "" (empty string) for paths - it causes auto-detection bugs
 - All functions receive explicit paths - no fallback auto-detection
+
+#3585 (ADR 0236, standard 0034): a repo structure that cannot be read raises
+rather than handing the drafter a placeholder; a lineage move that cannot
+happen alerts and raises; a context file the operator named and the workflow
+cannot use raises; an approval cache that cannot be read alerts and raises
+before a save can overwrite it; a review row that cannot be embedded raises.
 """
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -26,8 +33,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
+from assemblyzero.core import alert
+
 
 logger = logging.getLogger(__name__)
+
+
+class LLDStatusCacheError(ValueError):
+    """The LLD approval cache exists and cannot be read or understood (#3585).
+
+    Raised before anything is written: the next save rewrites the whole file,
+    so reading a broken file as empty used to destroy every repo's approvals.
+    """
 
 
 # Base directories relative to repo root
@@ -61,6 +78,12 @@ LLD_DONE_DIR = Path("docs/lld/done")
 # Test isolation now falls out of the design instead of being remembered: a
 # test whose target repo is `tmp_path` writes under `tmp_path`.
 LLD_STATUS_RELATIVE = Path("data") / "assemblyzero" / "lld-status.json"
+
+# What git writes on stderr, under LC_ALL=C, when a directory is in no
+# repository: "fatal: not a git repository (or any of the parent directories)",
+# or "(or any parent up to mount point ...)". The one git failure that is an
+# answer rather than a failure (#3585).
+_NOT_A_REPOSITORY = "not a git repository"
 
 # Schema version of the shared cache file. "1.0" is the pre-#1160 flat layout
 # whose entries cannot be attributed to a repo.
@@ -113,7 +136,14 @@ def get_repo_structure(
                    (e.g., ["src", "tests"]). If None, shows all.
 
     Returns:
-        Tree-formatted string showing directory structure.
+        Tree-formatted string showing directory structure, or "(No relevant
+        directories found)" for a repo with none, which is an answer.
+
+    Raises:
+        FileNotFoundError: the repo does not exist (#3585). Its placeholder
+            text used to be spliced into the drafter's prompt as the structure.
+        OSError: a directory in the tree cannot be listed, after an ERROR
+            line naming it (#3585); the subtree used to be left out silently.
 
     Example output:
         src/
@@ -130,9 +160,21 @@ def get_repo_structure(
     """
     repo = Path(repo_path)
     if not repo.exists():
-        return f"(Repository not found: {repo_path})"
+        raise FileNotFoundError(
+            f"cannot list the repository structure: {repo_path} does not exist"
+        )
 
     lines: list[str] = []
+
+    def list_dir(path: Path) -> list[Path]:
+        try:
+            return sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except OSError as exc:
+            logger.error(
+                "cannot list %s for the repository structure of %s: %s: %s",
+                path, repo_path, type(exc).__name__, exc,
+            )
+            raise
 
     def should_exclude(name: str) -> bool:
         """Check if directory/file should be excluded."""
@@ -145,10 +187,7 @@ def get_repo_structure(
         if depth > max_depth:
             return
 
-        try:
-            entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-        except PermissionError:
-            return
+        entries = list_dir(path)
 
         # Separate dirs and files
         dirs = [e for e in entries if e.is_dir() and not should_exclude(e.name)]
@@ -174,10 +213,7 @@ def get_repo_structure(
                 lines.append(f"{prefix}... and {len(important_files) - 10} more files")
 
     # Get top-level entries
-    try:
-        top_entries = sorted(repo.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-    except PermissionError:
-        return "(Permission denied reading repository)"
+    top_entries = list_dir(repo)
 
     top_dirs = [e for e in top_entries if e.is_dir() and not should_exclude(e.name)]
 
@@ -317,7 +353,7 @@ def make_run_id() -> str:
 # =============================================================================
 
 
-def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path | None:
+def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path:
     """Move a lineage directory from active/ to done/ on workflow completion.
 
     Issue #100: All 4 workflows create docs/lineage/active/{id}/ and save
@@ -328,11 +364,34 @@ def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path | None:
         target_repo: Target repository root (used for log messages).
 
     Returns:
-        Path to the done/ directory if moved successfully, None on failure or skip.
+        Path to the done/ directory: where the lineage was moved, or where it
+        already was.
+
+    Raises:
+        FileNotFoundError: the lineage directory does not exist (#3585). Every
+            caller checks for it first, so reaching here without one is a
+            failure; it used to be an INFO "skipping" and None.
+        OSError: the move failed (#3585); it used to be logged without the
+            repo and returned None, and the caller went on.
+
+    Both failures alert the operator, naming the directory and the repo.
     """
+    def _alert(exc: Exception, consequence: str) -> None:
+        alert.alert_operator(
+            what=f"move the lineage {audit_dir} from active/ to done/",
+            where="assemblyzero.workflows.requirements.audit.move_lineage_to_done",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence=consequence,
+            repo=str(target_repo),
+        )
+
     if not audit_dir.exists():
-        logger.info("Lineage dir not found, skipping move: %s", audit_dir)
-        return None
+        missing = FileNotFoundError(
+            f"cannot move the lineage to done/: {audit_dir} does not exist "
+            f"(repo {target_repo})"
+        )
+        _alert(missing, "the workflow stops at finalize; nothing is moved")
+        raise missing
 
     # Build destination by mirroring the structure under active/ to done/.
     # Previously this used audit_dir.name (last segment only), which threw
@@ -354,11 +413,11 @@ def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path | None:
 
     try:
         shutil.move(str(audit_dir), str(done_dir))
-        logger.info("Moved lineage to done: %s -> %s", audit_dir.name, done_dir)
-        return done_dir
-    except OSError as e:
-        logger.error("Failed to move lineage to done: %s", e)
-        return None
+    except OSError as exc:
+        _alert(exc, "the lineage stays in active/ and the workflow stops at finalize")
+        raise
+    logger.info("Moved lineage to done: %s -> %s", audit_dir.name, done_dir)
+    return done_dir
 
 
 # =============================================================================
@@ -527,7 +586,15 @@ def assemble_context(
         target_repo: Target repository root.
 
     Returns:
-        Assembled context as a single string with file headers.
+        Assembled context as a single string with file headers; "" when no
+        context file was named.
+
+    Raises:
+        ValueError: a named path is outside the target repo or does not exist
+            (#3585). It used to be dropped, so the draft was built without the
+            context the operator asked for and nobody was told.
+        OSError: a named file cannot be read, after an ERROR line naming it
+            (#3585); it used to be skipped, giving partial context.
     """
     if not context_files:
         return ""
@@ -537,7 +604,7 @@ def assemble_context(
     for ctx_path in context_files:
         path = validate_context_path(ctx_path, target_repo)
         if path is None:
-            continue
+            raise ValueError(_rejected_context_reason(ctx_path, target_repo))
 
         try:
             if path.is_file():
@@ -555,10 +622,30 @@ def assemble_context(
                         context_parts.append(
                             f"## Reference: {rel_path}\n\n```\n{content}\n```"
                         )
-        except (OSError, UnicodeDecodeError):
-            continue
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.error(
+                "cannot read the context file %s (named as %s) in %s: %s: %s; "
+                "the draft is not built on partial context",
+                path, ctx_path, target_repo, type(exc).__name__, exc,
+            )
+            raise
 
     return "\n\n".join(context_parts)
+
+
+def _rejected_context_reason(context_path: str, target_repo: Path) -> str:
+    """Why ``validate_context_path`` rejected a path, in words, for the raise."""
+    path = Path(context_path)
+    resolved = path.resolve() if path.is_absolute() else (target_repo / path).resolve()
+    if not resolved.is_relative_to(target_repo):
+        return (
+            f"context file {context_path} resolves to {resolved}, outside the "
+            f"target repo {target_repo}; context must come from the repo"
+        )
+    return (
+        f"context file {context_path} does not exist (looked for {resolved} "
+        f"in the target repo {target_repo})"
+    )
 
 
 # =============================================================================
@@ -607,11 +694,19 @@ def _repo_key(target_repo: Path) -> str:
     different separators or a relative path lands on one key. The cache is
     machine-local, so an absolute path is the right identity — repo *names*
     collide across the fleet, which is the collision this fix exists to end.
+
+    A root that cannot be resolved raises, after an ERROR line (#3585). It
+    used to fall back to the unresolved path, a different key, under which an
+    approval was filed or looked up where no other run would find it.
     """
     try:
         return _main_worktree_root(target_repo).resolve().as_posix()
-    except OSError:
-        return Path(target_repo).as_posix()
+    except OSError as exc:
+        logger.error(
+            "cannot resolve the LLD approval cache key for %s: %s: %s",
+            target_repo, type(exc).__name__, exc,
+        )
+        raise
 
 
 def lld_status_path(target_repo: Path) -> Path:
@@ -637,14 +732,30 @@ def _main_worktree_root(path: Path) -> Path:
     resolved to the calling tree, so an approval written from `{repo}-{issue}`
     landed under a key the repo itself never read -- caught by the worktree
     test below.
+
+    A directory git reports is not a repository is its own root: that is an
+    answer. Git is run under ``LC_ALL=C`` so that report reads the same on
+    every machine. Any other failure, or an answer with nothing in it, raises
+    ``GitOperationError`` with the rc and stderr (#3585): a dubious-ownership
+    refusal, a corrupt repository. Every failure used to read as "not a git
+    tree", so a worktree caller silently kept a cache of its own.
     """
     root = Path(path)
     common = subprocess.run(
         ["git", "rev-parse", "--git-common-dir"],
         cwd=str(root), capture_output=True, text=True,
+        env={**os.environ, "LC_ALL": "C"},
     )
-    if common.returncode != 0 or not common.stdout.strip():
+    if common.returncode != 0 and _NOT_A_REPOSITORY in common.stderr:
         return root
+    if common.returncode != 0 or not common.stdout.strip():
+        from assemblyzero.workflows.requirements.git_operations import GitOperationError
+
+        raise GitOperationError(
+            f"cannot find the main worktree of {root}: git rev-parse "
+            f"--git-common-dir rc={common.returncode}, stdout "
+            f"{common.stdout.strip()!r}, stderr: {common.stderr.strip() or '(empty)'}"
+        )
     git_dir = Path(common.stdout.strip())
     if not git_dir.is_absolute():
         git_dir = (root / git_dir).resolve()
@@ -670,18 +781,41 @@ def _read_status_file(target_repo: Path) -> dict:
     invalidated") applied to provenance rather than to age. The cost of
     dropping them is one extra review per issue; the cost of honouring them is
     skipping a review the workflow was told to perform.
+
+    No file is an answer: nothing was ever approved here. A file that exists
+    and cannot be read, is not a JSON object, or has a ``repos`` field that is
+    not an object alerts the operator and raises ``LLDStatusCacheError``
+    naming it (#3585). Each used to read as an empty cache, and the next save,
+    which rewrites the whole file, then destroyed every repo's approvals.
     """
     status_file = lld_status_path(target_repo)
     if not status_file.exists():
         return _empty_status_file()
 
+    def _refuse(problem: str, cause: str) -> LLDStatusCacheError:
+        alert.alert_operator(
+            what=f"read the LLD approval cache {status_file}",
+            where="assemblyzero.workflows.requirements.audit._read_status_file",
+            cause=cause,
+            consequence=(
+                "the cache is neither read nor rewritten, so the approvals it "
+                "holds survive; the workflow stops until the file is repaired"
+            ),
+            repo=str(target_repo),
+        )
+        return LLDStatusCacheError(f"the LLD approval cache {status_file} {problem}")
+
     try:
         data = json.loads(status_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return _empty_status_file()
+    except (json.JSONDecodeError, OSError) as exc:
+        cause = f"{type(exc).__name__}: {exc}"
+        raise _refuse(f"cannot be read: {cause}", cause) from exc
 
     if not isinstance(data, dict):
-        return _empty_status_file()
+        raise _refuse(
+            f"is not a JSON object (it holds {type(data).__name__})",
+            f"top-level JSON value is {type(data).__name__}, not an object",
+        )
 
     if "repos" not in data:
         legacy = data.get("issues")
@@ -695,7 +829,11 @@ def _read_status_file(target_repo: Path) -> dict:
         }
 
     if not isinstance(data.get("repos"), dict):
-        data["repos"] = {}
+        kind = type(data.get("repos")).__name__
+        raise _refuse(
+            f"has a 'repos' field that is not an object (it holds {kind})",
+            f"'repos' is {kind}, not an object",
+        )
     return data
 
 
@@ -753,8 +891,12 @@ def load_lld_tracking(target_repo: Path) -> LLDStatusCache:
             repo read every other repo's entries.
 
     Returns:
-        LLDStatusCache dict. Empty cache when the file is missing, corrupt, or
-        carries nothing for this repo.
+        LLDStatusCache dict. Empty cache when the file is missing or carries
+        nothing for this repo.
+
+    Raises:
+        LLDStatusCacheError: the file exists and cannot be read or understood
+            (#3585), after alerting the operator.
     """
     raw = _read_status_file(target_repo)
     slice_ = raw.get("repos", {}).get(_repo_key(target_repo), {})
@@ -1154,6 +1296,10 @@ def embed_review_evidence(
 
     Returns:
         Updated LLD content with embedded evidence.
+
+    Raises:
+        ValueError: the LLD has a Review Summary heading whose table is not in
+            the expected form, so the evidence row cannot be added (#3585).
     """
     if not reviewer_model:
         from assemblyzero.core.seats import resolve_active
@@ -1185,6 +1331,15 @@ def embed_review_evidence(
             lld_content = table_pattern.sub(
                 f"\\1\n{review_entry}\n",
                 lld_content,
+            )
+        else:
+            # #3585: the evidence row used to be left out without a word, so
+            # a finalized LLD carried no record of the review that passed it.
+            raise ValueError(
+                "the LLD has a '### Review Summary' heading but no table under "
+                "it in the form '| Review | Date | Verdict ... |' with a "
+                f"separator row, so the review evidence row {review_entry!r} "
+                "cannot be embedded"
             )
     else:
         # Create Review Summary section before Final Status

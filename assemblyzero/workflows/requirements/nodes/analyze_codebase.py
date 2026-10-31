@@ -8,15 +8,25 @@ into the LangGraph state so the drafter node can produce LLDs grounded in
 real codebase structure and conventions.
 
 This node runs before the draft_lld node and after load_input.
+
+#3585 (ADR 0236): an analysis that cannot read what it analyzes returns
+``error_message``, which ``route_after_analyze_codebase`` sends to HALT
+before N0c spends a model call, and HALT alerts. That covers a missing repo
+path, a selected file that cannot be read, a listing that fails and a Tiphys
+extraction that raises. A file left out to fit the token budget is a designed
+cap and is named in the log; a sensitive, binary or empty file is skipped.
 """
 
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.interface_surface import build_interface_map
 from assemblyzero.utils.codebase_reader import (
+    BINARY_EXTENSIONS,
+    FileReadResult,
     is_sensitive_file,
     parse_project_metadata,
     read_files_within_budget,
@@ -65,6 +75,61 @@ _PER_FILE_TOKEN_BUDGET: int = 3_000
 _MAX_RELATED_FILES: int = 5
 
 
+def _loud(message: str) -> str:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[N0b] %s", message)
+    print(f"ERROR [N0b] {message}", file=sys.stderr, flush=True)
+    return message
+
+
+class UnreadableSelectedFile(RuntimeError):
+    """A file the analysis selected could not be read (#3585)."""
+
+
+def _unread_selected(
+    selected: list[Path],
+    results: list[FileReadResult],
+    total_budget: int,
+) -> list[Path]:
+    """The selected files left out to fit the budget (#3585).
+
+    ``read_files_within_budget`` returns only the files it read with content,
+    so a selected file can be missing from its results for one of four
+    reasons. Sensitive and binary files are skipped by design, and an empty
+    file has nothing to read: all three stay quiet. A file after the total
+    budget ran out is a designed cap: it is returned so the caller names it in
+    the log. Anything else could not be read, and the drafter would design
+    without it. The reader logs that at DEBUG and returns nothing, so this is
+    the only place it is seen, and it raises.
+
+    Raises:
+        UnreadableSelectedFile: naming the first selected file that could not
+            be read, and why.
+    """
+    by_path = {r["path"]: r for r in results}
+    used = 0
+    budget_dropped: list[Path] = []
+    for path in selected:
+        hit = by_path.get(str(path))
+        if hit is not None:
+            used += hit["token_estimate"]
+            continue
+        if is_sensitive_file(path) or path.suffix.lower() in BINARY_EXTENSIONS:
+            continue
+        if used >= total_budget:
+            budget_dropped.append(path)
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise UnreadableSelectedFile(f"{path}: {type(exc).__name__}: {exc}") from exc
+        if text.strip():
+            raise UnreadableSelectedFile(
+                f"{path}: it has content and the budgeted reader returned none"
+            )
+    return budget_dropped
+
+
 def _empty_codebase_context() -> dict[str, Any]:
     """Return an empty CodebaseContext dict.
 
@@ -98,23 +163,27 @@ def analyze_codebase(state: dict) -> dict:
             - directory_tree (str): Pre-computed directory listing from #389
 
     Returns:
-        dict with ``codebase_context`` key containing CodebaseContext,
-        or empty CodebaseContext on any failure.
+        dict with ``codebase_context`` and ``interface_map``, or with
+        ``error_message`` (#3585) when the analysis cannot read what it
+        analyzes, which routes to HALT.
     """
     # Extract repo_path from state – support both 'repo_path' and 'target_repo'
     repo_path_str: str | None = state.get("repo_path") or state.get("target_repo")
 
+    # #3585: both used to return an empty context with a warning, and the
+    # drafter designed against nothing.
     if not repo_path_str or not str(repo_path_str).strip():
-        logger.warning("No repo path provided, skipping codebase analysis")
-        return {"codebase_context": _empty_codebase_context(), "interface_map": {}}
+        return {"error_message": _loud(
+            "LLD analysis has no repo path (neither repo_path nor target_repo "
+            "is set), so there is no codebase to ground the design in"
+        )}
 
     repo_path = Path(repo_path_str)
-    if not repo_path.exists():
-        logger.warning(
-            "Repo path does not exist: %s, skipping codebase analysis",
-            repo_path,
-        )
-        return {"codebase_context": _empty_codebase_context(), "interface_map": {}}
+    if not repo_path.is_dir():
+        return {"error_message": _loud(
+            f"LLD analysis cannot read the repo {repo_path}: it is not a "
+            f"directory, so there is no codebase to ground the design in"
+        )}
 
     # Resolve to absolute to ensure consistent path handling
     repo_path = repo_path.resolve()
@@ -176,12 +245,34 @@ def analyze_codebase(state: dict) -> dict:
     # ------------------------------------------------------------------
     # Step 1: Select and read key files
     # ------------------------------------------------------------------
-    key_files = _select_key_files(repo_path)
+    # #3585: a listing that fails raises from the helpers (it used to pass),
+    # and a selected file that cannot be read halts (it was left out).
+    try:
+        key_files = _select_key_files(repo_path)
+    except OSError as exc:
+        return {"error_message": _loud(
+            f"LLD analysis cannot list the key files of {repo_path}: "
+            f"{type(exc).__name__}: {exc}"
+        )}
     key_read_results = read_files_within_budget(
         key_files,
         total_budget=_TOTAL_TOKEN_BUDGET,
         per_file_budget=_PER_FILE_TOKEN_BUDGET,
     )
+    try:
+        budget_dropped = _unread_selected(
+            key_files, key_read_results, _TOTAL_TOKEN_BUDGET
+        )
+    except UnreadableSelectedFile as exc:
+        return {"error_message": _loud(
+            f"LLD analysis cannot read a selected key file in {repo_path}: {exc}"
+        )}
+    if budget_dropped:
+        logger.warning(
+            "Codebase analysis: %d key file(s) left out to fit the %d-token budget: %s",
+            len(budget_dropped), _TOTAL_TOKEN_BUDGET,
+            ", ".join(str(p) for p in budget_dropped),
+        )
 
     # Build key_file_excerpts and file_contents for pattern scanning
     key_file_excerpts: dict[str, str] = {}
@@ -250,7 +341,13 @@ def analyze_codebase(state: dict) -> dict:
     related_paths_all: list[Path] = []
 
     if issue_text and directory_tree:
-        related_paths = _find_related_files(repo_path, issue_text, directory_tree)
+        try:
+            related_paths = _find_related_files(repo_path, issue_text, directory_tree)
+        except OSError as exc:
+            return {"error_message": _loud(
+                f"LLD analysis cannot search {repo_path} for the files the "
+                f"issue names: {type(exc).__name__}: {exc}"
+            )}
         related_paths_all = list(related_paths)
         # Exclude files already read as key files
         already_read = {Path(p).name for p in key_file_excerpts}
@@ -258,32 +355,55 @@ def analyze_codebase(state: dict) -> dict:
             p for p in related_paths if p.name not in already_read
         ]
 
-        if related_paths and remaining_budget > 0:
-            related_results = read_files_within_budget(
+        related_results = (
+            read_files_within_budget(
                 related_paths,
                 total_budget=remaining_budget,
                 per_file_budget=_PER_FILE_TOKEN_BUDGET,
             )
-            for result in related_results:
-                if result["content"]:
-                    related_code[result["path"]] = result["content"]
+            if related_paths and remaining_budget > 0
+            else []
+        )
+        try:
+            budget_dropped = _unread_selected(
+                related_paths, related_results, remaining_budget
+            )
+        except UnreadableSelectedFile as exc:
+            return {"error_message": _loud(
+                f"LLD analysis cannot read a related file in {repo_path}: {exc}"
+            )}
+        if budget_dropped:
+            logger.warning(
+                "Codebase analysis: %d related file(s) left out to fit the "
+                "remaining %d-token budget: %s",
+                len(budget_dropped), remaining_budget,
+                ", ".join(str(p) for p in budget_dropped),
+            )
+        for result in related_results:
+            related_code[result["path"]] = result["content"]
 
     # ------------------------------------------------------------------
     # Step 8b: Tiphys (#1688) — ground-truth interface surface.
     # Size-adaptive: small repos ship their whole public surface (no
     # selection, no selection miss); large repos use explicit-path +
-    # keyword selection with one-hop import expansion. Never blocks:
-    # any failure yields an empty map and the LLD proceeds as before.
+    # keyword selection with one-hop import expansion.
+    #
+    # #3585: a failure halts. It used to leave the map empty with a warning,
+    # so the drafter worked blind on the very repo this exists to ground it
+    # in; interface_surface raises since #3779. A repo with no Python files
+    # has an empty surface, which is an answer, not a failure.
     # ------------------------------------------------------------------
-    interface_map: dict[str, str] = {}
     try:
         interface_map = build_interface_map(
             repo_path,
             issue_text=issue_text,
             related_paths=related_paths_all,
         )
-    except Exception:  # noqa: BLE001 — Tiphys must never block the LLD
-        logger.warning("Tiphys interface extraction failed", exc_info=True)
+    except (OSError, SyntaxError, ValueError) as exc:
+        return {"error_message": _loud(
+            f"LLD analysis cannot extract the interface surface of {repo_path}: "
+            f"{type(exc).__name__}: {exc}"
+        )}
 
     # ------------------------------------------------------------------
     # Step 9: Assemble CodebaseContext
@@ -328,6 +448,10 @@ def _select_key_files(repo_path: Path) -> list[Path]:
 
     Returns:
         Ordered list of file paths by priority.
+
+    Raises:
+        OSError: a docs directory or the repo root cannot be listed (#3585);
+            the listing used to be skipped without a word.
     """
     files: list[Path] = []
 
@@ -355,25 +479,19 @@ def _select_key_files(repo_path: Path) -> list[Path]:
     for docs_subdir in ("docs/standards", "docs/adrs"):
         docs_dir = repo_path / docs_subdir
         if docs_dir.is_dir():
-            try:
-                md_files = sorted(docs_dir.glob("*.md"))[:3]
-                files.extend(md_files)
-            except OSError:
-                pass
+            md_files = sorted(docs_dir.glob("*.md"))[:3]
+            files.extend(md_files)
 
     # Priority 5: Top-level __init__.py files (first 5)
-    try:
-        init_files: list[Path] = []
-        for child in sorted(repo_path.iterdir()):
-            if child.is_dir() and not child.name.startswith("."):
-                init_py = child / "__init__.py"
-                if init_py.is_file():
-                    init_files.append(init_py)
-                    if len(init_files) >= 5:
-                        break
-        files.extend(init_files)
-    except OSError:
-        pass
+    init_files: list[Path] = []
+    for child in sorted(repo_path.iterdir()):
+        if child.is_dir() and not child.name.startswith("."):
+            init_py = child / "__init__.py"
+            if init_py.is_file():
+                init_files.append(init_py)
+                if len(init_files) >= 5:
+                    break
+    files.extend(init_files)
 
     return files
 
@@ -397,6 +515,9 @@ def _find_related_files(
 
     Returns:
         At most 5 file paths, ordered by match count descending.
+
+    Raises:
+        OSError: from ``_search_for_file``, when a directory cannot be walked.
     """
     if not issue_text or not directory_tree:
         return []
@@ -476,7 +597,11 @@ def _search_for_file(repo_path: Path, filename: str) -> Path | None:
         filename: Filename (possibly with partial path) to find.
 
     Returns:
-        Resolved Path if found, None otherwise.
+        Resolved Path if found, None otherwise. Not found is an answer.
+
+    Raises:
+        OSError: a search directory cannot be walked (#3585); the directory
+            used to be skipped, so "not found" could mean "not looked for".
     """
     search_dirs = [
         repo_path,
@@ -490,17 +615,11 @@ def _search_for_file(repo_path: Path, filename: str) -> Path | None:
     for search_dir in search_dirs:
         if not search_dir.is_dir():
             continue
-        try:
-            for match in search_dir.rglob(base_name):
-                if match.is_file():
-                    # Verify it's within repo boundary
-                    try:
-                        match.resolve().relative_to(repo_path.resolve())
-                        return match
-                    except ValueError:
-                        continue
-        except OSError:
-            continue
+        for match in search_dir.rglob(base_name):
+            # Verify it's within repo boundary: a match outside is not one of
+            # the repo's files, so it is passed over (the boundary filter).
+            if match.is_file() and match.resolve().is_relative_to(repo_path.resolve()):
+                return match
 
     return None
 

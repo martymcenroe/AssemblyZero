@@ -126,16 +126,19 @@ class TestTheSpecStageFilesItsQuestion:
 
         assert spy.calls == []
 
-    def test_filing_never_masks_the_halt(self, repo, capsys):
-        """Same contract as N0c's. The roll is already stopping; a filing
-        problem is loud and nothing more."""
+    def test_filing_never_masks_the_halt(self, repo, capsys, operator_alerts):
+        """Same contract as N0c's: the roll is already stopping, and a filing
+        problem never changes the halt. #3585: it alerts the operator with its
+        cause, where it used to print a WARNING and nothing more."""
         spy = _Spy(boom=True)
         with patch("assemblyzero.speedrun.must_resolve.file_must_resolve", spy):
             _file_conflict_if_any(
                 {"repo_root": str(repo), "issue_number": 1}, REVIEWER_RATIONALE
             )
 
-        assert "WARNING" in capsys.readouterr().out
+        assert "ERROR" in capsys.readouterr().out
+        assert len(operator_alerts) == 1
+        assert operator_alerts[0]["cause"] == "RuntimeError: gh exploded"
 
     def test_it_really_reaches_gh_issue_create(self, repo):
         """End to end through the filer, with the runner injected explicitly,

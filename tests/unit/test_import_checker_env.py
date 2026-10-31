@@ -16,7 +16,10 @@ than none).
 
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+    CompletenessCannotCheck,
     _first_party_tops,
     check_import_targets_exist,
 )
@@ -117,14 +120,16 @@ class TestThirdPartyProbe:
         assert probe.call_count == 1
         assert sorted(probe.call_args.args[1]) == ["PIL", "psutil"]
 
-    def test_unavailable_env_gives_benefit_of_the_doubt(self, tmp_path):
-        """None means cannot-validate: pass, and say so in the details."""
+    def test_unavailable_env_stops_the_check(self, tmp_path):
+        """#3585: an environment that cannot answer raises, and N3 halts. It
+        used to pass the imports with a note that they were not validated."""
         repo = _make_repo(tmp_path)
         spec = _spec_with_imports("from PIL.Image import open")
-        with patch(f"{MODULE}._probe_target_env", return_value=None):
-            result = check_import_targets_exist(spec, [], str(repo))
-        assert result["passed"] is True
-        assert "not validated" in result["details"]
+        with patch(
+            f"{MODULE}._probe_target_env",
+            side_effect=CompletenessCannotCheck("poetry env info exited 1: no venv"),
+        ), pytest.raises(CompletenessCannotCheck, match="no venv"):
+            check_import_targets_exist(spec, [], str(repo))
 
     def test_stdlib_never_reaches_the_probe(self, tmp_path):
         repo = _make_repo(tmp_path)

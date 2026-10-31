@@ -10,10 +10,17 @@ Uses the configured drafter LLM to generate a draft based on:
 - LLD workflow: issue content + context + template
 
 Supports revision mode with bounded verdict feedback window.
+
+#3585 (ADR 0236): a drafter that cannot draft what it was asked to returns
+``error_message``, which routes to HALT, and HALT alerts. Everything the call
+depends on is settled before the drafter is paid for: the audit_dir, a prompt
+within the cap (nothing is dropped or truncated to fit), a prior draft that
+can be read, and a Tiphys interface refresh that worked.
 """
 
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +81,44 @@ logger = logging.getLogger(__name__)
 MAX_TOTAL_PROMPT_CHARS = 120_000
 # Warn at 80% of the cap
 PROMPT_SIZE_WARNING_THRESHOLD = 0.8
+
+
+class InterfaceRefreshError(RuntimeError):
+    """The Tiphys refresh of a revision's own files failed (#3585).
+
+    Raised by ``build_revision_context``; ``generate_draft`` turns it into
+    the halt. It used to be logged as a warning, and the revision went on
+    against the N0b map, which is stale by exactly the files the draft names.
+    """
+
+
+def _loud(message: str) -> str:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[N1] %s", message)
+    print(f"ERROR [N1] {message}", file=sys.stderr, flush=True)
+    return message
+
+
+def _audit_dir_problem(state: RequirementsWorkflowState) -> str:
+    """Why the run's audit_dir cannot take the draft, or "" when it can.
+
+    N0 makes every run's audit_dir. One that is unset or absent here meant
+    the draft (or every best-of-N candidate) was paid for and then not
+    recorded in lineage, without a word (#3585).
+    """
+    audit_dir = str(state.get("audit_dir", "") or "")
+    if not audit_dir:
+        return (
+            "cannot draft: the run has no audit_dir, so the draft could not be "
+            "recorded in its lineage; the drafter was not called"
+        )
+    if not Path(audit_dir).is_dir():
+        return (
+            f"cannot draft: the audit_dir {audit_dir} does not exist, so the "
+            f"draft could not be recorded in its lineage; the drafter was not "
+            f"called"
+        )
+    return ""
 
 
 def _edit_script_halt(reason: str) -> str:
@@ -146,6 +191,7 @@ def _generate_best_of_n(
     audit_dir: Path,
     draft_count: int,
     cost_before: float,
+    drafter_spec: str,
 ) -> dict[str, Any]:
     """N independent drafts, scored by the real gates, best one forward (#2573).
 
@@ -161,6 +207,11 @@ def _generate_best_of_n(
     losers are the evidence for whether best-of-N is worth keeping, and
     discarding them would make that question unanswerable the same way the
     serial loop's discarded drafts did.
+
+    #3585: a candidate whose call fails is said at ERROR with its index, the
+    drafter spec and the cause, and still scored unusable, since one failed
+    candidate does not end the round; all of them failing halts. The caller
+    has checked the audit_dir, so every candidate and the winner are recorded.
     """
     from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
         validate_lld_mechanical,
@@ -184,7 +235,13 @@ def _generate_best_of_n(
         last_result = result
         if not result.success:
             # A failed candidate is scored unusable, not fatal: the point of
-            # N drafts is that one failing does not end the round.
+            # N drafts is that one failing does not end the round. #3585: it
+            # is said, where it used to show only in the score table.
+            _loud(
+                f"best-of-N candidate {index}/{candidates} from {drafter_spec} "
+                f"failed: {result.error_message}; it is scored unusable and "
+                f"the round goes on"
+            )
             scores.append(
                 _unusable(index, f"drafter failed: {result.error_message}")
             )
@@ -198,11 +255,10 @@ def _generate_best_of_n(
         )
         scores.append(score)
 
-        if audit_dir.exists():
-            file_num = next_file_number(audit_dir)
-            save_audit_file(
-                audit_dir, file_num, f"candidate-{index}-draft.md", candidate
-            )
+        file_num = next_file_number(audit_dir)
+        save_audit_file(
+            audit_dir, file_num, f"candidate-{index}-draft.md", candidate
+        )
 
         if score.clears:
             # A draft that passes every gate outright short-circuits: the
@@ -229,10 +285,8 @@ def _generate_best_of_n(
     node_cost_usd = get_cumulative_cost() - cost_before
     iteration_count = state.get("iteration_count", 0) + 1
 
-    draft_path = None
-    if audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
+    file_num = next_file_number(audit_dir)
+    draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
 
     node_costs = accumulate_node_cost(
         dict(state.get("node_costs", {})), "generate_draft", node_cost_usd,
@@ -246,7 +300,7 @@ def _generate_best_of_n(
 
     return {
         "current_draft": draft_content,
-        "current_draft_path": str(draft_path) if draft_path else "",
+        "current_draft_path": str(draft_path),
         "draft_count": draft_count,
         "iteration_count": iteration_count,
         "file_counter": file_num,
@@ -327,24 +381,11 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     else:
         print("\n[N1] Generating initial draft...")
 
-    # #3563: the drafter is the run profile's `requirements.draft` seat. The
-    # mock profile puts `mock:lld` there (#3533), so a rehearsal reaches
-    # review and finalize; the issue workflow's --mock makes it `mock:draft`.
-    # A seat that will not resolve is reported where an unbuildable drafter
-    # always was, below, so the node keeps one "Invalid drafter" halt site.
-    seat_error: ValueError | None = None
-    drafter_seat = None
-    drafter_spec = reviewer_spec = ""
-    try:
-        # #3577: the reviewer first, so the drafter is the last seat resolved
-        # before its provider is built and the call record names it.
-        reviewer_spec = resolve(state, "requirements.review").spec
-        drafter_seat = resolve(state, "requirements.draft")
-        drafter_spec = drafter_seat.spec
-    except ValueError as e:
-        # fail-open: not here. The error is held and raised inside the drafter
-        # try below, so it halts with the node's one "Invalid drafter" message.
-        seat_error = e
+    # #3585: before anything is spent. The serial save and every best-of-N
+    # save used to be skipped without a word when the audit_dir was missing.
+    problem = _audit_dir_problem(state)
+    if problem:
+        return {"error_message": _loud(problem)}
 
     # Determine template path based on workflow type
     if workflow_type == "issue":
@@ -359,25 +400,47 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
         return {"error_message": str(e)}
 
     # Build prompt
-    prompt = _build_prompt(state, template, workflow_type)
+    try:
+        prompt = _build_prompt(state, template, workflow_type)
+    except InterfaceRefreshError as e:
+        return {"error_message": _loud(str(e))}
 
-    # Issue #508: Prompt-size awareness
+    # Issue #508: Prompt-size awareness. #3585: a prompt over the cap halts.
+    # It used to be cut to fit, dropping whole sections (the codebase context,
+    # then the repository structure) and then the tail, so the drafter wrote
+    # a design from a prompt nobody had decided to send.
     prompt_len = len(prompt)
     if prompt_len > MAX_TOTAL_PROMPT_CHARS:
-        logger.warning(
-            "[N1] Prompt exceeds cap: %d > %d chars. Truncating.",
-            prompt_len, MAX_TOTAL_PROMPT_CHARS,
-        )
-        print(f"    [WARN] Prompt {prompt_len:,} chars exceeds {MAX_TOTAL_PROMPT_CHARS:,} cap — truncating")
-        prompt = _truncate_prompt(prompt)
+        return {"error_message": _loud(
+            f"the drafting prompt is {prompt_len:,} chars, over the "
+            f"{MAX_TOTAL_PROMPT_CHARS:,}-char cap; nothing is dropped to fit, "
+            f"so the drafter was not called"
+        )}
     elif prompt_len > MAX_TOTAL_PROMPT_CHARS * PROMPT_SIZE_WARNING_THRESHOLD:
         pct = prompt_len / MAX_TOTAL_PROMPT_CHARS * 100
         print(f"    [WARN] Prompt at {pct:.0f}% of cap ({prompt_len:,} / {MAX_TOTAL_PROMPT_CHARS:,} chars)")
 
+    # #3563: the drafter is the run profile's `requirements.draft` seat. The
+    # mock profile puts `mock:lld` there (#3533), so a rehearsal reaches
+    # review and finalize; the issue workflow's --mock makes it `mock:draft`.
+    # #3585: a seat that will not resolve and a provider that cannot be built
+    # halt together, here, before the preflight. The seat error used to be
+    # held in a variable and raised below the preflight, a shape that reads as
+    # a fall-through; now nothing runs between the failure and its halt.
+    try:
+        # #3577: the reviewer first, so the drafter is the last seat resolved
+        # before its provider is built and the call record names it.
+        reviewer_spec = resolve(state, "requirements.review").spec
+        drafter_seat = resolve(state, "requirements.draft")
+        drafter_spec = drafter_seat.spec
+        drafter = get_provider(drafter_spec, effort=drafter_seat.effort)
+    except ValueError as e:
+        return {"error_message": f"Invalid drafter: {e}"}
+
     # Issue #486: Pre-flight check — verify Gemini available before expensive
     # Claude call. #3506: only when some node of this run is Gemini, and then
     # the agy transport itself, not the credential file.
-    if not mock_mode and seat_error is None:
+    if not mock_mode:
         from assemblyzero.core.preflight import preflight_for_specs
         preflight = preflight_for_specs(drafter_spec, reviewer_spec)
         if preflight is None:
@@ -389,14 +452,6 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
             return {"error_message": f"[PREFLIGHT] Gemini unavailable: {warnings_str}"}
         else:
             print("    [PREFLIGHT] Gemini transport: agy answered")
-
-    # Get drafter provider
-    try:
-        if seat_error is not None:
-            raise seat_error
-        drafter = get_provider(drafter_spec, effort=drafter_seat.effort)
-    except ValueError as e:
-        return {"error_message": f"Invalid drafter: {e}"}
 
     # System prompt for drafting
     if workflow_type == "issue":
@@ -473,14 +528,19 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
     if previous_draft_path or previous_verdict_text:
         previous_draft_text = ""
         if previous_draft_path:
+            # #3585: a prior draft that cannot be read halts. Its place in the
+            # system prompt used to say "(unable to read previous draft ...)",
+            # and the drafter was told to revise a document it never saw.
             try:
                 previous_draft_text = Path(previous_draft_path).read_text(
                     encoding="utf-8"
                 )
-            except OSError:
-                previous_draft_text = (
-                    f"(unable to read previous draft at {previous_draft_path})"
-                )
+            except (OSError, UnicodeDecodeError) as e:
+                return {"error_message": _loud(
+                    f"cannot read the prior draft {previous_draft_path} this "
+                    f"stage was asked to revise ({type(e).__name__}: {e}); "
+                    f"the drafter was not called"
+                )}
         system_prompt += (
             "\n\n========================================================\n"
             "REVISION MODE — you have a prior attempt to learn from.\n"
@@ -558,10 +618,14 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
             audit_dir=audit_dir,
             draft_count=draft_count,
             cost_before=cost_before,
+            drafter_spec=drafter_spec,
         )
 
     if use_edit_script:
-        edit_context = build_revision_context(state)
+        try:
+            edit_context = build_revision_context(state)
+        except InterfaceRefreshError as e:
+            return {"error_message": _loud(str(e))}
         # #1443's cross-run context rides in the classic system prompt, which
         # the edit path does not use. Carry the prior attempt's verdict across
         # explicitly so a resumed stage revises with everything it had before.
@@ -668,18 +732,14 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
     dq_result = _extract_open_questions(drafter, draft_content, system_prompt)
     open_questions = dq_result["open_questions"]
 
-    # Save to audit trail
+    # Save to audit trail (#3585: the audit_dir was checked before the call)
     iteration_count = state.get("iteration_count", 0) + 1
     file_num = next_file_number(audit_dir)
-    if audit_dir.exists():
-        draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
-    else:
-        draft_path = None
+    draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
 
     draft_lines = len(draft_content.splitlines()) if draft_content else 0
     print(f"    Generated {draft_lines} lines")
-    if draft_path:
-        print(f"    Saved: {draft_path.name}")
+    print(f"    Saved: {draft_path.name}")
 
     # Issue #248: Pre-review validation gate REMOVED
     # Open questions now proceed to review where Gemini can answer them.
@@ -698,7 +758,7 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
 
     return {
         "current_draft": draft_content,
-        "current_draft_path": str(draft_path) if draft_path else "",
+        "current_draft_path": str(draft_path),
         "draft_count": draft_count,
         "iteration_count": iteration_count,
         "file_counter": file_num,
@@ -732,6 +792,10 @@ def build_revision_context(state: RequirementsWorkflowState) -> str:
 
     Returns:
         Markdown feedback block, empty when there is nothing to say.
+
+    Raises:
+        InterfaceRefreshError: the Tiphys refresh of the draft's own files
+            failed (#3585).
     """
     current_draft = state.get("current_draft", "")
     verdict_history = state.get("verdict_history", [])
@@ -790,22 +854,32 @@ def build_revision_context(state: RequirementsWorkflowState) -> str:
     # Changed table declares the change's actual blast radius; refresh
     # signatures for exactly those files (plus one-hop imports). Any
     # draft-one selection miss becomes a one-iteration transient. Falls
-    # back to the N0b-computed map when the table yields nothing.
+    # back to the N0b-computed map when the table names no Python file.
+    #
+    # #3585: a refresh that fails raises InterfaceRefreshError, which
+    # generate_draft turns into the halt. It used to be logged as a warning
+    # and the revision went on against the N0b map, stale by exactly the
+    # files this draft names; interface_surface raises since #3779.
     refreshed_map: dict = {}
     revision_target_repo = state.get("target_repo", "")
     if revision_target_repo and current_draft:
-        try:
-            entries, _parse_errors = parse_files_changed_table(current_draft)
-            draft_paths = [
-                e.get("path", "") for e in entries
-                if e.get("path", "").endswith(".py")
-            ]
-            if draft_paths:
+        entries, _parse_errors = parse_files_changed_table(current_draft)
+        draft_paths = [
+            e.get("path", "") for e in entries
+            if e.get("path", "").endswith(".py")
+        ]
+        if draft_paths:
+            try:
                 refreshed_map = build_interface_map_for_paths(
                     draft_paths, Path(revision_target_repo)
                 )
-        except Exception:  # noqa: BLE001 — Tiphys must never block revision
-            logger.warning("Tiphys revision refresh failed", exc_info=True)
+            except (OSError, SyntaxError, ValueError) as exc:
+                raise InterfaceRefreshError(
+                    f"the Tiphys interface refresh of the draft's Files Changed "
+                    f"files ({', '.join(draft_paths)}) in {revision_target_repo} "
+                    f"failed: {type(exc).__name__}: {exc}; the revision would "
+                    f"have been drafted against a stale interface map"
+                ) from exc
     interface_section = format_interface_map_section(
         refreshed_map or state.get("interface_map") or {}
     )
@@ -839,6 +913,9 @@ def _build_prompt(
 
     Returns:
         Complete prompt string.
+
+    Raises:
+        InterfaceRefreshError: on a revision, from ``build_revision_context``.
     """
     current_draft = state.get("current_draft", "")
     verdict_history = state.get("verdict_history", [])
@@ -871,11 +948,10 @@ def _build_prompt(
             input_content += f"\n\n## Context\n\n{context_content}"
 
         # Tiphys (#1688): real interface surface, placed BEFORE the
-        # codebase-context sections — _truncate_prompt sacrifices those
-        # first under token pressure, and ground truth that exists to
-        # prevent hallucination must not be the first thing dropped. On
-        # revision passes the refreshed surface rides in revision_context
-        # instead — never both.
+        # codebase-context sections. (A truncator used to drop those first
+        # under token pressure; since #3585 an over-cap prompt halts and
+        # nothing is dropped.) On revision passes the refreshed surface rides
+        # in revision_context instead — never both.
         if not is_revision:
             interface_section = format_interface_map_section(
                 state.get("interface_map") or {}
@@ -1092,76 +1168,9 @@ def _format_codebase_context(ctx: dict) -> str:
     return "\n\n".join(parts)
 
 
-def _truncate_prompt(prompt: str) -> str:
-    """Truncate an oversized prompt by dropping lowest-priority sections.
-
-    Issue #508: Mirrors the pattern from generate_spec.py. Splits on ## headings,
-    drops sections by priority (context/codebase first, then repo structure),
-    and hard-truncates as a last resort.
-
-    Args:
-        prompt: Oversized prompt string.
-
-    Returns:
-        Truncated prompt within MAX_TOTAL_PROMPT_CHARS.
-    """
-    if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
-        return prompt
-
-    # Split into sections by ## headings
-    sections: list[tuple[str, str]] = []
-    current_heading = ""
-    current_lines: list[str] = []
-
-    for line in prompt.split("\n"):
-        if line.startswith("## "):
-            if current_lines:
-                sections.append((current_heading, "\n".join(current_lines)))
-            current_heading = line
-            current_lines = [line]
-        else:
-            current_lines.append(line)
-    if current_lines:
-        sections.append((current_heading, "\n".join(current_lines)))
-
-    # Drop sections by priority (lowest value = drop first)
-    drop_order = [
-        "Codebase Analysis",
-        "Related Code",
-        "Key File Excerpts",
-        "Dependencies",
-        "Coding Conventions",
-        "Frameworks",
-        "Module Structure",
-        "TARGET REPOSITORY STRUCTURE",
-        "ACTUAL REPOSITORY STRUCTURE",
-        "Context",
-    ]
-
-    dropped: list[str] = []
-    for keyword in drop_order:
-        if len("\n\n".join(s[1] for s in sections)) <= MAX_TOTAL_PROMPT_CHARS:
-            break
-        sections_new = []
-        for heading, body in sections:
-            if keyword.lower() in heading.lower():
-                dropped.append(heading or keyword)
-            else:
-                sections_new.append((heading, body))
-        sections = sections_new
-
-    result = "\n\n".join(s[1] for s in sections)
-
-    if dropped:
-        logger.warning("[N1] Dropped sections to fit cap: %s", dropped)
-        print(f"    [WARN] Dropped {len(dropped)} section(s): {', '.join(dropped)}")
-
-    # Hard truncate as last resort
-    if len(result) > MAX_TOTAL_PROMPT_CHARS:
-        result = result[:MAX_TOTAL_PROMPT_CHARS]
-        logger.warning("[N1] Hard-truncated prompt to %d chars", MAX_TOTAL_PROMPT_CHARS)
-
-    return result
+# #3585: `_truncate_prompt` is gone. It dropped whole prompt sections, then
+# hard-truncated the rest, to fit MAX_TOTAL_PROMPT_CHARS; generate_draft now
+# halts on an over-cap prompt instead, so nothing was left to call it.
 
 
 def validate_draft_structure(content: str) -> str | None:
@@ -1181,10 +1190,11 @@ def validate_draft_structure(content: str) -> str | None:
         content: Draft content to validate.
 
     Returns:
-        Error message if validation fails, None if passes.
+        Error message if validation fails, None if passes. #3585: an empty
+        draft fails; it used to pass, as a draft with no open questions.
     """
-    if not content:
-        return None
+    if not content or not content.strip():
+        return "BLOCKED: the draft is empty, so its open questions cannot be checked"
 
     # Extract only the Open Questions section
     # Pattern: from "### Open Questions" or "## Open Questions"

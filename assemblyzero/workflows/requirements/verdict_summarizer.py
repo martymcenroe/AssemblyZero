@@ -35,7 +35,10 @@ def extract_blocking_issues(verdict_text: str) -> list[str]:
     - Text format (current): regex extracts lines matching ``[BLOCKING]``
       or ``**BLOCKING**`` patterns
 
-    Falls back to text parsing with logger.warning() if JSON detection fails.
+    A JSON verdict is read strictly (#3585): text that starts with ``{`` and
+    is not JSON, a JSON verdict with no ``blocking_issues`` list, and an issue
+    item with no ``description`` each raise ValueError naming the problem.
+    They used to fall back to reading the JSON as prose, or to "0 issues".
 
     Args:
         verdict_text: Raw verdict string (text or JSON format).
@@ -51,22 +54,26 @@ def extract_blocking_issues(verdict_text: str) -> list[str]:
 
     # Attempt JSON parsing first
     if stripped.startswith("{"):
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict) and "blocking_issues" in data:
-                issues = data["blocking_issues"]
-                if isinstance(issues, list):
-                    return [
-                        item["description"]
-                        for item in issues
-                        if isinstance(item, dict) and "description" in item
-                    ]
-            return []
-        except (json.JSONDecodeError, KeyError, TypeError):
-            logger.warning(
-                "Verdict text starts with '{' but failed JSON parsing; "
-                "falling back to text extraction"
+        data = _load_json_verdict(stripped)
+        if not isinstance(data, dict) or "blocking_issues" not in data:
+            raise ValueError(
+                f"the JSON verdict carries no 'blocking_issues' key: {stripped[:200]!r}"
             )
+        issues = data["blocking_issues"]
+        if not isinstance(issues, list):
+            raise ValueError(
+                f"the JSON verdict's 'blocking_issues' is not a list (it is "
+                f"{type(issues).__name__}): {stripped[:200]!r}"
+            )
+        descriptions = []
+        for index, item in enumerate(issues):
+            if not isinstance(item, dict) or "description" not in item:
+                raise ValueError(
+                    f"the JSON verdict's blocking_issues item {index} has no "
+                    f"'description': {item!r}"
+                )
+            descriptions.append(item["description"])
+        return descriptions
 
     # Text format extraction
     # Match patterns like:
@@ -78,8 +85,51 @@ def extract_blocking_issues(verdict_text: str) -> list[str]:
     return [m.strip() for m in matches]
 
 
+def _load_json_verdict(text: str):
+    """Parse a verdict that starts with ``{``, or raise naming it (#3585)."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.error(
+            "a verdict in the history starts with '{' and is not valid JSON: %s; "
+            "it begins %r", exc, text[:200],
+        )
+        raise ValueError(
+            f"the verdict starts with '{{' and is not valid JSON ({exc}); it "
+            f"begins {text[:200]!r}"
+        ) from exc
+
+
+def _verdict_line_status(text: str) -> str:
+    """The status an explicit ``Verdict:`` line states, or "" when none does.
+
+    Reads ``Verdict: BLOCKED``, ``## Verdict: APPROVED``, ``**Verdict:**
+    APPROVED`` and ``Verdict: [x] APPROVED``: markdown emphasis, heading marks
+    and a ticked box are dropped, and the first word after the colon decides.
+    """
+    for line in text.splitlines():
+        cleaned = line.replace("*", "").replace("#", "").strip()
+        if not cleaned.lower().startswith("verdict"):
+            continue
+        rest = cleaned[len("verdict"):].lstrip()
+        if not rest.startswith(":"):
+            continue
+        words = rest[1:].upper().replace("[X]", " ").split()
+        if words and words[0].strip(".,;:!") in ("APPROVED", "BLOCKED"):
+            return words[0].strip(".,;:!")
+    return ""
+
+
 def _extract_verdict_status(verdict_text: str) -> str:
     """Extract the verdict status string from a verdict.
+
+    #3585: the status comes from the JSON ``verdict`` field, or from an
+    explicit verdict line. Any "APPROVED" in the text used to decide it, so
+    "NOT APPROVED" read as APPROVED. A JSON verdict that does not parse raises.
+
+    UNKNOWN is an answer, not a failure: the review node stores actionable
+    feedback in the history (#506), usually a bullet list with no verdict
+    line, and UNKNOWN is what such an entry says about its status.
 
     Args:
         verdict_text: Raw verdict text.
@@ -92,25 +142,15 @@ def _extract_verdict_status(verdict_text: str) -> str:
 
     stripped = verdict_text.strip()
 
-    # Try JSON first
     if stripped.startswith("{"):
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict) and "verdict" in data:
-                verdict_val = str(data["verdict"]).upper()
-                if verdict_val in ("BLOCKED", "APPROVED"):
-                    return verdict_val
-                return "UNKNOWN"
-        except (json.JSONDecodeError, KeyError, TypeError):
-            pass  # Fall through to text parsing
+        data = _load_json_verdict(stripped)
+        if isinstance(data, dict) and "verdict" in data:
+            verdict_val = str(data["verdict"]).upper()
+            if verdict_val in ("BLOCKED", "APPROVED"):
+                return verdict_val
+            return "UNKNOWN"
 
-    # Text format: look for "Verdict: BLOCKED" or "Verdict: APPROVED"
-    upper = stripped.upper()
-    if "APPROVED" in upper:
-        return "APPROVED"
-    if "BLOCKED" in upper:
-        return "BLOCKED"
-    return "UNKNOWN"
+    return _verdict_line_status(stripped) or "UNKNOWN"
 
 
 def identify_persisting_issues(

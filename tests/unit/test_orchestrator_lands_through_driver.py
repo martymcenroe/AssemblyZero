@@ -172,10 +172,13 @@ def test_finalize_says_the_lld_did_not_land(tmp_path, capsys):
                       side_effect=GitOperationError("Failed to land 2-lld: AZ_MERGE_DRIVER is not set")):
         out = finalize_mod._commit_and_push_files(state)
 
-    printed = capsys.readouterr().out
-    assert "[LLD] NOT LANDED:" in printed
+    # #3585: said at ERROR on stderr, and error_message halts the graph.
+    printed = capsys.readouterr().err
+    assert "ERROR [finalize]" in printed
+    assert "NOT LANDED" in printed
     assert "AZ_MERGE_DRIVER is not set" in printed
     assert "AZ_MERGE_DRIVER is not set" in out["commit_error"]
+    assert "AZ_MERGE_DRIVER is not set" in out["error_message"]
 
 
 def test_the_lld_stage_fails_when_the_lld_did_not_land(tmp_path):

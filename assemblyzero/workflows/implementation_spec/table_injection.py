@@ -87,6 +87,7 @@ __all__ = [
     "BEGIN_MARKER",
     "END_MARKER",
     "INJECTED_HEADING",
+    "DamagedInjectionError",
     "apply_injection",
     "authoritative_tables",
     "build_injection",
@@ -112,6 +113,15 @@ _PREAMBLE = (
 )
 
 
+class DamagedInjectionError(ValueError):
+    """The LLD's machine-owned block is present and holds no criteria table (#3585).
+
+    The block is the one region of the LLD no drafter and no revision could
+    touch; reading the rest of the LLD in its place is what the block exists
+    to prevent. The LLD is upstream, so no spec revision can mend it.
+    """
+
+
 def authoritative_tables(lld_content: str):
     """The LLD's criteria tables that bind the spec, in document order.
 
@@ -125,6 +135,11 @@ def authoritative_tables(lld_content: str):
     issue's -- falls back to every criteria table it has. That is the correct
     reading of "derive from the upstream artifact" when the upstream artifact
     predates the fence.
+
+    Raises:
+        DamagedInjectionError: the block is present but parses to no criteria
+            table (#3585). It used to fall back to every criteria table in the
+            LLD, reading around the damage, which hides it.
     """
     tables = source_criteria_tables(lld_content)
     span = injected_line_span(lld_content or "")
@@ -132,11 +147,13 @@ def authoritative_tables(lld_content: str):
         return tables
     start, end = span
     inside = [t for t in tables if start <= t.line_no <= end]
-    # An injected block that parses to no criteria table means the fence is
-    # present but its content is not what this function is looking for. Fall
-    # back rather than inject nothing: emitting no block would silently drop
-    # the protection, which is the failure mode this module exists to end.
-    return inside or tables
+    if not inside:
+        raise DamagedInjectionError(
+            f"the LLD's machine-owned decision-table block (lines {start}-{end}) "
+            f"holds no criteria table, so the binding values the spec must carry "
+            f"cannot be read from it; the LLD needs its block restored (#2607)"
+        )
+    return inside
 
 
 def build_injection(lld_content: str) -> str:
@@ -145,6 +162,9 @@ def build_injection(lld_content: str) -> str:
     An LLD with no criteria decision table injects nothing and the spec
     derivation proceeds exactly as before -- prose-only LLDs are the ordinary
     case and this issue's control.
+
+    Raises:
+        DamagedInjectionError: see authoritative_tables.
     """
     tables = authoritative_tables(lld_content)
     if not tables:

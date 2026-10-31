@@ -45,12 +45,24 @@ unconverted issues live.
 
 `REFUSING_KINDS` and `EXACT_JOIN_REFUSES` are the two knobs. Widening the
 refusal is a one-line change if the operator wants it wider.
+
+A check that could not run refuses (#3585)
+------------------------------------------
+
+The ruling is about what the check FINDS. A check that never ran found
+nothing, and ADR 0236 makes everything after it dependent: an issue that
+cannot be fetched, an empty body, and a crash in the discrimination or scope
+extension each write an ERROR line, alert the operator and refuse the launch.
+They used to print "could not be checked" (or nothing, for a crashed
+extension) and let the roll proceed.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
+from assemblyzero.core import alert
 from assemblyzero.workflows.requirements.discrimination_check import (  # noqa: E402  (#2387)
     DiscriminationReport,
     check_discrimination,
@@ -63,6 +75,8 @@ from assemblyzero.workflows.requirements.scope_coverage import (  # noqa: E402  
     ScopeReport,
     check_scope_coverage,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Violations of the table's own shape: wrong row count for its condition
 #: count, or a repeated combination. These are what "malformed table" means.
@@ -82,7 +96,7 @@ class IssueForm:
 
     issue: int
     report: FormReport | None = None
-    error: str = ""            # the check could not run at all
+    error: str = ""            # the check could not run; render refuses (#3585)
     refusing: list = field(default_factory=list)   # violations that refuse
     reporting: list = field(default_factory=list)  # violations that only report
     #: #2387: the discrimination-coverage extension. Report-only, like the rest
@@ -141,39 +155,65 @@ def classify(report: FormReport) -> tuple[list, list]:
     return refusing, reporting
 
 
+def _failure_alert(repo_root, issue: int, cause: str) -> dict:
+    """The alert record for a form check that could not run (#3585)."""
+    return {
+        "what": f"run the ADR 0226 form check on issue #{issue}",
+        "where": "assemblyzero.workflows.requirements.form_gate.check_issue (launcher preflight)",
+        "cause": cause,
+        "consequence": "the preflight refuses the roll; nothing is spent",
+        "repo": str(repo_root),
+        "issue": issue,
+    }
+
+
+def _record_failure(result: IssueForm, cause: str) -> IssueForm:
+    """Mark the check as not run: an ERROR line, and ``error``, which refuses."""
+    result.error = cause
+    logger.error("[form check] #%s could not be checked: %s", result.issue, cause)
+    return result
+
+
 def check_issue(repo_root, issue: int, fetch) -> IssueForm:
-    """Run the form check for one issue. Never raises."""
+    """Run the form check for one issue. Never raises.
+
+    A check that cannot run sets ``error``, writes an ERROR line and alerts
+    the operator, and ``render`` refuses on it (#3585): an issue that cannot
+    be fetched, an empty body, or a crash in the discrimination or scope
+    extension. A crashed extension used to leave its result None, which
+    ``render`` printed as nothing at all.
+    """
     result = IssueForm(issue=issue)
     try:
         title, body = fetch(repo_root, issue)
-    except Exception as exc:  # noqa: BLE001 - a read failure is not a verdict
-        result.error = str(exc)
-        return result
+    except Exception as exc:  # noqa: BLE001 - alerted, and render refuses on it
+        cause = f"the issue could not be read: {type(exc).__name__}: {exc}"
+        alert.alert_operator(**_failure_alert(repo_root, issue, cause))
+        return _record_failure(result, cause)
 
     if not (body or "").strip():
-        result.error = "the issue body is empty, so there was nothing to check"
-        return result
+        cause = "the issue body is empty, so there was nothing to check"
+        alert.alert_operator(**_failure_alert(repo_root, issue, cause))
+        return _record_failure(result, cause)
 
     result.report = check_form(body)
     result.refusing, result.reporting = classify(result.report)
-    # #2387: never allowed to cost the form check its verdict.
+    # #2387: report-only in what it finds; a crash is a check that did not run.
     try:
         result.discrimination = check_discrimination(body)
-    except Exception:  # noqa: BLE001 - an extension is not the gate
-        result.discrimination = None
-    # #2645: same containment. The scope check reads the TITLE as well, which
-    # is the witness that survived nineteen ruled conflicts on boostgauge #331
-    # while the table lost a row.
+    except Exception as exc:  # noqa: BLE001 - alerted, and render refuses on it
+        cause = f"the discrimination-coverage check crashed: {type(exc).__name__}: {exc}"
+        alert.alert_operator(**_failure_alert(repo_root, issue, cause))
+        return _record_failure(result, cause)
+    # #2645: same. The scope check reads the TITLE as well, which is the
+    # witness that survived nineteen ruled conflicts on boostgauge #331 while
+    # the table lost a row.
     try:
         result.scope = check_scope_coverage(title, body)
-    except Exception:  # noqa: BLE001
-        # fail-open: an extension that crashes must not cost the form check
-        # its verdict, and this one parses free-form prose from every issue in
-        # the fleet. None is NOT a clean bill -- `render` prints nothing at all
-        # for a None scope, so the operator sees the disclosure line missing
-        # rather than a passing one. Report-only either way, so nothing is
-        # gated on it.
-        result.scope = None
+    except Exception as exc:  # noqa: BLE001 - alerted, and render refuses on it
+        cause = f"the scope-coverage check crashed: {type(exc).__name__}: {exc}"
+        alert.alert_operator(**_failure_alert(repo_root, issue, cause))
+        return _record_failure(result, cause)
     return result
 
 
@@ -186,11 +226,14 @@ def render(results: list[IssueForm]) -> tuple[str, bool]:
     """
     lines = [f"{LABEL} -- deterministic, no model calls:"]
     refuse = False
+    not_run = False
 
     for item in results:
         head = f"  #{item.issue}: "
 
         if item.error:
+            # #3585: a check that did not run refuses; it used to proceed.
+            refuse = not_run = True
             lines.append(
                 head + f"could not be checked ({item.error}). Nothing about "
                 "this issue's form has been verified."
@@ -259,7 +302,14 @@ def render(results: list[IssueForm]) -> tuple[str, bool]:
                 "but not blocking"
             )
 
-    if refuse:
+    if not_run:
+        lines += [
+            "",
+            "  BLOCKED by the form check: it could not run on the issue above,",
+            "  so this roll would launch unchecked. Fix the cause it names, then",
+            "  launch again. Nothing has been spent.",
+        ]
+    elif refuse:
         lines += [
             "",
             "  BLOCKED by the form check: a decision table above is malformed.",
@@ -280,8 +330,17 @@ def render(results: list[IssueForm]) -> tuple[str, bool]:
 
 
 def check_form_at_preflight(repo_root, issues: list[int], fetch) -> tuple[str, bool]:
-    """The whole preflight step: (text to print, whether to refuse)."""
-    results = [check_issue(repo_root, issue, fetch) for issue in issues or []]
+    """The whole preflight step: (text to print, whether to refuse).
+
+    The first issue the check cannot run on ends the loop (#3585): the launch
+    is refused either way, and no partial report goes on past it.
+    """
+    results = []
+    for issue in issues or []:
+        result = check_issue(repo_root, issue, fetch)
+        results.append(result)
+        if result.error:
+            break
     if not results:
         return "", False
     return render(results)
