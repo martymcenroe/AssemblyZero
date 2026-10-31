@@ -1984,8 +1984,12 @@ class MockProvider(LLMProvider):
         # rehearses the whole LLD workflow -- review and finalize included --
         # instead of looping on "Section 2.1 missing" to the draft cap. One
         # new file at the repo root, so path validation has nothing to find.
+        # #3585: N1.5 blocks a title with no issue number, so the title names
+        # issue 42, the mock rehearsal's issue (`--type lld --issue 42
+        # --mock`). The mock cannot see the run's issue: a rehearsal run with
+        # any other number is blocked at N1.5 on the title mismatch.
         "lld": [
-            "# Mock Feature: rehearsal LLD\n\n"
+            "# 42 - Feature: Mock rehearsal LLD\n\n"
             "## 1. Context & Goal\n\n"
             "A mock LLD written by the mock drafter so a `--mock` run reaches "
             "review and finalize.\n\n"

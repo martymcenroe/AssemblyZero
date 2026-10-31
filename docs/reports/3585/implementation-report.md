@@ -161,7 +161,7 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 - **A telemetry record that cannot be written alerts and raises** (1825).
 - **Compliant, pinned** (1775): a blocked draft goes back to the drafter, and to HALT at the cap.
 - **What the graph now receives.** N1.5 can raise where it returned. Nothing in the graph catches it; `tools/run_requirements_workflow.py` prints `ERROR:` and exits 1, without an alert.
-- **The mock drafter.** Its canned LLD (`assemblyzero/core/llm_provider.py`, `MockProvider.DEFAULT_RESPONSES["lld"]`) is titled `# Mock Feature: rehearsal LLD`, with no issue number, so a `--mock` LLD run is now blocked at N1.5 until the mock titles its LLD with the issue.
+- **The mock drafter.** Its canned LLD (`assemblyzero/core/llm_provider.py`, `MockProvider.DEFAULT_RESPONSES["lld"]`) was titled `# Mock Feature: rehearsal LLD`, with no issue number, so a `--mock` LLD run was blocked at N1.5. On the landing branch it is titled `# 42 - Feature: Mock rehearsal LLD`, issue 42 being the rehearsal's documented issue (`--type lld --issue 42 --mock`). The mock cannot see the run's issue, so a rehearsal with any other issue number is still blocked at N1.5 on the title mismatch.
 
 ### audit.py (14 ledger rows: 13 fixed, 1 compliant)
 

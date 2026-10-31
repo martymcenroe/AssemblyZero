@@ -175,6 +175,8 @@ The 6 files involved then gave 154 passed.
 - `test_lld_writes_only_worktree.py::TestAMockRunLeavesTheCheckoutClean`, five tests;
 - `test_lld_mock_is_offline.py::TestMockIsOffline`, three tests.
 
+**The mock title, on the landing branch:** with the title above, the three files gave 9 failed and 7 passed, the nine being these. With the mock titled `# 42 - Feature: Mock rehearsal LLD`, they gave 16 passed. The provider, CLI, seat, mechanical-validation and finalize suites that read the mock (11 files) then gave 509 passed.
+
 ## audit.py
 
 **New: `tests/unit/test_requirements_audit_loud_failure.py` (25).**
