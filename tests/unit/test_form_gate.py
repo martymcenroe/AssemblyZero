@@ -431,9 +431,12 @@ class TestTheLauncherRunsIt:
                 patch.object(sr, "check_prereqs", lambda *a: None), \
                 patch.object(sr, "open_must_resolve_issues", lambda r: ([], None)), \
                 patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "untracked_files", lambda *_a: []), \
                 patch.object(sr, "roll_issue",
                              lambda *a: rolled.append(a) or 0), \
                 patch.object(sr, "fetch_issue", lambda r, i: ("t", PROSE_ISSUE)):
+            # #3585: a `git status` that fails now raises, and this repo is
+            # not a real one, so the baseline untracked read is patched.
             code = sr.main(["--repo", str(repo), "--issue", "7"])
 
         assert code == 0
