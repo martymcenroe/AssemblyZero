@@ -23,6 +23,14 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 - **Kept and pinned (435, 1153).** An unsupported framework raises; no scenarios is the GUARD halt.
 - **Where the raises go.** `parse_lld_test_section` and the assertion generator have no caller outside the tests. `ScaffoldImportError`'s new causes also reach `implementation_spec/nodes/validate_completeness.py`, which already catches it and fails its Section 10 check with the message.
 
+### nodes/review_test_plan.py (7 ledger rows: 2 fixed, 5 fixed in the node and waiting on the router)
+
+- **The prompt is AssemblyZero's, and a missing one raises (156).** `load_review_prompt` read `docs/skills/0706c-Test-Plan-Review-Prompt.md` under the TARGET repository's root, where it never is, and a missing file became a built-in default prompt without a word: every review of another repository's plan ran on a prompt nobody maintained. It now reads this checkout's file (`projects_root.REPO_ROOT`) and raises FileNotFoundError naming the path; the default prompt is deleted. The raise reaches the entry point, which alerts.
+- **A BLOCKED verdict sends real feedback or is rejected (710).** The schema-required rationale was never read, so a JSON BLOCKED verdict with no blocking issues sent the reviser "See full verdict for details." The feedback is now the summary and blocking issues, else the Required Changes section or numbered list, else the rationale. A BLOCKED verdict naming none of them is rejected through the existing "Test-plan reviewer response rejected" return, which halts.
+- **Every error is an ERROR line on stderr (428, 489, 553, 579, 609).** The GUARD block, an unresolvable reviewer, a failed call, an unexpected error (now named with its type) and an unusable verdict each write `ERROR [N1]` on stderr and return `error_message` as before.
+- **The router half is batch C's.** `route_after_review` in `graph.py` (line 218) sends an error to HALT only when `auto_mode` is off: `if error and not auto_mode`. It must be `if error`. Until then, those five errors continue to N2 under `auto_mode`.
+- **Halt sites unchanged.** The five error returns keep their order, so the gate registry needs no change; the line-579 broad handler and its loud-failure baseline entry stay for that reason.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.
