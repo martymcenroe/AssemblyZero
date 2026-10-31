@@ -1000,6 +1000,9 @@ graph TD
         """generate_runbook creates runbook file."""
         from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
+        # ADR 0236: the runbook is written from the LLD alone, so the LLD
+        # carries all three sections it needs (an invented one used to fill
+        # a missing section).
         lld_content = """# Workflow Feature
 
 ## Prerequisites
@@ -1012,6 +1015,10 @@ graph TD
 1. Load configuration
 2. Execute workflow
 3. Save results
+
+## Verification
+
+- The results file exists
 """
         runbook_path = generate_runbook(
             feature_name="Workflow Feature",
@@ -2967,15 +2974,15 @@ class TestE2EValidationModule:
 class TestPatternsModule:
     """Tests for patterns.py module."""
 
-    def test_load_test_types_yaml_missing(self, tmp_path):
-        """load_test_types uses defaults when YAML missing."""
-        from assemblyzero.workflows.testing.knowledge.patterns import _default_test_types
+    def test_load_test_types_yaml_missing(self, tmp_path, monkeypatch):
+        """A missing types.yaml raises (ADR 0236); the inline defaults that
+        stood in for it are gone."""
+        from assemblyzero.workflows.testing.knowledge import patterns
 
-        result = _default_test_types()
+        monkeypatch.setattr(patterns, "TYPES_YAML", tmp_path / "types.yaml")
 
-        assert "unit" in result
-        assert "integration" in result
-        assert "browser" in result
+        with pytest.raises(FileNotFoundError, match="types.yaml"):
+            patterns.load_test_types()
 
     def test_get_test_type_info(self):
         """get_test_type_info returns type definition."""
@@ -3528,6 +3535,9 @@ class TestTemplatesFullCoverage:
 ## Steps
 1. Load config
 2. Execute
+
+## Testing
+- The run exits 0
 """
         result = generate_runbook(
             feature_name="Test Feature",
@@ -4130,7 +4140,12 @@ class TestRunbookEdgeCases:
 
 ## Implementation
 
-Steps here.
+1. Start the container
+2. Run the job
+
+## Verification
+
+- The job's output exists
 """
         result = generate_runbook(
             feature_name="Feature",
@@ -4142,8 +4157,8 @@ Steps here.
 
         assert result.exists()
         content = result.read_text()
-        # Should include prerequisites
-        assert "Prerequisites" in content or "Python" in content
+        # ADR 0236: the LLD's own prerequisites, never an invented list
+        assert "| Docker running | `verify` |" in content
 
 
 class TestPatternsYamlLoading:
@@ -4286,20 +4301,22 @@ class TestRunbookAdditional:
     """More tests for runbook.py."""
 
     def test_generate_runbook_minimal_lld(self, tmp_path):
-        """generate_runbook handles minimal LLD."""
+        """A minimal LLD gives no runbook (ADR 0236): every section is named
+        missing and nothing is written, where invented sections were."""
         from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
         lld_content = "# Feature\n\nSimple description."
 
-        result = generate_runbook(
-            feature_name="Feature",
-            lld_content=lld_content,
-            issue_number=42,
-            repo_root=tmp_path,
-            implementation_files=["tools/script.py"],
-        )
+        with pytest.raises(ValueError, match="no prerequisites, no procedure, no verification"):
+            generate_runbook(
+                feature_name="Feature",
+                lld_content=lld_content,
+                issue_number=42,
+                repo_root=tmp_path,
+                implementation_files=["tools/script.py"],
+            )
 
-        assert result.exists()
+        assert not (tmp_path / "docs" / "runbooks").exists()
 
 
 class TestLessonsAdditional:
@@ -5424,16 +5441,17 @@ class TestWikiPageGaps:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
 
+        # ADR 0236: the page is written from the LLD's own overview; an LLD
+        # with none raises (test_wiki_page_template_loud_failure.py).
         result = generate_wiki_page(
             feature_name="Very Long Feature Name That Describes A Complex Implementation",
-            lld_content="# Feature\n\nDetailed description here.",
+            lld_content="# Feature\n\n## Overview\n\nDetailed description here.\n",
             issue_number=42,
             repo_root=tmp_path,
         )
 
-        # May return None if wiki dir doesn't exist in expected location
-        # or return a path if successful
-        assert result is None or result.exists()
+        assert result.name == "Very-Long-Feature-Name-That-Describes-A-Complex-Implementation.md"
+        assert result.exists()
 
 
 class TestFinalizeCoverageMore:

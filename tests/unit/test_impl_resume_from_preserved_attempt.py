@@ -241,7 +241,10 @@ def state(tmp_path):
 
 
 def _run_impl(state, git):
+    # The stubbed git cuts no worktree, so there is nothing to provision;
+    # provisioning a worktree that is not there refuses (ADR 0236, #3585).
     with patch.object(stages, "run_command", git), \
+         patch.object(stages, "provision_worktree", return_value=[]), \
          patch.object(Path, "is_dir", return_value=False):
         try:
             stages.run_impl_stage(state)

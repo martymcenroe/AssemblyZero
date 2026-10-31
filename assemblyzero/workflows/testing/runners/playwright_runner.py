@@ -16,8 +16,11 @@ from assemblyzero.workflows.testing.framework_detector import (
 )
 from assemblyzero.workflows.testing.runners.base_runner import (
     BaseTestRunner,
+    RunnerError,
     combined_output,
     first_json_object,
+    loud,
+    output_head,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +100,12 @@ class PlaywrightRunner(BaseTestRunner):
         first JSON object that carries `suites`; `stderr` (npx's warnings,
         Playwright's browser-launch notices) is kept in the result's
         `raw_output` for the reader and never parsed.
+
+        ADR 0236: a run with no report, a report that does not parse, or a
+        report whose suites are not the shape above raises RunnerError after
+        an ERROR line, naming the project, the exit code and the head of both
+        streams. Each used to come back as a fabricated result that read zero
+        failures at exit 0.
         """
         passed = 0
         failed = 0
@@ -106,20 +115,31 @@ class PlaywrightRunner(BaseTestRunner):
 
         try:
             report = first_json_object(raw_output, "suites")
-            if report is None:
-                logger.warning("No JSON report found in Playwright output; using exit code only")
-                return self._fallback_result(shown, exit_code)
+        except ValueError as e:
+            raise self._unreadable(f"its JSON report does not parse: {e}", exit_code, shown) from e
+        if report is None:
+            raise self._unreadable("no Playwright JSON report in its stdout", exit_code, shown)
 
-            for suite in report.get("suites", []):
+        suites = report["suites"]
+        if not isinstance(suites, list):
+            raise self._unreadable(
+                f"its JSON report is not the shape Playwright writes: suites is "
+                f"a {type(suites).__name__}, not a list",
+                exit_code, shown,
+            )
+        try:
+            for suite in suites:
                 passed_s, failed_s, skipped_s, errors_s = self._count_suite(suite)
                 passed += passed_s
                 failed += failed_s
                 skipped += skipped_s
                 errors += errors_s
-
-        except (ValueError, KeyError, TypeError, AttributeError) as e:
-            logger.warning("Failed to parse Playwright JSON report: %s", e)
-            return self._fallback_result(shown, exit_code)
+        except (TypeError, AttributeError) as e:
+            raise self._unreadable(
+                f"its JSON report is not the shape Playwright writes: "
+                f"{type(e).__name__}: {e}",
+                exit_code, shown,
+            ) from e
 
         total = passed + failed + skipped + errors
 
@@ -169,20 +189,16 @@ class PlaywrightRunner(BaseTestRunner):
 
         return passed, failed, skipped, errors
 
-    def _fallback_result(self, raw_output: str, exit_code: int) -> TestRunResult:
-        """Create a fallback result when JSON parsing fails."""
-        return {
-            "passed": 0,
-            "failed": 1 if exit_code != 0 else 0,
-            "skipped": 0,
-            "errors": 1 if exit_code != 0 else 0,
-            "total": 1,
-            "coverage_percent": 0.0,
-            "coverage_type": CoverageType.SCENARIO,
-            "raw_output": raw_output,
-            "exit_code": exit_code,
-            "framework": TestFramework.PLAYWRIGHT,
-        }
+    def _unreadable(self, cause: str, exit_code: int, shown: str) -> RunnerError:
+        """The RunnerError for a run whose outcome cannot be read, after its
+        ERROR line (ADR 0236). It replaces the fallback result, which read
+        zero failures and zero errors at exit 0."""
+        message = (
+            f"the Playwright run in {self.project_dir} (exit {exit_code}) cannot "
+            f"be read, so its outcome is unknown: {cause}. Output: {output_head(shown)}"
+        )
+        loud(message)
+        return RunnerError(message)
 
     def validate_test_file(self, file_path: str, content: str) -> list[str]:
         """Validate .spec.ts file for Playwright-specific correctness.

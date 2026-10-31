@@ -1,9 +1,12 @@
-"""Pytest exit code routing for TDD workflow.
+"""Pytest exit codes for the TDD workflow, and what each one means.
 
-Issue #292: Route workflow based on pytest exit codes instead of
-just pass/fail counts. This correctly handles syntax errors (exit 4)
-and no-tests-collected (exit 5) by routing back to scaffold instead
-of looping endlessly through implementation.
+Issue #292 introduced these so the workflow could route on pytest's exit
+code instead of the pass/fail counts alone. The routing that runs is inline
+in `nodes/verify_phases.py`, on these constants; `route_by_exit_code`, a
+second copy of that decision that nothing called (see #2690), is deleted
+(ADR 0236, ledger 0908): it sent a red phase that passed, an interrupted or
+broken pytest, a timeout and an unknown code to a plain end, never to HALT,
+so none of them would have alerted anyone had it been wired in.
 
 Pytest exit codes (from pytest documentation):
     0 - All tests passed
@@ -13,8 +16,6 @@ Pytest exit codes (from pytest documentation):
     4 - pytest command line usage error / test collection error
     5 - No tests were collected
 """
-
-from typing import Literal
 
 # Pytest exit codes
 EXIT_OK = 0
@@ -26,49 +27,6 @@ EXIT_NOTESTSCOLLECTED = 5
 
 # Sentinel for subprocess timeout
 EXIT_TIMEOUT = -1
-
-
-def route_by_exit_code(
-    exit_code: int,
-    phase: Literal["red", "green"],
-) -> str:
-    """Determine next workflow node based on pytest exit code.
-
-    Args:
-        exit_code: Pytest return code (0-5, or -1 for timeout).
-        phase: Which TDD phase we're in ("red" or "green").
-
-    Returns:
-        Next node name string for workflow routing.
-    """
-    if exit_code == EXIT_OK:
-        if phase == "red":
-            # All tests passed in red phase = unexpected (feature already exists?)
-            return "END"
-        # Green phase: all tests pass = success, handled by caller
-        return "PASS"
-
-    if exit_code == EXIT_TESTSFAILED:
-        if phase == "red":
-            # Tests failed = valid RED state, proceed to implementation
-            return "N4_implement_code"
-        # Green phase: tests still failing, need more implementation
-        return "N4_implement_code"
-
-    if exit_code in (EXIT_INTERRUPTED, EXIT_INTERNALERROR):
-        # Human review needed — not a code problem, not safe to auto-retry
-        return "end"
-
-    if exit_code in (EXIT_USAGEERROR, EXIT_NOTESTSCOLLECTED):
-        # Syntax/collection error or no tests found = scaffold problem
-        return "N2_scaffold_tests"
-
-    if exit_code == EXIT_TIMEOUT:
-        # Subprocess timed out — stop workflow
-        return "end"
-
-    # Unknown exit code — stop safely
-    return "end"
 
 
 def describe_run_outcome(exit_code: int, failed_count: int | None = None) -> str:

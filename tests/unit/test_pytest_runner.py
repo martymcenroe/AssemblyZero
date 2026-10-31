@@ -99,10 +99,11 @@ TOTAL    150     12    92%
         assert result["exit_code"] == 0
 
     def test_parse_no_coverage(self, pytest_runner):
-        """Parse output without coverage info."""
+        """Output without coverage info is not measured (ADR 0236, #4246),
+        never 0%."""
         output = "5 passed in 0.5s"
         result = pytest_runner.parse_results(output, exit_code=0)
-        assert result["coverage_percent"] == 0.0
+        assert result["coverage_percent"] is None
 
 
 class TestPytestRunnerRunTests:

@@ -60,7 +60,15 @@ def test_document_suppresses_cp_docs_when_skip_flag_set(tmp_path):
 def test_document_emits_cp_docs_when_not_skipped(tmp_path):
     """Default (skip_cp_docs unset) still emits c/p docs for a CLI tool — AZ
     self-builds keep them."""
-    state = _doc_state(tmp_path)  # no skip_cp_docs
+    # ADR 0236 (#3585): the CLI document is written from the commands the LLD
+    # shows, so the LLD shows one; an LLD with none gives no c/p docs.
+    state = _doc_state(
+        tmp_path,
+        lld_content=(
+            "# Tool\n\nImplement a CLI tool.\n\n```bash\n"
+            "poetry run python tools/new_tool.py --issue 42\n```\n"
+        ),
+    )  # no skip_cp_docs
     result = document(state)
     assert len(result.get("doc_cp_paths", [])) == 2, (
         "a CLI tool must still get its c/p docs when not skipped"
@@ -123,7 +131,12 @@ def _capture_impl_payload(state):
         out.stderr = ""
         out.returncode = 0
         mock_run.return_value = out
+        # The stubbed git cuts no worktree, so there is nothing to provision;
+        # provisioning a worktree that is not there refuses (ADR 0236, #3585).
         with patch(
+            "assemblyzero.workflows.orchestrator.stages.provision_worktree",
+            return_value=[],
+        ), patch(
             "assemblyzero.workflows.testing.graph.build_testing_workflow",
             return_value=_StubGraph(),
         ):
