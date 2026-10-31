@@ -766,7 +766,16 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.e2e_error", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "E2E validation error",
-        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 1),
+        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 1)
+        # #3585: a run that times out or cannot start, no audit dir, the
+        # sandbox safety check and cleanup that are not implemented, a failed
+        # cleanup, and E2E files that collect nothing (ledger 0908,
+        # e2e_validation.py:182, :188, :210, :231, :291, :300, :313, :337).
+        # Return 1 now also takes pytest's exit 2 and unknown codes (:334),
+        # which used to loop to N4 as test failures.
+        + _s(f"{_TS}/nodes/e2e_validation.py::_halt_e2e_error::return", 0),
+        notes="an E2E run that could not be made or judged; only exit 1 is a "
+              "test failure, which loops to N4 under the cap",
     ),
     Gate(
         "impl.build_hook_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,

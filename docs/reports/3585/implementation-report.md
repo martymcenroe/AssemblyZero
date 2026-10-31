@@ -30,6 +30,15 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-graph`, is ba
 - **Kept and pinned (142).** The fallback to bare lines for a source that does not parse.
 - **Structure.** A new registry row, `impl.coverage_augment_cannot_run`, cites the operator's ruling of 2026-10-06, and the impl ratchet goes from 47 to 48; the spent halt joins `impl.coverage_augment_spent`.
 
+### nodes/e2e_validation.py (13 ledger rows: 10 fixed, two of them in part; 3 compliant and pinned)
+
+- **A run that cannot be made halts with its cause (182, 188, 291).** A timeout or a runner that cannot start raises `E2ERunFailed` naming the ceiling, the command and the cause; both returned code -1 with a fixed string. An unset or absent audit dir halts before the run; an unset one used to write the results into the working directory.
+- **The sandbox stubs stop claiming success (210, 231, 300).** The safety check and the cleanup raise `NotImplementedError` instead of reporting "safe" and "cleaned", so a run given a sandbox repo halts before any test runs. A cleanup that reports failure halts with its error.
+- **Only exit 1 is a test failure (331, 334).** Exit 2, 3, 4 and any other code halt, naming the code's meaning, the issue and the output tail. Exit 2 and unknown codes used to loop to N4 as test failures.
+- **E2E files that collect nothing halt (313, 337, in part).** A run whose E2E or integration files collect no marked test halts naming the files. A run with no such file and no marked test still goes to finalize, with a line saying there was nothing to validate: the orchestrator never sets `skip_e2e`, so halting there would stop every orchestrated run on a target without E2E tests after its green phase. Whether such a run is a failure is the operator's decision; the halt is one line. Files are now judged by their path inside the repository, not the whole path.
+- **Kept and pinned (45, 394, 417).** The advisory pass count, the circuit breaker and the retry cap.
+- **Structure.** The new halts join the existing registry row `impl.e2e_error`; no row is added.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT or through the caller's handler.

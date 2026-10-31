@@ -2799,45 +2799,53 @@ class TestE2EValidationModule:
             assert "pytest" in call_args
 
     def test_run_e2e_tests_timeout(self, tmp_path):
-        """run_e2e_tests handles timeout."""
-        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        """run_e2e_tests raises on a timeout, naming the ceiling (#3585).
+
+        It returned code -1 with a fixed string.
+        """
+        from assemblyzero.workflows.testing.nodes.e2e_validation import (
+            E2ERunFailed,
+            run_e2e_tests,
+        )
 
         with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("pytest", 600)
 
-            result = run_e2e_tests([], None, tmp_path)
-
-        assert result["returncode"] == -1
-        assert "timed out" in result["stderr"]
+            with pytest.raises(E2ERunFailed, match="timed out after"):
+                run_e2e_tests([], None, tmp_path)
 
     def test_run_e2e_tests_not_found(self, tmp_path):
-        """run_e2e_tests handles missing pytest."""
-        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        """run_e2e_tests raises when the runner is missing (#3585)."""
+        from assemblyzero.workflows.testing.nodes.e2e_validation import (
+            E2ERunFailed,
+            run_e2e_tests,
+        )
 
         with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError()
 
-            result = run_e2e_tests([], None, tmp_path)
-
-        assert result["returncode"] == -1
+            with pytest.raises(E2ERunFailed, match="could not start"):
+                run_e2e_tests([], None, tmp_path)
 
     def test_cleanup_sandbox(self):
-        """cleanup_sandbox returns success."""
+        """cleanup_sandbox is not implemented and says so (#3585).
+
+        It returned success without doing anything.
+        """
         from assemblyzero.workflows.testing.nodes.e2e_validation import cleanup_sandbox
 
-        success, error = cleanup_sandbox("some/repo")
-
-        assert success is True
-        assert error == ""
+        with pytest.raises(NotImplementedError):
+            cleanup_sandbox("some/repo")
 
     def test_verify_safety_limits(self):
-        """verify_safety_limits returns safe."""
+        """verify_safety_limits is not implemented and says so (#3585).
+
+        It reported "safe" without checking.
+        """
         from assemblyzero.workflows.testing.nodes.e2e_validation import verify_safety_limits
 
-        safe, error = verify_safety_limits("repo", 5, 3)
-
-        assert safe is True
-        assert error == ""
+        with pytest.raises(NotImplementedError):
+            verify_safety_limits("repo", 5, 3)
 
     def test_e2e_validation_success(self, tmp_path):
         """e2e_validation succeeds on all tests passing."""
@@ -3259,7 +3267,11 @@ class TestE2EValidationFullCoverage:
     """Additional tests for e2e_validation.py."""
 
     def test_e2e_validation_with_sandbox(self, tmp_path):
-        """e2e_validation handles sandbox repo."""
+        """e2e_validation with a sandbox repo halts before any test runs (#3585).
+
+        The safety check is not implemented. It used to report "safe", and
+        the run went on against the sandbox unchecked.
+        """
         from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
@@ -3288,7 +3300,9 @@ class TestE2EValidationFullCoverage:
 
             result = e2e_validation(state)
 
-        assert result.get("error_message") == ""
+        assert "path/to/sandbox" in result.get("error_message", "")
+        assert "not implemented" in result["error_message"]
+        mock_run.assert_not_called()
 
     def test_e2e_validation_internal_error(self, tmp_path):
         """e2e_validation handles internal error (code 3)."""

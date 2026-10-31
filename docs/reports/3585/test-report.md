@@ -37,3 +37,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 12 files that import the module, with the gate registry, the graph halts and the new file: 250 passed and 8 failed on the first pass, each one of the tests above; the three changed files then passed (78).
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new and 3 more stale, the three deleted tags. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff finds the module's same nine issues as at HEAD; the new test file is clean.
+
+## nodes/e2e_validation.py
+
+**New: `tests/unit/test_e2e_validation_loud_failure.py` (23).** Each site test is named for its ledger line; the three compliant rows and the no-E2E-test finalize are pinned. pytest is patched at `run_command`, so no test runs a suite.
+
+**Before the fix, measured** against HEAD's `e2e_validation.py` with the first 22 tests: 16 failed, 6 passed. The six that passed pin the advisory count (45), the finalize for a run with no E2E test (313, 337), the circuit breaker (394), the cap (417) and the exit-1 loop to N4. The 23rd, added with the fix, checks that a file is judged by its path inside the repository.
+
+**Changed tests:** in `test_testing_workflow.py`, `test_run_e2e_tests_timeout` and `test_run_e2e_tests_not_found` expect `E2ERunFailed`, `test_cleanup_sandbox` and `test_verify_safety_limits` expect `NotImplementedError`, and `test_e2e_validation_with_sandbox` expects the halt before any test runs.
+
+**Neighbouring suites:** 15 files that name the node or N6, with the mock rolls and the gate registry: 532 passed after the updates. The first pass failed 5, the tests above.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new; the module had no baseline entry. `audit_fail_open.py --check` reports no new fail-open, and the module's two baseline entries are stale. `audit_halt_sites.py --check` passes. Ruff finds the module's one issue at HEAD; the new test file is clean.
