@@ -61,3 +61,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** the six files that import the module, with `test_gate_registry.py`: 158 passed.
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff finds the module's one issue as at HEAD; the new test file is clean.
+
+## nodes/revise_test_plan.py
+
+**New: `tests/unit/test_revise_test_plan_loud_failure.py` (6).** The provider and `with_retry` are stand-ins: no model is called. Each site test drives the node into its failure and routes the result through `route_after_revision`.
+
+**Before the fix, measured** against HEAD's `revise_test_plan.py`: 4 failed, 2 passed. The four site tests failed only on the new stderr line; their halts held. The two that passed pin a short plan under the cap asking again with no reason, and a complete revision going back to N1.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** the six files that import the module or `route_after_revision`, with `test_gate_registry.py`: 381 passed.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff is clean on the module and the new test file.

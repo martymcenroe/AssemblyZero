@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 from typing import Any
 
 from assemblyzero.workflows.testing.state import TestingWorkflowState
@@ -43,6 +44,11 @@ MAX_REVISION_CYCLES = 3
 # extract_test_scenarios (test_plan_validator.py). Mirroring that here
 # so revisions produce IDs the validator will recognize.
 _SCENARIO_ID_PATTERN = re.compile(r"^(?:T?\d+)$", re.IGNORECASE)
+
+
+def _loud(message: str) -> None:
+    """N1.5's ERROR line on stderr, at the point of failure (ADR 0236)."""
+    print(f"ERROR [N1.5] {message}", file=sys.stderr)
 
 
 def _build_revision_prompt(
@@ -203,10 +209,13 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
           N1 <-> N1.5 loop runs. At the cap it records a reason naming
           the budget, which is what ends the run (#2775).
         - On failure (LLM error, bad revisor spec, no requirements):
-          increments revision count + sets error_message so the router
-          routes the workflow to END after the next pass. These are not
-          bounded by the revision cap -- asking again cannot fix a
+          increments revision count + sets error_message, which
+          `route_after_revision` sends to HALT, which alerts (#2775). These
+          are not bounded by the revision cap -- asking again cannot fix a
           missing credential or an absent requirements list.
+
+        Every recorded reason is also an ERROR line on stderr where it
+        happens (ADR 0236; ledger 0908 lines 226, 246, 266, 307).
     """
     revision_count = state.get("test_plan_revision_count", 0) + 1
     print(f"\n[N1.5] Revising test plan (cycle {revision_count}/{MAX_REVISION_CYCLES})")
@@ -219,8 +228,9 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     requirements = state.get("requirements", []) or []
 
     if not requirements:
-        # Without requirements, can't produce scenario rows. Emit a
-        # blocking error so the router ends gracefully.
+        # Without requirements, can't produce scenario rows. The reason
+        # routes to HALT.
+        _loud("Test plan revision blocked: no requirements available")
         return {
             "test_plan_revision_count": revision_count,
             "error_message": (
@@ -241,6 +251,7 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         revisor_spec = revisor_seat.spec
         revisor = get_provider(revisor_spec, effort=revisor_seat.effort)
     except ValueError as e:
+        _loud(f"Test plan revision: invalid revisor spec {revisor_spec}: {e}")
         return {
             "test_plan_revision_count": revision_count,
             "error_message": f"Test plan revision: invalid revisor spec: {e}",
@@ -261,6 +272,7 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     )
 
     if not result.success:
+        _loud(f"Test plan revision LLM call failed ({revisor_spec}): {result.error_message}")
         return {
             "test_plan_revision_count": revision_count,
             "error_message": (
@@ -301,6 +313,10 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         # budget and the row judges `budget` (#2723 ruling 1). The count is
         # still reported, because the shortfall is what a reader needs to
         # know which side to repair.
+        _loud(
+            f"Test plan revision budget spent: {MAX_REVISION_CYCLES} revisions "
+            f"produced a plan covering only {shortfall} requirements"
+        )
         return {
             "test_plan_revision_count": revision_count,
             "test_plan_section": revised_table,

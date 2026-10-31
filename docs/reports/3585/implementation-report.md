@@ -44,6 +44,10 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 - **Every halt is an ERROR line (74, 91, 98).** `_halt` now also writes the reason at ERROR on stderr; the unreadable config, the hook that cannot start and the hook that fails were already halts and are pinned.
 - **Kept (70).** No `.unleashed.json` is no hook.
 
+### nodes/revise_test_plan.py (4 ledger rows: 4 compliant and pinned)
+
+- **Pinned, and said where they happen (226, 246, 266, 307).** No requirements, an invalid revisor spec, a failed revision call and a short plan at the revision cap each record a reason that `route_after_revision` sends to HALT. Each now also writes an ERROR line on stderr, naming the spec where there is one. The docstring said these route "to END"; it says HALT now.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.
