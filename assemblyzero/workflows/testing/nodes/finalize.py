@@ -169,6 +169,19 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
     gate_log("[N7] Finalizing workflow...")
 
     issue_number = state.get("issue_number", 0)
+
+    # #4303: `Path("")` is the working directory, which exists, so an unset
+    # audit_dir used to pass every check below and reach the lineage move. N0
+    # sets it on every route here, so its absence stops the run first.
+    audit_dir_named = state.get("audit_dir") or ""
+    if not audit_dir_named:
+        return {"error_message": _fail(
+            f"issue #{issue_number}: the run's state names no audit_dir, so N7 "
+            f"has no audit trail to write to and no lineage to archive. N7 "
+            f"stops; nothing is written or moved."
+        )}
+    audit_dir = Path(audit_dir_named)
+
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
 
@@ -235,7 +248,6 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    Test report: {report_path}")
 
     # Save to audit trail
-    audit_dir = Path(state.get("audit_dir", ""))
     if audit_dir.exists():
         file_num = next_file_number(audit_dir)
         save_test_report_metadata(audit_dir, file_num, metadata)

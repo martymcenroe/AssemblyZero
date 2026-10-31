@@ -1,5 +1,5 @@
 {
-  "count": 124,
+  "count": 118,
   "entries": {
     "assemblyzero/metrics/collector.py::count_gemini_verdicts::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -481,12 +481,6 @@
       "kind": "swallowed_handler",
       "line": 228
     },
-    "tools/fix_requires_python.py::main::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 245
-    },
     "tools/fleet_delete_pr_sentinel.py::main::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
@@ -510,12 +504,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 393
-    },
-    "tools/merge_aletheia_603_audit_gate.py::main::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 357
     },
     "tools/new_repo.py::_create_repo::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -696,30 +684,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 214
-    },
-    "tools/upgrade_boostgauge_auto_reviewer.py::main::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 358
-    },
-    "tools/upgrade_boostgauge_auto_reviewer.py::main::swallowed_handler::2": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 368
-    },
-    "tools/upgrade_comp_environ_auto_reviewer.py::main::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 408
-    },
-    "tools/upgrade_comp_environ_auto_reviewer.py::main::swallowed_handler::2": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 418
     },
     "tools/verdict-analyzer.py::cmd_scan::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",

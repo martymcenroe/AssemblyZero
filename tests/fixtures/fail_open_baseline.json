@@ -2,8 +2,8 @@
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
     "files_scanned": 315,
-    "sites_examined": 10218,
-    "findings_total": 216
+    "sites_examined": 10224,
+    "findings_total": 215
   },
   "undeclared": [
     "assemblyzero/core/capacity.py::parse_reset_time::except_handler::0",
@@ -168,7 +168,6 @@
     "assemblyzero/workflows/orchestrator/stages.py::run_spec_stage::except_handler::2",
     "assemblyzero/workflows/orchestrator/stages.py::run_triage_stage::except_handler::0",
     "assemblyzero/workflows/parallel/coordinator.py::ParallelCoordinator._execute_item::except_handler::0",
-    "assemblyzero/workflows/requirements/audit.py::move_lineage_to_done::except_handler::0",
     "assemblyzero/workflows/requirements/audit.py::update_lld_status::except_handler::0",
     "assemblyzero/workflows/requirements/audit.py::validate_context_path::except_handler::0",
     "assemblyzero/workflows/requirements/nodes/analyze_codebase.py::_find_related_files::except_handler::0",

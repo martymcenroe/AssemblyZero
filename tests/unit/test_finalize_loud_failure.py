@@ -34,8 +34,8 @@ def _gh(stdout: str = "", stderr: str = "", rc: int = 0) -> subprocess.Completed
 def _issue_state(tmp_path: Path, **overrides) -> dict:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
-    audit = tmp_path / "audit"
-    audit.mkdir(exist_ok=True)
+    audit = repo / "docs" / "lineage" / "active" / "run"
+    audit.mkdir(parents=True, exist_ok=True)
     state = {
         "workflow_type": "issue",
         "target_repo": str(repo),
@@ -53,8 +53,8 @@ def _lld_state(tmp_path: Path, **overrides) -> dict:
 
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
-    audit = tmp_path / "audit"
-    audit.mkdir(exist_ok=True)
+    audit = repo / "docs" / "lineage" / "active" / "run"
+    audit.mkdir(parents=True, exist_ok=True)
     state = dict(create_initial_state(
         workflow_type="lld", assemblyzero_root=str(tmp_path / "az"),
         target_repo=str(repo), issue_number=42, base_branch="main",
