@@ -2009,10 +2009,15 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
         # Easiest: use the existing sample_spec_complete pattern from
         # base_state fixtures. For unit isolation, give it an empty files
         # list and a basic but >100-char draft.
+        # #3585: one implementation fence, as in the specs the error-path
+        # coverage fix updated: a spec with none is a check that cannot run,
+        # which is not a pass. The fence raises nothing, so it needs no test.
         state = {
             "spec_draft": "# Implementation Spec\n\n## Overview\n\n"
                           "This spec does nothing structural; no Modify, "
-                          "no Add. " + ("filler " * 20) + SECTION_TEN,
+                          "no Add. " + ("filler " * 20)
+                          + "\n```python\ndef build():\n    return None\n```\n"
+                          + SECTION_TEN,
             "files_to_modify": [],
             "pattern_references": [],
             "repo_root": str(tmp_path),
