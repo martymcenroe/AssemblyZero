@@ -19,3 +19,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **A test command that did not run raises.** A timeout (129), a missing command (132) or another OS error (135) raises `RunnerError` naming the framework, the command, the working directory and the cause, after an ERROR line. They came back as exit code -1 with the cause where stderr would be, and the runners parsed that as a run, so a suite that never started read as one that failed.
 - **No scenarios is not 0% (96).** `compute_scenario_coverage` with no scenarios raises ValueError after an ERROR line. It returned 0.0 with a WARNING, which the green phase read as a measured 0%.
 - **Where the raises go.** Both reach `nodes/verify_phases.py`, which catches neither, so each ends the run through the entry point's handler, which alerts. Catching them in N5 and returning them as `error_message` would end the run at HALT instead.
+
+### runners/pytest_runner.py (2 ledger rows: 2 fixed)
+
+- **The exit code is read (45).** 0 and 1 are finished runs, read from the summary line. Any other code raises `RunnerError` after an ERROR line, naming the code, what pytest means by it (interrupted or stopped at collection, internal error, usage error, no tests collected) and the head of the output. Those runs used to come back as counts read off their output, mostly zero.
+- **No coverage table is not 0% (57).** `coverage_percent` is None, not measured, when the output carries no TOTAL row, as the Jest runner reports it since #4246.
+- **No caller swallows it.** Nothing in `assemblyzero/` or `tools/` calls `PytestRunner.run_tests`; the phases run pytest through `run_pytest`.

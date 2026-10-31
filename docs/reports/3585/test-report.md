@@ -25,3 +25,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 194 passed across 18 files: the runner files, the framework integration tests, the full-suite gate, the zero-collected route and the path-to-runner tests.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issue as at HEAD.
+
+## runners/pytest_runner.py
+
+**New: `tests/unit/test_pytest_runner_loud_failure.py` (9).**
+
+**Before the fix, measured:** 6 failed, 3 passed. The six site tests failed: exit codes 2 to 5, a collection error, and the missing coverage table. The three that passed pin exit 0 and exit 1 read from the summary line, and a TOTAL row read.
+
+**Changed tests:** `test_pytest_runner.py::test_parse_no_coverage` now expects None where it expected 0.0.
+
+**Neighbouring suites:** 41 passed across the 5 files that use the pytest runner.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
