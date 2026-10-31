@@ -1874,6 +1874,10 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             "worktree_path": str(worktree_path),
             "repo_root": str(worktree_path),
             "original_repo_root": target_repo,
+            # #4436: what N5 measures the run's changes from. A merge-base with
+            # this branch answers the same on a fresh cut, on a worktree
+            # carved from a preserved attempt, and on a seed branch.
+            "base_branch": state.get("base_branch", ""),
             # Issue #1627: suppress the AZ-internal 907/908 c/p docs when building
             # an external repo (target differs from the AssemblyZero root).
             "skip_cp_docs": bool(assemblyzero_root) and target_repo != assemblyzero_root,

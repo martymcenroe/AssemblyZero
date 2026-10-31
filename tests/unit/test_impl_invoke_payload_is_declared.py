@@ -121,6 +121,13 @@ class TestThePayloadMatchesTheSchema:
         assert "mock_mode" in payload
         assert "config_mock_mode" not in payload
 
+    def test_the_stage_tells_n5_what_the_run_is_measured_from(self, state):
+        """#4436: N5 judges the lines changed against this branch, and a run
+        that names no base halts."""
+        payload = _payload_sent_by_run_impl_stage(state)
+
+        assert payload["base_branch"] == "hardening-run-20"
+
     def test_the_stage_does_not_send_the_dead_spec_path_key(self, state):
         """#2848: nothing in the testing workflow reads it."""
         payload = _payload_sent_by_run_impl_stage(state)

@@ -135,32 +135,19 @@ def test_a_genuine_implementation_loop_is_unaffected() -> None:
 def test_node_halts_when_nothing_to_target(
     tmp_path: Path,
 ) -> None:
-    """A MEASURED report naming no uncovered lines: halt, change nothing.
-
-    #2637: this fixture used to be `"23 passed"` -- no coverage report at all --
-    and the node read that as "nothing to target" and bounced. That reading is
-    the defect, not the contract; an absent report is now a named measurement
-    failure, pinned by the test below. What this test is actually about is a
-    report that WAS produced and happens to name no missing lines.
+    """A shortfall N5 named no line for: halt, change nothing.
 
     #3585: it returned to N5, which measured the same shortfall and sent it
-    back, uncounted. A shortfall the report cannot locate now halts.
+    back, uncounted. A shortfall nobody can locate now halts.
+
+    #4436: N5 reads the report and names the lines; this node reads no report.
     """
     test_file = tmp_path / "test_x.py"
     test_file.write_text("def test_a():\n    assert 1\n", encoding="utf-8")
     before = test_file.read_text(encoding="utf-8")
 
-    fully_covered = (
-        "23 passed\n"
-        "Name             Stmts   Miss  Cover   Missing\n"
-        "-----------------------------------------------\n"
-        "pkg/thing.py        10      0   100%\n"
-        "-----------------------------------------------\n"
-        "TOTAL               10      0   100%\n"
-    )
-
     result = augment_tests_for_coverage({
-        "green_phase_output": fully_covered,
+        "uncovered_changed_lines": {},
         "test_files": [str(test_file)],
         "repo_root": str(tmp_path),
         "coverage_achieved": 80.0,
@@ -173,26 +160,23 @@ def test_node_halts_when_nothing_to_target(
     assert test_file.read_text(encoding="utf-8") == before
 
 
-def test_absent_report_is_a_named_measurement_failure(tmp_path: Path) -> None:
-    """#2637, the run-201554 shape: N4c must not read an absent report as
-    all-clear. That reading is half of the contradiction that produced the
-    stagnation halt."""
+def test_nothing_named_is_never_an_all_clear(tmp_path: Path) -> None:
+    """#2637, the run-201554 shape: N4c must not read "no lines" as all-clear.
+    That reading is half of the contradiction that produced the stagnation
+    halt. #4436: an unreadable report now halts at N5, which is the one reader
+    of it, so a state naming nothing here halts on its own."""
     test_file = tmp_path / "test_x.py"
     test_file.write_text("def test_a():\n    assert 1\n", encoding="utf-8")
 
     result = augment_tests_for_coverage({
-        "green_phase_output": "15 passed, 0 failed\n",
         "test_files": [str(test_file)],
         "repo_root": str(tmp_path),
         "coverage_achieved": 0.0,
         "coverage_target": 95,
-        "coverage_module": "src/boostgauge/skins/stingray.py",
     })
 
     assert result["next_node"] == "end"
-    assert "COVERAGE MEASUREMENT FAILED" in result["error_message"]
-    assert "src/boostgauge/skins/stingray.py" in result["error_message"]
-    assert "not a test gap" in result["error_message"]
+    assert "names no uncovered line" in result["error_message"]
 
 
 def test_node_halts_with_no_test_file() -> None:
@@ -202,6 +186,27 @@ def test_node_halts_with_no_test_file() -> None:
     })
     assert result["next_node"] == "end"
     assert "no test file" in result["error_message"]
+
+
+def test_a_python_gap_with_no_python_test_file_halts_naming_the_lines(tmp_path: Path) -> None:
+    """#4436: a framework with changed source and no test file of the run is
+    judged on its whole suite. N4c must not append pytest functions to a
+    `.test.ts`, which is what `coverage_target_file` would hand it."""
+    typescript = tmp_path / "a.test.ts"
+    typescript.write_text("// a test\n", encoding="utf-8")
+
+    result = augment_tests_for_coverage({
+        "uncovered_changed_lines": {"pkg/a.py": [3, 4]},
+        "test_files": [str(typescript)],
+        "repo_root": str(tmp_path),
+        "coverage_achieved": 0.0,
+        "coverage_target": 95,
+    })
+
+    assert result["next_node"] == "end"
+    assert "no Python test file" in result["error_message"]
+    assert "pkg/a.py: 3-4" in result["error_message"]
+    assert typescript.read_text(encoding="utf-8") == "// a test\n"
 
 
 def test_node_never_names_an_implementation_file_as_its_output() -> None:

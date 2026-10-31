@@ -27,6 +27,9 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     verify_green_phase,
     verify_red_phase,
 )
+import pytest
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 
 def _make_state(**overrides):

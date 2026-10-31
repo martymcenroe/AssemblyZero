@@ -219,7 +219,13 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"    Issue: #{issue_number}")
     print(f"    Tests: {passed_count}/{test_count} passed")
-    print(f"    Coverage: {coverage_achieved:.1f}%")
+    # #4436: N5 judges changed lines. With none to judge the number is the
+    # whole-file figure, which decided nothing, and the report says so.
+    coverage_scope = (
+        "changed lines" if state.get("coverage_judged", True)
+        else "whole files, not judged"
+    )
+    print(f"    Coverage ({coverage_scope}): {coverage_achieved:.1f}%")
     print(f"    Iterations: {iteration_count}")
 
     # Create metadata
@@ -231,6 +237,7 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
         "implementation_files": implementation_files,
         "coverage_achieved": coverage_achieved,
         "coverage_target": coverage_target,
+        "coverage_scope": coverage_scope,
         "total_iterations": iteration_count,
         "test_count": test_count,
         "passed_count": passed_count,
@@ -351,7 +358,7 @@ def _generate_summary(metadata: TestReportMetadata) -> str:
 | Total Tests | {metadata["test_count"]} |
 | Passed | {metadata["passed_count"]} |
 | Failed | {metadata["failed_count"]} |
-| Coverage | {metadata["coverage_achieved"]:.1f}% |
+| Coverage ({metadata["coverage_scope"]}) | {metadata["coverage_achieved"]:.1f}% |
 | Target | {metadata["coverage_target"]}% |
 | E2E Status | {e2e_status} |
 | Iterations | {metadata["total_iterations"]} |

@@ -17,12 +17,16 @@ from __future__ import annotations
 import inspect
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
     TestFramework,
 )
 from assemblyzero.workflows.testing.nodes import verify_phases
 from assemblyzero.workflows.testing.nodes.verify_phases import _verify_green_non_pytest
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 VERIFY = "assemblyzero.workflows.testing.nodes.verify_phases"
 VITEST = {"framework": "vitest", "coverage_type": "line", "working_directory": "web"}

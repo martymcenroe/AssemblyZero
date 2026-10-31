@@ -46,13 +46,15 @@ class PytestRunner(BaseTestRunner):
         extra_args: list[str] | None = None,
         *,
         measure_coverage: bool = False,
+        coverage_include: list[str] | None = None,
     ) -> TestRunResult:
         """Run pytest with --tb=short -q and parse output.
 
         Reads the counts from pytest's summary line; an exit code other than
         0 or 1 raises RunnerError (`parse_results`).
-        `measure_coverage` is accepted and ignored (#4246): the green phase
-        measures pytest's coverage through `run_pytest`, with pytest-cov.
+        `measure_coverage` and `coverage_include` are accepted and ignored
+        (#4246, #4436): the green phase measures pytest's coverage through
+        `run_pytest`, with pytest-cov.
         """
         # #1904: bare "pytest" resolved from the ORCHESTRATOR's PATH — AZ's
         # venv, not the target repo's. Phase 3 of the boostgauge campaign

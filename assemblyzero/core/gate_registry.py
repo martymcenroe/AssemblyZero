@@ -793,7 +793,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
               "or has no pytest-cov for a coverage run; the red marker, a test "
               "file, the spec suite or the audit directory cannot be read or "
               "written; a snapshot, restore, dropping removal or visual sample "
-              "fails; git status fails; no coverage target can be derived; a "
+              "fails; git status fails; a "
               "runner crashed or exited non-zero with no failure; a coverage_type "
               "is unknown; a passing leg has no coverage figure; or a critical "
               "test was skipped. Each used to print a warning or '(non-fatal)' "
@@ -844,13 +844,18 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.coverage_unreadable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "COVERAGE MEASUREMENT FAILED",
-        _s(f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage::return", 0)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 1)
+        # 0 since #4436, ahead of the exit-code stop: the report is read before
+        # the measurement note, which rides the changed-line figure.
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 0)
         + _s(f"{_TS}/nodes/verify_phases.py::_halt_coverage_unreadable::return", 0),
         decided_in=f"{_TS}/coverage_report.py",
         notes="a harness defect, never a test gap; see #2690's mapping. Since "
               "#4246 a Jest or Vitest run whose tests all pass and whose "
-              "json-summary cannot be read halts here too; it read 0%",
+              "json-summary cannot be read halts here too; it read 0%. Since "
+              "#4436 so does a per-line report that cannot be read, a changed "
+              "file the report does not name, and a base commit that cannot be "
+              "determined, none of which may read as zero changed lines. N5 is "
+              "the one reader of the report, so N4c no longer halts here",
     ),
     Gate(
         "impl.coverage_gap_not_augmentable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -921,7 +926,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.green_phase_stopped", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Green phase stopped",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 0),
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 1),
         notes="pytest exit 2 or 3: interrupted or an internal error",
     ),
     Gate(

@@ -42,6 +42,8 @@ from assemblyzero.workflows.testing.nodes.scaffold_tests import (
 )
 from assemblyzero.workflows.testing.state import TestScenario
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 
 class TestAuditUtilities:
     """Tests for audit trail utilities."""
@@ -1607,14 +1609,13 @@ class TestVerifyPhasesModule:
             run_pytest(
                 [str(test_file)],
                 coverage_module="mymodule",
-                coverage_target=80,
                 repo_root=tmp_path,
             )
 
         # Verify coverage args were passed
         call_args = mock_run.call_args[0][0]
         assert "--cov=mymodule" in call_args
-        assert "--cov-fail-under=80" in call_args
+        assert "--cov-fail-under=0" in call_args, "#4436: whole-file coverage decides nothing"
 
     def test_run_pytest_uses_poetry_run(self, tmp_path):
         """Issue #268: run_pytest must use 'poetry run' for correct virtualenv."""
@@ -2678,6 +2679,7 @@ class TestFinalizeModule:
             "implementation_files": ["src/module.py"],
             "coverage_achieved": 95.0,
             "coverage_target": 90,
+            "coverage_scope": "changed lines",
             "total_iterations": 3,
             "test_count": 5,
             "passed_count": 5,
@@ -2703,6 +2705,7 @@ class TestFinalizeModule:
             "implementation_files": [],
             "coverage_achieved": 90,
             "coverage_target": 90,
+            "coverage_scope": "changed lines",
             "total_iterations": 1,
             "test_count": 1,
             "passed_count": 1,

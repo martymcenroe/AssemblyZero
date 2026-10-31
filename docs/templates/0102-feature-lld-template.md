@@ -284,7 +284,7 @@ sequenceDiagram
 | T020 | {test name} | {what it verifies} | RED / GREEN |
 | T030 | {test name} | {what it verifies} | RED / GREEN |
 
-**Coverage Target:** ≥95% for all new code
+**Coverage Target:** ≥95% of the lines this change adds or modifies, for each test framework; a new file counts whole (ADR 0207)
 
 **TDD Checklist:**
 - [ ] All tests written before implementation

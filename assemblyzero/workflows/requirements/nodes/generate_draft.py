@@ -480,10 +480,11 @@ CRITICAL — REQUIREMENT/TEST MAPPING (failure to follow halts the workflow):
 - Multiple scenarios may cover the same requirement (e.g. two error-case scenarios both ending in `(REQ-2)`). That's fine. What's NOT fine: a requirement with zero matching `(REQ-N)` references.
 
 COVERAGE TARGETS MUST BE REACHABLE BY THE PLANNED TESTS (Issue #1940):
-- If the target repo declares a coverage gate (pyproject `fail_under`), use \
-THAT number as the LLD's coverage target. Do NOT invent a stricter one \
-unless the issue itself demands it — a live run died holding generated \
-code to an invented 95% while the repo's own gate said 89%.
+- The LLD's coverage target is a percentage of the lines this change adds or \
+modifies, for each test framework, per ADR 0207. It is not the repo's \
+whole-project gate (pyproject `fail_under`), which measures something else \
+and is never copied into the LLD. Use 95 unless the issue demands another \
+number, and do not invent a stricter one (Issue #4436).
 - Every percentage you promise must be arithmetically reachable by the \
 tests you plan. If your design includes defensive branches — queue-full \
 eviction, race-window except blocks, abstract method bodies — the test \

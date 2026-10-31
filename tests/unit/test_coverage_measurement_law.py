@@ -286,7 +286,9 @@ class TestBothConsumersAgree:
     def test_one_reading_per_report(self, report: str, expected: str) -> None:
         assert read_coverage(report, TARGET).state == expected
 
-    def test_n4c_halts_on_the_run_201554_shape(self, tmp_path: Path) -> None:
+    def test_n4c_cannot_read_the_run_201554_shape_as_an_all_clear(self, tmp_path: Path) -> None:
+        """#4436: N5 is the one reader of the report, and N4c reads what N5
+        named, so the two can no longer disagree about one report."""
         from assemblyzero.workflows.testing.nodes.augment_tests import (
             augment_tests_for_coverage,
         )
@@ -300,16 +302,16 @@ class TestBothConsumersAgree:
             "repo_root": str(tmp_path),
             "coverage_achieved": 0.0,
             "coverage_target": 95,
-            "coverage_module": TARGET,
         })
 
         assert result["next_node"] == "end"
-        assert "COVERAGE MEASUREMENT FAILED" in result["error_message"]
+        assert "names no uncovered line" in result["error_message"]
 
     def test_n5_halts_on_the_run_201554_shape(self, tmp_path: Path) -> None:
         """The other half of the acceptance: the SAME named failure from N5.
 
         The observed state exactly -- 15 passed, 0 failed, no coverage table.
+        The repository is real, so what halts is the missing report.
         """
         from unittest.mock import patch
 
@@ -320,10 +322,18 @@ class TestBothConsumersAgree:
         impl = tmp_path / "src" / "boostgauge" / "skins"
         impl.mkdir(parents=True)
         (impl / "stingray.py").write_text(MOD, encoding="utf-8")
+        for args in (
+            ["init", "-b", "main"], ["config", "user.email", "t@example.com"],
+            ["config", "user.name", "T"],
+            ["commit", "--allow-empty", "-m", "the base"],
+            ["switch", "-c", "issue-331"],
+        ):
+            subprocess.run(["git", *args], cwd=str(tmp_path), check=True, capture_output=True)
 
         state = {
             "issue_number": 331,
             "repo_root": str(tmp_path),
+            "base_branch": "main",
             "test_files": [str(tmp_path / "t.py")],
             "audit_dir": "",
             "file_counter": 0,
@@ -353,6 +363,7 @@ class TestBothConsumersAgree:
         assert "COVERAGE MEASUREMENT FAILED" in result["error_message"]
         assert "not a test gap" in result["error_message"]
         assert "not a defect in the LLD or spec" in result["error_message"]
+        assert "no coverage report at" in result["error_message"]
         assert "stagnant" not in result["error_message"].lower()
 
     def test_n5_does_not_preempt_the_zero_collected_law(self) -> None:

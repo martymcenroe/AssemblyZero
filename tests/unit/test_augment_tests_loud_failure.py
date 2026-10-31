@@ -89,6 +89,7 @@ def _state(worktree: Path, **overrides) -> dict:
         "audit_dir": str(worktree / "audit"),
         "test_files": [str(worktree / "tests" / "test_x.py")],
         "green_phase_output": GREEN_OUTPUT,
+        "uncovered_changed_lines": {"src/boostgauge/collector.py": [56, 57, 58, 63]},
         "coverage_achieved": 93.0,
         "coverage_target": 95,
         "coverage_module": "",
@@ -129,12 +130,14 @@ def test_106_a_malformed_line_number_raises():
         mod._line_numbers(["4", "y"])
 
 
-def test_101_the_node_halts_on_a_report_it_cannot_read(worktree, capsys):
-    output = GREEN_OUTPUT.replace("56-58, 63", "56-58, 63-")
-    with patch.object(mod, "call_claude_for_file") as call:
-        result = mod.augment_tests_for_coverage(_state(worktree, green_phase_output=output))
-    _halted(result, capsys, "N4c cannot add tests", "'63-'")
-    call.assert_not_called()
+def test_101_the_lines_n5_names_never_pass_through_a_report_parse(worktree):
+    """#4436: a Missing column N4c could misread is gone from the node's path;
+    it reads the numbers N5 judged. `_line_numbers` still guards the vetting
+    run's report, which is the one report text this node reads."""
+    state = _state(worktree, green_phase_output="not a coverage table at all")
+    with patch.object(mod, "call_claude_for_file", return_value=("", "stop here")) as call:
+        mod.augment_tests_for_coverage(state)
+    assert ">> 56:" in call.call_args.args[0]
 
 
 # ------------------------------------------------------ lines 134, 142, 209
@@ -235,10 +238,7 @@ def test_537_no_test_file_halts(worktree, capsys):
 
 
 def test_554_a_shortfall_with_no_uncovered_line_named_halts(worktree, capsys):
-    covered = GREEN_OUTPUT.replace("82      6    93%   56-58, 63", "82      0   100%")
-    covered = covered.replace("TOTAL                                     82      6    93%",
-                              "TOTAL                                     82      0   100%")
-    result = mod.augment_tests_for_coverage(_state(worktree, green_phase_output=covered))
+    result = mod.augment_tests_for_coverage(_state(worktree, uncovered_changed_lines={}))
     _halted(result, capsys, "names no uncovered line", "93.0%")
 
 

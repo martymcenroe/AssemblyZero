@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.testing.nodes.verify_phases import (
     _cap_grace,
     verify_green_phase,
@@ -20,6 +22,8 @@ from assemblyzero.workflows.testing.state import (
     GREEN_ITERATION_CEILING,
 )
 from assemblyzero.workflows.testing.step_budget import recursion_limit
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 
 class TestTheGraceRule:

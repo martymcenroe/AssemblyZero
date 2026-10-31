@@ -10,6 +10,10 @@ import os
 import re
 import shutil
 
+from assemblyzero.workflows.testing.coverage_report import (
+    FileLines,
+    read_istanbul_report,
+)
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
     FrameworkConfig,
@@ -29,16 +33,36 @@ from assemblyzero.workflows.testing.runners.base_runner import (
 logger = logging.getLogger(__name__)
 
 #: Where a coverage run's report goes, beneath the framework's project
-#: directory (#4246): both runners' default, so a JavaScript project's
-#: .gitignore already names it in the common case.
+#: directory (#4246): both runners' default. A JavaScript project's .gitignore
+#: names it in the common case, and not always (the target #4436 measured does
+#: not), so a run's reports are removed once read, or a checkpoint's `git add
+#: -A` would commit them into the run's branch and its PR.
 COVERAGE_DIR = "coverage"
 
 #: The istanbul json-summary reporter's file name, for Vitest and Jest alike.
 COVERAGE_SUMMARY = "coverage-summary.json"
 
+#: The istanbul json reporter's file name: the per-line data the green phase
+#: judges a run's changed lines by, which a json-summary does not carry (#4436).
+COVERAGE_LINES = "coverage-final.json"
+
 #: Vitest measures coverage through one of these packages (#4246). Closed:
 #: the two providers Vitest ships.
 VITEST_COVERAGE_PROVIDERS: tuple[str, ...] = ("@vitest/coverage-v8", "@vitest/coverage-istanbul")
+
+#: Vitest's four threshold metrics, each set to 0 on a coverage run (#4436):
+#: a project's own whole-file `coverage.thresholds` would otherwise end the
+#: run non-zero on a number that decides nothing. Closed: the four it checks.
+VITEST_THRESHOLDS: tuple[str, ...] = ("lines", "functions", "branches", "statements")
+
+#: What a Vitest or Jest coverage glob reads as syntax and a file name may
+#: hold, as in a `[id].tsx` route. Closed: glob grouping characters.
+_GLOB_GROUPING = "()[]{}"
+
+
+def _glob_literal(path: str) -> str:
+    """`path` as a glob that matches that one file."""
+    return "".join(f"\\{c}" if c in _GLOB_GROUPING else c for c in path)
 
 
 class JestRunner(BaseTestRunner):
@@ -75,19 +99,43 @@ class JestRunner(BaseTestRunner):
         """Where a coverage run writes its istanbul json-summary (#4246)."""
         return os.path.join(self.project_dir, COVERAGE_DIR, COVERAGE_SUMMARY)
 
-    def _coverage_args(self) -> list[str]:
-        """Ask for line coverage, as a json-summary in COVERAGE_DIR (#4246).
-        These replace the project's own coverage reporters for the run, so
-        no text table lands on the stdout the JSON report is read from."""
+    @property
+    def line_coverage_report_path(self) -> str:
+        """Where a coverage run writes its per-line report (#4436)."""
+        return os.path.join(self.project_dir, COVERAGE_DIR, COVERAGE_LINES)
+
+    def _coverage_args(self, include: list[str] | None = None) -> list[str]:
+        """Ask for line coverage, as a json-summary and a per-line report in
+        COVERAGE_DIR (#4246, #4436). These replace the project's own coverage
+        reporters for the run, so no text table lands on the stdout the JSON
+        report is read from.
+
+        `include` names files, relative to the project, the report must cover
+        even if no test loads them; both runners then report such a file at
+        zero rather than leave it out. The project's own whole-file
+        thresholds are switched off: a threshold that fails decides the run
+        on a number that must decide nothing (#4436).
+
+        Jest's array flags take every word after them that is not a flag, so
+        `--coverageDirectory`, which is not one, comes last, ahead of the
+        test paths.
+        """
+        files = [_glob_literal(path) for path in include or []]
         if self._is_vitest:
             return [
                 "--coverage.enabled=true",
                 "--coverage.reporter=json-summary",
+                "--coverage.reporter=json",
                 f"--coverage.reportsDirectory={COVERAGE_DIR}",
+                *(f"--coverage.thresholds.{metric}=0" for metric in VITEST_THRESHOLDS),
+                *(f"--coverage.include={path}" for path in files),
             ]
         return [
             "--coverage",
             "--coverageReporters=json-summary",
+            "--coverageReporters=json",
+            *(f"--collectCoverageFrom={path}" for path in files),
+            "--coverageThreshold={}",
             f"--coverageDirectory={COVERAGE_DIR}",
         ]
 
@@ -118,6 +166,33 @@ class JestRunner(BaseTestRunner):
                 f"(total.lines.pct is {pct!r})"
             )
         return float(pct)
+
+    def read_line_coverage(self) -> dict[str, FileLines]:
+        """Every line of every file the run's report covers, by repository
+        path (#4436). Raises CoverageReportError naming the path when the
+        report is missing or cannot be read. The last read of a run, so the
+        reports leave the project here."""
+        lines = read_istanbul_report(
+            self.line_coverage_report_path, self.project_root, self.project_dir,
+        )
+        self._discard_reports()
+        return lines
+
+    def _discard_reports(self) -> None:
+        """Take a run's reports out of the project (#4436; see COVERAGE_DIR).
+        Before a run this is also what stops an earlier run's report being
+        read as this one's (#4246)."""
+        for report in (self.coverage_report_path, self.line_coverage_report_path):
+            if not os.path.isfile(report):
+                continue
+            try:
+                os.remove(report)
+            except OSError as e:
+                raise CoverageReportError(
+                    f"the coverage report at {report} cannot be removed, so a "
+                    f"later run's could not be told from it and a checkpoint "
+                    f"would commit it: {type(e).__name__}: {e}"
+                ) from e
 
     def _has_typecheck_script(self) -> bool:
         """Whether the project's package.json declares a `typecheck` script.
@@ -159,6 +234,7 @@ class JestRunner(BaseTestRunner):
         extra_args: list[str] | None = None,
         *,
         measure_coverage: bool = False,
+        coverage_include: list[str] | None = None,
     ) -> TestRunResult:
         """Run 'npx jest --json' or 'npx vitest run --reporter=json'.
 
@@ -171,19 +247,15 @@ class JestRunner(BaseTestRunner):
         and `coverage_percent` is None: not measured. Without
         `measure_coverage` (the red phase, the full-suite gate) it is None
         too, and the argv is as it was.
+
+        #4436: the run writes its per-line report beside the summary, cleared
+        the same way, and `read_line_coverage` reads it and removes both. A
+        run whose reports will not be read has them removed here.
+        `coverage_include` names files the report must cover (`_coverage_args`).
         """
         test_paths = self._paths_for_runner(test_paths)  # #3707
         if measure_coverage:
-            stale = self.coverage_report_path
-            if os.path.isfile(stale):
-                try:
-                    os.remove(stale)
-                except OSError as e:
-                    raise CoverageReportError(
-                        f"an earlier run's coverage report at {stale} cannot "
-                        f"be removed, so this run's could not be told from it: "
-                        f"{type(e).__name__}: {e}"
-                    ) from e
+            self._discard_reports()
         if self._is_vitest:
             print("Running vitest runner for project:", self.project_dir)
             tsconfig_path = os.path.join(self.project_dir, "tsconfig.json")
@@ -204,7 +276,7 @@ class JestRunner(BaseTestRunner):
             command = ["npx", "jest", "--json"]
 
         if measure_coverage:
-            command.extend(self._coverage_args())
+            command.extend(self._coverage_args(coverage_include))
 
         if extra_args:
             command.extend(extra_args)
@@ -214,13 +286,11 @@ class JestRunner(BaseTestRunner):
 
         stdout, stderr, exit_code = self._run_subprocess(command)
         result = self.parse_results(stdout, exit_code, stderr)
-        if (
-            measure_coverage
-            and result["passed"] > 0
-            and result["failed"] == 0
-            and result["errors"] == 0
-        ):
-            result["coverage_percent"] = self.read_coverage_report()
+        if measure_coverage:
+            if result["passed"] > 0 and result["failed"] == 0 and result["errors"] == 0:
+                result["coverage_percent"] = self.read_coverage_report()
+            else:
+                self._discard_reports()  # Jest writes them even when tests fail
         return result
 
     def parse_results(
