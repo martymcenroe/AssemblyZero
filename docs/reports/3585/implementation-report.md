@@ -76,3 +76,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **The knowledge base is read or refused.** A missing types.yaml (24) raises FileNotFoundError naming it. One that cannot be read, does not parse, or holds no `test_types` mapping (30) raises `KnowledgeBaseError`, a ValueError. Each comes after an ERROR line.
 - **The stand-in is deleted.** Both failures fell back, silently, to a shorter inline copy of the definitions that differed from the file. It existed only for those failures.
 - **Where the raise goes.** N0 and N1 read the knowledge base outside any handler, so a broken install ends the run at the first node, through the entry point's handler, which alerts.
+
+### templates/runbook.py (3 ledger rows: 3 fixed)
+
+- **No invented sections.** An LLD with no prerequisites (172), no procedure (200) or no verification steps (210) raises ValueError naming the feature, the issue and every missing section, after an ERROR line and before anything is written. The template wrote invented ones in their place, and the runbook read as written from the LLD.
+- **The caller still swallows it.** N8 (`nodes/document.py`) catches every exception from the runbook and prints "SKIPPED" on stdout. That handler is its own ledger row, `document.py:308`, in another batch.
+- **A defect that row's fix will expose.** The section patterns allow one digit before a heading, so "## 10. Verification" and "## 2.2 Dependencies" are not found. On such an LLD the runbook now raises where it used to be invented.

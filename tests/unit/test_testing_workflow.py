@@ -993,6 +993,9 @@ graph TD
         """generate_runbook creates runbook file."""
         from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
+        # ADR 0236: the runbook is written from the LLD alone, so the LLD
+        # carries all three sections it needs (an invented one used to fill
+        # a missing section).
         lld_content = """# Workflow Feature
 
 ## Prerequisites
@@ -1005,6 +1008,10 @@ graph TD
 1. Load configuration
 2. Execute workflow
 3. Save results
+
+## Verification
+
+- The results file exists
 """
         runbook_path = generate_runbook(
             feature_name="Workflow Feature",
@@ -3467,6 +3474,9 @@ class TestTemplatesFullCoverage:
 ## Steps
 1. Load config
 2. Execute
+
+## Testing
+- The run exits 0
 """
         result = generate_runbook(
             feature_name="Test Feature",
@@ -4060,7 +4070,12 @@ class TestRunbookEdgeCases:
 
 ## Implementation
 
-Steps here.
+1. Start the container
+2. Run the job
+
+## Verification
+
+- The job's output exists
 """
         result = generate_runbook(
             feature_name="Feature",
@@ -4072,8 +4087,8 @@ Steps here.
 
         assert result.exists()
         content = result.read_text()
-        # Should include prerequisites
-        assert "Prerequisites" in content or "Python" in content
+        # ADR 0236: the LLD's own prerequisites, never an invented list
+        assert "| Docker running | `verify` |" in content
 
 
 class TestPatternsYamlLoading:
@@ -4216,20 +4231,22 @@ class TestRunbookAdditional:
     """More tests for runbook.py."""
 
     def test_generate_runbook_minimal_lld(self, tmp_path):
-        """generate_runbook handles minimal LLD."""
+        """A minimal LLD gives no runbook (ADR 0236): every section is named
+        missing and nothing is written, where invented sections were."""
         from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
         lld_content = "# Feature\n\nSimple description."
 
-        result = generate_runbook(
-            feature_name="Feature",
-            lld_content=lld_content,
-            issue_number=42,
-            repo_root=tmp_path,
-            implementation_files=["tools/script.py"],
-        )
+        with pytest.raises(ValueError, match="no prerequisites, no procedure, no verification"):
+            generate_runbook(
+                feature_name="Feature",
+                lld_content=lld_content,
+                issue_number=42,
+                repo_root=tmp_path,
+                implementation_files=["tools/script.py"],
+            )
 
-        assert result.exists()
+        assert not (tmp_path / "docs" / "runbooks").exists()
 
 
 class TestLessonsAdditional:

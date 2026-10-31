@@ -147,3 +147,18 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 325 passed across 5 files: the workflow tests, N0's and N1's.
 
 **Audits:** 0 new loud-failure sites, and this module's swallowed handler is now stale in the baseline; no new fail-open; halt sites pass. Ruff finds one fewer issue than at HEAD in the module and in the workflow tests.
+
+## templates/runbook.py
+
+**New: `tests/unit/test_runbook_template_loud_failure.py` (5).**
+
+**Before the fix, measured:** 4 failed, 1 passed. The four site tests failed. The one that passed pins a runbook written from the LLD alone, with none of the invented strings.
+
+**Changed tests,** all in `test_testing_workflow.py`:
+- two runbook tests gain a verification section in their LLDs;
+- the prerequisites test gains a procedure and a verification section, and now asserts the LLD's own row;
+- the minimal-LLD test now expects the ValueError naming all three sections.
+
+**Neighbouring suites:** 288 passed across the runbook and workflow tests.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
