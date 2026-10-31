@@ -451,3 +451,7 @@ Each new test file names its tests `test_<line>_...` after the ledger row they p
   - `test_review_convergence.py`: a garbage cap now raises.
 - **Neighbouring suites:** all 116 unit test files that import the spec workflow, with the error-path change: 2,402 passed. With all four changes, the 26 closest files: 725 passed.
 - **Audits:** `audit_loud_failure.py --check` 0 new, 4 stale (the earlier modules'); `audit_fail_open.py --check` PASS.
+
+## The landing tier
+
+Run on 2026-10-31 on the merge of `main` at `5ebba1ad` (the requirements package): 12,430 passed, 66 skipped, 7 deselected and 6 xfailed in 813 s, with no failures. The merge's only conflict beyond the reports and baselines was a test file both packages named `test_human_gate_loud_failure.py`; the spec's is now `tests/unit/test_spec_human_gate_loud_failure.py`. After the tier, `main`'s one further commit changed only ledger rows.
