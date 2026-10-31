@@ -1,10 +1,11 @@
 """Verify a gpg-encrypted secret blob without exposing key material.
 
 Decrypts in-process (single pinentry prompt), then reports structural
-metadata only -- byte count, line count, first/last lines, type-specific
-checks. The decrypted content never reaches stdout/stderr and never lands
-on disk. Follows the same threat-model posture as
-``tools/_pat_session.py`` (ADR-0216).
+metadata only -- byte count, line count, type-specific checks. The decrypted
+content never reaches stdout/stderr and never lands on disk. No line of it is
+printed, not even the first or last: a token is one line, so those two prints
+were the whole credential, twice (#3278). Follows the same threat-model
+posture as ``tools/_pat_session.py`` (ADR-0216).
 
 Supported types:
     pem  -- PEM-encoded private key (RSA, EC, generic)
@@ -170,8 +171,6 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Total bytes:  {len(content)}")
     print(f"Line count:   {len(lines)}")
-    print(f"First line:   {lines[0] if lines else '(empty)'}")
-    print(f"Last line:    {lines[-1] if lines else '(empty)'}")
     print()
 
     ok, details = CHECKERS[secret_type](content)
