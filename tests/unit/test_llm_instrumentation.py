@@ -76,13 +76,6 @@ def claude_cli_fixture() -> dict:
 
 
 @pytest.fixture
-def anthropic_api_fixture() -> dict:
-    fixture_path = Path(__file__).parent.parent / "fixtures" / "llm_instrumentation" / "anthropic_api_response.json"
-    with open(fixture_path) as f:
-        return json.load(f)
-
-
-@pytest.fixture
 def gemini_fixture() -> dict:
     fixture_path = Path(__file__).parent.parent / "fixtures" / "llm_instrumentation" / "gemini_response.json"
     with open(fixture_path) as f:
@@ -317,25 +310,6 @@ class TestDisabledStore:
 # from the transport that is actually used.
 #
 # The live transport's usage parsing is covered in `tests/unit/test_llm_provider*`.
-
-
-# ── T120: Anthropic API parser ───────────────────────────────────────
-
-
-class TestAnthropicAPIParser:
-    """T120: _parse_usage_from_message fixture."""
-
-    def test_extracts_usage_block(self, anthropic_api_fixture: dict):
-        from assemblyzero.nodes.anthropic_provider import _parse_usage_from_message
-
-        result = _parse_usage_from_message(anthropic_api_fixture)
-
-        assert result["model_used"] == "claude-sonnet-4-6-20250514"
-        assert result["input_tokens"] == 2095
-        assert result["output_tokens"] == 503
-        assert result["cache_read_tokens"] == 1800
-        assert result["cache_write_tokens"] == 0
-        assert result["stop_reason"] == "end_turn"
 
 
 # ── T130: Gemini parser ──────────────────────────────────────────────

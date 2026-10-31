@@ -101,11 +101,11 @@ class ProfileError(ValueError):
 #: #3615: while this file exists, no seat may run on an Anthropic model. The
 #: operator throws the lock week by week as his quota runs out, with
 #: ``tools/claude_spend_lock.py --lock --apply`` and lifts it with
-#: ``--unlock --apply``. It covers ``claude:`` (the CLI, his subscription) and
-#: ``anthropic:`` (the API, billed): both spend Anthropic tokens.
+#: ``--unlock --apply``. It covers ``claude:``, the CLI on his subscription.
+#: There is no ``anthropic:`` provider any more (#2864): the paid API is removed.
 CLAUDE_SPEND_LOCK = Path.home() / ".claude" / "claude-spend.lock"
 LOCK_NAME = "claude-spend.lock"
-ANTHROPIC_PROVIDERS = frozenset({"claude", "anthropic"})
+ANTHROPIC_PROVIDERS = frozenset({"claude"})
 
 
 class ClaudeSpendLocked(ProfileError):
@@ -305,7 +305,6 @@ class Seat:
 def _provider_class(provider: str) -> str:
     return {
         "claude": "ClaudeCLIProvider",
-        "anthropic": "AnthropicProvider",
         "gemini": "GeminiProvider",
         "mock": "MockProvider",
         "scripted": "ScriptedProvider",
@@ -327,7 +326,6 @@ def check_spec(spec: str, where: str) -> tuple[str, str, str]:
     """
     from assemblyzero.core.config import FORBIDDEN_MODELS
     from assemblyzero.core.llm_provider import (
-        AnthropicProvider,
         ClaudeCLIProvider,
         GeminiProvider,
         parse_provider_spec,
@@ -340,6 +338,14 @@ def check_spec(spec: str, where: str) -> tuple[str, str, str]:
     except ValueError as e:
         raise ProfileError(f"{where}: {e}") from e
 
+    if provider == "anthropic":
+        # #2864: the paid API is removed. A seat that asks for it stops the
+        # profile here, at load, rather than at the first call.
+        raise ProfileError(
+            f"{where}: {spec!r} names the paid Anthropic API, which is removed "
+            f"(#2864). Use claude: (the subscription CLI) or gemini:"
+        )
+
     lowered = model.strip().lower()
     if provider == "gemini":
         resolved = getattr(GeminiProvider, "MODEL_MAP", {}).get(lowered)
@@ -349,8 +355,6 @@ def check_spec(spec: str, where: str) -> tuple[str, str, str]:
             resolved = lowered if lowered.startswith("gemini-") else f"gemini-{lowered}"
     elif provider == "claude":
         resolved = getattr(ClaudeCLIProvider, "MODEL_MAP", {}).get(lowered, lowered)
-    elif provider == "anthropic":
-        resolved = getattr(AnthropicProvider, "MODEL_MAP", {}).get(lowered, lowered)
     else:
         resolved = model.strip()
 

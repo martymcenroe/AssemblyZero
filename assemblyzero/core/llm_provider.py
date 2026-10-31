@@ -1,20 +1,20 @@
 ﻿"""LLM Provider abstraction for pluggable model support.
 
 Issue #101: Unified Governance Workflow
-Issue #395: Anthropic API provider with CLI->API fallback
 Issue #605: Systemic Model Refresh â€” Gemini 3.1, Claude 4.6
 
 Provides a unified interface for calling different LLM providers:
 - Claude CLI (via claude -p CLI, uses Max subscription)
-- Anthropic API (direct API calls, requires ANTHROPIC_API_KEY in .env)
 - Gemini (via GeminiClient with credential rotation)
 - OpenAI (future)
 - Ollama (future)
 
-Spec format: provider:model (e.g. "claude:opus", "anthropic:haiku", "gemini:3.1-pro")
+Spec format: provider:model (e.g. "claude:opus", "gemini:3.1-pro")
 
-The "claude:" prefix uses CLI first (free via Max subscription), and automatically
-falls back to the Anthropic API if an API key is configured in .env.
+The "claude:" prefix is the Claude CLI on the Max subscription and nothing else
+(#2864). There is no paid API path and no fallback to one: a rate-limited or
+failed CLI call stops the run loudly, and the answer to an exhausted weekly quota
+is to wait for it to renew.
 """
 
 import json
@@ -35,10 +35,7 @@ from pathlib import Path
 from typing import Optional
 
 from assemblyzero.core import provider_storm, retry_gate
-from assemblyzero.core.errors import (
-    RateLimitError,
-    classify_anthropic_error,
-)
+from assemblyzero.core.errors import RateLimitError
 from assemblyzero.core.text_sanitizer import strip_emoji
 from assemblyzero.utils.process import kill_process_tree
 
@@ -190,46 +187,6 @@ def reset_cumulative_cost() -> None:
     _cumulative_cost_usd = 0.0
 
 
-# =============================================================================
-# Issue #542: Module-level circuit breaker registry
-# =============================================================================
-# FallbackProvider._consecutive_failures was per-instance, but get_provider()
-# creates a fresh instance each LangGraph iteration â€” resetting the counter.
-# This module-level dict persists across all instances for the process lifetime.
-
-_circuit_breaker_registry: dict[str, int] = {}
-_CIRCUIT_BREAKER_MAX = 2
-
-
-# =============================================================================
-# Issue #773: API policy â€” block Anthropic API usage by default
-# =============================================================================
-# Default: False (no API). Max subscription makes `claude -p` free.
-# Anthropic API costs real money. Opt-in via `--allow-api` CLI flag.
-
-_api_allowed: bool = False
-
-
-def set_api_policy(allow: bool) -> None:
-    """Set whether Anthropic API usage is allowed this session.
-
-    Args:
-        allow: True to allow API calls, False to block them.
-    """
-    global _api_allowed
-    _api_allowed = allow
-
-
-def is_api_allowed() -> bool:
-    """Return whether Anthropic API usage is currently allowed."""
-    return _api_allowed
-
-
-def reset_circuit_breakers() -> None:
-    """Reset all circuit breaker counters (for testing)."""
-    _circuit_breaker_registry.clear()
-
-
 def log_llm_call(result: LLMCallResult) -> None:
     """Log token usage and cost for an LLM call.
 
@@ -293,11 +250,11 @@ def _loud_error(message: str) -> None:
 #: (#4199), and the transport each is. The Gemini seat's lines are written per
 #: agy process by GeminiClient, so recording them here would count each twice;
 #: the mock provider calls no model.
-_LEDGER_TRANSPORTS = {"claude": "claude", "anthropic": "anthropic-api"}
+_LEDGER_TRANSPORTS = {"claude": "claude"}
 
 
 def _ledger_line(result: LLMCallResult) -> None:
-    """One model-call ledger line for a Claude CLI or Anthropic API call (#4199)."""
+    """One model-call ledger line for a Claude CLI call (#4199)."""
     transport = _LEDGER_TRANSPORTS.get(result.provider)
     if transport is None:
         return
@@ -321,46 +278,6 @@ def _ledger_line(result: LLMCallResult) -> None:
         "assemblyzero.llm_provider", transport, result.model_used, usage,
         result.duration_ms / 1000.0, outcome, result.error_message,
     )
-
-
-def _load_anthropic_api_key() -> Optional[str]:
-    """Load ANTHROPIC_API_KEY from the .env file at the repo root.
-
-    Does NOT check os.environ â€” setting ANTHROPIC_API_KEY as an OS env var
-    conflicts with Claude Code's auth. The .env file is the only source.
-
-    Returns:
-        The API key string, or None if .env is missing or key not found.
-    """
-    env_path = Path(__file__).resolve().parents[2] / ".env"
-    if not env_path.exists():
-        return None
-
-    try:
-        text = env_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        # #3780: an unreadable .env is not an absent key. Reading it as None
-        # silently turned the API fallback off.
-        raise RuntimeError(
-            f"cannot read {env_path} for ANTHROPIC_API_KEY: {type(exc).__name__}: {exc}"
-        ) from exc
-
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if key == "ANTHROPIC_API_KEY":
-            # Strip surrounding quotes
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-                value = value[1:-1]
-            return value if value else None
-
-    return None
 
 
 class LLMProvider(ABC):
@@ -1295,295 +1212,6 @@ class ClaudeCLIProvider(LLMProvider):
         return call_result
 
 
-class AnthropicProvider(LLMProvider):
-    """Anthropic API provider for direct Claude API calls.
-
-    Issue #395: Provides direct API access with proper token tracking,
-    cost calculation, and error handling. Requires ANTHROPIC_API_KEY in .env.
-
-    Issue #605: Updated to Claude 4.6 model IDs (REQ-2).
-
-    Supported models:
-    - opus (claude-opus-4-6)
-    - sonnet (claude-sonnet-4-6)
-    - haiku (claude-haiku-4-5)
-    - Any full model ID as passthrough (e.g. claude-opus-4-6-20260415)
-    """
-
-    # Issue #605: Claude 4.6 (REQ-2)
-    MODEL_MAP = {
-        "opus": "claude-opus-4-6",
-        "sonnet": "claude-sonnet-4-6",
-        "haiku": "claude-haiku-4-5",
-    }
-
-    MAX_TOKENS = 65536
-
-    # Pricing per million tokens (input, output)
-    _PRICING: dict[str, tuple[float, float]] = {
-        "claude-opus-4-6": (5.0, 25.0),
-        "claude-sonnet-4-6": (3.0, 15.0),
-        "claude-haiku-4-5": (1.0, 5.0),
-    }
-
-    def __init__(self, model: str = "opus"):
-        """Initialize Anthropic API provider.
-
-        Args:
-            model: Model alias (opus, sonnet, haiku) or full model ID.
-        """
-        model_lower = model.lower()
-        if model_lower in self.MODEL_MAP:
-            self._model = model_lower
-            self._model_id = self.MODEL_MAP[model_lower]
-        else:
-            # Passthrough for full model IDs
-            self._model = model_lower
-            self._model_id = model_lower
-
-        self._client = None
-
-    @property
-    def provider_name(self) -> str:
-        return "anthropic"
-
-    @property
-    def model(self) -> str:
-        return self._model
-
-    def _get_client(self):
-        """Get or create Anthropic client.
-
-        Raises:
-            RuntimeError: If API key not found in .env.
-        """
-        if self._client is None:
-            import anthropic
-
-            api_key = _load_anthropic_api_key()
-            if not api_key:
-                raise RuntimeError(
-                    "ANTHROPIC_API_KEY not found in .env file. "
-                    "Add it to the .env file at the repo root."
-                )
-            self._client = anthropic.Anthropic(api_key=api_key)
-        return self._client
-
-    def _calculate_cost(
-        self,
-        input_tokens: int,
-        output_tokens: int,
-        cache_read_tokens: int = 0,
-        cache_creation_tokens: int = 0,
-    ) -> float:
-        """Calculate cost in USD for a call.
-
-        Cache read tokens are charged at 10% of input price.
-        Cache creation tokens are charged at 125% of input price.
-
-        #3780: an unpriced model raises. Returning 0.0 let every call on it
-        pass the cost budget for free; ``invoke`` refuses such a model before
-        it spends anything, so this is the backstop.
-        """
-        pricing = self._PRICING.get(self._model_id)
-        if not pricing:
-            raise ValueError(
-                f"no price for {self._model_id}; its cost cannot be counted against --budget"
-            )
-        input_price, output_price = pricing
-        cost = (input_tokens * input_price / 1_000_000) + (
-            output_tokens * output_price / 1_000_000
-        )
-        if cache_read_tokens:
-            cost += cache_read_tokens * (input_price * 0.1) / 1_000_000
-        if cache_creation_tokens:
-            cost += cache_creation_tokens * (input_price * 1.25) / 1_000_000
-        return cost
-
-    def invoke(
-        self,
-        system_prompt: str,
-        content: str,
-        timeout_seconds: int = 300,
-        response_schema: dict | None = None,
-        json_schema: dict | None = None,
-    ) -> LLMCallResult:
-        """Invoke Claude via the Anthropic API.
-
-        Args:
-            system_prompt: System instructions for the model.
-            content: User content to process.
-            timeout_seconds: Maximum time to wait (default 5 minutes).
-            response_schema: Optional JSON schema (accepted for interface
-                compatibility but not currently used by Anthropic API).
-            json_schema: JSON schema dict (accepted for interface compatibility
-                but not currently used by Anthropic API).
-
-        Returns:
-            LLMCallResult with response or error.
-        """
-        locked = _spend_locked_result(self.provider_name, self._model)
-        if locked is not None:
-            return locked
-        if self._model_id not in self._PRICING:
-            # #3780: a paid call whose cost cannot be counted is refused before
-            # it is made. It used to be priced at $0.00, so --budget never saw it.
-            call_result = LLMCallResult(
-                success=False,
-                response=None,
-                raw_response=None,
-                error_message=(
-                    f"refused: no price for {self._model_id}, so its cost cannot be "
-                    f"counted against --budget. Priced models: {sorted(self._PRICING)}"
-                ),
-                provider=self.provider_name,
-                model_used=self._model,
-                duration_ms=0,
-                attempts=0,
-                retryable=False,
-                failure_class="permanent",
-            )
-            log_llm_call(call_result)
-            return call_result
-        start_time = time.time()
-
-        try:
-            import httpx
-
-            client = self._get_client()
-
-            # Issue #541: Use streaming to eliminate timeout blindness.
-            # client.messages.create() blocks until the entire response is
-            # ready â€” on Windows/MSYS2 the httpx read timeout never fires,
-            # so calls hang indefinitely.  Streaming gets chunks as they're
-            # generated: the connection stays active, and any real stall
-            # surfaces as a read-timeout on a per-chunk basis.
-            # Issue #488: cache_control directives still work with streaming.
-            # Issue #645: Pre-call cost estimate
-            est_input_tokens = (len(system_prompt) + len(content)) // 4
-            pricing = self._PRICING.get(self._model_id)
-            if pricing:
-                est_cost = est_input_tokens * pricing[0] / 1_000_000
-                print(f"    [COST EST] ~${est_cost:.2f} input ({est_input_tokens:,} tokens, {self._model_id})")
-            response_text = ""
-            last_progress = time.time()
-            with client.messages.stream(
-                model=self._model_id,
-                max_tokens=self.MAX_TOKENS,
-                system=[{
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
-                }],
-                messages=[{"role": "user", "content": [{
-                    "type": "text",
-                    "text": content,
-                    "cache_control": {"type": "ephemeral"},
-                }]}],
-                timeout=httpx.Timeout(timeout_seconds, connect=30.0),
-            ) as stream:
-                for text in stream.text_stream:
-                    response_text += text
-                    # Progress indicator every 30s
-                    now = time.time()
-                    if now - last_progress >= 30:
-                        chars = len(response_text)
-                        elapsed = int(now - start_time)
-                        print(
-                            f"    [STREAM] {chars:,} chars received "
-                            f"({elapsed}s elapsed)",
-                            flush=True,
-                        )
-                        last_progress = now
-                response = stream.get_final_message()
-
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            # Issue #527: Strip emojis from response (preserve raw_response)
-            response_text = strip_emoji(response_text)
-
-            # Extract usage
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            cache_create = (
-                getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-            )
-
-            cost = self._calculate_cost(
-                input_tokens, output_tokens, cache_read, cache_create
-            )
-
-            call_result = LLMCallResult(
-                success=True,
-                response=response_text,
-                raw_response=str(response),
-                error_message=None,
-                provider=self.provider_name,
-                model_used=self._model,
-                duration_ms=duration_ms,
-                attempts=1,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_read_tokens=cache_read,
-                cache_creation_tokens=cache_create,
-                cost_usd=cost,
-            )
-            log_llm_call(call_result)
-            return call_result
-
-        except RuntimeError as e:
-            # No API key
-            duration_ms = int((time.time() - start_time) * 1000)
-            call_result = LLMCallResult(
-                success=False,
-                response=None,
-                raw_response=None,
-                error_message=str(e),
-                provider=self.provider_name,
-                model_used=self._model,
-                duration_ms=duration_ms,
-                attempts=0,
-            )
-            log_llm_call(call_result)
-            return call_result
-        except Exception as e:
-            import anthropic
-
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            # Issue #542/#546: Classify through the typed error hierarchy
-            # and propagate status_code, retry_after, retryable to LLMCallResult
-            if not isinstance(e, (anthropic.APIError, anthropic.APITimeoutError)):
-                # #3780: only the API's own errors are a failed call. Anything
-                # else is a fault in this code, raised rather than reported as
-                # "Anthropic API error" and handed to the retry loop.
-                raise
-            classified = classify_anthropic_error(e)
-            rate_limited = isinstance(classified, RateLimitError)
-            error_msg = str(classified)
-            status_code = classified.status_code
-            retry_after = classified.retry_after
-            retryable = classified.retryable
-
-            call_result = LLMCallResult(
-                success=False,
-                response=None,
-                raw_response=None,
-                error_message=error_msg,
-                provider=self.provider_name,
-                model_used=self._model,
-                duration_ms=duration_ms,
-                attempts=1,
-                rate_limited=rate_limited,
-                status_code=status_code,
-                retry_after=retry_after,
-                retryable=retryable,
-            )
-            log_llm_call(call_result)
-            return call_result
-
-
 def _is_capacity_message(error_msg: str | None) -> bool:
     """True when an error says the subscription is out of capacity (#1883).
 
@@ -1637,155 +1265,6 @@ def is_non_retryable_error(error_msg: str | None) -> bool:
         "account is not authorized",
     ]
     return any(pattern in msg for pattern in auth_patterns)
-
-
-class FallbackProvider(LLMProvider):
-    """Tries primary provider first, falls back to secondary on failure.
-
-    Issue #395: Wraps two providers â€” typically CLI (free) primary with
-    API (paid) fallback for reliability.
-    """
-
-    def __init__(
-        self,
-        primary: LLMProvider,
-        fallback: LLMProvider,
-        primary_timeout: int = 300,
-    ):
-        """Initialize fallback provider.
-
-        Args:
-            primary: First provider to try.
-            fallback: Provider to use if primary fails.
-            primary_timeout: Max timeout for primary (default 300s).
-        """
-        self._primary = primary
-        self._fallback = fallback
-        self._primary_timeout = primary_timeout
-        # Issue #542: Circuit breaker uses module-level registry so failures
-        # persist across instances (get_provider() creates fresh instances
-        # each LangGraph iteration).
-        self._breaker_key = f"{primary.provider_name}:{primary.model}"
-        # #3565: which provider produced the last result. `provider_name` and
-        # `model` report it, so a record never names the primary for a call
-        # the fallback answered.
-        self._answered: LLMProvider | None = None
-
-    @property
-    def answered(self) -> "LLMProvider":
-        """The provider that produced the last result (the primary before any call)."""
-        return self._answered or self._primary
-
-    @property
-    def fallback_answered(self) -> bool:
-        """Whether the last call was answered by the fallback."""
-        return self._answered is self._fallback
-
-    @property
-    def provider_name(self) -> str:
-        return self.answered.provider_name
-
-    @property
-    def model(self) -> str:
-        return self.answered.model
-
-    def invoke(
-        self,
-        system_prompt: str,
-        content: str,
-        timeout_seconds: int = 300,
-        response_schema: dict | None = None,
-        json_schema: dict | None = None,
-    ) -> LLMCallResult:
-        """Invoke primary, fall back to secondary on failure.
-
-        Issue #476: Circuit breaker trips after consecutive both-fail calls.
-
-        Args:
-            system_prompt: System instructions for the model.
-            content: User content to process.
-            timeout_seconds: Maximum time for fallback provider.
-            response_schema: Optional JSON schema, passed through to underlying providers.
-            json_schema: JSON schema dict for structured output, passed through to underlying providers.
-
-        Returns:
-            LLMCallResult from whichever provider succeeded (or last failure).
-        """
-        # Issue #476/#542: Circuit breaker â€” module-level registry
-        failures = _circuit_breaker_registry.get(self._breaker_key, 0)
-        if failures >= _CIRCUIT_BREAKER_MAX:
-            n = failures
-            msg = (
-                f"[CIRCUIT BREAKER] {n} consecutive failures. "
-                f"Use --resume after API recovers."
-            )
-            call_result = LLMCallResult(
-                success=False,
-                response=None,
-                raw_response=None,
-                error_message=msg,
-                provider=self.provider_name,
-                model_used=self.model,
-                duration_ms=0,
-                attempts=0,
-                retryable=False,
-            )
-            log_llm_call(call_result)  # #3780: loud, where it was a print
-            return call_result
-
-        # Issue #539: Skip CLI for large prompts â€” they always time out.
-        # LLD/spec prompts are 100K+ chars; the CLI subprocess overhead
-        # guarantees a timeout.  Go straight to the API.
-        prompt_size = len(system_prompt) + len(content)
-        if prompt_size > 50_000:
-            print(
-                f"    [LLM] Prompt {prompt_size:,} chars â€” "
-                f"skipping CLI, using {self._fallback.provider_name} directly"
-            )
-        else:
-            # Try primary with shorter timeout
-            effective_timeout = min(timeout_seconds, self._primary_timeout)
-            result = self._primary.invoke(
-                system_prompt, content, effective_timeout,
-                response_schema=response_schema, json_schema=json_schema,
-            )
-            if result.success:
-                _circuit_breaker_registry[self._breaker_key] = 0
-                self._answered = self._primary
-                return result
-
-            # Primary failed â€” try fallback with full timeout. #3780: the
-            # primary's failure is loud (its own log_llm_call); this line
-            # says, at the same level, that a paid fallback is now spending.
-            _loud_error(
-                f"{self._primary.provider_name} failed "
-                f"({result.error_message[:200] if result.error_message else 'no error message'}); "
-                f"falling back to {self._fallback.provider_name}"
-            )
-        fallback_result = self._fallback.invoke(
-            system_prompt, content, timeout_seconds,
-            response_schema=response_schema, json_schema=json_schema,
-        )
-        self._answered = self._fallback
-        if fallback_result.success:
-            _circuit_breaker_registry[self._breaker_key] = 0
-        else:
-            # Issue #516: Non-retryable errors trip breaker immediately
-            if is_non_retryable_error(fallback_result.error_message):
-                _circuit_breaker_registry[self._breaker_key] = _CIRCUIT_BREAKER_MAX
-                _loud_error(
-                    f"[CIRCUIT BREAKER] tripped by a non-retryable error: "
-                    f"{fallback_result.error_message[:200]}"
-                )
-            else:
-                current = _circuit_breaker_registry.get(self._breaker_key, 0)
-                _circuit_breaker_registry[self._breaker_key] = current + 1
-                _loud_error(
-                    f"[CIRCUIT] both {self._primary.provider_name} and "
-                    f"{self._fallback.provider_name} failed: {current + 1}/"
-                    f"{_CIRCUIT_BREAKER_MAX} consecutive failures"
-                )
-        return fallback_result
 
 
 class GeminiProvider(LLMProvider):
@@ -2171,25 +1650,22 @@ def parse_provider_spec(spec: str) -> tuple[str, str]:
 def get_provider(spec: str, effort: str | None = None) -> LLMProvider:
     """Factory function to create LLM provider from spec.
 
-    Issue #773: Respects API policy. When API is blocked (default),
-    ``claude:`` specs return bare ClaudeCLIProvider (no FallbackProvider),
-    and ``anthropic:`` specs raise ValueError.
+    #2864: ``claude:`` specs return ClaudeCLIProvider directly. There is no
+    paid API provider, so an ``anthropic:`` spec is an unknown provider and
+    raises ValueError.
 
     Args:
-        spec: Provider specification like "claude:opus", "anthropic:haiku",
-              or "gemini:3.1-pro".
+        spec: Provider specification like "claude:opus" or "gemini:3.1-pro".
         effort: Effort level for Claude CLI (low/medium/high/max). None omits flag.
 
     Returns:
         Configured LLMProvider instance.
 
     Raises:
-        ValueError: If provider or model is not recognized, or if
-            ``anthropic:`` is used when API is blocked.
+        ValueError: If the provider or model is not recognized.
 
     Examples:
         >>> drafter = get_provider("claude:opus")
-        >>> direct = get_provider("anthropic:haiku")  # requires --allow-api
         >>> reviewer = get_provider("gemini:3.1-pro")
         >>> mock = get_provider("mock:test")
     """
@@ -2235,19 +1711,10 @@ def _build_provider(spec: str, effort: str | None = None) -> "LLMProvider":
     provider, model = parse_provider_spec(spec)
 
     if provider == "claude":
-        cli = ClaudeCLIProvider(model=model, effort=effort)
-        # Only wrap with FallbackProvider if API is allowed AND key exists
-        if _api_allowed and _load_anthropic_api_key():
-            api = AnthropicProvider(model=model)
-            return FallbackProvider(primary=cli, fallback=api, primary_timeout=300)
-        return cli
-    elif provider == "anthropic":
-        if not _api_allowed:
-            raise ValueError(
-                "Anthropic API usage is blocked (default). "
-                "Use --allow-api to enable paid API calls."
-            )
-        return AnthropicProvider(model=model)
+        # #2864: the subscription CLI is the only Claude transport. There is
+        # no paid API behind it and no fallback to one: when the CLI fails or
+        # the weekly quota is spent, the call fails loudly and the run waits.
+        return ClaudeCLIProvider(model=model, effort=effort)
     elif provider == "gemini":
         return GeminiProvider(model=model)
     elif provider == "mock":
@@ -2270,5 +1737,5 @@ def _build_provider(spec: str, effort: str | None = None) -> "LLMProvider":
     else:
         raise ValueError(
             f"Unknown provider '{provider}'. "
-            f"Supported: claude, anthropic, gemini, mock, scripted"
+            f"Supported: claude, gemini, mock, scripted"
         )

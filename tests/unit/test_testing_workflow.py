@@ -1549,27 +1549,20 @@ __pycache__/
         # MAX_FILE_RETRIES = 2
         assert "API error after 2 attempts" in str(exc_info.value)
 
-    def test_call_claude_headless_sdk_fallback(self):
-        """call_claude_headless falls back to SDK when CLI unavailable."""
+    def test_call_claude_headless_has_no_sdk_fallback(self):
+        """#2864: with the CLI unavailable the call returns an error. There is
+        no SDK to fall back to, so nothing else answers."""
+        from assemblyzero.core.llm_provider import ClaudeCLIProvider
         from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
-        # Create a mock module for anthropic
-        import sys
-        mock_anthropic = type(sys)("anthropic")
-        mock_client = type("Anthropic", (), {})()
-        mock_message = type("Message", (), {
-            "content": [type("Block", (), {"text": "```python\n# File: test.py\npass\n```"})()]
-        })()
-        mock_client.messages = type("Messages", (), {"create": lambda *a, **kw: mock_message})()
-        mock_anthropic.Anthropic = lambda: mock_client
+        with patch.object(
+            ClaudeCLIProvider, "_find_cli",
+            side_effect=RuntimeError("claude command not found"),
+        ):
+            response, error = call_claude_headless("test prompt")
 
-        with patch("shutil.which", return_value=None):
-            with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
-                response, error = call_claude_headless("test prompt")
-
-                # Either it works with mock or returns an error (both are valid outcomes)
-                assert isinstance(response, str)
-                assert isinstance(error, str)
+        assert response == ""
+        assert error
 
 class TestVerifyPhasesModule:
     """Tests for verify_phases.py module."""

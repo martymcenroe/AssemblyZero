@@ -3,11 +3,12 @@
 Operator ruling, 2026-09-25: when he works on projects using AssemblyZero, no
 Anthropic token is used by the workflow while the lock is on. The lock is a
 switch he throws week by week (tools/claude_spend_lock.py). The refusal is in
-three places so no path spends: the profile loader at run start, each
-Anthropic provider before it spawns or sends, and speedrun_roll before
---fresh resets anything. T1 to T5 are the issue's tests.
+three places so no path spends: the profile loader at run start, the Claude
+CLI provider before it spawns, and speedrun_roll before --fresh resets
+anything. T1 to T5 are the issue's tests.
 
-It covers `anthropic:` seats as well as `claude:`: both spend Anthropic tokens.
+The paid `anthropic:` provider is gone (#2864); a seat that names it is a
+profile error whether or not the lock is on.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from unittest.mock import patch
 import pytest
 
 from assemblyzero.core import seats
-from assemblyzero.core.llm_provider import AnthropicProvider, ClaudeCLIProvider
+from assemblyzero.core.llm_provider import ClaudeCLIProvider
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -62,9 +63,15 @@ def test_t2_a_claude_seat_override_is_refused(locked):
     assert "requirements.review" in str(exc.value)
 
 
-def test_t2_an_anthropic_api_seat_override_is_refused(locked):
+@pytest.mark.parametrize("lock_on", [True, False])
+def test_t2_an_anthropic_api_seat_override_is_refused(lock_on, tmp_path, monkeypatch):
+    """#2864: the paid API is removed, so the seat cannot be set, lock or none."""
+    lock = tmp_path / "claude-spend.lock"
+    if lock_on:
+        lock.write_text("on\n", encoding="utf-8")
+    monkeypatch.setattr(seats, "CLAUDE_SPEND_LOCK", lock)
     base = seats.load_profile(seats.builtin_path("gemini"))
-    with pytest.raises(seats.ClaudeSpendLocked):
+    with pytest.raises(seats.ProfileError, match="paid Anthropic API"):
         seats.apply_overrides(base, {"requirements.review": "anthropic:opus"})
 
 
@@ -93,30 +100,17 @@ def test_t3_the_claude_cli_provider_refuses_without_spawning(locked):
     assert str(locked) in result.error_message
 
 
-def test_t3_the_anthropic_api_provider_refuses_without_a_client(locked):
-    provider = AnthropicProvider(model="opus")
-    with patch.object(AnthropicProvider, "_get_client") as get_client:
-        result = provider.invoke("sys", "content")
-    get_client.assert_not_called()
-    assert result.success is False and result.retryable is False
-    assert str(locked) in result.error_message
-
-
 # --- T4: no other path can spend ------------------------------------------------
 
 SPAWNERS = {"run", "call", "check_call", "check_output", "Popen", "spawn", "system", "popen"}
 
 #: Every place, today, that starts `claude` from a literal argv or imports the
 #: Anthropic SDK, with why it is not a spend path the lock must stop. A new
-#: site fails T4 until it is reviewed and added here. The issue expected a
-#: baseline of zero; the tree held these three on the day it landed.
+#: site fails T4 until it is reviewed and added here. The SDK imports that
+#: stood here went with the paid API path (#2864); no import is allowed now.
 ALLOWED = {
     ("spawn", "tools/claude-usage-scraper.py"):
         "starts interactive claude to read /usage; it sends no prompt to a model",
-    ("import", "assemblyzero/core/errors.py"):
-        "imports the SDK only to classify an exception already raised; spends nothing",
-    ("import", "assemblyzero/nodes/anthropic_provider.py"):
-        "the SDK wrapper behind AnthropicProvider, which refuses under the lock (T3)",
 }
 
 

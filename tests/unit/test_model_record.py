@@ -11,7 +11,7 @@ import json
 import pytest
 
 from assemblyzero.core import call_recording
-from assemblyzero.core.llm_provider import FallbackProvider, MockProvider, get_provider
+from assemblyzero.core.llm_provider import MockProvider, get_provider
 from assemblyzero.core.model_record import (
     announce_profile,
     call_fields,
@@ -28,8 +28,8 @@ from assemblyzero.core.seats import (
 )
 
 FIELDS = (
-    "profile", "seat", "spec", "resolved_model_id", "provider_class", "fallback",
-    "fallback_provider", "effort", "duration_ms", "input_tokens",
+    "profile", "seat", "spec", "resolved_model_id", "provider_class",
+    "effort", "duration_ms", "input_tokens",
     "output_tokens", "success", "model_used",
 )
 
@@ -81,7 +81,6 @@ class TestThePerCallRecord:
         assert record["spec"] == "mock:review"
         assert record["resolved_model_id"] == "review"
         assert record["provider_class"] == "MockProvider"
-        assert record["fallback"] is False
         assert record["success"] is True
         assert record["duration_ms"] >= 0
 
@@ -105,34 +104,22 @@ class TestThePerCallRecord:
 
         rows, unreadable = call_recording.read_calls(tmp_path)
         assert unreadable == 0 and len(rows) == len(sink.calls) == 1
-        for key in ("seat", "spec", "resolved_model_id", "provider_class", "fallback", "effort"):
+        for key in ("seat", "spec", "resolved_model_id", "provider_class", "effort"):
             assert rows[0][key] == sink.calls[0][key], key
         assert rows[0]["response"]  # the bodies are still there
 
-    def test_a_fallback_answer_is_recorded_as_the_fallback(self):
-        primary = MockProvider(model="draft", fail_on_call=1)
-        fallback = MockProvider(model="review")
-        wrapped = FallbackProvider(primary=primary, fallback=fallback)
-
-        result = wrapped.invoke("s", "c")
-
-        assert wrapped.fallback_answered is True
-        assert wrapped.model == "review"
+    def test_no_fallback_field_is_recorded(self):
+        """#2864: no transport has a fallback, so the record carries no
+        field that says one answered."""
+        inner = MockProvider(model="review")
+        result = inner.invoke("s", "c")
         fields = call_fields(
-            inner=wrapped, spec="claude:opus", seat="requirements.review",
+            inner=inner, spec="mock:review", seat="requirements.review",
             effort="max", result=result, duration_ms=5,
         )
-        assert fields["fallback"] is True
-        assert fields["fallback_provider"] == "MockProvider"
-        assert fields["resolved_model_id"] == "review"
-
-    def test_a_primary_answer_is_not_a_fallback(self):
-        wrapped = FallbackProvider(
-            primary=MockProvider(model="draft"), fallback=MockProvider(model="review"),
-        )
-        wrapped.invoke("s", "c")
-        assert wrapped.fallback_answered is False
-        assert wrapped.model == "draft"
+        assert "fallback" not in fields
+        assert "fallback_provider" not in fields
+        assert fields["provider_class"] == "MockProvider"
 
 
 # ---------------------------------------------------------------------------

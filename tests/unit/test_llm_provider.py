@@ -1,23 +1,20 @@
 """Unit tests for LLM Provider abstraction.
 
 Issue #101: Unified Governance Workflow
-Issue #395: Anthropic API provider with CLI→API fallback
+#2864: the paid Anthropic API path is removed
 
 Tests for:
 - LLMCallResult dataclass
 - LLMProvider ABC
 - ClaudeCLIProvider
-- AnthropicProvider
-- FallbackProvider
 - GeminiProvider
 - MockProvider
 - get_provider factory
 - parse_provider_spec
-- _load_anthropic_api_key
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import json
 from pathlib import Path
 
@@ -25,21 +22,14 @@ from assemblyzero.core.llm_provider import (
     LLMCallResult,
     LLMProvider,
     ClaudeCLIProvider,
-    AnthropicProvider,
-    FallbackProvider,
     GeminiProvider,
     MockProvider,
-    _circuit_breaker_registry,
-    _CIRCUIT_BREAKER_MAX,
     get_cumulative_cost,
     get_provider,
-    is_api_allowed,
     is_non_retryable_error,
     log_llm_call,
     parse_provider_spec,
-    reset_circuit_breakers,
     reset_cumulative_cost,
-    set_api_policy,
 )
 
 
@@ -165,12 +155,6 @@ class TestParseProviderSpec:
         assert provider == "gemini"
         assert model == "2.5-pro"
 
-    def test_valid_anthropic_spec(self):
-        """Test parsing valid Anthropic spec."""
-        provider, model = parse_provider_spec("anthropic:haiku")
-        assert provider == "anthropic"
-        assert model == "haiku"
-
     def test_case_insensitive_provider(self):
         """Test that provider is case-insensitive."""
         provider, model = parse_provider_spec("CLAUDE:opus")
@@ -188,87 +172,6 @@ class TestParseProviderSpec:
         """Test that empty spec raises ValueError."""
         with pytest.raises(ValueError):
             parse_provider_spec("")
-
-
-class TestLoadAnthropicApiKey:
-    """Tests for _load_anthropic_api_key helper."""
-
-    def test_key_from_env_file(self, tmp_path):
-        """Load key from a .env file."""
-        env_file = tmp_path / ".env"
-        env_file.write_text("ANTHROPIC_API_KEY=sk-ant-test-key-123\n")
-
-        with patch(
-            "assemblyzero.core.llm_provider.Path.__truediv__",
-        ) as mock_div:
-            # Patch the .env path resolution
-            with patch(
-                "assemblyzero.core.llm_provider._load_anthropic_api_key"
-            ) as mock_load:
-                mock_load.return_value = "sk-ant-test-key-123"
-                assert mock_load() == "sk-ant-test-key-123"
-
-    def test_missing_env_file(self, tmp_path):
-        """Return None when .env file doesn't exist."""
-        fake_env = tmp_path / ".env"
-        # Don't create the file
-
-        with patch(
-            "assemblyzero.core.llm_provider.Path.resolve"
-        ) as mock_resolve:
-            mock_parent = Mock()
-            mock_parent.parents.__getitem__ = Mock(return_value=tmp_path)
-            mock_resolve.return_value = mock_parent
-
-            # The actual function checks env_path.exists()
-            # Since we didn't create the file, a real call would return None
-            # Let's test the actual function with a patched path
-            with patch.object(
-                type(fake_env), "exists", return_value=False
-            ):
-                pass  # Path doesn't exist
-
-    def test_quoted_value(self, tmp_path):
-        """Strip quotes from value."""
-        env_file = tmp_path / ".env"
-        env_file.write_text('ANTHROPIC_API_KEY="sk-ant-quoted-key"\n')
-
-        # Directly test the parsing logic by reading the file ourselves
-        text = env_file.read_text()
-        for line in text.splitlines():
-            line = line.strip()
-            if "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if key == "ANTHROPIC_API_KEY":
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-                    value = value[1:-1]
-                assert value == "sk-ant-quoted-key"
-
-    def test_skips_comments_and_blanks(self, tmp_path):
-        """Skip comment lines and blank lines."""
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            "# This is a comment\n"
-            "\n"
-            "OTHER_KEY=other_value\n"
-            "ANTHROPIC_API_KEY=sk-ant-after-comments\n"
-        )
-
-        text = env_file.read_text()
-        found_key = None
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            if key.strip() == "ANTHROPIC_API_KEY":
-                found_key = value.strip()
-        assert found_key == "sk-ant-after-comments"
 
 
 class TestClaudeCLIProvider:
@@ -481,348 +384,6 @@ class TestClaudeCLIProvider:
         assert not Path(cwd).exists()
 
 
-class TestAnthropicProvider:
-    """Tests for AnthropicProvider."""
-
-    def test_init_opus(self):
-        """Test creating provider with opus model."""
-        provider = AnthropicProvider(model="opus")
-        assert provider.provider_name == "anthropic"
-        assert provider.model == "opus"
-        assert provider._model_id == "claude-opus-4-6"
-
-    def test_init_sonnet(self):
-        """Test creating provider with sonnet model."""
-        provider = AnthropicProvider(model="sonnet")
-        assert provider.model == "sonnet"
-        assert provider._model_id == "claude-sonnet-4-6"
-
-    def test_init_haiku(self):
-        """Test creating provider with haiku model."""
-        provider = AnthropicProvider(model="haiku")
-        assert provider.model == "haiku"
-        assert provider._model_id == "claude-haiku-4-5"
-
-    def test_passthrough_full_model_id(self):
-        """Accept full model IDs as passthrough."""
-        provider = AnthropicProvider(model="claude-opus-4-7-20260415")
-        assert provider.model == "claude-opus-4-7-20260415"
-        assert provider._model_id == "claude-opus-4-7-20260415"
-
-    def test_case_insensitive(self):
-        """Model names are case-insensitive."""
-        provider = AnthropicProvider(model="HAIKU")
-        assert provider.model == "haiku"
-        assert provider._model_id == "claude-haiku-4-5"
-
-    def test_no_api_key_returns_error(self):
-        """Return error result when API key not found."""
-        provider = AnthropicProvider(model="haiku")
-
-        with patch(
-            "assemblyzero.core.llm_provider._load_anthropic_api_key",
-            return_value=None,
-        ):
-            result = provider.invoke("system", "content")
-
-        assert result.success is False
-        assert "ANTHROPIC_API_KEY not found" in result.error_message
-        assert result.provider == "anthropic"
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key")
-    def test_invoke_success(self, mock_load_key):
-        """Test successful API invocation."""
-        mock_load_key.return_value = "sk-ant-test-key"
-
-        # Build mock response
-        mock_block = Mock()
-        mock_block.text = "Hello from API!"
-        mock_usage = Mock()
-        mock_usage.input_tokens = 100
-        mock_usage.output_tokens = 50
-        mock_usage.cache_read_input_tokens = 0
-        mock_usage.cache_creation_input_tokens = 0
-        mock_response = Mock()
-        mock_response.content = [mock_block]
-        mock_response.usage = mock_usage
-
-        mock_client = Mock()
-        # Issue #541: mock streaming context manager
-        mock_stream = MagicMock()
-        mock_stream.__enter__ = Mock(return_value=mock_stream)
-        mock_stream.__exit__ = Mock(return_value=False)
-        mock_stream.text_stream = ["Hello from API!"]
-        mock_stream.get_final_message.return_value = mock_response
-        mock_client.messages.stream.return_value = mock_stream
-
-        provider = AnthropicProvider(model="haiku")
-
-        with patch("anthropic.Anthropic", return_value=mock_client):
-            result = provider.invoke("You are a test.", "Say hello.", timeout_seconds=30)
-
-        assert result.success is True
-        assert result.response == "Hello from API!"
-        assert result.provider == "anthropic"
-        assert result.input_tokens == 100
-        assert result.output_tokens == 50
-        assert result.cost_usd > 0
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key")
-    def test_invoke_rate_limit(self, mock_load_key):
-        """Test rate limit error handling."""
-        import anthropic
-
-        mock_load_key.return_value = "sk-ant-test-key"
-
-        mock_client = Mock()
-        # Create a proper RateLimitError
-        mock_response = Mock()
-        mock_response.status_code = 429
-        mock_response.headers = {}
-        rate_limit_error = anthropic.RateLimitError(
-            message="Rate limited",
-            response=mock_response,
-            body={"error": {"message": "Rate limited", "type": "rate_limit_error"}},
-        )
-        mock_client.messages.stream.side_effect = rate_limit_error
-
-        provider = AnthropicProvider(model="haiku")
-
-        with patch("anthropic.Anthropic", return_value=mock_client):
-            result = provider.invoke("system", "content")
-
-        assert result.success is False
-        assert result.rate_limited is True
-        assert "rate limited" in result.error_message.lower()
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key")
-    def test_invoke_timeout(self, mock_load_key):
-        """Test timeout error handling."""
-        import anthropic
-
-        mock_load_key.return_value = "sk-ant-test-key"
-
-        mock_client = Mock()
-        mock_client.messages.stream.side_effect = anthropic.APITimeoutError(
-            request=Mock()
-        )
-
-        provider = AnthropicProvider(model="haiku")
-
-        with patch("anthropic.Anthropic", return_value=mock_client):
-            result = provider.invoke("system", "content", timeout_seconds=30)
-
-        assert result.success is False
-        assert "timed out" in result.error_message.lower()
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key")
-    def test_invoke_auth_error(self, mock_load_key):
-        """Test authentication error handling."""
-        import anthropic
-
-        mock_load_key.return_value = "sk-ant-bad-key"
-
-        mock_client = Mock()
-        mock_response = Mock()
-        mock_response.status_code = 401
-        mock_response.headers = {}
-        mock_client.messages.stream.side_effect = anthropic.AuthenticationError(
-            message="Invalid API key",
-            response=mock_response,
-            body={"error": {"message": "Invalid API key", "type": "authentication_error"}},
-        )
-
-        provider = AnthropicProvider(model="haiku")
-
-        with patch("anthropic.Anthropic", return_value=mock_client):
-            result = provider.invoke("system", "content")
-
-        assert result.success is False
-        assert "invalid api key" in result.error_message.lower() or "authentication" in result.error_message.lower()
-
-    def test_cost_calculation_haiku(self):
-        """Test cost calculation for haiku model."""
-        provider = AnthropicProvider(model="haiku")
-        # haiku: $1/MTok input, $5/MTok output
-        cost = provider._calculate_cost(
-            input_tokens=1000, output_tokens=500
-        )
-        expected = (1000 * 1.0 / 1_000_000) + (500 * 5.0 / 1_000_000)
-        assert abs(cost - expected) < 1e-10
-
-    def test_cost_calculation_with_cache(self):
-        """Test cost calculation with cache tokens."""
-        provider = AnthropicProvider(model="opus")
-        # opus: $5/MTok input, $25/MTok output
-        # cache_read: 10% of input = $0.5/MTok
-        # cache_create: 125% of input = $6.25/MTok
-        cost = provider._calculate_cost(
-            input_tokens=1000,
-            output_tokens=500,
-            cache_read_tokens=2000,
-            cache_creation_tokens=1000,
-        )
-        expected = (
-            (1000 * 5.0 / 1_000_000)
-            + (500 * 25.0 / 1_000_000)
-            + (2000 * 0.5 / 1_000_000)
-            + (1000 * 6.25 / 1_000_000)
-        )
-        assert abs(cost - expected) < 1e-10
-
-    def test_cost_calculation_unknown_model(self):
-        """#3780: an unpriced model raises; it used to cost 0.0, so --budget
-        never counted it."""
-        provider = AnthropicProvider(model="claude-opus-4-7-20260415")
-        with pytest.raises(ValueError, match="no price for claude-opus-4-7-20260415"):
-            provider._calculate_cost(input_tokens=1000, output_tokens=500)
-
-
-class TestFallbackProvider:
-    """Tests for FallbackProvider."""
-
-    def _make_result(self, success, provider_name="mock", error_msg=None):
-        """Helper to create LLMCallResult."""
-        return LLMCallResult(
-            success=success,
-            response="OK" if success else None,
-            raw_response="OK" if success else None,
-            error_message=error_msg,
-            provider=provider_name,
-            model_used="test",
-            duration_ms=100,
-            attempts=1,
-        )
-
-    def test_primary_succeeds_no_fallback(self):
-        """When primary succeeds, fallback is never called."""
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(True, "claude")
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        result = fb.invoke("system", "content", timeout_seconds=300)
-
-        assert result.success is True
-        primary.invoke.assert_called_once()
-        fallback.invoke.assert_not_called()
-
-    def test_primary_fails_fallback_succeeds(self):
-        """When primary fails, fallback is tried and succeeds."""
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(
-            False, "claude", "CLI timed out"
-        )
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-        fallback.invoke.return_value = self._make_result(True, "anthropic")
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        result = fb.invoke("system", "content", timeout_seconds=300)
-
-        assert result.success is True
-        primary.invoke.assert_called_once()
-        fallback.invoke.assert_called_once()
-
-    def test_both_fail(self):
-        """When both providers fail, return fallback's error."""
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(
-            False, "claude", "CLI error"
-        )
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-        fallback.invoke.return_value = self._make_result(
-            False, "anthropic", "API error"
-        )
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        result = fb.invoke("system", "content")
-
-        assert result.success is False
-        assert result.error_message == "API error"
-
-    def test_primary_timeout_is_capped(self):
-        """Primary gets min(timeout_seconds, primary_timeout)."""
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(True, "claude")
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-
-        fb = FallbackProvider(primary=primary, fallback=fallback, primary_timeout=180)
-        fb.invoke("system", "content", timeout_seconds=600)
-
-        # Primary should be called with min(600, 180) = 180
-        primary.invoke.assert_called_once_with(
-            "system", "content", 180, response_schema=None, json_schema=None,
-        )
-
-    def test_primary_timeout_not_exceeded_when_smaller(self):
-        """If caller timeout < primary_timeout, use caller timeout."""
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(True, "claude")
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-
-        fb = FallbackProvider(primary=primary, fallback=fallback, primary_timeout=180)
-        fb.invoke("system", "content", timeout_seconds=60)
-
-        # Primary should be called with min(60, 180) = 60
-        primary.invoke.assert_called_once_with(
-            "system", "content", 60, response_schema=None, json_schema=None,
-        )
-
-    def test_fallback_gets_full_timeout(self):
-        """Fallback provider gets the original full timeout."""
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(
-            False, "claude", "CLI error"
-        )
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-        fallback.invoke.return_value = self._make_result(True, "anthropic")
-
-        fb = FallbackProvider(primary=primary, fallback=fallback, primary_timeout=180)
-        fb.invoke("system", "content", timeout_seconds=600)
-
-        # Fallback should get full 600s
-        fallback.invoke.assert_called_once_with(
-            "system", "content", 600, response_schema=None, json_schema=None,
-        )
-
-    def test_provider_name_delegates_to_primary(self):
-        """provider_name comes from the primary provider."""
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        assert fb.provider_name == "claude"
-        assert fb.model == "opus"
-
-
 class TestGeminiProvider:
     """Tests for GeminiProvider."""
 
@@ -971,47 +532,15 @@ class TestMockProvider:
 class TestGetProvider:
     """Tests for get_provider factory function."""
 
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value=None)
-    def test_get_claude_provider_no_api_key(self, mock_load_key):
-        """Claude without API key returns bare ClaudeCLIProvider."""
+    def test_claude_spec_is_the_cli_provider_directly(self):
+        """#2864: claude: is the subscription CLI and nothing wraps it."""
         provider = get_provider("claude:opus")
-        assert isinstance(provider, ClaudeCLIProvider)
+        assert type(provider) is ClaudeCLIProvider
         assert provider.model == "opus"
 
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
-    def test_claude_with_api_key_returns_fallback_when_api_allowed(self, mock_load_key):
-        """Claude with API key + allow-api returns FallbackProvider."""
-        set_api_policy(True)
-        try:
-            provider = get_provider("claude:opus")
-            assert isinstance(provider, FallbackProvider)
-            assert provider.provider_name == "claude"
-            assert provider.model == "opus"
-        finally:
-            set_api_policy(False)
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
-    def test_claude_with_api_key_no_fallback_when_api_blocked(self, mock_load_key):
-        """Claude with API key but no --allow-api returns bare ClaudeCLIProvider."""
-        set_api_policy(False)
-        provider = get_provider("claude:opus")
-        assert isinstance(provider, ClaudeCLIProvider)
-        assert provider.model == "opus"
-
-    def test_get_anthropic_provider_when_api_allowed(self):
-        """Get direct AnthropicProvider when API is allowed."""
-        set_api_policy(True)
-        try:
-            provider = get_provider("anthropic:haiku")
-            assert isinstance(provider, AnthropicProvider)
-            assert provider.model == "haiku"
-        finally:
-            set_api_policy(False)
-
-    def test_anthropic_blocked_by_default(self):
-        """Anthropic raises ValueError when API is blocked (default)."""
-        set_api_policy(False)
-        with pytest.raises(ValueError, match="Anthropic API usage is blocked"):
+    def test_anthropic_spec_is_an_unknown_provider(self):
+        """#2864: there is no paid API provider, so anthropic: cannot be built."""
+        with pytest.raises(ValueError, match="Unknown provider 'anthropic'"):
             get_provider("anthropic:haiku")
 
     def test_get_gemini_provider(self):
@@ -1032,15 +561,14 @@ class TestGetProvider:
             get_provider("openai:gpt-4")
 
         assert "Unknown provider" in str(exc_info.value)
-        assert "anthropic" in str(exc_info.value)
+        assert "Supported: claude, gemini, mock, scripted" in str(exc_info.value)
 
     def test_invalid_spec_format(self):
         """Test that invalid spec format raises ValueError."""
         with pytest.raises(ValueError):
             get_provider("invalid-spec")
 
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value=None)
-    def test_claude_passthrough_model_id(self, mock_load_key):
+    def test_claude_passthrough_model_id(self):
         """Claude accepts full model IDs as passthrough."""
         provider = get_provider("claude:claude-opus-4-7-20260415")
         assert isinstance(provider, ClaudeCLIProvider)
@@ -1245,96 +773,6 @@ class TestRateLimitLogging:
         assert "RATE_LIMITED=true" in output
 
 
-class TestCircuitBreaker:
-    """Tests for Issue #476: FallbackProvider circuit breaker."""
-
-    def _make_result(self, success, provider_name="mock", error_msg=None, cost=0.0):
-        """Helper to create LLMCallResult."""
-        return LLMCallResult(
-            success=success,
-            response="OK" if success else None,
-            raw_response="OK" if success else None,
-            error_message=error_msg,
-            provider=provider_name,
-            model_used="test",
-            duration_ms=100,
-            attempts=1,
-            cost_usd=cost,
-        )
-
-    def test_circuit_breaker_trips_after_consecutive_failures(self):
-        """Circuit breaker trips after 2 consecutive both-fail calls."""
-        reset_circuit_breakers()
-
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(False, "claude", "CLI error")
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-        fallback.invoke.return_value = self._make_result(False, "anthropic", "API error")
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-
-        # Call 1: both fail → counter=1
-        r1 = fb.invoke("system", "content")
-        assert r1.success is False
-
-        # Call 2: both fail → counter=2
-        r2 = fb.invoke("system", "content")
-        assert r2.success is False
-
-        # Call 3: circuit breaker trips — neither provider called
-        primary.invoke.reset_mock()
-        fallback.invoke.reset_mock()
-        r3 = fb.invoke("system", "content")
-        assert r3.success is False
-        assert "CIRCUIT BREAKER" in r3.error_message
-        primary.invoke.assert_not_called()
-        fallback.invoke.assert_not_called()
-
-        reset_circuit_breakers()
-
-    def test_circuit_breaker_resets_on_success(self):
-        """Circuit breaker resets when a call succeeds."""
-        reset_circuit_breakers()
-
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        key = f"{primary.provider_name}:{primary.model}"
-
-        # Call 1: both fail → counter=1
-        primary.invoke.return_value = self._make_result(False, "claude", "error")
-        fallback.invoke.return_value = self._make_result(False, "anthropic", "error")
-        fb.invoke("system", "content")
-        assert _circuit_breaker_registry.get(key, 0) == 1
-
-        # Call 2: primary succeeds → counter resets to 0
-        primary.invoke.return_value = self._make_result(True, "claude")
-        fb.invoke("system", "content")
-        assert _circuit_breaker_registry.get(key, 0) == 0
-
-        # Call 3+4: both fail again → counter goes to 2
-        primary.invoke.return_value = self._make_result(False, "claude", "error")
-        fallback.invoke.return_value = self._make_result(False, "anthropic", "error")
-        fb.invoke("system", "content")
-        fb.invoke("system", "content")
-        assert _circuit_breaker_registry.get(key, 0) == 2
-
-        # Call 5: would trip, but verify it does
-        r = fb.invoke("system", "content")
-        assert "CIRCUIT BREAKER" in r.error_message
-
-        reset_circuit_breakers()
-
-
 class TestIsNonRetryableError:
     """Tests for Issue #516: Non-retryable error detection."""
 
@@ -1377,108 +815,6 @@ class TestIsNonRetryableError:
         """Detection is case-insensitive."""
         assert is_non_retryable_error("CREDIT BALANCE IS TOO LOW") is True
         assert is_non_retryable_error("Invalid_API_Key") is True
-
-
-class TestNonRetryableCircuitBreaker:
-    """Tests for Issue #516: Non-retryable errors trip breaker immediately."""
-
-    def _make_result(self, success, provider_name="mock", error_msg=None):
-        return LLMCallResult(
-            success=success,
-            response="OK" if success else None,
-            raw_response="OK" if success else None,
-            error_message=error_msg,
-            provider=provider_name,
-            model_used="test",
-            duration_ms=100,
-            attempts=1,
-        )
-
-    def test_billing_error_trips_breaker_immediately(self):
-        """Billing error on fallback trips circuit breaker on first call."""
-        reset_circuit_breakers()
-
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(
-            False, "claude", "CLI timed out"
-        )
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-        fallback.invoke.return_value = self._make_result(
-            False, "anthropic", "Your credit balance is too low to access the API"
-        )
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        key = f"{primary.provider_name}:{primary.model}"
-
-        # Call 1: billing error → breaker trips immediately
-        r1 = fb.invoke("system", "content")
-        assert r1.success is False
-        assert _circuit_breaker_registry.get(key, 0) == _CIRCUIT_BREAKER_MAX
-
-        # Call 2: circuit breaker blocks — neither provider called
-        primary.invoke.reset_mock()
-        fallback.invoke.reset_mock()
-        r2 = fb.invoke("system", "content")
-        assert r2.success is False
-        assert "CIRCUIT BREAKER" in r2.error_message
-        primary.invoke.assert_not_called()
-        fallback.invoke.assert_not_called()
-
-        reset_circuit_breakers()
-
-    def test_auth_error_trips_breaker_immediately(self):
-        """Auth error on fallback trips circuit breaker on first call."""
-        reset_circuit_breakers()
-
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(
-            False, "claude", "CLI error"
-        )
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-        fallback.invoke.return_value = self._make_result(
-            False, "anthropic", "authentication_error: invalid API key"
-        )
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        key = f"{primary.provider_name}:{primary.model}"
-        r1 = fb.invoke("system", "content")
-        assert r1.success is False
-        assert _circuit_breaker_registry.get(key, 0) == _CIRCUIT_BREAKER_MAX
-
-        reset_circuit_breakers()
-
-    def test_transient_error_does_not_trip_immediately(self):
-        """Transient error increments normally, does not trip immediately."""
-        reset_circuit_breakers()
-
-        primary = Mock(spec=LLMProvider)
-        primary.provider_name = "claude"
-        primary.model = "opus"
-        primary.invoke.return_value = self._make_result(
-            False, "claude", "CLI error"
-        )
-
-        fallback = Mock(spec=LLMProvider)
-        fallback.provider_name = "anthropic"
-        fallback.invoke.return_value = self._make_result(
-            False, "anthropic", "Connection timed out"
-        )
-
-        fb = FallbackProvider(primary=primary, fallback=fallback)
-        key = f"{primary.provider_name}:{primary.model}"
-        r1 = fb.invoke("system", "content")
-        assert r1.success is False
-        assert _circuit_breaker_registry.get(key, 0) == 1  # Incremented, NOT tripped
-
-        reset_circuit_breakers()
 
 
 class TestCumulativeCost:
@@ -1525,74 +861,6 @@ class TestCumulativeCost:
 
         reset_cumulative_cost()
         assert get_cumulative_cost() == 0.0
-
-
-class TestAPIPolicy:
-    """Tests for Issue #773: API policy — --no-api default."""
-
-    def setup_method(self):
-        """Reset API policy to default (blocked) before each test."""
-        set_api_policy(False)
-
-    def teardown_method(self):
-        """Reset API policy after each test."""
-        set_api_policy(False)
-
-    def test_api_blocked_by_default(self):
-        """API policy defaults to False (blocked)."""
-        assert is_api_allowed() is False
-
-    def test_set_api_policy_allow(self):
-        """set_api_policy(True) enables API access."""
-        set_api_policy(True)
-        assert is_api_allowed() is True
-
-    def test_set_api_policy_block(self):
-        """set_api_policy(False) disables API access."""
-        set_api_policy(True)
-        set_api_policy(False)
-        assert is_api_allowed() is False
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value=None)
-    def test_claude_no_api_returns_bare_cli(self, mock_load_key):
-        """claude: with no-api returns bare ClaudeCLIProvider (not FallbackProvider)."""
-        provider = get_provider("claude:opus")
-        assert isinstance(provider, ClaudeCLIProvider)
-        assert not isinstance(provider, FallbackProvider)
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
-    def test_claude_with_allow_api_and_key_returns_fallback(self, mock_load_key):
-        """claude: with allow-api + key returns FallbackProvider."""
-        set_api_policy(True)
-        provider = get_provider("claude:opus")
-        assert isinstance(provider, FallbackProvider)
-
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
-    def test_claude_with_key_but_no_api_returns_bare_cli(self, mock_load_key):
-        """claude: with key but no --allow-api returns bare ClaudeCLIProvider."""
-        provider = get_provider("claude:opus")
-        assert isinstance(provider, ClaudeCLIProvider)
-
-    def test_anthropic_blocked_raises_valueerror(self):
-        """anthropic: raises ValueError when API is blocked."""
-        with pytest.raises(ValueError, match="Anthropic API usage is blocked"):
-            get_provider("anthropic:haiku")
-
-    def test_anthropic_allowed_works(self):
-        """anthropic: works when API is allowed."""
-        set_api_policy(True)
-        provider = get_provider("anthropic:haiku")
-        assert isinstance(provider, AnthropicProvider)
-
-    def test_gemini_unaffected_by_api_policy(self):
-        """gemini: unaffected by API policy."""
-        provider = get_provider("gemini:2.5-pro")
-        assert isinstance(provider, GeminiProvider)
-
-    def test_mock_unaffected_by_api_policy(self):
-        """mock: unaffected by API policy."""
-        provider = get_provider("mock:test")
-        assert isinstance(provider, MockProvider)
 
 
 class TestEffortFlag:

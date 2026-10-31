@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Literal, Optional, TypedDict
 
 
-ProviderName = Literal["claude_cli", "anthropic_api", "gemini", "fallback"]
+ProviderName = Literal["claude_cli", "gemini"]
 EffortLevel = Literal["low", "medium", "high", "max"]
 StopReason = Literal["end_turn", "max_tokens", "stop_sequence", "tool_use", "error", "unknown"]
 

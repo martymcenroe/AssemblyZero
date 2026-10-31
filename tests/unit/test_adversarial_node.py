@@ -213,7 +213,7 @@ class TestRunAdversarialNode:
         refuses the spec, or the alias is forbidden -- is a review that cannot
         run. It is caught, not raised, and returned as an error for HALT."""
         mock_client_cls.side_effect = ValueError(
-            "Unknown provider 'gemini'. Supported: claude, anthropic, gemini, mock, scripted"
+            "Unknown provider 'gemini'. Supported: claude, gemini, mock, scripted"
         )
 
         state = {

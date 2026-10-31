@@ -115,61 +115,6 @@ class TestClaudeCLIProviderJsonSchema:
         assert "--json-schema" in cmd
 
 
-class TestFallbackProviderJsonSchema:
-    """Tests for json_schema kwarg passthrough in FallbackProvider."""
-
-    def test_json_schema_passed_to_primary(self):
-        """FallbackProvider passes json_schema kwarg to primary provider."""
-        from assemblyzero.core.llm_provider import FallbackProvider
-
-        mock_primary = MagicMock()
-        mock_primary.invoke.return_value = MagicMock(content='{"verdict": "APPROVED"}')
-        mock_fallback = MagicMock()
-
-        provider = FallbackProvider.__new__(FallbackProvider)
-        provider._primary = mock_primary
-        provider._fallback = mock_fallback
-        provider._primary_timeout = 300
-        provider._breaker_key = "mock:test"
-        provider._logger = MagicMock()
-
-        provider.invoke("system", "prompt", json_schema=FEEDBACK_SCHEMA)
-
-        mock_primary.invoke.assert_called_once()
-        call_kwargs = mock_primary.invoke.call_args[1]
-        assert "json_schema" in call_kwargs
-        assert call_kwargs["json_schema"] == FEEDBACK_SCHEMA
-
-    def test_json_schema_passed_to_fallback_on_primary_failure(self):
-        """FallbackProvider passes json_schema to fallback when primary fails."""
-        from assemblyzero.core.llm_provider import FallbackProvider
-
-        mock_primary = MagicMock()
-        mock_primary.provider_name = "claude"
-        mock_primary.invoke.return_value = MagicMock(
-            success=False, error_message="CLI error", content=""
-        )
-        mock_fallback = MagicMock()
-        mock_fallback.provider_name = "anthropic"
-        mock_fallback.invoke.return_value = MagicMock(
-            success=True, content='{"verdict": "REVISE"}'
-        )
-
-        provider = FallbackProvider.__new__(FallbackProvider)
-        provider._primary = mock_primary
-        provider._fallback = mock_fallback
-        provider._primary_timeout = 300
-        provider._breaker_key = "mock:test"
-        provider._logger = MagicMock()
-
-        provider.invoke("system", "prompt", json_schema=FEEDBACK_SCHEMA)
-
-        mock_fallback.invoke.assert_called_once()
-        call_kwargs = mock_fallback.invoke.call_args[1]
-        assert "json_schema" in call_kwargs
-        assert call_kwargs["json_schema"] == FEEDBACK_SCHEMA
-
-
 class TestOtherProvidersJsonSchema:
     """Tests that other providers accept json_schema kwarg without error."""
 
@@ -179,14 +124,6 @@ class TestOtherProvidersJsonSchema:
         import inspect
 
         sig = inspect.signature(GeminiProvider.invoke)
-        assert "json_schema" in sig.parameters
-
-    def test_anthropic_provider_accepts_json_schema(self):
-        """AnthropicProvider.invoke() accepts json_schema kwarg for interface compliance."""
-        from assemblyzero.core.llm_provider import AnthropicProvider
-        import inspect
-
-        sig = inspect.signature(AnthropicProvider.invoke)
         assert "json_schema" in sig.parameters
 
     def test_mock_provider_accepts_json_schema(self):
@@ -203,12 +140,4 @@ class TestOtherProvidersJsonSchema:
         import inspect
 
         sig = inspect.signature(ClaudeCLIProvider.invoke)
-        assert "json_schema" in sig.parameters
-
-    def test_fallback_provider_accepts_json_schema(self):
-        """FallbackProvider.invoke() accepts json_schema kwarg."""
-        from assemblyzero.core.llm_provider import FallbackProvider
-        import inspect
-
-        sig = inspect.signature(FallbackProvider.invoke)
         assert "json_schema" in sig.parameters

@@ -173,9 +173,9 @@ def test_a_claude_provider_call_writes_one_line(ledger, capsys):
 
 
 def test_a_failed_provider_call_writes_a_failed_line(ledger, capsys):
-    log_llm_call(call("anthropic", success=False))
+    log_llm_call(call("claude", success=False))
     [row] = rows(ledger)
-    assert (row["transport"], row["outcome"]) == ("anthropic-api", "failed")
+    assert (row["transport"], row["outcome"]) == ("claude", "failed")
     assert row["error"]
 
 

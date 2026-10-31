@@ -7,19 +7,17 @@ mistaken for a permanent failure:
 
 - CLI layer: an ``API Error: 529 … overloaded_error`` message from the
   claude CLI stays retryable (with_retry may run its short backoff).
-- SDK layer: connection failures at the outage edge classify retryable
-  (the unknown-error fallback used to kill them on the spot).
+- HTTP layer: a 529 status classifies as capacity, which is retryable. (The
+  SDK layer, whose connection failures once died on the spot, went with the
+  paid API path, #2864.)
 - Halt layer: the flattened message classifies ``capacity_exhausted``,
   which is in TRANSIENT_ERROR_TYPES, so the recovery plan says
   transient and the orchestrator's escalating capacity backoff (#1909)
   engages.
 """
 
-from unittest.mock import MagicMock
-
 from assemblyzero.core.errors import (
     CapacityError,
-    classify_anthropic_error,
     classify_http_status,
     is_capacity_message,
 )
@@ -48,25 +46,7 @@ class TestCLILayer:
         )
 
 
-class TestSDKLayer:
-    def test_connection_error_is_retryable(self):
-        """Outage-edge connection failures used to hit the non-retryable
-        fallback and die instantly."""
-        import anthropic
-
-        exc = anthropic.APIConnectionError(request=MagicMock())
-        classified = classify_anthropic_error(exc)
-        assert classified.retryable is True
-
-    def test_timeout_still_maps_to_timeout(self):
-        """The new branch must not shadow APITimeoutError (its subclass
-        relationship runs the other way: timeout IS-A connection error)."""
-        import anthropic
-        from assemblyzero.core.errors import TimeoutError_
-
-        exc = anthropic.APITimeoutError(request=MagicMock())
-        assert isinstance(classify_anthropic_error(exc), TimeoutError_)
-
+class TestHTTPLayer:
     def test_http_529_is_capacity(self):
         classified = classify_http_status(529, "Overloaded")
         assert isinstance(classified, CapacityError)

@@ -28,7 +28,8 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "gemini-3.8-flash-high": {"input": 0.0, "output": 0.0},
     "gemini-3.8-flash-medium": {"input": 0.0, "output": 0.0},
     "gemini-3.8-flash-low": {"input": 0.0, "output": 0.0},
-    # Claude models (Anthropic API)
+    # Claude models: notional list prices. The CLI runs on the subscription
+    # and bills nothing per call; there is no paid API path (#2864).
     "claude:opus": {"input": 15.00, "output": 75.00},
     "claude:sonnet": {"input": 3.00, "output": 15.00},
     "claude:haiku": {"input": 0.25, "output": 1.25},

@@ -78,11 +78,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Issue #773: subscription only. Never the paid Anthropic API.
-    from assemblyzero.core.llm_provider import set_api_policy
-
-    set_api_policy(False)
-
     repo = Path(args.repo).resolve()
 
     try:

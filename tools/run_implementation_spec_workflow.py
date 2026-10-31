@@ -204,13 +204,6 @@ Examples:
         help="Maximum revision iterations (default: 3)",
     )
 
-    # Issue #773: API policy
-    parser.add_argument(
-        "--allow-api",
-        action="store_true",
-        dest="allow_api",
-        help="Allow paid Anthropic API calls (default: blocked, uses claude -p via Max subscription)",
-    )
 
     # Modes
     parser.add_argument(
@@ -812,10 +805,6 @@ def main() -> int:
 
 def _run(args: argparse.Namespace) -> int:
     """Everything main guards. Raises on every failure."""
-    # Issue #773: Set API policy before any providers are created
-    from assemblyzero.core.llm_provider import set_api_policy
-    set_api_policy(args.allow_api)
-
     # Apply review configuration
     apply_review_config(args)
 

@@ -7,7 +7,7 @@ a single, typed exception hierarchy so callers can catch errors by *category*
 (retryable vs. fatal) instead of pattern-matching error messages.
 
 Classifier functions translate provider-native exceptions into the hierarchy:
-- ``classify_anthropic_error``  — Anthropic SDK exceptions
+- ``classify_agy_error``        — Gemini failures reported through agy
 - ``classify_http_status``      — generic HTTP status codes
 - ``classify_subprocess_error`` — subprocess failures (timeout, not-found)
 """
@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import sys
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ class APIError(Exception):
     Attributes:
         status_code: HTTP status code (None for non-HTTP errors).
         retryable: Whether the caller should retry this request.
-        provider: Provider name that raised the error (e.g. "anthropic").
+        provider: Provider name that raised the error (e.g. "claude").
         retry_after: Seconds to wait before retry (from Retry-After header).
     """
 
@@ -166,71 +165,6 @@ class SecurityException(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Classifier: Anthropic SDK
-# ---------------------------------------------------------------------------
-
-
-def classify_anthropic_error(exc: Exception) -> APIError:
-    """Translate an Anthropic SDK exception into the unified hierarchy.
-
-    Import ``anthropic`` lazily so this module has no hard dependency on the SDK.
-
-    Args:
-        exc: An exception raised by the ``anthropic`` package.
-
-    Returns:
-        The appropriate ``APIError`` subclass wrapping the original exception.
-    """
-    import anthropic
-
-    msg = str(exc)
-
-    # Billing — the SDK raises BadRequestError with a billing message
-    if _is_billing_message(msg):
-        return BillingError(msg, provider="anthropic")
-
-    if isinstance(exc, anthropic.RateLimitError):
-        retry_after = _extract_retry_after(exc)
-        return RateLimitError(msg, provider="anthropic", retry_after=retry_after)
-
-    if isinstance(exc, anthropic.AuthenticationError):
-        return AuthenticationError(msg, provider="anthropic")
-
-    if isinstance(exc, anthropic.PermissionDeniedError):
-        return AuthenticationError(msg, provider="anthropic", status_code=403)
-
-    if isinstance(exc, anthropic.NotFoundError):
-        return NotFoundError(msg, provider="anthropic")
-
-    if isinstance(exc, anthropic.APITimeoutError):
-        return TimeoutError_(msg, provider="anthropic")
-
-    if isinstance(exc, anthropic.APIConnectionError):
-        # #1917: the 2026-07-29 outage surfaced at the SDK edge as plain
-        # connection failures, which the unknown-error fallback below
-        # marked non-retryable and killed on the spot. Provider-unreachable
-        # is retryable weather (server storm or local blip), never a
-        # caller bug. Must stay AFTER the APITimeoutError branch —
-        # APITimeoutError subclasses APIConnectionError.
-        return APIError(msg, retryable=True, provider="anthropic")
-
-    if isinstance(exc, anthropic.InternalServerError):
-        status = getattr(exc, "status_code", 500)
-        if status in (503, 529):
-            return CapacityError(msg, provider="anthropic", status_code=status)
-        return ServerError(msg, provider="anthropic", status_code=status)
-
-    if isinstance(exc, anthropic.APIStatusError):
-        status = getattr(exc, "status_code", None)
-        if status and 500 <= status < 600:
-            return ServerError(msg, provider="anthropic", status_code=status)
-        return APIError(msg, status_code=status, retryable=False, provider="anthropic")
-
-    # Fallback: unknown anthropic error — not retryable by default
-    return APIError(msg, retryable=False, provider="anthropic")
-
-
-# ---------------------------------------------------------------------------
 # Classifier: Gemini through agy (ADR 0237)
 # ---------------------------------------------------------------------------
 
@@ -355,34 +289,6 @@ def _is_billing_message(msg: str) -> bool:
     """Return True if the message indicates a billing/quota problem."""
     lower = msg.lower()
     return any(p in lower for p in _BILLING_PATTERNS)
-
-
-def _extract_retry_after(exc: Exception) -> Optional[float]:
-    """Extract Retry-After seconds from an Anthropic rate-limit response.
-
-    None when the response carries no header: no hint is an answer, and the
-    caller backs off on its own schedule. A header that is not a number of
-    seconds is a failure to read what the provider asked for (#3774): it is
-    an ERROR line naming the value, and the rate limit is still raised with
-    no hint, so the caller's own backoff applies.
-    """
-    headers = getattr(exc, "response", None)
-    if headers is not None:
-        headers = getattr(headers, "headers", {})
-        val = headers.get("retry-after")
-        if val:
-            try:
-                return float(val)
-            except (ValueError, TypeError) as err:
-                message = (
-                    f"the rate limit's retry-after header {val!r} is not a number "
-                    f"of seconds ({type(err).__name__}: {err}), so the wait the "
-                    f"provider asked for is unknown and the caller's own backoff "
-                    f"is used"
-                )
-                logger.error("[RATE LIMIT] %s", message)
-                print(f"ERROR [RATE LIMIT] {message}", file=sys.stderr, flush=True)
-    return None
 
 
 # ---------------------------------------------------------------------------

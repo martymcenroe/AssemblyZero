@@ -1,7 +1,7 @@
 """One line per model call, in the machine's model-call ledger.
 
-Every agy process the governance transport starts, and every Claude or
-Anthropic API call a provider makes, appends one JSON line here, on success
+Every agy process the governance transport starts, and every Claude CLI
+call a provider makes, appends one JSON line here, on success
 and on failure. Before, GeminiClient logged nothing on success and the
 providers' call records were written only on armed runs, so the number of
 calls, their callers and their tokens could not be counted.
@@ -15,8 +15,8 @@ own result stands.
 Each line holds: ``ts`` (UTC, ISO 8601), ``side`` (``ubuntu`` or ``windows``),
 ``program`` (the calling program's file name), ``library`` (the code that
 made the call), ``repo`` (the working directory's repository; a worktree
-resolves to its repository), ``cwd``, ``transport`` (``agy``, ``claude`` or
-``anthropic-api``), ``model``, ``tokens_in``, ``tokens_out``, ``usage`` (the
+resolves to its repository), ``cwd``, ``transport`` (``agy`` or
+``claude``), ``model``, ``tokens_in``, ``tokens_out``, ``usage`` (the
 transport's own report, verbatim), ``wall_s``, ``outcome`` (``ok``,
 ``failed``, ``timeout`` or ``refused``) and ``error``.
 """

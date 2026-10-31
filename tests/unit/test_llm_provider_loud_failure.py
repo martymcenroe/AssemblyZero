@@ -19,11 +19,8 @@ import pytest
 
 from assemblyzero.core import llm_provider, provider_storm
 from assemblyzero.core.llm_provider import (
-    AnthropicProvider,
     ClaudeCLIProvider,
-    FallbackProvider,
     GeminiProvider,
-    LLMCallResult,
     _stream_with_idle_timeout,
     _StreamOutcome,
 )
@@ -32,24 +29,8 @@ from assemblyzero.core.llm_provider import (
 @pytest.fixture(autouse=True)
 def _clean_counters():
     provider_storm.reset()
-    llm_provider.reset_circuit_breakers()
     yield
     provider_storm.reset()
-    llm_provider.reset_circuit_breakers()
-
-
-def _failed(message: str = "boom", provider: str = "mock") -> LLMCallResult:
-    return LLMCallResult(
-        success=False, response=None, raw_response=None, error_message=message,
-        provider=provider, model_used="m", duration_ms=0, attempts=1,
-    )
-
-
-def _ok(text: str = "fine", provider: str = "mock") -> LLMCallResult:
-    return LLMCallResult(
-        success=True, response=text, raw_response=text, error_message=None,
-        provider=provider, model_used="m", duration_ms=0, attempts=1,
-    )
 
 
 # --- the pumps of the streaming transport (487, 505, 510, 517, 553) ---------
@@ -194,6 +175,23 @@ class TestTheClaudeCliCallFailsLoudly:
             _invoke_claude(_Outcome("[]"), returncode=1, stderr="You have hit your usage limit")
         assert "ERROR [LLM] [CAPACITY] claude exhausted until 5 PM" in capsys.readouterr().err
 
+    def test_2864_a_usage_limit_stops_the_call_and_says_to_wait(self, capsys):
+        """The weekly quota is spent: the call fails, is not retried, records
+        when it renews, and nothing else answers in its place (#2864)."""
+        recorded = SimpleNamespace(wait_summary=lambda: "claude exhausted until 5 PM")
+        with patch("assemblyzero.core.capacity.record_exhaustion", return_value=recorded) as record:
+            result = _invoke_claude(
+                _Outcome("[]"), returncode=1, stderr="You have hit your usage limit",
+            )
+        assert result.success is False
+        assert result.retryable is False
+        assert result.provider == "claude"
+        assert "usage limit" in result.error_message
+        record.assert_called_once()
+        err = capsys.readouterr().err
+        assert "ERROR [LLM] [CAPACITY] claude exhausted until 5 PM" in err
+        assert "provider=claude" in err
+
     def test_a_stream_with_problems_fails_even_on_exit_zero(self, capsys):
         payload = json.dumps({"type": "result", "result": "answer"})
         result = _invoke_claude(_Outcome(payload, problems="stdout could not be read to the end"))
@@ -309,99 +307,6 @@ class TestTheProbeSaysWhyItCouldNotRun:
         assert len(operator_alerts) == 1
         assert "could not run" in operator_alerts[0]["what"]
         assert "RuntimeError: claude command not found" in operator_alerts[0]["cause"]
-
-
-# --- AnthropicProvider (291, 1248, 1372, 1387) -----------------------------
-
-
-class TestTheApiProviderFailsLoudly:
-    def test_291_an_unreadable_env_file_raises_with_its_path(self, monkeypatch):
-        real_read = llm_provider.Path.read_text
-        real_exists = llm_provider.Path.exists
-
-        def read_text(self, *args, **kwargs):
-            if self.name == ".env":
-                raise PermissionError("permission denied")
-            return real_read(self, *args, **kwargs)
-
-        def exists(self):
-            return True if self.name == ".env" else real_exists(self)
-
-        monkeypatch.setattr(llm_provider.Path, "read_text", read_text)
-        monkeypatch.setattr(llm_provider.Path, "exists", exists)
-        with pytest.raises(RuntimeError, match=r"cannot read .*\.env .*PermissionError"):
-            llm_provider._load_anthropic_api_key()
-
-    def test_1248_an_unpriced_model_is_refused_before_any_call(self, capsys):
-        provider = AnthropicProvider(model="claude-opus-4-7-20260415")
-        with patch.object(AnthropicProvider, "_get_client") as client:
-            result = provider.invoke("system", "content")
-        client.assert_not_called()
-        assert result.success is False
-        assert "no price for claude-opus-4-7-20260415" in result.error_message
-        assert "ERROR [LLM]" in capsys.readouterr().err
-
-    def test_1372_no_key_is_a_loud_failed_call(self, capsys):
-        provider = AnthropicProvider(model="haiku")
-        with patch.object(llm_provider, "_load_anthropic_api_key", return_value=None), \
-             patch.dict("sys.modules", {"anthropic": Mock()}):
-            result = provider.invoke("system", "content")
-        assert result.success is False
-        assert "ANTHROPIC_API_KEY not found" in result.error_message
-        assert "ERROR [LLM]" in capsys.readouterr().err
-
-    def test_1387_an_api_error_is_a_loud_failed_call(self, capsys):
-        import anthropic
-
-        client = Mock()
-        client.messages.stream.side_effect = anthropic.APITimeoutError(request=Mock())
-        provider = AnthropicProvider(model="haiku")
-        with patch.object(llm_provider, "_load_anthropic_api_key", return_value="sk-ant-test"), \
-             patch("anthropic.Anthropic", return_value=client):
-            result = provider.invoke("system", "content")
-        assert result.success is False
-        assert "ERROR [LLM]" in capsys.readouterr().err
-
-    def test_1387_a_fault_in_this_code_is_raised(self):
-        client = Mock()
-        client.messages.stream.side_effect = TypeError("unexpected keyword")
-        provider = AnthropicProvider(model="haiku")
-        with patch.object(llm_provider, "_load_anthropic_api_key", return_value="sk-ant-test"), \
-             patch("anthropic.Anthropic", return_value=client), \
-             pytest.raises(TypeError, match="unexpected keyword"):
-            provider.invoke("system", "content")
-
-
-# --- FallbackProvider (1555, 1596, 1609, 1617) -----------------------------
-
-
-def _pair(primary_result, fallback_result):
-    primary = Mock(provider_name="claude", model="opus")
-    primary.invoke.return_value = primary_result
-    fallback = Mock(provider_name="anthropic", model="opus")
-    fallback.invoke.return_value = fallback_result
-    return FallbackProvider(primary=primary, fallback=fallback)
-
-
-class TestTheFallbackIsLoud:
-    def test_1555_an_open_breaker_is_a_loud_failed_call(self, capsys):
-        provider = _pair(_ok(), _ok())
-        llm_provider._circuit_breaker_registry[provider._breaker_key] = llm_provider._CIRCUIT_BREAKER_MAX
-        result = provider.invoke("system", "content")
-        assert result.success is False
-        assert "[CIRCUIT BREAKER]" in capsys.readouterr().err
-
-    def test_1596_a_failed_primary_says_the_fallback_is_spending(self, capsys):
-        _pair(_failed("cli died"), _ok()).invoke("system", "content")
-        assert "falling back to anthropic" in capsys.readouterr().err
-
-    def test_1609_a_non_retryable_fallback_failure_is_loud(self, capsys):
-        _pair(_failed("cli died"), _failed("invalid_api_key")).invoke("system", "content")
-        assert "[CIRCUIT BREAKER] tripped" in capsys.readouterr().err
-
-    def test_1617_both_failing_is_loud(self, capsys):
-        _pair(_failed("cli died"), _failed("overloaded")).invoke("system", "content")
-        assert "both claude and anthropic failed" in capsys.readouterr().err
 
 
 # --- GeminiProvider (1729, 1756) -------------------------------------------

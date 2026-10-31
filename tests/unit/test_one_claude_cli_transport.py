@@ -19,8 +19,8 @@ Reachability, confirmed mechanically before deleting:
 `call_with_fallback_instrumentation` was defined and never called outside its
 own module; `nodes/__init__.py` imports only `check_type_renames` and
 `smoke_test_node`. The one test that looked like a reference --
-`test_fallback_provider_accepts_json_schema` -- is about `FallbackProvider` in
-`llm_provider`, a different class entirely.
+`test_fallback_provider_accepts_json_schema` -- was about `FallbackProvider` in
+`llm_provider`, a different class entirely (both are gone since #2864).
 
 Two transports whose timeout semantics disagree is the kind of divergence that
 reads as intentional once it has survived a few releases. These pin that there
