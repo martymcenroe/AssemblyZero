@@ -15,6 +15,11 @@ This prints the comparison the human was doing, while the stage is running:
 It never kills anything. Bounding a call is the provider's job (#1874); this
 is the observability half, so a stall is obvious in the log at the time it
 happens rather than in hindsight.
+
+#3796 (ADR 0236): since nothing here can stop a stalled stage, the first
+STALLED tick alerts the operator, once per stage run, with the stage, the
+elapsed time and the ratio. An alert that cannot be delivered is raised when
+the stage ends, unless the stage is already raising its own error.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ import threading
 import time
 from typing import Optional
 
-from assemblyzero.core import operator_wait
+from assemblyzero.core import alert, operator_wait
 
 # Derived, not typed. Each value is the p90 duration of PASSED runs of that
 # stage across the boostgauge speedrun corpus, produced by
@@ -107,6 +112,19 @@ class StageWatchdog:
         self._start = 0.0
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._alerted = False
+        self._undelivered: alert.AlertDeliveryError | None = None
+
+    def _verdict(self, elapsed: float) -> str:
+        """``"STALLED"``, ``"SLOW"`` or ``""``, against the nominal alone."""
+        if not self.nominal:
+            return ""
+        ratio = elapsed / self.nominal
+        if ratio >= STALLED_RATIO:
+            return "STALLED"
+        if ratio >= SLOW_RATIO:
+            return "SLOW"
+        return ""
 
     def status_line(self, elapsed: float) -> str:
         """The line printed at `elapsed` seconds — reads only declared state,
@@ -122,25 +140,63 @@ class StageWatchdog:
         if not self.nominal:
             return line
         line += f" (nominal ~{int(self.nominal)}s)"
-        ratio = elapsed / self.nominal
-        if ratio >= STALLED_RATIO:
-            line += f" - STALLED, {int(ratio)}x nominal"
-        elif ratio >= SLOW_RATIO:
-            line += f" - SLOW, {int(ratio)}x nominal"
+        verdict = self._verdict(elapsed)
+        if verdict:
+            line += f" - {verdict}, {int(elapsed / self.nominal)}x nominal"
         return line
+
+    def _alert_stall(self, elapsed: float) -> None:
+        """Tell the operator the stage has stalled (#3796).
+
+        Nothing here can stop the stage, so the alert is the whole response.
+        It used to be a stdout line, seen only by someone at the terminal.
+        """
+        ratio = elapsed / self.nominal
+        alert.alert_operator(
+            what=(
+                f"stage {self.stage} is STALLED: running {int(elapsed)}s, "
+                f"{int(ratio)}x its nominal"
+            ),
+            where="assemblyzero.core.stage_watchdog.StageWatchdog",
+            cause=(
+                f"no result after {int(elapsed)}s against a nominal of "
+                f"~{int(self.nominal)}s, the p90 of its passing runs; STALLED "
+                f"is {STALLED_RATIO:g}x"
+            ),
+            consequence=(
+                "the stage keeps running: the watchdog never kills it, so "
+                "look at it now"
+            ),
+        )
 
     def _run(self) -> None:
         while not self._stop.wait(self.interval):
-            line = self.status_line(time.monotonic() - self._start)
+            elapsed = time.monotonic() - self._start
+            line = self.status_line(elapsed)
             # #2527: amber on a TTY while awaiting the operator; paint() is a
             # no-op into files, so logs stay free of escape codes.
-            if operator_wait.active() is not None:
+            waiting = operator_wait.active() is not None
+            if waiting:
                 line = operator_wait.paint(line)
             print(line, flush=True)
+            # #3796: the first STALLED tick alerts; later ticks only print.
+            if not waiting and not self._alerted and self._verdict(elapsed) == "STALLED":
+                self._alerted = True
+                try:
+                    self._alert_stall(elapsed)
+                except alert.AlertDeliveryError as exc:
+                    # alert_operator has already written the undelivered
+                    # record to stderr. The error ends this thread (Python
+                    # prints its traceback), and __exit__ raises it in the
+                    # stage's own thread when the stage ends.
+                    self._undelivered = exc
+                    raise
 
     def __enter__(self) -> "StageWatchdog":
         self._start = time.monotonic()
         self._stop.clear()
+        self._alerted = False
+        self._undelivered = None
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return self
@@ -149,3 +205,8 @@ class StageWatchdog:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=2)
+        # #3796: an alert that could not be delivered is a failure of its own.
+        # When the stage is already raising, its error propagates, and the
+        # undelivered record is on stderr.
+        if self._undelivered is not None and exc[0] is None:
+            raise self._undelivered

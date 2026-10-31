@@ -253,7 +253,9 @@ class TestWaitForMergeable:
         """An answer this loop cannot read is indistinguishable from 'not
         ready yet', so it waits out the whole budget in silence. It cost 900
         real seconds in this very test file when a stub still returned the
-        single-field shape."""
+        single-field shape. #3785: the verdict on it now raises, so the poll
+        stops at the first unreadable answer instead of running out its
+        bound."""
         monkeypatch.setattr(dependabot_review, "MERGEABLE_TIMEOUT_S", 0.01)
         monkeypatch.setattr(
             dependabot_review, "run",
@@ -261,7 +263,8 @@ class TestWaitForMergeable:
                 args=[], returncode=0, stdout='"behind"', stderr=""),
         )
         monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
-        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
+        with pytest.raises(ValueError, match="not a pull request's state"):
+            dependabot_review.wait_for_mergeable(1, "owner/repo")
         out = capsys.readouterr().out
         assert "cannot read" in out
         assert "behind" in out

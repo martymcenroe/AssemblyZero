@@ -25,9 +25,12 @@ Selection composite (operator-ratified 2026-07-26):
   draft's own Files Changed table, turning any draft-one selection miss
   into a one-iteration transient.
 
-Failure contract: every public entry point degrades to an empty result
-with a logged warning. Tiphys degrading is not a pipeline failure — it is
-a measurable absence (#1812 records LLD-stage hallucination counts).
+Failure contract (#3779, ADR 0236): a failure raises, naming the file and
+the cause. It used to degrade to an empty map with a logged warning, and an
+empty map is the drafter working blind, inventing the functions this module
+exists to stop it inventing. Two outcomes are not failures: a repo with no
+Python files has an empty surface (logged), and files dropped to fit the
+character budget are named in the log.
 """
 
 from __future__ import annotations
@@ -101,13 +104,13 @@ def summarize_python_file(content: str) -> str:
 
     Returns:
         Compact summary with imports, signatures, and constants.
+
+    Raises:
+        SyntaxError: the content does not parse (#3779). The first 50 lines
+            used to stand in for the interface, so the drafter read a file's
+            head as its surface.
     """
-    try:
-        tree = ast.parse(content)
-    except SyntaxError:
-        # If we can't parse it, return first 50 lines as fallback
-        lines = content.split("\n")
-        return "\n".join(lines[:50]) + "\n# ... (truncated, syntax error in original)\n"
+    tree = ast.parse(content)
 
     parts: list[str] = []
 
@@ -248,25 +251,22 @@ def list_repo_python_files(repo_root: Path) -> list[Path]:
         repo_root: Resolved absolute repository root.
 
     Returns:
-        Sorted list of candidate .py paths; empty on any walk failure.
+        Sorted list of candidate .py paths. A walk that fails raises
+        ``OSError`` (#3779); it used to return [], which read as "no files".
     """
     results: list[Path] = []
-    try:
-        for path in sorted(repo_root.rglob("*.py")):
-            if not path.is_file():
-                continue
-            rel_parts = path.relative_to(repo_root).parts
-            if any(
-                part.startswith(".") or part in _EXCLUDED_DIR_NAMES
-                for part in rel_parts[:-1]
-            ):
-                continue
-            if is_sensitive_file(path):
-                continue
-            results.append(path)
-    except OSError as e:
-        logger.warning("Interface surface walk failed under %s: %s", repo_root, e)
-        return []
+    for path in sorted(repo_root.rglob("*.py")):
+        if not path.is_file():
+            continue
+        rel_parts = path.relative_to(repo_root).parts
+        if any(
+            part.startswith(".") or part in _EXCLUDED_DIR_NAMES
+            for part in rel_parts[:-1]
+        ):
+            continue
+        if is_sensitive_file(path):
+            continue
+        results.append(path)
     return results
 
 
@@ -312,12 +312,11 @@ def resolve_import_targets(path: Path, repo_root: Path) -> list[Path]:
         repo_root: Resolved absolute repository root.
 
     Returns:
-        Deduplicated list of existing in-repo .py paths; empty on parse failure.
+        Deduplicated list of existing in-repo .py paths. A file that cannot be
+        read or parsed raises (#3779); it used to return [], which read as
+        "imports nothing" and dropped its collaborators from the surface.
     """
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, UnicodeDecodeError):
-        return []
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     targets: list[Path] = []
     seen: set[Path] = set()
@@ -368,9 +367,10 @@ def extract_interface_map(
     """Summarize each file's interface surface, within budget.
 
     Dispatches by extension through the language seam; unregistered
-    extensions contribute nothing. Unreadable files are skipped with a
+    extensions contribute nothing. An unreadable file, or one outside the
+    repo root, raises (#3779); unreadable files used to be skipped with a
     warning. Once the total cap is reached, remaining files are dropped
-    (logged) rather than truncated mid-signature.
+    rather than truncated mid-signature, and the log names each one.
 
     Args:
         paths: Candidate files (absolute).
@@ -383,37 +383,36 @@ def extract_interface_map(
     """
     surface: dict[str, str] = {}
     total = 0
-    dropped = 0
+    dropped: list[str] = []
 
     for path in paths:
         extractor = _EXTRACTORS.get(path.suffix)
         if extractor is None:
             continue
-        try:
-            content = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Interface surface: cannot read %s: %s", path, e)
-            continue
+        # #3779: no handler. An unreadable file raises with its path; it was
+        # skipped with a warning, and its interface silently left the map.
+        content = path.read_text(encoding="utf-8")
+        # #3779: a file outside the root raises; it was keyed by its bare
+        # name, which can collide with a real in-repo file of that name.
+        rel = path.resolve().relative_to(repo_root).as_posix()
 
         summary = extractor(content)
         if len(summary) > per_file_char_cap:
             summary = summary[:per_file_char_cap] + "\n# ... (truncated for budget)"
 
         if total + len(summary) > total_char_cap:
-            dropped += 1
+            dropped.append(rel)
             continue
 
-        try:
-            rel = path.resolve().relative_to(repo_root).as_posix()
-        except ValueError:
-            rel = path.name
         surface[rel] = summary
         total += len(summary)
 
     if dropped:
+        # A budget, not a failure: the cap is designed. The log names every
+        # file left out (#3779), where it used to give only a count.
         logger.warning(
-            "Interface surface: dropped %d file(s) to fit %d-char budget",
-            dropped, total_char_cap,
+            "Interface surface: %d file(s) left out to fit the %d-char budget: %s",
+            len(dropped), total_char_cap, ", ".join(dropped),
         )
     return surface
 
@@ -430,7 +429,8 @@ def build_interface_map(
     (no selection, no selection miss); otherwise the selection composite —
     explicit paths, keyword-related files, one-hop import expansion.
 
-    Never raises: any failure returns ``{}`` with a logged warning.
+    #3779: a failure raises, naming its cause. It used to return ``{}`` with
+    a warning, which the drafter could not tell from a repo with no Python.
 
     Args:
         repo_root: Repository root (resolved inside).
@@ -438,60 +438,71 @@ def build_interface_map(
         related_paths: Keyword-matched paths N0b already computed.
 
     Returns:
-        Repo-relative path -> signature summary; ``{}`` when unavailable.
+        Repo-relative path -> signature summary; ``{}`` only for a repo with
+        no Python files, which is logged.
+
+    Raises:
+        NotADirectoryError: ``repo_root`` is not a directory.
     """
-    try:
-        repo_root = Path(repo_root).resolve()
-        if not repo_root.is_dir():
-            return {}
+    repo_root = _existing_root(repo_root)
 
-        all_py = list_repo_python_files(repo_root)
-        if not all_py:
-            return {}
+    all_py = list_repo_python_files(repo_root)
+    if not all_py:
+        logger.info("Interface surface: no Python files under %s, so no surface", repo_root)
+        return {}
 
-        # Mode 1: whole surface, when it fits.
-        if len(all_py) <= WHOLE_SURFACE_MAX_FILES:
-            whole = extract_interface_map(all_py, repo_root)
-            if len(whole) == len(
-                [p for p in all_py if p.suffix in _EXTRACTORS]
-            ):
-                logger.info(
-                    "Interface surface: whole-repo mode (%d files)", len(whole)
-                )
-                return whole
-            # Didn't fit — fall through to selection.
+    # Mode 1: whole surface, when it fits.
+    if len(all_py) <= WHOLE_SURFACE_MAX_FILES:
+        whole = extract_interface_map(all_py, repo_root)
+        if len(whole) == len(
+            [p for p in all_py if p.suffix in _EXTRACTORS]
+        ):
+            logger.info(
+                "Interface surface: whole-repo mode (%d files)", len(whole)
+            )
+            return whole
+        # Didn't fit — fall through to selection.
 
-        # Mode 2: selection composite.
-        primary: list[Path] = []
-        seen: set[Path] = set()
-        for p in extract_explicit_paths(issue_text, repo_root) + [
-            Path(rp) for rp in (related_paths or [])
-        ]:
-            try:
-                rp = Path(p).resolve()
-            except OSError:
-                continue
-            if rp.is_file() and rp.suffix == ".py" and rp not in seen:
-                seen.add(rp)
-                primary.append(rp)
-            if len(primary) >= PRIMARY_SELECTION_CAP:
-                break
+    # Mode 2: selection composite.
+    primary: list[Path] = []
+    seen: set[Path] = set()
+    for p in extract_explicit_paths(issue_text, repo_root) + [
+        Path(rp) for rp in (related_paths or [])
+    ]:
+        rp = Path(p).resolve()  # #3779: an OSError here raises; it was skipped
+        if rp.is_file() and rp.suffix == ".py" and rp not in seen:
+            seen.add(rp)
+            primary.append(rp)
+        if len(primary) >= PRIMARY_SELECTION_CAP:
+            break
 
-        expansion: list[Path] = []
-        for p in primary:
-            for target in resolve_import_targets(p, repo_root):
-                if target not in seen:
-                    seen.add(target)
-                    expansion.append(target)
-                if len(expansion) >= IMPORT_EXPANSION_CAP:
-                    break
+    return extract_interface_map(primary + _expand(primary, seen, repo_root), repo_root)
+
+
+def _existing_root(repo_root: Path | str) -> Path:
+    """The resolved root, or NotADirectoryError naming it (#3779).
+
+    A root that is not a directory used to return ``{}``, read as a repo
+    with no interface at all."""
+    root = Path(repo_root).resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(f"interface surface: {root} is not a directory")
+    return root
+
+
+def _expand(primary: list[Path], seen: set[Path], repo_root: Path) -> list[Path]:
+    """One-hop import expansion of the primary picks, capped."""
+    expansion: list[Path] = []
+    for p in primary:
+        for target in resolve_import_targets(p, repo_root):
+            if target not in seen:
+                seen.add(target)
+                expansion.append(target)
             if len(expansion) >= IMPORT_EXPANSION_CAP:
                 break
-
-        return extract_interface_map(primary + expansion, repo_root)
-    except Exception as e:  # noqa: BLE001 — never block the LLD
-        logger.warning("Interface surface extraction failed: %s", e)
-        return {}
+        if len(expansion) >= IMPORT_EXPANSION_CAP:
+            break
+    return expansion
 
 
 def build_interface_map_for_paths(
@@ -504,54 +515,40 @@ def build_interface_map_for_paths(
     Changed table declares the blast radius, and this extracts signatures
     for exactly those files plus their one-hop imports.
 
-    Never raises: any failure returns ``{}`` with a logged warning.
+    #3779: a failure raises, naming its cause; it used to return ``{}``.
+    A path outside the repo is not one of its files and is left out, as
+    before: the table can name a file the change creates elsewhere.
 
     Args:
         paths: Repo-relative path strings (from the Files Changed table).
         repo_root: Repository root (resolved inside).
 
     Returns:
-        Repo-relative path -> signature summary; ``{}`` when unavailable.
+        Repo-relative path -> signature summary.
+
+    Raises:
+        NotADirectoryError: ``repo_root`` is not a directory.
     """
-    try:
-        repo_root = Path(repo_root).resolve()
-        if not repo_root.is_dir():
-            return {}
+    repo_root = _existing_root(repo_root)
 
-        primary: list[Path] = []
-        seen: set[Path] = set()
-        for raw in paths:
-            candidate = (repo_root / str(raw).replace("\\", "/")).resolve()
-            try:
-                candidate.relative_to(repo_root)
-            except ValueError:
-                continue
-            if (
-                candidate.is_file()
-                and candidate.suffix == ".py"
-                and candidate not in seen
-                and not is_sensitive_file(candidate)
-            ):
-                seen.add(candidate)
-                primary.append(candidate)
-            if len(primary) >= PRIMARY_SELECTION_CAP:
-                break
+    primary: list[Path] = []
+    seen: set[Path] = set()
+    for raw in paths:
+        candidate = (repo_root / str(raw).replace("\\", "/")).resolve()
+        if not candidate.is_relative_to(repo_root):
+            continue
+        if (
+            candidate.is_file()
+            and candidate.suffix == ".py"
+            and candidate not in seen
+            and not is_sensitive_file(candidate)
+        ):
+            seen.add(candidate)
+            primary.append(candidate)
+        if len(primary) >= PRIMARY_SELECTION_CAP:
+            break
 
-        expansion: list[Path] = []
-        for p in primary:
-            for target in resolve_import_targets(p, repo_root):
-                if target not in seen:
-                    seen.add(target)
-                    expansion.append(target)
-                if len(expansion) >= IMPORT_EXPANSION_CAP:
-                    break
-            if len(expansion) >= IMPORT_EXPANSION_CAP:
-                break
-
-        return extract_interface_map(primary + expansion, repo_root)
-    except Exception as e:  # noqa: BLE001 — never block the LLD
-        logger.warning("Interface surface (revision) extraction failed: %s", e)
-        return {}
+    return extract_interface_map(primary + _expand(primary, seen, repo_root), repo_root)
 
 
 # ---------------------------------------------------------------------------

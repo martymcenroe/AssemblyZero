@@ -65,6 +65,9 @@ STUCK_STATES: frozenset[str] = frozenset({"dirty", "behind"})
 #: and threw the other two away.
 POLL_FIELDS: tuple[str, ...] = ("mergeable_state", "merged", "state")
 
+#: The two values a pull request's ``state`` takes.
+PR_STATES: frozenset[str] = frozenset({"open", "closed"})
+
 
 def poll_verdict(payload: dict, *, accept_unstable: bool = False) -> str:
     """What this PR's current state says a poller should do.
@@ -73,7 +76,24 @@ def poll_verdict(payload: dict, *, accept_unstable: bool = False) -> str:
     so a reading that consulted the state before the terminal fields would put
     the finished case in the same bucket as "no information yet" -- which is
     exactly the bucket the twelve-hour loops sat in.
+
+    A payload that is not a pull request's state raises ValueError naming it
+    (#3785): one with no boolean `merged` or no `state` of open or closed,
+    which is the `{}` a failed or unparsed API call leaves and the shape of
+    GitHub's error object. It used to read as `wait`, so a poller sat out its
+    whole bound on an answer it never had. An open PR whose `mergeable_state`
+    is not yet computed (`unknown`, or null) still waits: that is an answer.
     """
+    state_field = payload.get("state") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("merged"), bool)
+        or str(state_field or "").lower() not in PR_STATES
+    ):
+        raise ValueError(
+            f"the poll payload is not a pull request's state (it needs a boolean "
+            f"'merged' and a 'state' of open or closed): {payload!r:.200}"
+        )
     if payload.get("merged") is True:
         return VERDICT_GONE
     if str(payload.get("state") or "").lower() == "closed":

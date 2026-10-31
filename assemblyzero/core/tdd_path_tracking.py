@@ -103,7 +103,11 @@ def cleanup_stale_scaffold(state: TDDState) -> None:
     
     Only deletes files matching the scaffold pattern: tests/test_issue_N.py
     Never deletes unit test files.
-    
+
+    A scaffold that exists and cannot be removed raises the removal's own
+    OSError, which names the file (#3798). It used to be a WARNING, and the
+    stale scaffold stayed beside the real tests, collected and run with them.
+
     Args:
         state: Current TDD state
     """
@@ -111,18 +115,15 @@ def cleanup_stale_scaffold(state: TDDState) -> None:
     current_path = state.get("test_file_path")
     if not current_path:
         return
-    
+
     # Check history for scaffold files
     history = state.get("test_file_history", [])
     for old_path in history:
         # Only cleanup scaffold pattern files (safety: prevent deleting real tests)
         if _is_scaffold_file(old_path) and old_path != current_path:
             if os.path.exists(old_path):
-                try:
-                    os.remove(old_path)
-                    logger.info(f"Cleaned up stale scaffold file: {old_path}")
-                except OSError as e:
-                    logger.warning(f"Failed to cleanup scaffold file {old_path}: {e}")
+                os.remove(old_path)
+                logger.info(f"Cleaned up stale scaffold file: {old_path}")
 
 
 def resolve_test_file_conflict(

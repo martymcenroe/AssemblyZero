@@ -113,7 +113,7 @@ class TestTheToast:
 
         assert show_toast(
             "t", "b", "http://x/", runner=runner, platform="win32"
-        ) == ""
+        ) is None
         assert calls["cmd"][0] == "powershell"
         assert "-NonInteractive" in calls["cmd"]
         import subprocess
@@ -121,19 +121,22 @@ class TestTheToast:
             subprocess, "CREATE_NO_WINDOW", 0
         ), "a toast must never flash a console window"
 
-    def test_a_failing_toast_is_a_reason_not_a_raise(self):
+    def test_a_failing_toast_raises(self):
+        """#3783: a reason string was a failure a caller could drop."""
+        from assemblyzero.core.alert import AlertDeliveryError
+
         def runner(cmd, **kwargs):
             raise OSError("powershell missing")
 
-        reason = show_toast("t", "b", runner=runner, platform="win32")
-        assert "toast failed" in reason
+        with pytest.raises(AlertDeliveryError, match="powershell missing"):
+            show_toast("t", "b", runner=runner, platform="win32")
 
-    def test_a_non_windows_host_skips_with_a_reason(self):
+    def test_a_non_windows_host_is_an_error_line(self, capsys):
         def forbidden(cmd, **kwargs):
             raise AssertionError("nothing must spawn off Windows")
 
-        reason = show_toast("t", "b", runner=forbidden, platform="linux")
-        assert "not a Windows host" in reason
+        assert show_toast("t", "b", runner=forbidden, platform="linux") is None
+        assert "not Windows" in capsys.readouterr().err
 
 
 class TestTheEmail:
@@ -154,22 +157,27 @@ class TestTheEmail:
             sender="gate@verified.example", to="operator@example.com",
             subject="s", text_body="b", client=client,
         )
-        assert error == ""
+        assert error is None
         [call] = client.sent
         assert call["FromEmailAddress"] == "gate@verified.example"
         assert call["Destination"] == {"ToAddresses": ["operator@example.com"]}
 
-    def test_no_sender_identity_is_a_named_reason(self):
-        reason = send_email(sender="", to="x@y", subject="s", text_body="b")
-        assert "no sender identity configured" in reason
-        assert EMAIL_FROM_ENV in reason
+    def test_no_sender_identity_raises_naming_where_to_set_it(self):
+        """#3783: a reason string was a failure a caller could drop."""
+        from assemblyzero.core.alert import AlertDeliveryError
 
-    def test_a_failing_send_is_a_reason_not_a_raise(self):
-        reason = send_email(
-            sender="gate@verified.example", to="x@y", subject="s",
-            text_body="b", client=self._Client(fail=True),
-        )
-        assert "email send failed" in reason
+        with pytest.raises(AlertDeliveryError, match="no sender identity configured") as raised:
+            send_email(sender="", to="x@y", subject="s", text_body="b")
+        assert EMAIL_FROM_ENV in str(raised.value)
+
+    def test_a_failing_send_raises(self):
+        from assemblyzero.core.alert import AlertDeliveryError
+
+        with pytest.raises(AlertDeliveryError, match="SES says no"):
+            send_email(
+                sender="gate@verified.example", to="x@y", subject="s",
+                text_body="b", client=self._Client(fail=True),
+            )
 
 
 class TestTheWaitEscalates:

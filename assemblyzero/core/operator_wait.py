@@ -33,16 +33,19 @@ _active: dict | None = None
 
 
 def wants_color(stream=None) -> bool:
-    """True when ``stream`` (default stdout) is a live terminal."""
+    """True when ``stream`` (default stdout) is a live terminal.
+
+    A stream with no ``isatty``, and a closed one, is not a terminal: that is
+    the answer, and it is quiet. The write meant for a closed stream raises on
+    its own. An ``isatty`` that fails on an open stream (a bad descriptor, a
+    detached buffer) raises (#3784): it used to read as "not a terminal", and
+    the broken stream went unnamed.
+    """
     stream = sys.stdout if stream is None else stream
     isatty = getattr(stream, "isatty", None)
-    try:
-        return bool(isatty and isatty())
-    except (ValueError, OSError):
-        # fail-open: a closed or detached stream is not a terminal, and "no
-        # colour" is the correct, indistinguishable-from-real answer for it —
-        # a paint decision must never crash the line it decorates.
+    if isatty is None or getattr(stream, "closed", False):
         return False
+    return bool(isatty())
 
 
 def paint(text: str, stream=None) -> str:

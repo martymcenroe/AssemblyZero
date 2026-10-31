@@ -125,9 +125,10 @@ class TestSummarizers:
         # Implementation details must NOT ride along.
         assert "secret_internal_detail" not in summary
 
-    def test_syntax_error_falls_back_to_head(self):
-        summary = summarize_python_file("def broken(:\n" * 3)
-        assert "truncated, syntax error" in summary
+    def test_syntax_error_raises(self):
+        """#3779: the first 50 lines used to stand in for the interface."""
+        with pytest.raises(SyntaxError):
+            summarize_python_file("def broken(:\n" * 3)
 
     def test_spec_stage_aliases_are_the_core_functions(self):
         """The move must be aliasing, not copying — one yardstick."""
@@ -266,8 +267,10 @@ class TestBuildInterfaceMap:
     def test_empty_repo_yields_empty_map(self, tmp_path):
         assert build_interface_map(tmp_path) == {}
 
-    def test_missing_repo_yields_empty_map(self, tmp_path):
-        assert build_interface_map(tmp_path / "gone") == {}
+    def test_missing_repo_raises(self, tmp_path):
+        """#3779: a missing root returned {}, read as "no interface"."""
+        with pytest.raises(NotADirectoryError, match="gone is not a directory"):
+            build_interface_map(tmp_path / "gone")
 
 
 class TestBuildInterfaceMapForPaths:

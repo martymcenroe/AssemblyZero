@@ -28,7 +28,14 @@ DRIVER_ENV = "AZ_MERGE_DRIVER"
 
 #: What the driver prints, line by line, that a caller reads back. These are
 #: the driver's own fixed lines, a closed set; no pattern matching is needed.
+#: The PR is named on whichever of the first three lines the run took (a
+#: rerun reuses its open PR), or on the already-merged line of a rerun after
+#: the merge (#3781).
 _CREATED = "created PR #"
+_REUSED = "reusing open PR #"
+_MERGED = "merged PR #"
+_ALREADY_PREFIX = "PR #"
+_ALREADY_MARK = " already merged with this tip"
 _SQUASH = "squash SHA "
 _LANDED = "[OK] stage=landed"
 
@@ -120,8 +127,11 @@ def parse_output(output: str) -> tuple[int | None, str, bool]:
     landed = False
     for raw in output.splitlines():
         line = raw.strip()
-        if line.startswith(_CREATED):
-            rest = line[len(_CREATED):].split()
+        prefix = next((p for p in (_CREATED, _REUSED, _MERGED) if line.startswith(p)), "")
+        if not prefix and line.startswith(_ALREADY_PREFIX) and _ALREADY_MARK in line:
+            prefix = _ALREADY_PREFIX
+        if prefix:
+            rest = line[len(prefix):].split()
             if rest and rest[0].isdigit():
                 pr_number = int(rest[0])
         elif line.startswith(_SQUASH):
@@ -150,6 +160,11 @@ def land(
     The driver pushes, opens, waits, merges and cleans up; nothing here
     touches git or gh. Any failure is MergeDriverError carrying the driver's
     own output, and nothing is retried: the driver's refusals are decisions.
+
+    A landing whose output names no PR number or no squash SHA raises too
+    (#3781): it used to be returned as a success with an empty PR URL, and the
+    caller recorded a landing it could not point at. The driver may well have
+    merged, so the error says to read its output, not to run it again.
     """
     driver = driver_path(environ)
     argv = build_argv(
@@ -165,5 +180,16 @@ def land(
     if proc.returncode != 0 or not landed:
         raise MergeDriverError(
             f"the merge driver did not land {branch} (exit {proc.returncode}):\n{output.strip()}"
+        )
+    missing = [
+        what for what, value in (("no PR number", pr_number), ("no squash SHA", squash))
+        if not value
+    ]
+    if missing:
+        raise MergeDriverError(
+            f"the merge driver reported {branch} landed, but its output names "
+            f"{' and '.join(missing)}, so the landing cannot be recorded or checked; "
+            f"it may have merged: read its output, and do not run it again:\n"
+            f"{output.strip()}"
         )
     return Landing(pr_number=pr_number, squash_sha=squash, output=output, argv=argv)

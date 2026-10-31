@@ -240,8 +240,14 @@ def test_the_idle_threshold_is_overridable_too(monkeypatch):
     assert idle_timeout_seconds() == IDLE_TIMEOUT_SECONDS
     monkeypatch.setenv(ENV_IDLE_TIMEOUT, "45")
     assert idle_timeout_seconds() == 45
+    # #3780: a bad value raises and names the variable; it used to warn and
+    # run on the default, which hid the operator's typo.
     monkeypatch.setenv(ENV_IDLE_TIMEOUT, "not-a-number")
-    assert idle_timeout_seconds() == IDLE_TIMEOUT_SECONDS
+    with pytest.raises(ValueError, match="AZ_LLM_IDLE_TIMEOUT='not-a-number'"):
+        idle_timeout_seconds()
+    monkeypatch.setenv(ENV_IDLE_TIMEOUT, "0")
+    with pytest.raises(ValueError, match="AZ_LLM_IDLE_TIMEOUT=0 is not a positive"):
+        idle_timeout_seconds()
 
 
 # --- the flag the whole mechanism rests on --------------------------------

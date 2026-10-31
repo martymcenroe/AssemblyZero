@@ -183,6 +183,10 @@ def parse_structured_verdict(response_text: str) -> dict | None:
         Parsed verdict dict with keys: verdict, summary, blocking_issues,
         suggestions. Returns None if response is not valid JSON or
         doesn't contain required fields.
+
+    #3802: ``rationale`` is required (VERDICT_SCHEMA). A verdict without one
+    is not schema-valid and returns None, so the caller rejects it. It used
+    to be filled in as "", which passed a verdict with no reason as a valid one.
     """
     if not response_text or not response_text.strip():
         return None
@@ -192,9 +196,7 @@ def parse_structured_verdict(response_text: str) -> dict | None:
     # Try direct JSON parse
     try:
         data = json.loads(text)
-        if isinstance(data, dict) and "verdict" in data:
-            if "rationale" not in data:
-                data["rationale"] = ""
+        if _is_verdict(data):
             return data
     except json.JSONDecodeError:
         pass
@@ -204,14 +206,17 @@ def parse_structured_verdict(response_text: str) -> dict | None:
     if json_match:
         try:
             data = json.loads(json_match.group(1))
-            if isinstance(data, dict) and "verdict" in data:
-                if "rationale" not in data:
-                    data["rationale"] = ""
+            if _is_verdict(data):
                 return data
         except json.JSONDecodeError:
             pass
 
     return None
+
+
+def _is_verdict(data: object) -> bool:
+    """A dict carrying both of VERDICT_SCHEMA's required keys (#3802)."""
+    return isinstance(data, dict) and all(k in data for k in VERDICT_SCHEMA["required"])
 
 
 class StructuredContractError(RuntimeError):
@@ -647,11 +652,15 @@ def scan_residual_questions(text: str) -> FinalizeQuestionsResult:
     validates its own artifact, a scan, not a parse. Lines ending with '?'
     must be > 5 chars to filter bare punctuation and headings like "Why?";
     any line carrying a TODO marker counts.
+
+    #3802: an empty document raises. It used to report "no open questions",
+    which is the verdict finalize needs to pass, for a document that was
+    never written.
     """
-    if not text:
-        return FinalizeQuestionsResult(
-            has_open_questions=False, question_count=0, questions=[],
-            source="document_scan",
+    if not text or not text.strip():
+        raise ValueError(
+            "the document to scan for open questions is empty, so it cannot be "
+            "shown to have none"
         )
     questions: list[str] = []
     for line in text.splitlines():
@@ -689,8 +698,13 @@ def same_blocking_issues(
     Issue #503: Structured two-strike stagnation detection.
 
     Strategy:
-    1. Try structured JSON comparison first (section + issue identity)
-    2. Fall back to line-overlap heuristic if either verdict is unstructured
+    1. Structured JSON comparison when both verdicts are JSON (section + issue
+       identity).
+    2. Otherwise the line comparison. That is not a fallback from a failure
+       (#3802): the requirements workflow stores rendered feedback in
+       ``current_verdict`` by design (#506), bullet lines and a summary rather
+       than the reviewer's JSON, so for it the line comparison IS the
+       comparison.
 
     Args:
         current_feedback: Current verdict text (may be JSON or markdown).
@@ -699,9 +713,21 @@ def same_blocking_issues(
 
     Returns:
         True if the same blocking issues appear in both verdicts (stagnation).
+
+    Raises:
+        ValueError: when either verdict is empty (#3802). Nothing can be
+            compared, and "not stagnant" sent the drafter round again with
+            no feedback to act on.
     """
-    if not current_feedback or not previous_feedback:
-        return False
+    if not (current_feedback or "").strip() or not (previous_feedback or "").strip():
+        empty = [
+            name for name, text in (("current", current_feedback), ("previous", previous_feedback))
+            if not (text or "").strip()
+        ]
+        raise ValueError(
+            f"cannot compare blocking issues: the {' and '.join(empty)} verdict "
+            "text is empty"
+        )
 
     current_parsed = parse_structured_verdict(current_feedback)
     previous_parsed = parse_structured_verdict(previous_feedback)

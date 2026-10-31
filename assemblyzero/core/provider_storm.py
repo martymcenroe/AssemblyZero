@@ -131,7 +131,10 @@ def diagnose(probe: Callable[[], bool]) -> str:
     launcher reads ``is_storm()`` rather than this return value.
 
     A probe that raises counts as a failed probe. If we cannot reach the
-    provider to ask, we are not entitled to overturn the storm reading.
+    provider to ask, we are not entitled to overturn the storm reading. It is
+    also its own failure (#3787, ADR 0236): "the probe cannot run" (a missing
+    CLI, a process that will not start) wants a different next action from
+    "the provider is down", so it alerts the operator with its cause.
 
     The evidence this exists for: boostgauge #1's run declared PROVIDER STORM on
     three consecutive timeouts, and the very next call succeeded in 16.9s, with
@@ -144,7 +147,18 @@ def diagnose(probe: Callable[[], bool]) -> str:
         return "none"
     try:
         answered = bool(probe())
-    except Exception:
+    except Exception as exc:
+        from assemblyzero.core import alert
+
+        alert.alert_operator(
+            what="the provider-storm probe could not run",
+            where="assemblyzero.core.provider_storm.diagnose",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence=(
+                f"the storm reading stands after {_consecutive_timeouts} "
+                "consecutive timeouts, so the roll halts as storm-bound"
+            ),
+        )
         answered = False
     if answered:
         # Preserve what the verdict was about before clearing it. reset() wipes

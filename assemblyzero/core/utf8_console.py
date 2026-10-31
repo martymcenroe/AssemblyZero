@@ -39,8 +39,11 @@ pytest's capture does exactly that between tests.
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Reconfiguring a stream fails narrowly and predictably: a detached or closed
 # stream raises ValueError, an unknown codec LookupError, and a stream backed by
@@ -63,8 +66,12 @@ def install() -> None:
 def widen(stream: Any) -> bool:
     """Widen one stream. Returns whether it now carries arbitrary text safely.
 
-    False means the stream had no `reconfigure` and was left untouched, not that
-    anything failed -- callers use it for reporting, never for control flow.
+    False means the stream was not widened -- callers use it for reporting,
+    never for control flow. A stream with no `reconfigure` is left untouched,
+    quietly: it handles text natively or is not ours. A stream that refuses
+    both tiers is an ERROR line on stderr and in the log, naming the stream
+    and both refusals (#3800); it used to be silent, and the first character
+    its encoding lacks then killed the report with no word about why.
     """
     reconfigure = getattr(stream, "reconfigure", None)
     if reconfigure is None:
@@ -73,12 +80,20 @@ def widen(stream: Any) -> bool:
     try:
         reconfigure(encoding="utf-8", errors="replace")
         return True
-    except _RECONFIGURE_ERRORS:
-        pass
+    except _RECONFIGURE_ERRORS as exc:
+        refused_utf8 = exc
 
     # Tier 2: keep the encoding, lose the crash.
     try:
         reconfigure(errors="replace")
         return True
-    except _RECONFIGURE_ERRORS:
+    except _RECONFIGURE_ERRORS as exc:
+        message = (
+            f"cannot widen {stream!r}: UTF-8 refused "
+            f"({type(refused_utf8).__name__}: {refused_utf8}) and errors='replace' "
+            f"refused ({type(exc).__name__}: {exc}); a character its encoding "
+            f"lacks will raise UnicodeEncodeError when it is printed"
+        )
+        logger.error("[CONSOLE] %s", message)
+        print(f"ERROR [CONSOLE] {message}", file=sys.stderr, flush=True)
         return False

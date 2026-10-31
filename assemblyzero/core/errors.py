@@ -14,8 +14,12 @@ Classifier functions translate provider-native exceptions into the hierarchy:
 
 from __future__ import annotations
 
+import logging
 import subprocess
+import sys
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +358,14 @@ def _is_billing_message(msg: str) -> bool:
 
 
 def _extract_retry_after(exc: Exception) -> Optional[float]:
-    """Extract Retry-After seconds from an Anthropic rate-limit response."""
+    """Extract Retry-After seconds from an Anthropic rate-limit response.
+
+    None when the response carries no header: no hint is an answer, and the
+    caller backs off on its own schedule. A header that is not a number of
+    seconds is a failure to read what the provider asked for (#3774): it is
+    an ERROR line naming the value, and the rate limit is still raised with
+    no hint, so the caller's own backoff applies.
+    """
     headers = getattr(exc, "response", None)
     if headers is not None:
         headers = getattr(headers, "headers", {})
@@ -362,8 +373,15 @@ def _extract_retry_after(exc: Exception) -> Optional[float]:
         if val:
             try:
                 return float(val)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as err:
+                message = (
+                    f"the rate limit's retry-after header {val!r} is not a number "
+                    f"of seconds ({type(err).__name__}: {err}), so the wait the "
+                    f"provider asked for is unknown and the caller's own backoff "
+                    f"is used"
+                )
+                logger.error("[RATE LIMIT] %s", message)
+                print(f"ERROR [RATE LIMIT] {message}", file=sys.stderr, flush=True)
     return None
 
 
