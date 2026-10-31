@@ -18,6 +18,7 @@ This node populates:
 - error_message: "" on success, error text on failure
 """
 
+import sys
 from typing import Any
 
 from assemblyzero.workflows.implementation_spec.state import ImplementationSpecState
@@ -107,8 +108,8 @@ def human_gate(state: ImplementationSpecState) -> dict[str, Any]:
 
     Three modes of operation:
     1. Gate disabled (human_gate_enabled=False): This node is never reached;
-       graph routing skips directly to N5. But if somehow invoked, auto-routes
-       to N5 as a safety fallback.
+       graph routing skips directly to N5. If it is invoked anyway, the graph
+       is misrouted and the node halts (#3585); it used to route to N5.
     2. Interactive mode: Displays spec preview and prompts for S/R/M decision.
        If R is chosen, optionally collects feedback for the drafter.
 
@@ -138,15 +139,21 @@ def human_gate(state: ImplementationSpecState) -> dict[str, Any]:
     issue_number = state.get("issue_number", 0)
 
     # --------------------------------------------------------------------------
-    # SAFETY FALLBACK: If gate is disabled but node was invoked anyway,
-    # auto-route to N5. This shouldn't happen with correct graph routing,
-    # but protects against misconfiguration.
+    # GUARD: the gate is disabled but the node was invoked anyway. #3585:
+    # route_after_validation sends here only when human_gate_enabled is True,
+    # so this is a misrouted graph, and it halts. It used to proceed to N5 as
+    # a "safety fallback", which hid the misrouting.
     # --------------------------------------------------------------------------
     if not human_gate_enabled:
-        print("    Gate disabled -> proceeding to Gemini review")
+        message = (
+            f"[N4] human_gate for issue #{issue_number}: reached with "
+            f"human_gate_enabled False; route_after_validation sends here only "
+            f"when it is True, so the graph is misrouted"
+        )
+        print(f"ERROR {message}", file=sys.stderr, flush=True)
         return {
-            "next_node": "N5_review_spec",
-            "error_message": "",
+            "next_node": "",
+            "error_message": message,
         }
 
     # --------------------------------------------------------------------------

@@ -343,7 +343,9 @@ def test_mechanical_validation_records_nothing_when_it_passes(tmp_path, monkeypa
     assert read_failures(tmp_path) == []
 
 
-def test_telemetry_failure_does_not_change_the_validation_verdict(tmp_path, monkeypatch):
+def test_telemetry_failure_alerts_and_stops_the_run(tmp_path, monkeypatch, operator_alerts):
+    """#3585: a failed telemetry record used to print a line and pass, so the
+    roll's failures silently left the counts; it now alerts and raises."""
     from assemblyzero.speedrun import prompt_telemetry as pt
     from assemblyzero.workflows.requirements.nodes import validate_mechanical as vm
 
@@ -360,9 +362,9 @@ def test_telemetry_failure_does_not_change_the_validation_verdict(tmp_path, monk
 
     monkeypatch.setattr(pt, "record_failures", explode)
 
-    result = vm.validate_lld_mechanical({
-        "target_repo": str(tmp_path), "issue_number": 2,
-    })
-
-    assert result["lld_status"] == "BLOCKED"
-    assert result["validation_errors"] == ["boom"]
+    with pytest.raises(RuntimeError, match="telemetry is broken"):
+        vm.validate_lld_mechanical({
+            "target_repo": str(tmp_path), "issue_number": 2,
+        })
+    assert len(operator_alerts) == 1
+    assert operator_alerts[0]["issue"] == 2

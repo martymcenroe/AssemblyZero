@@ -149,8 +149,12 @@ class TestTheHardCeiling:
         assert "still converging" in decision.detail
         assert "#2383" in decision.detail, "point at the resume that keeps the work"
 
-    def test_a_garbage_cap_does_not_crash_the_ceiling(self):
-        assert rp.hard_ceiling("nonsense") == 3 * rp.CEILING_MULTIPLIER
+    def test_a_garbage_cap_raises_rather_than_guessing_a_ceiling(self):
+        """#3585: a cap that is not an integer used to stand in a base of 3,
+        so the run reviewed to a ceiling nobody set. A negative cap still
+        clamps to a ceiling of 0."""
+        with pytest.raises(ValueError, match="max_iterations"):
+            rp.hard_ceiling("nonsense")
         assert rp.hard_ceiling(-4) == 0
 
 

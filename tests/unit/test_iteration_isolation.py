@@ -75,12 +75,21 @@ class TestDroppingsAreRemoved:
 
         assert (worktree / "src" / "gauge.py").exists()
 
-    def test_a_failed_snapshot_deletes_nothing(self, worktree):
-        """'Could not measure' is not 'nothing was there' (#2028's rule) --
-        None must never authorise deleting whatever is untracked now."""
-        (worktree / "precious.txt").write_text("x", encoding="utf-8")
+    def test_a_failed_snapshot_deletes_nothing(self, worktree, monkeypatch):
+        """'Could not measure' is not 'nothing was there' (#2028's rule).
+        #3585: a snapshot git cannot take now raises, so it can never
+        authorise deleting whatever is untracked now."""
+        from assemblyzero.workflows.testing.nodes import verify_phases
 
-        _remove_test_run_droppings(worktree, None)
+        (worktree / "precious.txt").write_text("x", encoding="utf-8")
+        before = _snapshot_untracked(worktree) - {"precious.txt"}
+
+        def broken(*a, **k):
+            raise OSError("git vanished")
+
+        monkeypatch.setattr(verify_phases.subprocess, "run", broken)
+        with pytest.raises(verify_phases.PhaseStepError, match="git vanished"):
+            _remove_test_run_droppings(worktree, before)
 
         assert (worktree / "precious.txt").exists()
 
@@ -95,10 +104,14 @@ class TestSnapshot:
         snap = _snapshot_untracked(worktree)
         assert any("telltale.py" in p for p in snap)
 
-    def test_a_non_repo_returns_none(self, tmp_path):
+    def test_a_non_repo_raises(self, tmp_path):
+        """#3585: git that cannot say is a failure, never None."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import PhaseStepError
+
         bare = tmp_path / "not-a-repo"
         bare.mkdir()
-        assert _snapshot_untracked(bare) is None
+        with pytest.raises(PhaseStepError, match="git status"):
+            _snapshot_untracked(bare)
 
 
 class TestTheStagnantHaltNamesTheTests:

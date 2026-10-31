@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from typing import NamedTuple
 
 #: A `-v` outcome line: `tests/unit/test_x.py::TestA::test_b[case] PASSED [ 12%]`.
@@ -78,27 +79,45 @@ def _text(lines: list[str], span: tuple[int, int]) -> str:
     return "\n".join(lines[span[0] - 1:span[1]])
 
 
-def keep_passing_tests_as_written(before: str, after: str, passing: set[str]) -> Kept:
+def _parse(source: str, what: str, path: str) -> ast.Module:
+    """Parse one side of the contract, or stop with the reason (standard 0034).
+
+    Which tests are the contract cannot be decided on a side that does not
+    parse, so an ERROR line names the side and the file, and the SyntaxError
+    propagates to the node's runner, which alerts.
+    """
+    try:
+        return ast.parse(source)
+    except SyntaxError as exc:
+        subject = f"{what} of {path}" if path else what
+        print(
+            f"ERROR [test contract] the {subject} does not parse (line "
+            f"{exc.lineno}: {exc.msg}); which tests are the contract cannot be "
+            f"decided on it, so the stage stops",
+            file=sys.stderr, flush=True,
+        )
+        raise
+
+
+def keep_passing_tests_as_written(
+    before: str, after: str, passing: set[str], path: str = "",
+) -> Kept:
     """`after`, with every passing test's text taken from `before`.
 
     A passing test whose text the edit changed gets its prior text back in
     place. One the edit deleted is put back: at the end of the module, or at
-    the end of its class when the class is still there (a class the edit
-    removed takes its methods with it -- they are not re-homed).
+    the end of its class when the class is still there.
 
-    `after` is returned untouched when there is nothing to keep, or when
-    either side does not parse: a file that does not parse is the syntax
-    gate's finding, and a guess at its functions would be noise on top.
+    `after` is returned untouched when there is nothing to keep. A side that
+    does not parse, or a passing test whose class the edit removed (a method
+    is not re-homed into a class that is gone), is a contract that cannot be
+    kept: an ERROR line naming `path` and the tests, then SyntaxError or
+    ValueError (#3585; both used to return `after` untouched).
     """
     if not passing or before == after:
         return Kept(after, [], [])
-    try:
-        before_tree = ast.parse(before)
-        after_tree = ast.parse(after)
-    except SyntaxError:
-        # fail-open: an unparseable side is reported by the syntax gate that
-        # runs on the written file; this keeps nothing rather than guessing.
-        return Kept(after, [], [])
+    before_tree = _parse(before, "prior text", path)
+    after_tree = _parse(after, "revised text", path)
 
     before_lines = before.splitlines()
     after_lines = after.splitlines()
@@ -114,6 +133,7 @@ def keep_passing_tests_as_written(before: str, after: str, passing: set[str]) ->
     trailing: list[str] = []
     restored: list[str] = []
     returned: list[str] = []
+    lost: list[str] = []
     for key, (node, owner) in before_tests.items():
         if node.name not in passing:
             continue
@@ -131,10 +151,20 @@ def keep_passing_tests_as_written(before: str, after: str, passing: set[str]) ->
             continue
         home = after_classes.get(owner.name)
         if home is None:
+            lost.append(key)
             continue
         end = home.end_lineno or home.lineno
         edits.append((end, end, ["", *prior.splitlines()]))
         returned.append(node.name)
+
+    if lost:
+        message = (
+            f"the revision of {path or 'a test file'} removed the class holding "
+            f"passing test(s) {', '.join(lost)}; a passing test is the contract "
+            f"(#2905) and is not re-homed, so the stage stops"
+        )
+        print(f"ERROR [test contract] {message}", file=sys.stderr, flush=True)
+        raise ValueError(message)
 
     if not restored and not returned:
         return Kept(after, [], [])
@@ -151,7 +181,7 @@ def keep_passing_tests_as_written(before: str, after: str, passing: set[str]) ->
 
 
 def release_spec_twins(
-    contract: set[str], spec_suite_source: str | None,
+    contract: set[str], spec_suite_source: str | None, path: str = "",
 ) -> tuple[set[str], set[str]]:
     """The contract without the names the spec suite defines, and those names (#2910).
 
@@ -164,16 +194,15 @@ def release_spec_twins(
     chased the spec's, and the loop ended at the cap raising neither. For a
     name both files carry, the spec's copy governs and the plan file's is
     the implementer's to change.
+
+    No contract or no spec suite releases nothing. A spec suite (at `path`)
+    that does not parse is an ERROR line and a SyntaxError: which names it
+    defines cannot be known (#3585).
     """
     if not contract or not spec_suite_source:
         return set(contract), set()
-    try:
-        tree = ast.parse(spec_suite_source)
-    except SyntaxError:
-        # fail-open: a spec suite that does not parse is the scaffold gate's
-        # finding; nothing is released and the #2905 keep stands as before.
-        return set(contract), set()
-    twins = {node.name for node, _ in _test_functions(tree).values()}
+    tree = _parse(spec_suite_source, "spec suite", path)
+    twins ={node.name for node, _ in _test_functions(tree).values()}
     released = set(contract) & twins
     return set(contract) - released, released
 
@@ -186,7 +215,9 @@ class Aligned(NamedTuple):
     imports_added: list[str]
 
 
-def align_spec_twins(plan_source: str, spec_source: str) -> Aligned:
+def align_spec_twins(
+    plan_source: str, spec_source: str, plan_path: str = "", spec_path: str = "",
+) -> Aligned:
     """`plan_source` with every module-level test the spec suite also defines
     carrying the spec's text (#2912).
 
@@ -203,18 +234,15 @@ def align_spec_twins(plan_source: str, spec_source: str) -> Aligned:
     and the plan's `test_req_N` copies are module-level as the spec's are.
     Import statements the spec suite has and the plan file lacks (verbatim)
     are copied in after the plan file's imports, so a copied body resolves
-    the names its own file resolved. Either side failing to parse aligns
-    nothing: that is the syntax gate's finding.
+    the names its own file resolved. No spec source aligns nothing. Either
+    side failing to parse is an ERROR line naming it (`plan_path`,
+    `spec_path`) and a SyntaxError: a drifted copy cannot be found in a file
+    that does not parse (#3585; it used to align nothing).
     """
     if not spec_source or plan_source == spec_source:
         return Aligned(plan_source, [], [])
-    try:
-        plan_tree = ast.parse(plan_source)
-        spec_tree = ast.parse(spec_source)
-    except SyntaxError:
-        # fail-open: an unparseable side is the syntax gate's finding; the
-        # plan file is left exactly as it is and measured as it is.
-        return Aligned(plan_source, [], [])
+    plan_tree = _parse(plan_source, "plan file", plan_path)
+    spec_tree = _parse(spec_source, "spec suite", spec_path)
 
     plan_lines = plan_source.splitlines()
     spec_lines = spec_source.splitlines()

@@ -20,6 +20,7 @@ import subprocess
 import pytest
 
 from assemblyzero.workflows.implementation_spec.base_tree import (
+    BaseTreeError,
     base_ref,
     exists_on_base,
     read_from_base,
@@ -140,7 +141,9 @@ class TestRunsWithoutAnAttemptBranch:
         assert exists_on_base(repo, "", "src/telltale.py") is False
         assert read_from_base(repo, "", "src/telltale.py") == ""
 
-    def test_a_base_that_does_not_exist_is_not_fatal(self, repo):
+    def test_a_base_that_does_not_exist_raises(self, repo):
+        """#3585: a base that is not on origin used to be read as having no
+        files, so every Add stayed an Add against a tree nobody could read."""
         files = [{"path": "src/telltale.py", "change_type": "Add", "description": "d"}]
-        updated, _ = reclassify_against_base(files, repo, "no-such-branch")
-        assert updated[0]["change_type"] == "Add"
+        with pytest.raises(BaseTreeError, match="origin/no-such-branch"):
+            reclassify_against_base(files, repo, "no-such-branch")

@@ -4,12 +4,19 @@ Runs E2E tests in a sandbox environment:
 - Uses dedicated sandbox repos (mcwiz/assemblyzero-e2e-tools, mcwiz/assemblyzero-e2e-target)
 - Has safety limits (max 5 issues, max 3 PRs per run)
 - Auto-cleanup after each E2E run
+
+#3585 (ADR 0236): every failure here halts with its cause, through
+`_halt_e2e_error` or the node's own returns, which `route_after_e2e` sends to
+HALT, which alerts. The sandbox safety check and cleanup are not implemented,
+and say so by raising rather than reporting "safe" and "cleaned", so a run
+pointed at a sandbox stops before any test runs.
 """
 
 from assemblyzero.core.gate_registry import advised
 from assemblyzero.utils.shell import run_command
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -31,8 +38,58 @@ DEFAULT_E2E_MAX_ITERATIONS = 5
 E2E_TIMEOUT_SECONDS = 600  # 10 minutes
 
 
+class E2ERunFailed(RuntimeError):
+    """The E2E pytest run did not complete: it timed out, or could not start."""
+
+
+def _halt_e2e_error(reason: str) -> dict[str, Any]:
+    """N6's halt for an E2E run that could not be made or judged (#3585).
+
+    Said at ERROR on stderr; routed to HALT by `route_after_e2e`, which alerts.
+    """
+    print(f"ERROR [N6] E2E validation error: {reason}", file=sys.stderr)
+    return {"error_message": f"E2E validation error: {reason}"}
+
+
+#: How much of pytest's output an error message carries (#3585).
+_OUTPUT_TAIL_CHARS = 1500
+
+
+def _tail(output: str) -> str:
+    text = output.strip()
+    return text if len(text) <= _OUTPUT_TAIL_CHARS else "..." + text[-_OUTPUT_TAIL_CHARS:]
+
+
+def _e2e_files(test_files: list[str], repo_root: Path) -> list[str]:
+    """The run's test files that are E2E or integration files by name.
+
+    Judged on the path inside the repository (#3585). The whole absolute path
+    used to be searched, so a checkout whose own directory name held "e2e" or
+    "integration" made every test file an E2E file; with N6 now halting when
+    E2E files collect nothing, that would stop every run in such a checkout.
+    A file outside the repository is judged by its name alone.
+    """
+    root = Path(repo_root)
+    named: list[str] = []
+    for f in test_files:
+        path = Path(f)
+        if not path.is_absolute():
+            inside = path
+        elif path.is_relative_to(root):
+            inside = path.relative_to(root)
+        else:
+            inside = Path(path.name)
+        text = inside.as_posix().lower()
+        if "e2e" in text or "integration" in text:
+            named.append(f)
+    return named
+
+
 def _parse_e2e_passed(output: str) -> int:
     """Parse passed test count from pytest output.
+
+    0 when no count is printed: the count feeds the advisory stagnation line
+    only, never a verdict, so an unparseable count is a quiet answer.
 
     Args:
         output: Combined stdout + stderr from pytest.
@@ -138,9 +195,15 @@ def run_e2e_tests(
 
     Returns:
         Dict with returncode, stdout, stderr.
+
+    Raises:
+        E2ERunFailed: #3585 (ledger 0908, e2e_validation.py:182, :188) when
+            the run times out or cannot start, naming the command, the
+            ceiling or the cause. Both used to return code -1 with a fixed
+            string, and the halt that followed said neither.
     """
     # Filter for E2E tests only
-    e2e_files = [f for f in test_files if "e2e" in f.lower() or "integration" in f.lower()]
+    e2e_files = _e2e_files(test_files, repo_root)
 
     if not e2e_files:
         # Run all tests if no specific E2E files
@@ -179,35 +242,40 @@ def run_e2e_tests(
             "stderr": result.stderr,
         }
 
-    except subprocess.TimeoutExpired:
-        return {
-            "returncode": -1,
-            "stdout": "",
-            "stderr": "E2E test execution timed out",
-        }
-    except FileNotFoundError:
-        return {
-            "returncode": -1,
-            "stdout": "",
-            "stderr": "pytest not found",
-        }
+    except subprocess.TimeoutExpired as err:
+        raise E2ERunFailed(
+            f"the E2E run timed out after {E2E_TIMEOUT_SECONDS}s: "
+            f"{' '.join(cmd)} (cwd {repo_root})"
+        ) from err
+    except FileNotFoundError as err:
+        raise E2ERunFailed(
+            f"the E2E run could not start: {err} ({' '.join(cmd)}, cwd {repo_root})"
+        ) from err
 
 
 def cleanup_sandbox(sandbox_repo: str) -> tuple[bool, str]:
     """Clean up sandbox repository after E2E tests.
 
+    Cleanup would delete the test issues created in the sandbox, close the
+    test PRs and reset the sandbox. None of it is implemented.
+
+    #3585 (ledger 0908, e2e_validation.py:210): this stub returned success
+    without doing anything. It raises instead, so nothing reads a sandbox as
+    clean that was never touched.
+
     Args:
         sandbox_repo: Path to sandbox repository.
 
     Returns:
-        Tuple of (success, error_message).
-    """
-    # For now, this is a stub - actual cleanup would:
-    # 1. Delete test issues created in sandbox
-    # 2. Close test PRs
-    # 3. Reset sandbox to clean state
+        Tuple of (success, error_message), once implemented.
 
-    return True, ""
+    Raises:
+        NotImplementedError: always, until the cleanup exists.
+    """
+    raise NotImplementedError(
+        f"E2E sandbox cleanup of {sandbox_repo} is not implemented: nothing "
+        f"deletes the test issues or closes the test PRs it would leave"
+    )
 
 
 def verify_safety_limits(
@@ -217,18 +285,29 @@ def verify_safety_limits(
 ) -> tuple[bool, str]:
     """Verify sandbox is within safety limits.
 
+    It would query GitHub for the sandbox's open issue and PR counts. That
+    query is not implemented.
+
+    #3585 (ledger 0908, e2e_validation.py:231): this stub reported "safe"
+    without checking. It raises instead: a safety gate that cannot run is a
+    gate that failed.
+
     Args:
         sandbox_repo: Path to sandbox repository.
         max_issues: Maximum allowed issues.
         max_prs: Maximum allowed PRs.
 
     Returns:
-        Tuple of (safe, error_message).
-    """
-    # This would query GitHub to check current counts
-    # For now, assume safe
+        Tuple of (safe, error_message), once implemented.
 
-    return True, ""
+    Raises:
+        NotImplementedError: always, until the check exists.
+    """
+    raise NotImplementedError(
+        f"the E2E sandbox safety check for {sandbox_repo} is not implemented: "
+        f"nothing counts its open issues (limit {max_issues}) or PRs "
+        f"(limit {max_prs})"
+    )
 
 
 def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
@@ -263,12 +342,31 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
     iteration_count = state.get("iteration_count", 0)
+    issue = state.get("issue_number", 0)
+
+    # #3585 (ledger 0908, e2e_validation.py:291): the results are saved to the
+    # audit dir, and an unset one read as "." and wrote them into the working
+    # directory, while a missing one skipped the save silently. Checked
+    # before anything runs.
+    audit_dir_str = state.get("audit_dir", "") or ""
+    audit_dir = Path(audit_dir_str)
+    if not audit_dir_str or not audit_dir.is_dir():
+        return _halt_e2e_error(
+            f"the audit directory {audit_dir_str!r} for issue #{issue} is not a "
+            f"directory, so the E2E results would not be kept"
+        )
 
     # --------------------------------------------------------------------------
     # GUARD: Verify safety limits before running E2E
     # --------------------------------------------------------------------------
     if sandbox_repo:
-        safe, error = verify_safety_limits(sandbox_repo, max_issues, max_prs)
+        try:
+            safe, error = verify_safety_limits(sandbox_repo, max_issues, max_prs)
+        except NotImplementedError as err:
+            # #3585 (ledger 0908, e2e_validation.py:231)
+            return _halt_e2e_error(
+                f"{err}; issue #{issue} cannot run E2E against the sandbox"
+            )
         if not safe:
             print(f"    [GUARD] BLOCKED: Safety limit exceeded - {error}")
             return {
@@ -281,24 +379,33 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
         print(f"    Sandbox repo: {sandbox_repo}")
 
     # Run E2E tests
-    result = run_e2e_tests(test_files, sandbox_repo, repo_root)
+    try:
+        result = run_e2e_tests(test_files, sandbox_repo, repo_root)
+    except E2ERunFailed as err:
+        # #3585 (ledger 0908, e2e_validation.py:182, :188)
+        return _halt_e2e_error(f"{err}; issue #{issue}")
     output = result["stdout"] + "\n" + result["stderr"]
 
     print(f"    Return code: {result['returncode']}")
 
     # Save output to audit trail
-    audit_dir = Path(state.get("audit_dir", ""))
-    if audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "e2e-results.txt", output)
-    else:
-        file_num = state.get("file_counter", 0)
+    file_num = next_file_number(audit_dir)
+    save_audit_file(audit_dir, file_num, "e2e-results.txt", output)
 
     # Cleanup sandbox
     if sandbox_repo:
-        success, error = cleanup_sandbox(sandbox_repo)
+        try:
+            success, error = cleanup_sandbox(sandbox_repo)
+        except NotImplementedError as err:
+            # #3585 (ledger 0908, e2e_validation.py:210); unreachable while the
+            # safety check above also raises.
+            return _halt_e2e_error(f"{err}; issue #{issue}")
         if not success:
-            print(f"    [WARN] Sandbox cleanup failed: {error}")
+            # #3585 (ledger 0908, e2e_validation.py:300): it was a WARN.
+            return _halt_e2e_error(
+                f"sandbox cleanup of {sandbox_repo} failed for issue #{issue}: "
+                f"{error}"
+            )
 
     # Analyze results
     # Pytest return codes:
@@ -310,11 +417,29 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
     #   5: No tests were collected
     returncode = result["returncode"]
 
-    if returncode == 5:
-        # No tests collected - tests don't have @pytest.mark.e2e markers
-        # This is NOT a failure, just means no E2E tests to run
-        print("    No E2E tests collected (missing @pytest.mark.e2e markers)")
-        print("    Proceeding to finalize - add markers to enable E2E validation")
+    # Nothing collected. Exit 5, or the older pytest's wording on another code.
+    output_lower = output.lower()
+    if returncode == 5 or (
+        returncode != 0
+        and ("no tests ran" in output_lower or "collected 0 items" in output_lower)
+    ):
+        # #3585 (ledger 0908, e2e_validation.py:313, :337): E2E or
+        # integration files that collect nothing marked e2e or integration
+        # are a check that could not run, and halt. A run with no such file
+        # and no marked test has nothing to validate, the way N4.5 treats a
+        # target with no build hook; it goes on to finalize.
+        named = _e2e_files(test_files, repo_root)
+        if named:
+            return _halt_e2e_error(
+                f"pytest (exit {returncode}) collected no test marked e2e or "
+                f"integration from the E2E/integration file(s) of issue "
+                f"#{issue}: {', '.join(named)}. Mark their tests, or run with "
+                f"--skip-e2e"
+            )
+        print(
+            "    No E2E tests in this run: no E2E or integration test file, "
+            "and no test marked e2e or integration -- nothing to validate"
+        )
         return {
             "e2e_output": output,
             "file_counter": file_num,
@@ -322,27 +447,30 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
             "error_message": "",
         }
 
-    if returncode in (3, 4, -1):
-        # Internal error, usage error, or timeout - don't loop, just fail
-        print(f"    E2E validation error (code {returncode}) - not retrying")
+    if returncode not in (0, 1):
+        # #3585 (ledger 0908, e2e_validation.py:331, :334): only exit 1 is a
+        # test failure. Exit 2 (interrupted) and any code pytest does not
+        # document used to loop to N4 as failures; 3 and 4 halted without
+        # the issue or the output.
+        meaning = {
+            2: "interrupted", 3: "internal error", 4: "usage error",
+        }.get(returncode, "not a pytest exit code")
+        print(
+            f"ERROR [N6] E2E validation error: pytest exited {returncode} "
+            f"({meaning}) for issue #{issue}",
+            file=sys.stderr,
+        )
         return {
             "e2e_output": output,
             "file_counter": file_num,
-            "error_message": f"E2E validation error: pytest returned {returncode}",
+            "error_message": (
+                f"E2E validation error: pytest exited {returncode} ({meaning}) "
+                f"for issue #{issue}, which is not a test failure; output: "
+                f"{_tail(output)}"
+            ),
         }
 
     if returncode != 0:
-        # Fallback string check for edge cases (older pytest versions, etc.)
-        output_lower = output.lower()
-        if "no tests ran" in output_lower or "collected 0 items" in output_lower:
-            print("    No E2E tests found - proceeding to finalize")
-            return {
-                "e2e_output": output,
-                "file_counter": file_num,
-                "next_node": "N7_finalize",
-                "error_message": "",
-            }
-
         e2e_passed = _parse_e2e_passed(output)
         previous_e2e_passed = state.get("previous_e2e_passed", -1)
         current_failures = _extract_failed_test_names(output)

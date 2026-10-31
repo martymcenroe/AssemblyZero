@@ -57,7 +57,8 @@ def _state(**overrides):
         "iteration_count": 4,
         "max_iterations": DEFAULT_MAX_ITERATIONS,
         "coverage_target": 95,
-        "implementation_files": [],
+        # #3585: N5 halts when nothing names a coverage target.
+        "implementation_files": ["/tmp/repo/pkg/mod.py"],
         "skip_e2e": True,
         "previous_coverage": 92.0,
         "previous_passed": 45,

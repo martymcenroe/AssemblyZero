@@ -107,3 +107,66 @@ def _bypass_box_health_preflight():
         module, "check_box_health", lambda *a, **k: BoxHealth(True, [], "")
     ):
         yield
+
+
+def _offline_issue(_repo_root, issue):
+    """An issue as the launcher's preflights read it in a unit test: prose,
+    no decision table, so the form check has nothing to refuse."""
+    return (f"issue {issue}", "A prose issue with no decision table.\n")
+
+
+@pytest.fixture(autouse=True)
+def _preflight_issue_reads_are_offline():
+    """The launcher's form and contract preflights never call GitHub (#3585).
+
+    Since #3585 a preflight that cannot read its issue refuses the launch:
+    under ADR 0236 a check that could not run is a failure. A unit test's
+    target repo has no GitHub remote, so the real ``fetch_issue`` always fails
+    there, and every test that drives ``speedrun_roll.main()`` for some other
+    reason was refused at the form check. This rebinds only those two
+    preflights, and only when they are handed the real reader: a test that
+    patches ``speedrun_roll.fetch_issue`` (the form-gate launcher tests, the
+    retry tests) still passes its own. The checks themselves are tested with
+    explicit fetches in ``test_form_gate*.py`` and ``test_contract_fidelity*.py``.
+    """
+    module = sys.modules.get("speedrun_roll")
+    if module is None:
+        yield
+        return
+
+    real_fetch = module.fetch_issue
+    real_form = module.check_form_at_preflight
+    real_fidelity = module.check_contract_fidelity_at_preflight
+
+    def _reader(fetch):
+        return _offline_issue if fetch is real_fetch else fetch
+
+    def form(repo_root, issues, fetch, *args, **kwargs):
+        return real_form(repo_root, issues, _reader(fetch), *args, **kwargs)
+
+    def fidelity(repo_root, issues, fetch, *args, **kwargs):
+        return real_fidelity(repo_root, issues, _reader(fetch), *args, **kwargs)
+
+    with patch.object(module, "check_form_at_preflight", form), patch.object(
+        module, "check_contract_fidelity_at_preflight", fidelity
+    ):
+        yield
+
+@pytest.fixture(autouse=True)
+def _n5_measurement_note_is_not_written(monkeypatch):
+    """N5 tests measure fake runs in directories that are not git repositories
+    (#3810).
+
+    N5 notes its result on HEAD of ``repo_root`` (#2867), and since #3810 a
+    note git cannot write halts N5 rather than printing "(non-fatal)". The
+    unit tier's N5 tests stub the test run and point ``repo_root`` at a plain
+    directory, so every one of them would halt on a note it is not testing.
+    This rebinds only the name N5 calls through, the same way
+    ``_bypass_box_health_preflight`` does: ``checkpoints.record_measurement``
+    itself is untouched, and its tests and N5's halt on a failed note
+    (``tests/unit/test_checkpoints_loud_failure.py``) set the name back.
+    """
+    module = sys.modules.get("assemblyzero.workflows.testing.nodes.verify_phases")
+    if module is not None:
+        monkeypatch.setattr(module, "record_measurement", lambda *a, **k: True)
+    yield

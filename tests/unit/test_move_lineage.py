@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from assemblyzero.workflows.requirements.audit import move_lineage_to_done
 
 
@@ -38,14 +40,18 @@ def test_happy_path(tmp_path: Path) -> None:
     assert not active_dir.exists()
 
 
-def test_dir_not_found(tmp_path: Path) -> None:
-    """Returns None when the active lineage dir doesn't exist."""
+def test_dir_not_found(tmp_path: Path, operator_alerts) -> None:
+    """Raises and alerts when the active lineage dir doesn't exist (#3585).
+
+    Every caller checks for the directory first, so one that is missing here
+    is a failure; it used to be an INFO line and None.
+    """
     target_repo = tmp_path / "repo"
     nonexistent = target_repo / "docs" / "lineage" / "active" / "99-lld"
 
-    result = move_lineage_to_done(nonexistent, target_repo)
-
-    assert result is None
+    with pytest.raises(FileNotFoundError, match="99-lld"):
+        move_lineage_to_done(nonexistent, target_repo)
+    assert len(operator_alerts) == 1
 
 
 def test_dest_exists_skip(tmp_path: Path) -> None:
@@ -66,8 +72,9 @@ def test_dest_exists_skip(tmp_path: Path) -> None:
     assert (done_dir / "old-file.md").read_text() == "old content"
 
 
-def test_os_error_returns_none(tmp_path: Path, monkeypatch) -> None:
-    """Returns None on OSError during move."""
+def test_os_error_alerts_and_raises(tmp_path: Path, monkeypatch, operator_alerts) -> None:
+    """Alerts and re-raises an OSError during the move (#3585; it returned
+    None and the caller went on)."""
     target_repo, active_dir, _ = _setup_lineage(tmp_path)
 
     def failing_move(src, dst):
@@ -75,11 +82,13 @@ def test_os_error_returns_none(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr("assemblyzero.workflows.requirements.audit.shutil.move", failing_move)
 
-    result = move_lineage_to_done(active_dir, target_repo)
+    with pytest.raises(OSError, match="Permission denied"):
+        move_lineage_to_done(active_dir, target_repo)
 
-    assert result is None
     # Active dir should still exist (move failed)
     assert active_dir.exists()
+    assert len(operator_alerts) == 1
+    assert operator_alerts[0]["repo"] == str(target_repo)
 
 
 def test_creates_done_parent(tmp_path: Path) -> None:

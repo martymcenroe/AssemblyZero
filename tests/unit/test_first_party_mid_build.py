@@ -104,9 +104,13 @@ class TestThePyprojectSignal:
         )
         assert "realpkg" in _first_party_tops(repo)
 
-    def test_a_malformed_pyproject_is_not_fatal(self, repo):
+    def test_a_malformed_pyproject_cannot_be_read_past(self, repo):
+        """#3585: a malformed pyproject raises, naming the file. It used to be
+        read as declaring no package, so the repo's own package could be
+        judged as foreign."""
         _make(repo, "src/pkg/mod.py", pyproject="this is not toml [[[")
-        assert "pkg" in _first_party_tops(repo)
+        with pytest.raises(vc.CompletenessCannotCheck, match="pyproject.toml"):
+            _first_party_tops(repo)
 
     def test_a_missing_pyproject_is_not_fatal(self, repo):
         _make(repo, "src/pkg/mod.py")

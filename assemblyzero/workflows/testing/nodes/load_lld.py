@@ -19,6 +19,7 @@ from assemblyzero.utils.shell import run_command
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,28 @@ def _framework_resolution_failed(issue_number: int, error: ValueError) -> dict[s
     return {"error_message": message}
 
 
+def _halt_spec_unusable(message: str) -> dict[str, Any]:
+    """N0's halt for a spec or LLD the run cannot be built from (#3585).
+
+    Not approved, no test plan, no requirements, no files to implement: the
+    document the upstream stage handed over is the defect, and every later
+    node would spend against it. Said at ERROR on stderr; the error_message
+    routes to HALT, which alerts.
+    """
+    message = f"GUARD: {message}"
+    print(f"ERROR [N0] {message}", file=sys.stderr)
+    return {"error_message": message}
+
+
+def _halt_input_unreadable(message: str) -> dict[str, Any]:
+    """N0's halt for an input it found and could not read (#3585).
+
+    Said at ERROR on stderr; the error_message routes to HALT, which alerts.
+    """
+    print(f"ERROR [N0] {message}", file=sys.stderr)
+    return {"error_message": message}
+
+
 def _frameworks_with_directories(configs: list[dict]) -> dict[str, str]:
     """`{framework: directory}` for the run record (#3707)."""
     return {
@@ -147,11 +170,23 @@ def validate_spec_structure(content: str) -> None:
         WorkflowParsingError: If Section 10 heading is not found, or if
             legacy Section 9 test mapping is detected.
     """
+    error = spec_structure_error(content)
+    if error:
+        raise WorkflowParsingError(error)
+
+
+def spec_structure_error(content: str) -> str:
+    """Why `content` fails the Section 10 rule, or "" when it passes (#3585).
+
+    `validate_spec_structure` raises this reason. A caller that tries more
+    than one source asks here instead, so it can record each source's reason
+    without catching an exception per source.
+    """
     # Issue #608: Explicitly reject legacy Section 9 test mapping headings.
     # This gives a clear migration message rather than the generic "Expected
     # Section 10" error, so authors know *what* to change.
     if _LEGACY_SECTION_9_PATTERN.search(content):
-        raise WorkflowParsingError(
+        return (
             "Legacy Section 9 test mapping detected. "
             "Migrate to Section 10 per standard 0701 v1.1. "
             "Expected: ## 10. Test Mapping"
@@ -160,7 +195,8 @@ def validate_spec_structure(content: str) -> None:
     # Require Section 10, tolerate whitespace around the number and period
     pattern = r"^##\s*10\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|Test\s*Plan|Testing)"
     if not re.search(pattern, content, re.MULTILINE | re.IGNORECASE):
-        raise WorkflowParsingError("Expected: ## 10. Test Mapping")
+        return "Expected: ## 10. Test Mapping"
+    return ""
 
 
 def extract_test_plan_section(lld_content: str) -> str:
@@ -225,6 +261,15 @@ def extract_spec_test_functions(spec_content: str) -> dict[str, Any]:
 
     Returns empty lists when the spec carries no executable functions, which
     is the signal for the caller to fall back to table-derived scenarios.
+    That absence is a legitimate answer and stays quiet.
+
+    #3585 (ledger 0908, load_lld.py:202): a Section 10 that cannot be parsed
+    (none, or a legacy Section 9) is not that answer. It used to return the
+    same empty suite, so no caller could tell "no functions" from "no test
+    plan". It now also carries `error`, the reason Section 10 fails, so a
+    caller that needs the section can say why it is missing. Raising was not
+    taken: the spec workflow's completeness checks call this on drafts, where
+    a missing Section 10 is a revisable defect their own check reports.
     """
     empty: dict[str, Any] = {"imports": "", "functions": []}
     if not spec_content:
@@ -233,10 +278,10 @@ def extract_spec_test_functions(spec_content: str) -> dict[str, Any]:
     # Only look inside Section 10. A spec's other sections legitimately show
     # example test code (Pattern References, Implementation Notes), and those
     # are illustrations rather than the suite.
-    try:
-        section = extract_test_plan_section(spec_content)
-    except WorkflowParsingError:
-        return empty
+    error = spec_structure_error(spec_content)
+    if error:
+        return {**empty, "error": error}
+    section = extract_test_plan_section(spec_content)
 
     # The suite lives in a python fence. Take the first fence that actually
     # defines test functions -- a fence showing a config snippet is not it.
@@ -343,6 +388,10 @@ def scenarios_from_spec_functions(
     return scenarios
 
 
+class LLDRebuildFailed(RuntimeError):
+    """Rebuilding the LLD from refs raised; N0 cannot say whether it exists."""
+
+
 def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
     """Find the LLD file for an issue number, rebuilding from refs on a miss.
 
@@ -355,12 +404,22 @@ def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
     graveyard grafts, or the janitor's leavings refs — loudly — before
     concluding the LLD genuinely does not exist anywhere.
 
+    None means the LLD is on no ref either (or the repo is not a git repo):
+    a legitimate answer, and quiet. #3585 (ledger 0908, load_lld.py:324): a
+    rebuild that RAISES is not that answer. It used to print a WARN and
+    return the same None, so the run went on against the spec as if no LLD
+    existed. It now says the failure at ERROR on stderr and raises
+    LLDRebuildFailed; `load_lld` turns it into a halt, which alerts.
+
     Args:
         issue_number: GitHub issue number.
         repo_root: Repository root path.
 
     Returns:
         Path to LLD file if found or rebuilt, None otherwise.
+
+    Raises:
+        LLDRebuildFailed: the rebuild from refs raised.
     """
     lld_dir = repo_root / LLD_ACTIVE_DIR
 
@@ -391,23 +450,25 @@ def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
         return found
 
     # The cache missed. Rebuild the canonical copy from the refs before
-    # concluding absence — only in a git repo, and never raising: a loader
-    # that cannot rebuild must report the same absence it always did.
+    # concluding absence, only in a git repo.
     if (repo_root / ".git").exists():
-        try:
-            from assemblyzero.speedrun.restore import restore_artifact
+        from assemblyzero.speedrun.restore import restore_artifact
 
-            canonical = lld_dir / f"LLD-{issue_number:03d}.md"
-            if restore_artifact(
+        canonical = lld_dir / f"LLD-{issue_number:03d}.md"
+        try:
+            restored = restore_artifact(
                 repo_root, issue_number, str(canonical),
                 log=lambda m: print(f"    {m}"),
-            ):
-                return _glob_once()
-        except Exception as exc:  # noqa: BLE001
-            # fail-open: the rebuild is a recovery attempt on a path that
-            # previously always reported absence; a rebuild error must not
-            # turn a clean "not found" into a crash.
-            print(f"    [WARN] LLD rebuild from refs failed: {exc}")
+            )
+        except Exception as exc:  # said and raised below
+            message = (
+                f"the LLD for issue #{issue_number} could not be rebuilt from "
+                f"the refs of {repo_root}: {type(exc).__name__}: {exc}"
+            )
+            print(f"ERROR [N0] {message}", file=sys.stderr)
+            raise LLDRebuildFailed(message) from exc
+        if restored:
+            return _glob_once()
 
     return None
 
@@ -941,6 +1002,12 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
 
     Returns:
         List of dicts with 'path', 'change_type', and 'description'.
+
+    Raises:
+        WorkflowParsingError: #3585 (ledger 0908, load_lld.py:896) when there
+            is no such table, or it names no file. Both used to return [],
+            with no message, and the run went on with no red-phase import
+            until N4 found nothing to implement.
     """
     files = []
 
@@ -988,7 +1055,10 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
                 break
 
     if not match:
-        return files
+        raise WorkflowParsingError(
+            "no Files to Implement table: expected '## 2. Files to Implement' "
+            "(spec) or '### 2.1 Files Changed' (LLD) followed by a table"
+        )
 
     table_rows = match.group(1)
 
@@ -1029,6 +1099,11 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
             "description": description,
         })
 
+    if not files:
+        raise WorkflowParsingError(
+            "the Files to Implement table names no file (only headers, "
+            "directories or order numbers)"
+        )
     return files
 
 
@@ -1087,18 +1162,30 @@ def _load_from_issue(  # pragma: no cover
     gate_log(f"    Issue title: {title}")
     gate_log(f"    Body length: {len(body)} chars")
 
-    # Extract what we can from the issue body
-    # Issue #608: extract_test_plan_section now enforces Section 10;
-    # for issue-only mode, gracefully handle missing section
+    # Extract what we can from the issue body.
+    # #3585 (ledger 0908, load_lld.py:1001): Issue #608 enforces Section 10,
+    # and issue-only mode used to swallow its absence into an empty plan and
+    # report success. The issue body is the plan here, so it must carry one.
     try:
         test_plan_section = extract_test_plan_section(lld_content)
-    except WorkflowParsingError:
-        test_plan_section = ""
+    except WorkflowParsingError as e:
+        return _halt_spec_unusable(
+            f"issue-only mode: the body of issue #{issue_number} has no "
+            f"Section 10 test plan ({e}); add a '## 10. Test Plan' section to "
+            f"the issue"
+        )
     test_scenarios = parse_test_scenarios(test_plan_section) if test_plan_section else []
     detected_types = detect_test_types(lld_content)
     requirements = extract_requirements(lld_content)
     coverage_target = extract_coverage_target(lld_content) or 80
-    files_to_modify = extract_files_to_modify(lld_content)
+    try:
+        files_to_modify = extract_files_to_modify(lld_content)
+    except WorkflowParsingError as e:
+        # #3585 (ledger 0908, load_lld.py:896)
+        return _halt_spec_unusable(
+            f"issue-only mode: the body of issue #{issue_number} names no "
+            f"files to implement ({e}); add a '## 2. Files to Implement' table"
+        )
 
     gate_log(f"    Found {len(test_scenarios)} test scenarios")
     gate_log(f"    Detected test types: {detected_types}")
@@ -1243,44 +1330,74 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         print(f"    [GUARD] BLOCKED: LLD content too short ({len(lld_content)} chars)")
         return {"error_message": "GUARD: LLD content too short"}
 
+    # #3585 (ledger 0908, load_lld.py:1146): an unapproved spec halts. It
+    # used to print a WARNING and go on to build from it.
     if "APPROVED" not in lld_content.upper():
-        print("    [GUARD] WARNING: LLD may not be approved (no APPROVED marker)")
+        return _halt_spec_unusable(
+            f"the implementation spec at {lld_path_obj} carries no APPROVED "
+            f"marker, so it may not have passed review; N0 will not build "
+            f"from it"
+        )
     # --------------------------------------------------------------------------
 
     # Issue #656: Also load the original LLD if we loaded an impl spec.
     # The impl spec's Section 3 is "Current State", not "Requirements",
     # and its Section 10 may use a different format. The original LLD
     # has the canonical Section 3 (Requirements) and Section 10.1 (Test Scenarios).
+    # No separate LLD at all is a legitimate state: the spec serves for both.
     original_lld_content = lld_content  # default: use spec content
     original_lld_readable = False  # #2552: tracked for the zero-req event
-    original_lld_path = find_lld_path(issue_number, repo_root)
-    if not original_lld_path and state.get("original_repo_root"):
-        original_lld_path = find_lld_path(issue_number, Path(state["original_repo_root"]))
+    try:
+        original_lld_path = find_lld_path(issue_number, repo_root)
+        if not original_lld_path and state.get("original_repo_root"):
+            original_lld_path = find_lld_path(
+                issue_number, Path(state["original_repo_root"])
+            )
+    except LLDRebuildFailed as e:
+        # #3585 (ledger 0908, load_lld.py:324): already said at ERROR.
+        return {"error_message": str(e)}
     if original_lld_path and original_lld_path.exists():
         try:
             original_lld_content = original_lld_path.read_text(encoding="utf-8")
             original_lld_readable = True
             print(f"    Original LLD: {original_lld_path}")
-        except OSError:
-            print("    [WARN] Could not read original LLD, using spec content")
+        except OSError as e:
+            # #3585 (ledger 0908, load_lld.py:1164): it used to print a WARN
+            # and go on with the spec standing in for the LLD it had found.
+            return _halt_input_unreadable(
+                f"the original LLD for issue #{issue_number} at "
+                f"{original_lld_path} could not be read: "
+                f"{type(e).__name__}: {e}"
+            )
     else:
         print("    [INFO] No separate LLD found, using spec content for parsing")
 
     # Extract test plan section — try original LLD first, fall back to spec
     # Issue #608: Now enforces Section 10 and raises WorkflowParsingError on failure
+    # #3585 (ledger 0908, load_lld.py:1180, :1182): each source's error is
+    # recorded. A spec whose Section 10 serves after the LLD's failed is the
+    # order #656 set, and the LLD's error is printed; neither serving halts.
     test_plan_section = ""
-    for content_source, label in [
-        (original_lld_content, "original LLD"),
-        (lld_content, "spec"),
+    section_errors: list[str] = []
+    for content_source, label, where in [
+        (original_lld_content, "original LLD", original_lld_path or lld_path_obj),
+        (lld_content, "spec", lld_path_obj),
     ]:
-        try:
-            test_plan_section = extract_test_plan_section(content_source)
-            if test_plan_section:
-                break
-        except WorkflowParsingError:
+        error = spec_structure_error(content_source)
+        if error:
+            section_errors.append(f"the {label} at {where}: {error}")
             continue
+        test_plan_section = extract_test_plan_section(content_source)
+        if test_plan_section:
+            break
+        section_errors.append(f"the {label} at {where}: Section 10 is empty")
     if not test_plan_section:
-        print("    [GUARD] WARNING: No Section 10 test plan found in LLD or spec")
+        return _halt_spec_unusable(
+            f"no Section 10 test plan for issue #{issue_number}: "
+            + "; ".join(section_errors)
+        )
+    for error in section_errors:
+        print(f"    [N0] no usable test plan in {error}; using the next source")
 
     # Parse test scenarios.
     #
@@ -1320,23 +1437,22 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
 
     # Extract requirements — use original LLD (has Section 3: Requirements)
     requirements = extract_requirements(original_lld_content)
-    requirements_empty_reason = ""
     if not requirements:
         # Diagnostic: try spec content as fallback
         requirements = extract_requirements(lld_content)
         if requirements:
             print(f"    Found {len(requirements)} requirements (from spec)")
         else:
-            # #2552: a named event, never a WARN that scrolls past. The
-            # reason travels in state so N1's guard and the N4b gate can
-            # say WHY the denominator is zero — declared-none and
-            # unreadable are different repairs, and the second names the
-            # path it searched.
-            requirements_empty_reason = describe_zero_requirements(
+            # #2552: a named event, never a WARN that scrolls past;
+            # declared-none and unreadable are different repairs, and the
+            # second names the path it searched. #3585 (ledger 0908,
+            # load_lld.py:1224): the event is a halt at N0. It used to travel
+            # in state as `requirements_empty_reason` while the run went on
+            # until N1's guard or the N4b gate refused the zero.
+            return _halt_spec_unusable(describe_zero_requirements(
                 issue_number, repo_root, str(lld_path_obj),
                 original_lld_path, original_lld_readable,
-            )
-            print(f"    [ZERO-REQUIREMENTS] {requirements_empty_reason}")
+            ))
     else:
         print(f"    Found {len(requirements)} requirements (from LLD)")
 
@@ -1345,7 +1461,14 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     print(f"    Coverage target: {coverage_target}%")
 
     # Extract files to modify from Section 2.1
-    files_to_modify = extract_files_to_modify(lld_content)
+    try:
+        files_to_modify = extract_files_to_modify(lld_content)
+    except WorkflowParsingError as e:
+        # #3585 (ledger 0908, load_lld.py:896)
+        return _halt_spec_unusable(
+            f"the implementation spec at {lld_path_obj} names no files to "
+            f"implement for issue #{issue_number}: {e}"
+        )
     print(f"    Found {len(files_to_modify)} files to modify")
 
     # Create audit directory
@@ -1411,8 +1534,6 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         "detected_test_types": detected_types,
         "coverage_target": coverage_target,
         "requirements": requirements,
-        # #2552: why the denominator is zero, when it is. "" otherwise.
-        "requirements_empty_reason": requirements_empty_reason,
         "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
         "file_counter": file_num,

@@ -21,6 +21,7 @@ Architectural Constraints:
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Literal
 
@@ -134,7 +135,9 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
             f"Completeness gate: cannot certify an implementation against "
             f"zero requirements -- {reason} (#2552)"
         )
-        print(f"    [N4b] {message}")
+        # Ledger 0908, line 119 (compliant: the error_message routes to
+        # HALT, which alerts). Said at ERROR on stderr where it happens.
+        print(f"ERROR [N4b] {message}", file=sys.stderr)
         log_workflow_execution(
             target_repo=repo_root,
             issue_number=issue_number,

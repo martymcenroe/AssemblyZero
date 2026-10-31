@@ -15,7 +15,15 @@ verifies one aspect of spec quality:
 This node populates:
 - completeness_issues: List of issue descriptions from failed checks
 - validation_passed: Whether all checks passed
-- error_message: "" on success, error text on failure
+- error_message: "" while the draft can still be revised; the reason when
+  N3 halts, which is a check that cannot run (``completeness_cannot_check``
+  carries the same text) or the iteration cap
+
+#3585 (ADR 0236): a check that cannot run raises ``CompletenessCannotCheck``
+and N3 halts through one return, which the router sends to HALT and HALT
+alerts. A check that runs and finds a defect in the draft fails, and the
+draft is revised. Absence that is a legitimate answer (no Modify files, no
+pattern references, no pyproject) stays quiet and says so in its details.
 """
 
 import ast
@@ -36,6 +44,7 @@ from assemblyzero.workflows.implementation_spec.state import (
     PatternRef,
 )
 from assemblyzero.workflows.implementation_spec.base_tree import (
+    BaseTreeError,
     base_ref,
     exists_on_base,
     read_from_base,
@@ -45,6 +54,7 @@ from assemblyzero.workflows.implementation_spec.check_classification import (
     is_proxy,
 )
 from assemblyzero.workflows.implementation_spec.criteria_coverage import (
+    CriteriaTableError,
     criteria_coverage,
     format_report as format_coverage_report,
 )
@@ -84,11 +94,29 @@ SPECIFICITY_INDICATORS = [
 
 
 class CompletenessCannotCheck(RuntimeError):
-    """A completeness check could not run at all (#3767).
+    """A completeness check, or the telemetry N3 records with them, could not
+    run at all (#3767, #3585).
 
     Distinct from a check that ran and failed: the draft did not cause it and
-    no revision can fix it, so N3 halts the run (ADR 0236).
+    no revision can fix it, so N3 halts the run (ADR 0236). The message names
+    the check, its subject (the repo, the file, the ref) and the cause.
     """
+
+
+#: The completeness issue a draft too short to check is reported as.
+SHORT_DRAFT_ISSUE = (
+    "Spec draft is empty or too short (< 100 chars). "
+    "N2 must generate a substantive Implementation Spec."
+)
+
+
+def _failed_check(*, check_name: str, details: str) -> CompletenessCheck:
+    """A check that ran and found a defect in the draft.
+
+    Used where a handler reports what it caught as the draft's failure: the
+    node turns it into a revision prompt, or at the cap into a HALT.
+    """
+    return CompletenessCheck(check_name=check_name, passed=False, details=details)
 
 
 # =============================================================================
@@ -96,37 +124,15 @@ class CompletenessCannotCheck(RuntimeError):
 # =============================================================================
 
 
-def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
-    """N3: Check that spec meets mechanical completeness criteria.
+def _run_checks(
+    state: ImplementationSpecState, spec_draft: str
+) -> list[CompletenessCheck]:
+    """Every completeness check over the draft, in order, then the telemetry.
 
-    Issue #304: Implementation Readiness Review Workflow
-
-    Runs a series of mechanical checks on the generated spec draft to
-    verify it has sufficient detail for autonomous implementation. Failed
-    checks produce actionable error messages that guide N2 revision.
-
-    Steps:
-    1. Verify spec_draft exists and is non-trivial
-    2. Run each completeness check independently
-    3. Collect results and determine pass/fail
-    4. Return state updates with check results
-
-    Args:
-        state: Current workflow state. Requires:
-            - spec_draft: Generated Implementation Spec markdown (from N2)
-            - files_to_modify: List[FileToModify] from N0
-            - pattern_references: List[PatternRef] from N1
-            - repo_root: Repository root path (for pattern validation)
-
-    Returns:
-        Dict with state field updates:
-        - completeness_issues: List of issue descriptions (empty if all passed)
-        - validation_passed: True if all checks passed
-        - error_message: "" on success, error text on failure
+    Raises ``CompletenessCannotCheck`` when a check, or the hallucination
+    telemetry, cannot run; ``validate_completeness`` turns that into its one
+    halt (#3585).
     """
-    print("\n[N3] Validating mechanical completeness...")
-
-    spec_draft = state.get("spec_draft", "")
     files_to_modify = state.get("files_to_modify", [])
     pattern_references = state.get("pattern_references", [])
     repo_root_str = state.get("repo_root", "")
@@ -134,22 +140,6 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     # (#2012) and mid-arc has none of the arc; base_tree reads git instead.
     base_branch = state.get("base_branch", "")
 
-    # --------------------------------------------------------------------------
-    # GUARD: Must have a spec draft to validate
-    # --------------------------------------------------------------------------
-    if not spec_draft or len(spec_draft.strip()) < 100:
-        print("    [GUARD] BLOCKED: Spec draft is empty or too short")
-        return {
-            "completeness_issues": [
-                "Spec draft is empty or too short (< 100 chars). "
-                "N2 must generate a substantive Implementation Spec."
-            ],
-            "validation_passed": False,
-            "error_message": "",
-        }
-    # --------------------------------------------------------------------------
-
-    # Run all checks
     checks: list[CompletenessCheck] = []
 
     # Check 1: Every "Modify" file must have current state excerpt
@@ -202,21 +192,11 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     _log_check(check_imports)
 
     # Check 6b (#3755): calls into existing first-party code the plan does not
-    # change must use keywords the callee accepts.
-    try:
-        check_calls = check_call_signatures_match(
-            spec_draft, files_to_modify, repo_root_str, base_branch
-        )
-    except CompletenessCannotCheck as exc:
-        # #3767: route_after_validation sends this to HALT, which alerts.
-        message = f"N3 completeness gate cannot run: {exc}"
-        print(f"ERROR [N3] {message}", file=sys.stderr)
-        return {
-            "completeness_issues": [message],
-            "validation_passed": False,
-            "completeness_cannot_check": message,
-            "error_message": message,
-        }
+    # change must use keywords the callee accepts. A callee that does not parse
+    # raises CompletenessCannotCheck (#3767), which halts N3.
+    check_calls = check_call_signatures_match(
+        spec_draft, files_to_modify, repo_root_str, base_branch
+    )
     checks.append(check_calls)
     _log_check(check_calls)
 
@@ -292,26 +272,28 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     _log_check(check_manifest)
 
     # Telemetry (#1812): record detector outcomes for the spec draft (every
-    # pass) and the LLD (first pass only). Record-only — the try/except
-    # guarantees telemetry can never alter validation_passed.
+    # pass) and the LLD (first pass only). It never changes a check's verdict.
+    # #3585 (ADR 0236): a failure to record it halts N3 with the cause. It
+    # used to print a WARNING to stdout, and the measurement went missing.
     try:
         _record_hallucination_telemetry(state, spec_draft, gathered_symbols)
-    except Exception as e:  # noqa: BLE001 — record-only contract
-        print(f"    [telemetry] WARNING: hallucination telemetry failed: {e}")
+    except CompletenessCannotCheck:
+        raise
+    except Exception as exc:
+        # Converted and raised, never swallowed: N3 halts with the cause.
+        raise CompletenessCannotCheck(
+            f"hallucination telemetry for issue {state.get('issue_number', 0)} "
+            f"could not be recorded: {type(exc).__name__}: {exc}"
+        ) from exc
 
-    # #2540: a proxy-heuristic never outranks an engaged judge examining the
-    # same dimension. Applied here, once, over every check -- so the rule is
-    # the table's, not each check's call site's, and a check added tomorrow
-    # obeys it without anyone remembering to write the demotion again.
-    review_engaged = review_is_engaged(state)
-    checks = [_demote_proxies(check, review_engaged) for check in checks]
+    return checks
 
-    # Collect issues from failed checks
-    completeness_issues = [
-        check["details"] for check in checks if not check["passed"]
-    ]
 
-    validation_passed = len(completeness_issues) == 0
+def _print_results(
+    checks: list[CompletenessCheck], completeness_issues: list[str]
+) -> None:
+    """The console summary of one validation pass."""
+    validation_passed = not completeness_issues
 
     # Report summary. #1870: a check with nothing to check reports passed=True
     # with "not applicable" in its details, so a spec that verified almost
@@ -340,6 +322,89 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
         print(f"    BLOCKED: {len(completeness_issues)} check(s) failed")
         for issue in completeness_issues:
             print(f"      - {issue[:120]}...")
+
+
+def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
+    """N3: Check that spec meets mechanical completeness criteria.
+
+    Issue #304: Implementation Readiness Review Workflow
+
+    Runs a series of mechanical checks on the generated spec draft to
+    verify it has sufficient detail for autonomous implementation. Failed
+    checks produce actionable error messages that guide N2 revision.
+
+    Steps:
+    1. Verify spec_draft exists and is non-trivial
+    2. Run each completeness check independently
+    3. Collect results and determine pass/fail
+    4. Return state updates with check results
+
+    Args:
+        state: Current workflow state. Requires:
+            - spec_draft: Generated Implementation Spec markdown (from N2)
+            - files_to_modify: List[FileToModify] from N0
+            - pattern_references: List[PatternRef] from N1
+            - repo_root: Repository root path; every check that reads the
+              target repo needs it, and N3 halts without it (#3585)
+            - lld_content: the approved LLD (from N0); N3 halts without it
+
+    Returns:
+        Dict with state field updates:
+        - completeness_issues: List of issue descriptions (empty if all passed)
+        - validation_passed: True if all checks passed
+        - completeness_cannot_check: set only when a check cannot run
+        - error_message: "" while the draft can still be revised; the reason
+          when N3 halts (a check that cannot run, or the iteration cap)
+    """
+    print("\n[N3] Validating mechanical completeness...")
+
+    spec_draft = state.get("spec_draft", "")
+
+    # --------------------------------------------------------------------------
+    # GUARD: a draft too short to check is a draft defect. #3585: it used to
+    # return here with an empty error_message, so a halt at the cap carried no
+    # reason and the banner read "unknown". It now takes the same bookkeeping
+    # as a failed check: revised below the cap, the cap message at the cap.
+    # --------------------------------------------------------------------------
+    if not spec_draft or len(spec_draft.strip()) < 100:
+        print("    [GUARD] BLOCKED: Spec draft is empty or too short")
+        checks: list[CompletenessCheck] = []
+        completeness_issues = [SHORT_DRAFT_ISSUE]
+    else:
+        try:
+            checks = _run_checks(state, spec_draft)
+        except (CompletenessCannotCheck, BaseTreeError, CriteriaTableError) as exc:
+            # #3767, #3585: every check that cannot run halts through here;
+            # route_after_validation sends it to HALT, which alerts. The base
+            # tree and the criteria join raise their own types when git or the
+            # criteria table cannot be read (#3585), named here with the cause.
+            cause = (
+                str(exc) if isinstance(exc, CompletenessCannotCheck)
+                else f"{type(exc).__name__}: {exc}"
+            )
+            message = f"N3 completeness gate cannot run: {cause}"
+            print(f"ERROR [N3] {message}", file=sys.stderr)
+            return {
+                "completeness_issues": [message],
+                "validation_passed": False,
+                "completeness_cannot_check": message,
+                "error_message": message,
+            }
+
+        # #2540: a proxy-heuristic never outranks an engaged judge examining
+        # the same dimension. Applied here, once, over every check -- so the
+        # rule is the table's, not each check's call site's, and a check added
+        # tomorrow obeys it without anyone remembering to write the demotion
+        # again.
+        review_engaged = review_is_engaged(state)
+        checks = [_demote_proxies(check, review_engaged) for check in checks]
+
+        completeness_issues = [
+            check["details"] for check in checks if not check["passed"]
+        ]
+        _print_results(checks, completeness_issues)
+
+    validation_passed = len(completeness_issues) == 0
 
     # Closes #1465: Persist this iteration's failures into a cumulative
     # breakdown so the next N2 revision sees "we already tried fixing this
@@ -607,9 +672,10 @@ def _record_hallucination_telemetry(
     event is recorded instead of silence, so "not checked" is never
     mistaken for "checked, clean".
 
-    Record-only: this function writes events and returns nothing. It is
-    called inside a try/except in the node; sink failures degrade to
-    warnings inside the telemetry module itself.
+    Record-only: this function writes events and returns nothing, and no
+    event changes a check's verdict. A failure here is still a failure
+    (#3585): ``_run_checks`` raises it as ``CompletenessCannotCheck``, so N3
+    halts with the cause instead of dropping the measurement.
     """
     iteration: int = state.get("review_iteration", 0)  # type: ignore[assignment]
     repo: str = state.get("repo_root", "")  # type: ignore[assignment]
@@ -1349,8 +1415,14 @@ def check_pattern_references_valid(
 
     Returns:
         CompletenessCheck with pass/fail result and details.
+
+    Raises:
+        CompletenessCannotCheck: there are references to check and no repo
+            root to check them in (#3585). This used to pass, "skipping file
+            existence checks".
     """
     if not pattern_refs:
+        # N1 finding no pattern references is an answer, not a failure.
         return CompletenessCheck(
             check_name="pattern_references_valid",
             passed=True,
@@ -1358,14 +1430,9 @@ def check_pattern_references_valid(
         )
 
     if not repo_root_str:
-        # Can't validate without repo root — pass with warning
-        return CompletenessCheck(
-            check_name="pattern_references_valid",
-            passed=True,
-            details=(
-                "No repo_root available for pattern validation — "
-                "skipping file existence checks."
-            ),
+        raise CompletenessCannotCheck(
+            f"pattern_references_valid cannot check {len(pattern_refs)} "
+            f"pattern reference(s): N3 was given no repo root to find them in"
         )
 
     repo_root = Path(repo_root_str)
@@ -1470,12 +1537,16 @@ def check_import_targets_exist(
 
     Returns:
         CompletenessCheck with pass/fail result and details.
+
+    Raises:
+        CompletenessCannotCheck: no repo root, or the target environment
+            cannot answer for the third-party imports (#3585). Both used to
+            pass, the first as "skipping" and the second with a note.
     """
     if not repo_root_str:
-        return CompletenessCheck(
-            check_name="import_targets_exist",
-            passed=True,
-            details="No repo_root available for import validation — skipping.",
+        raise CompletenessCannotCheck(
+            "import_targets_exist cannot run: N3 was given no repo root to "
+            "resolve the spec's imports against"
         )
 
     repo_root = Path(repo_root_str)
@@ -1543,22 +1614,15 @@ def check_import_targets_exist(
             else:
                 third_party.setdefault(top_level, []).append(module_path)
 
-    env_note = ""
     if third_party:
+        # The target env is the only honest authority for third-party imports
+        # (#1904: wrong-environment answers are worse than none). #3585: when
+        # it cannot answer, the probe raises and N3 halts; the imports used to
+        # pass with a note that they were not validated.
         probe = _probe_target_env(repo_root, sorted(third_party))
-        if probe is None:
-            # Cannot validate ≠ missing. The target env is the only honest
-            # authority for third-party imports (#1904: wrong-environment
-            # answers are worse than none); without it, give the benefit
-            # of the doubt and say so.
-            env_note = (
-                f" Target environment unavailable — {len(third_party)} "
-                f"third-party top-level import(s) not validated."
-            )
-        else:
-            for top, modules in sorted(third_party.items()):
-                if not probe.get(top, False):
-                    unresolvable.extend(modules)
+        for top, modules in sorted(third_party.items()):
+            if not probe.get(top, False):
+                unresolvable.extend(modules)
 
     if unresolvable:
         mod_list = ", ".join(f"`{m}`" for m in unresolvable[:5])
@@ -1600,7 +1664,7 @@ def check_import_targets_exist(
     return CompletenessCheck(
         check_name="import_targets_exist",
         passed=True,
-        details=f"All {len(checked)} import targets validated.{env_note}",
+        details=f"All {len(checked)} import targets validated.",
     )
 
 
@@ -1630,12 +1694,22 @@ def _same_named_modules(
                 if path.stem == last or (path.name == "__init__.py" and path.parent.name == last):
                     found.add(dotted(rel, prefix))
         if base_ref_name:
+            where = f"{prefix}/{top}" if prefix else top
             listing = subprocess.run(
-                ["git", "ls-tree", "-r", "--name-only", base_ref_name, "--",
-                 f"{prefix}/{top}" if prefix else top],
+                ["git", "ls-tree", "-r", "--name-only", base_ref_name, "--", where],
                 cwd=str(repo_root), capture_output=True, text=True,
                 encoding="utf-8", errors="replace", check=False,
             )
+            if listing.returncode != 0:
+                # #3585: a path absent from the ref lists nothing and exits 0;
+                # a non-zero exit is git failing (a bad ref), and an empty
+                # stdout must not read as "no module of that name".
+                raise CompletenessCannotCheck(
+                    f"import_targets_exist cannot list {where} on "
+                    f"{base_ref_name} in {repo_root}: `git ls-tree` exited "
+                    f"{listing.returncode}: "
+                    f"{listing.stderr.strip() or '(no stderr)'}"
+                )
             for rel in listing.stdout.splitlines():
                 if rel.endswith((f"/{last}.py", f"/{last}/__init__.py")):
                     found.add(dotted(rel, prefix))
@@ -1717,12 +1791,14 @@ def check_call_signatures_match(
     skipped, since the spec may be changing it; so is a class without its own
     `__init__` and any signature with `**kwargs`. A fence that does not parse
     is left to `python_fences_parse`.
+
+    No repo root raises ``CompletenessCannotCheck`` (#3585); it used to pass
+    as "not applicable".
     """
     if not repo_root_str:
-        return CompletenessCheck(
-            check_name="call_signatures_match",
-            passed=True,
-            details="No repo_root available — check not applicable.",
+        raise CompletenessCannotCheck(
+            "call_signatures_match cannot run: N3 was given no repo root to "
+            "read the callees from"
         )
     repo_root = Path(repo_root_str)
     base_ref_name = base_ref(repo_root, base_branch) if base_branch else ""
@@ -1899,21 +1975,23 @@ def check_criteria_have_tests(spec: str, lld_content: str) -> CompletenessCheck:
     omits 12 required state matrix tests" among the reasons; here it is free and
     names all twelve at iteration zero, so one revision can fix the whole set.
 
-    An LLD with no pass-criteria table is not applicable rather than a failure --
-    the #1870 convention, so a spec that verified almost nothing cannot report a
-    full house.
+    #3585 (ADR 0236): a check that cannot run is not a pass. No LLD, an LLD
+    with no pass-criteria table, and criteria with no REQ tag to join on all
+    raise ``CompletenessCannotCheck``. They used to pass as "not applicable",
+    and no revision of the spec can fix any of them: the defect is upstream.
     """
     if not lld_content.strip():
-        return CompletenessCheck(
-            check_name="criteria_have_tests",
-            passed=True,
-            details=(
-                "Criterion coverage not applicable: the LLD was not available to "
-                "this node, so its pass criteria could not be read."
-            ),
+        raise CompletenessCannotCheck(
+            "criteria_have_tests cannot read the LLD's pass criteria: N3 was "
+            "given no LLD content"
         )
 
     report = criteria_coverage(spec, lld_content)
+    if not report.ran:
+        raise CompletenessCannotCheck(
+            f"criteria_have_tests cannot check the spec against the LLD: "
+            f"{report.reason}"
+        )
     return CompletenessCheck(
         check_name="criteria_have_tests",
         passed=report.ok,
@@ -1996,8 +2074,8 @@ def _normalise_distribution(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _declared_dependencies(pyproject_text: str) -> set[str] | None:
-    """Every distribution a pyproject declares, normalised; None if not TOML.
+def _declared_dependencies(pyproject_text: str) -> set[str]:
+    """Every distribution a pyproject declares, normalised.
 
     Reads the three shapes in use: PEP 621 lists (``[project] dependencies``,
     ``[project.optional-dependencies]``), Poetry tables
@@ -2006,17 +2084,15 @@ def _declared_dependencies(pyproject_text: str) -> set[str] | None:
     ``dependencies`` (or ``dependency-groups``), a table contributes the keys
     whose values are a version string or a spec table, and a list contributes
     the leading name of each string. Nothing else in the file is read.
+
+    Empty text declares nothing. Text that is not TOML raises
+    ``tomllib.TOMLDecodeError`` (#3585), and the caller names the file; it
+    used to read as None, reported as "could not be parsed" while the check
+    went on.
     """
     if not pyproject_text:
         return set()
-    try:
-        data = tomllib.loads(pyproject_text)
-    except tomllib.TOMLDecodeError:
-        # fail-open: an unparseable pyproject declares no plugins, which makes
-        # the fixture check STRICTER, never quieter -- every plugin fixture is
-        # then reported as undeclared -- and None lets the report say "could
-        # not be parsed" rather than "declares none".
-        return None
+    data = tomllib.loads(pyproject_text)
 
     names: set[str] = set()
 
@@ -2049,36 +2125,40 @@ def _declared_dependencies(pyproject_text: str) -> set[str] | None:
 
 def _pyproject_for_run(repo_root_str: str, base_branch: str) -> tuple[str, str]:
     """The target repo's pyproject as the run's base ships it (#2684, #2668),
-    and where it came from -- so a fallback is named in the report rather
-    than taken silently. Falls to the checkout when the run names no base or
-    the base has none; ``("", <why>)`` when nothing can be read."""
+    and where it came from, so the report names its source. Falls to the
+    checkout when the run names no base or the base has none.
+
+    A checkout with no pyproject.toml is an answer, ``("", <why>)``: the repo
+    declares no plugins, and the report says so. #3585: a base that cannot be
+    read, or a checkout pyproject that exists and cannot be read, raises
+    ``CompletenessCannotCheck``. The first used to fall back to the checkout
+    with a line on stdout, and the second read as "declares none".
+    """
     if not repo_root_str:
         return "", "no repo root given"
     repo_root = Path(repo_root_str)
     if base_branch:
-        ref = ""
         try:
             ref = base_ref(repo_root, base_branch)
             text = read_from_base(repo_root, ref, "pyproject.toml")
         except (OSError, subprocess.SubprocessError) as exc:
-            # fail-open: a base that cannot be read falls to the checkout's
-            # own pyproject, and the fallback is printed here and named in
-            # the report. The direction is stricter (fewer declared plugins),
-            # never quieter.
-            print(
-                f"    [FIXTURES] pyproject unreadable on base {base_branch!r} "
-                f"({exc}); reading the checkout's instead"
-            )
-            text = ""
+            raise CompletenessCannotCheck(
+                f"spec_test_fixtures_resolvable cannot read pyproject.toml on "
+                f"the run's base {base_branch!r} in {repo_root}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
         if text:
             return text, f"read from {ref}"
+    pyproject = repo_root / "pyproject.toml"
+    if not pyproject.exists():
+        return "", "the checkout has no pyproject.toml"
     try:
-        checkout = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
-    except OSError:
-        # fail-open: no pyproject anywhere means no declared plugins, which
-        # the report states outright; the check gets stricter, not quieter.
-        return "", "no pyproject could be read"
-    return checkout, "read from the checkout"
+        return pyproject.read_text(encoding="utf-8"), "read from the checkout"
+    except OSError as exc:
+        raise CompletenessCannotCheck(
+            f"spec_test_fixtures_resolvable cannot read {pyproject}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _spec_test_functions(spec: str) -> dict[str, Any]:
@@ -2099,6 +2179,10 @@ def _test_function_spans(
     The extractor slices sources verbatim out of the draft, so each is found
     by text; the cursor advances so two identical bodies map to their own
     positions rather than both to the first.
+
+    A source the draft does not hold means the extractor and the draft
+    disagree, an internal fault, so it raises ``CompletenessCannotCheck``
+    (#3585). It used to be skipped, and the complaint lost its line address.
     """
     spans: dict[str, tuple[int, int]] = {}
     cursor = 0
@@ -2108,7 +2192,11 @@ def _test_function_spans(
         if idx < 0:
             idx = spec.find(source)
         if idx < 0:
-            continue
+            raise CompletenessCannotCheck(
+                f"the Section 10 extractor returned `{fn['name']}`, whose "
+                f"source is not in the draft, so no complaint can cite its "
+                f"lines"
+            )
         start = spec.count("\n", 0, idx) + 1
         spans[fn["name"]] = (start, start + source.count("\n"))
         cursor = idx + len(source)
@@ -2212,20 +2300,28 @@ def check_section_ten_carries_test_functions(spec: str) -> CompletenessCheck:
     drafter that filed its tests one section away has written the content and
     put it in the wrong drawer, which is the most revisable defect there is.
 
-    **Not applicable stays possible and stays visible.** A spec with no Section
-    10 at all is a different defect with its own check, and this one says it did
-    not run rather than inventing a pass. Losing that distinction is exactly
-    what run 12 did.
+    **A spec with no Section 10 fails (#3585).** It used to pass as "check did
+    not run", leaving the finding to `criteria_have_tests`, which does not ask
+    where the tests are. A draft with no test section carries no suite for the
+    implementation stage to read, and the drafter can add one.
+
+    **The extractor's refusal is named (#3585).** When the implementation
+    stage's extractor refuses the draft (a legacy Section 9 test heading, or a
+    Section 10 heading only inside a fence), it finds no functions however many
+    Section 10 holds. The complaint quotes the refusal; it used to swallow it
+    and say the section held "nothing".
     """
     span = _section_ten_span(spec)
     if span is None:
         return CompletenessCheck(
             check_name="section_ten_carries_test_functions",
-            passed=True,
+            passed=False,
             details=(
-                "No Section 10 heading found — check did not run. A spec with "
-                "no test section is `criteria_have_tests`'s finding, not this "
-                "one's."
+                "The draft has no Section 10 heading (## 10. Test Mapping), so "
+                "it carries no test suite: the implementation stage reads its "
+                "tests from Section 10 alone (#1870, #2316). Add Section 10; it "
+                "MUST include a code block, a ```python fence holding one "
+                "runnable test function per pass criterion."
             ),
         )
 
@@ -2241,19 +2337,24 @@ def check_section_ten_carries_test_functions(spec: str) -> CompletenessCheck:
         )
 
     from assemblyzero.workflows.testing.nodes.load_lld import (
+        WorkflowParsingError,
         extract_test_plan_section,
     )
 
+    first, last = span
     try:
         section = extract_test_plan_section(spec)
-    except Exception:  # noqa: BLE001
-        # fail-open: the heading was found above, so the section exists; only
-        # its body could not be sliced. The check still reports the defect and
-        # only loses the detail of what it found instead, which makes the
-        # complaint vaguer rather than absent.
-        section = ""
+    except WorkflowParsingError as exc:
+        return _failed_check(
+            check_name="section_ten_carries_test_functions",
+            details=(
+                f"Section 10 (lines {first}-{last}) cannot be read by the "
+                f"implementation stage, whose extractor refuses this draft: "
+                f"{exc} That stage reads its suite from Section 10 alone "
+                f"(#1870, #2316), so it finds no test function in this draft."
+            ),
+        )
 
-    first, last = span
     holds = _what_section_ten_holds(section)
 
     # Are the functions somewhere else in the draft? That decides whether this
@@ -2435,8 +2536,13 @@ def check_spec_test_fixtures_resolvable(
     in the same block, or a fixture from a plugin the target repo's pyproject
     declares (`_PLUGIN_FIXTURES`, read from the run's base branch). A name
     that takes none of them errors at setup one stage later, before any
-    assertion runs. Abstains when the block does not parse --
-    `python_fences_parse` reports that (#2526's unknown-is-not-guilty).
+    assertion runs.
+
+    A block that does not parse fails the check, naming the SyntaxError and
+    Section 10's lines (#3585). It used to pass as "not applicable", leaving
+    the report to `python_fences_parse`, which does not judge an untagged
+    fence; the implementation stage emits this block verbatim, so a syntax
+    error in it is the draft's defect and the drafter can fix it.
     """
     suite = _spec_test_functions(spec)
     functions = suite["functions"]
@@ -2453,16 +2559,16 @@ def check_spec_test_fixtures_resolvable(
     block = "\n\n".join([suite["imports"]] + [fn["source"] for fn in functions])
     try:
         tree = ast.parse(block)
-    except SyntaxError:
-        # fail-open: abstains audibly -- the details say not applicable, the
-        # summary counts it as such, and python_fences_parse fails the same
-        # draft on the same syntax (#2526's unknown-is-not-guilty).
-        return CompletenessCheck(
+    except SyntaxError as exc:
+        first, last = _section_ten_span(spec) or (0, 0)
+        return _failed_check(
             check_name="spec_test_fixtures_resolvable",
-            passed=True,
             details=(
-                "Section 10 test block does not parse — check not applicable; "
-                "python_fences_parse reports the syntax."
+                f"Section 10 (lines {first}-{last}) holds test functions that "
+                f"do not parse, so their fixtures cannot be checked: "
+                f"SyntaxError: {exc.msg} (line {exc.lineno} of the test block). "
+                f"Fix the test code; the implementation stage emits it "
+                f"verbatim (#2316)."
             ),
         )
 
@@ -2473,10 +2579,14 @@ def check_spec_test_fixtures_resolvable(
         and _is_fixture_decorated(node)
     }
     pyproject_text, pyproject_source = _pyproject_for_run(repo_root_str, base_branch)
-    declared = _declared_dependencies(pyproject_text)
-    if declared is None:
-        pyproject_source = "the repo's pyproject could not be parsed"
-        declared = set()
+    try:
+        declared = _declared_dependencies(pyproject_text)
+    except tomllib.TOMLDecodeError as exc:
+        raise CompletenessCannotCheck(
+            f"spec_test_fixtures_resolvable cannot read the plugins "
+            f"{repo_root_str or 'the target repo'} declares: its pyproject.toml "
+            f"({pyproject_source}) is not valid TOML: {exc}"
+        ) from exc
     from_declared_plugins: set[str] = set()
     from_undeclared_plugins: dict[str, str] = {}
     for distribution, fixtures in _PLUGIN_FIXTURES.items():
@@ -2642,12 +2752,12 @@ def check_manifest_traceability(
       citation quoted and the namespaces enumerated, so the complaint names
       something the draft actually contains (#2555).
 
-    Abstention (#2526: unknown is not guilty): a fence that will not parse is
-    not judged here — it is already a hard failure of the api-symbols check
-    (#2392), and judging text this check could not read would be static
-    analysis of arbitrary code, which is not its job. The details name how
-    many fences went unjudged, so "checked" never overstates what was
-    verified (#1870).
+    The fences are read by ``_scan_fences``, the same pass the symbol check
+    makes. A fence tagged Python that does not parse fails this check too,
+    naming its lines and the parse error (#3585): its tests went unjudged, so
+    the diff cannot balance. It used to be counted and passed over. An
+    untagged or diff fence that does not parse claimed no Python; it is
+    counted in the details and does not fail the check (#2526, #1870).
     """
     if not manifest_rows:
         return CompletenessCheck(
@@ -2665,23 +2775,9 @@ def check_manifest_traceability(
         for rid in row_ids
     }
 
+    scan = _scan_fences(spec)
     tests: list[tuple[str, str]] = []  # (test name, source segment)
-    unparsed = 0
-    for match in _CODE_FENCE_RE.finditer(spec):
-        tag = (match.group(1) or "").lower()
-        if tag and tag not in _PYTHON_FENCE_TAGS and tag not in _UNDECLARED_FENCE_TAGS:
-            continue
-        block = _normalize_fence(match.group(2))
-        try:
-            tree = ast.parse(block)
-        except (SyntaxError, ValueError, RecursionError):
-            # fail-open: #2533's ruled abstention (#2526: unknown is not
-            # guilty). A fence that will not parse is the api-symbols
-            # check's HARD failure (#2392) — the draft is already blocked
-            # for it — and this check counts what it could not read into
-            # the details line, so the abstention is visible, never silent.
-            unparsed += 1
-            continue
+    for block, tree in scan.parsed:
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
                 node.name.startswith("test_")
@@ -2689,10 +2785,21 @@ def check_manifest_traceability(
                 segment = ast.get_source_segment(block, node) or ""
                 tests.append((node.name, segment))
 
+    unparsed = scan.undeclared_unparsed
     abstain_note = (
-        f" ({unparsed} unparseable fence(s) not judged — abstained, not "
-        f"guilty)"
+        f" ({unparsed} unparseable untagged fence(s) not judged — they "
+        f"claimed no Python)"
         if unparsed else ""
+    )
+    unjudged = (
+        f"{len(scan.failures)} python fence(s) do not parse, so the tests in "
+        f"them were not judged: "
+        + "; ".join(
+            f"lines {f.start_line}-{f.end_line} ({f.error})"
+            for f in scan.failures[:5]
+        )
+        + (f" (and {len(scan.failures) - 5} more)" if len(scan.failures) > 5 else "")
+        if scan.failures else ""
     )
 
     if not tests:
@@ -2716,6 +2823,7 @@ def check_manifest_traceability(
                 f"spec contains no parseable test functions citing them. "
                 f"Manifest rows are {listed}{more}. Section 10 owes each a "
                 f"test."
+                + (f" {unjudged}." if unjudged else "")
                 + abstain_note
             ),
         )
@@ -2792,6 +2900,8 @@ def check_manifest_traceability(
             + (f" (and {len(invalid_only) - 4} more)"
                if len(invalid_only) > 4 else "")
         )
+    if unjudged:
+        problems.append(unjudged)
 
     if problems:
         namespaces = [f"manifest rows are {', '.join(row_ids[:12])}"]
@@ -3020,6 +3130,9 @@ class _ScanResult(NamedTuple):
     #: Undeclared fences (untagged, diff) that would not parse. Counted and
     #: reported, never a failure: nothing claimed they were Python.
     undeclared_unparsed: int
+    #: (normalised source, tree) for every fence that parsed, in document
+    #: order, so a check that reads tests reads the fences this pass read.
+    parsed: tuple[tuple[str, ast.Module], ...] = ()
 
 
 def _normalize_fence(block: str) -> str:
@@ -3432,14 +3545,15 @@ class _FenceVisitor(ast.NodeVisitor):
         return ""
 
 
-def _fence_facts_ast(block: str) -> _FenceFacts:
-    """Facts from a parsed fence.
+def _fence_facts_ast(block: str, tree: ast.Module | None = None) -> _FenceFacts:
+    """Facts from a parsed fence (parsed here unless ``tree`` is given).
 
     Raises whatever ``ast.parse`` raises. #2392: a parse failure is not a value —
     the caller decides whether this fence claimed to be Python, and names the
     failure if it did. It never degrades to a guess.
     """
-    tree = ast.parse(block)
+    if tree is None:
+        tree = ast.parse(block)
     visitor = _FenceVisitor(block)
     visitor.visit(tree)
     return _FenceFacts(
@@ -3457,13 +3571,30 @@ def _fence_facts_ast(block: str) -> _FenceFacts:
     )
 
 
-def _resolve_stdlib_class(dotted: str) -> type | None:
-    """The standard-library class a dotted name denotes, or None (#2839).
+class _BaseResolutionFailure(NamedTuple):
+    """A standard-library-rooted base this host could not resolve to a class.
+
+    The caller prints it at ERROR and names it in the symbol check's details
+    (#3585): the methods the class inherits go unjudged, and that is said.
+    """
+
+    dotted: str
+    cause: str
+
+
+def _resolve_stdlib_class(dotted: str) -> type | _BaseResolutionFailure | None:
+    """The standard-library class a dotted name denotes (#2839).
 
     Only standard-library modules are ever imported here: they are already
     loaded or loadable without side effects, and ``sys.stdlib_module_names``
     is a closed set. A third-party base (pydantic, Pillow) is never imported
     and resolves to None, which the caller reads as "cannot say", not "wrong".
+
+    A name rooted in the standard library that this host cannot import, or
+    that names no class, returns a ``_BaseResolutionFailure`` with the cause
+    (#3585). It used to return None, so the abstention left no trace. It may
+    be a platform module (``winreg`` on Linux) or a submodule never imported,
+    so it is not called a hallucination either.
     """
     root, *rest = dotted.split(".")
     if root not in _STDLIB_MODULE_NAMES:
@@ -3472,17 +3603,20 @@ def _resolve_stdlib_class(dotted: str) -> type | None:
         obj: Any = importlib.import_module(root)
         for part in rest:
             obj = getattr(obj, part)
-    except (ImportError, AttributeError, ValueError):
-        # fail-open: a name the standard library does not have resolves to
-        # nothing, and nothing abstains -- unresolved is not hallucinated.
-        return None
-    return obj if isinstance(obj, type) else None
+    except (ImportError, AttributeError, ValueError) as exc:
+        return _BaseResolutionFailure(dotted, f"{type(exc).__name__}: {exc}")
+    if not isinstance(obj, type):
+        return _BaseResolutionFailure(
+            dotted, f"it names a {type(obj).__name__}, not a class"
+        )
+    return obj
 
 
 def _inherited_surfaces(
     class_bases: dict[str, list[str]],
     import_modules: dict[str, str],
     spec_classes: set[str],
+    unresolved_bases: list[str] | None = None,
 ) -> dict[str, set[str] | None]:
     """What each spec-defined class inherits from bases the target repo does
     not own (#2839).
@@ -3494,6 +3628,10 @@ def _inherited_surfaces(
     on the class abstain. Spec-defined bases contribute their own surface, to
     a fixed point, so ``class B(A)`` with ``class A(ast.NodeVisitor)`` inherits
     the visitor's methods too.
+
+    A standard-library base this host cannot resolve also abstains, and is
+    printed at ERROR and appended to ``unresolved_bases`` when one is given
+    (#3585).
     """
     surfaces: dict[str, set[str] | None] = {}
 
@@ -3516,6 +3654,18 @@ def _inherited_surfaces(
             if root in import_modules:
                 dotted = import_modules[root] + base[len(root):]
             resolved = _resolve_stdlib_class(dotted)
+            if isinstance(resolved, _BaseResolutionFailure):
+                named = f"`{cls}` derives from {resolved.dotted} ({resolved.cause})"
+                print(
+                    f"ERROR [N3] api_symbols_exist cannot resolve a "
+                    f"standard-library base on this host: {named}; the methods "
+                    f"`{cls}` inherits are not judged",
+                    file=sys.stderr,
+                )
+                if unresolved_bases is not None:
+                    unresolved_bases.append(named)
+                result = None
+                break
             if resolved is None:
                 result = None
                 break
@@ -3541,6 +3691,7 @@ def _scan_fences(text: str) -> _ScanResult:
     """
     facts: list[_FenceFacts] = []
     failures: list[_FenceParseFailure] = []
+    parsed: list[tuple[str, ast.Module]] = []
     skipped_by_tag = 0
     undeclared_unparsed = 0
 
@@ -3557,7 +3708,8 @@ def _scan_fences(text: str) -> _ScanResult:
 
         block = _normalize_fence(match.group(2))
         try:
-            facts.append(_fence_facts_ast(block))
+            tree = ast.parse(block)
+            fence_facts = _fence_facts_ast(block, tree)
         except (SyntaxError, ValueError, RecursionError) as e:
             if declares_python:
                 failures.append(
@@ -3570,12 +3722,16 @@ def _scan_fences(text: str) -> _ScanResult:
                 )
             else:
                 undeclared_unparsed += 1
+        else:
+            facts.append(fence_facts)
+            parsed.append((block, tree))
 
     return _ScanResult(
         facts=facts,
         failures=failures,
         skipped_by_tag=skipped_by_tag,
         undeclared_unparsed=undeclared_unparsed,
+        parsed=tuple(parsed),
     )
 
 
@@ -3584,6 +3740,7 @@ def _flag_calls(
     symbol_set: set[str],
     first_party_tops: frozenset[str] = frozenset(),
     importable: Callable[[list[str]], set[str]] | None = None,
+    unresolved_bases: list[str] | None = None,
 ) -> dict[str, list[str]]:
     """Judge every collected call against the target repo's symbol table.
 
@@ -3598,6 +3755,8 @@ def _flag_calls(
             or wrong about; a chain rooted in any other imported name is not.
             Empty means "cannot tell", which deliberately treats every imported
             root as foreign — see the note on the foreign-root set below.
+        unresolved_bases: When given, collects each standard-library base of
+            a spec class that this host could not resolve (#3585).
     """
     # #1948: three universes the target repo's symbol table has no authority
     # over — the phase-5 kill was this check rejecting Pillow's documented API
@@ -3792,7 +3951,9 @@ def _flag_calls(
         for cls, base in fence.bases:
             class_bases.setdefault(cls, []).append(base)
         import_modules.update(dict(fence.import_modules))
-    inherited = _inherited_surfaces(class_bases, import_modules, spec_classes)
+    inherited = _inherited_surfaces(
+        class_bases, import_modules, spec_classes, unresolved_bases
+    )
     instance_class: dict[str, str] = {}
     for bound, source in assignments:
         if len(source) == 1 and len(bound) == 1:
@@ -3898,34 +4059,34 @@ def _importable_probe_for(repo_root_str: str):
 
     Returns a callable ``roots -> set of importable roots``, or None when
     there is no repo root to probe. The probe is `_probe_target_env`, the
-    same authority #1904 uses for third-party imports; when IT cannot answer
-    (no venv, timeout) the callable returns an empty set, which adds no
-    exemption -- the check behaves exactly as before rather than guessing.
+    same authority #1904 uses for third-party imports. When it cannot answer
+    (no venv, timeout, bad output) it raises ``CompletenessCannotCheck``
+    (#3585): the check halts. It used to return an empty set, so the unbound
+    roots stayed judged and nothing said the environment never answered.
     """
     if not repo_root_str:
         return None
 
     def _probe(roots: list[str]) -> set[str]:
         answer = _probe_target_env(Path(repo_root_str), sorted(roots))
-        if not answer:
-            return set()
         return {name for name, ok in answer.items() if ok}
 
     return _probe
 
 
 def _first_party_tops_for(repo_root_str: str) -> frozenset[str]:
-    """First-party package names for a repo root string, empty when unknown.
+    """First-party package names for a repo root string.
 
-    Never raises: a symbol check must not fail because a path was unreadable,
-    and an empty answer is the fail-open direction (#2411).
+    No repo root names no packages: a standalone caller of the detector
+    (#1812's telemetry consumer, a replay) gets every import treated as
+    foreign (#2411), which manufactures no findings. The gate always passes
+    one. A repo that cannot be read raises ``CompletenessCannotCheck`` (#3585);
+    it used to read as "no packages", which judged the repo's own package as
+    foreign.
     """
     if not repo_root_str:
         return frozenset()
-    try:
-        return frozenset(_first_party_tops(Path(repo_root_str)))
-    except OSError:
-        return frozenset()
+    return frozenset(_first_party_tops(Path(repo_root_str)))
 
 
 def check_api_symbols_exist(
@@ -3952,8 +4113,15 @@ def check_api_symbols_exist(
     - Only flags method CALLS (trailing ``(``), not bare attribute access.
     - Only scans inside code fences.
     - Has a broad allowlist to keep false positives low.
-    - Skips the check when ``gathered_symbols`` is empty (N1 didn't gather any
-      Python content, so we have nothing to check against).
+
+    An empty ``gathered_symbols`` no longer skips the check (#3585); it used
+    to pass as "skipped". The fences are still parsed, so a Python fence that
+    does not parse still fails. A call the check would judge against the
+    table is then read by what the repo holds: a repo with Python packages
+    has code N1 did not gather, so the call cannot be judged and the check
+    raises ``CompletenessCannotCheck``; a repo with none has no API to call,
+    so the call is a finding. A spec whose every call needs no table passes
+    on that evidence.
 
     Args:
         spec: Implementation Spec markdown content.
@@ -3965,17 +4133,13 @@ def check_api_symbols_exist(
 
     Returns:
         CompletenessCheck with pass/fail result and details.
-    """
-    if not gathered_symbols:
-        return CompletenessCheck(
-            check_name="api_symbols_exist",
-            passed=True,
-            details=(
-                "No gathered symbols from target repo — "
-                "API symbol check skipped (N1 found no Python files to analyze)."
-            ),
-        )
 
+    Raises:
+        CompletenessCannotCheck: no symbols were gathered from a repo that has
+            Python packages and the spec makes calls that need them; or the
+            target environment cannot answer for an unbound root, or the repo
+            cannot be read (#3585).
+    """
     symbol_set: set[str] = set(gathered_symbols)
     scan = _scan_fences(spec)
 
@@ -4020,10 +4184,28 @@ def check_api_symbols_exist(
             ),
         )
 
+    first_party_tops = _first_party_tops_for(repo_root_str)
+    unresolved_bases: list[str] = []
     flagged = _flag_calls(
-        scan.facts, symbol_set, _first_party_tops_for(repo_root_str),
+        scan.facts, symbol_set, first_party_tops,
         importable=_importable_probe_for(repo_root_str),
+        unresolved_bases=unresolved_bases,
     )
+
+    if flagged and not symbol_set and (first_party_tops or not repo_root_str):
+        # #3585: the calls need the repo's symbols and N1 gathered none, from
+        # a repo that has Python of its own (or one N3 cannot see). Whether
+        # these methods exist cannot be told, so the check cannot run.
+        listed = ", ".join(f"`{name}`" for name in sorted(flagged)[:5])
+        where = (
+            f"{repo_root_str}, which has Python packages "
+            f"({', '.join(sorted(first_party_tops))})"
+            if repo_root_str else "a repo N3 was not given"
+        )
+        raise CompletenessCannotCheck(
+            f"api_symbols_exist cannot judge {len(flagged)} called method(s) "
+            f"({listed}): N1 gathered no symbols from {where}"
+        )
 
     # #1870's honesty rule applied to the scan itself: say what was NOT read,
     # so "checked" never overstates what was verified.
@@ -4039,9 +4221,27 @@ def check_api_symbols_exist(
             f"and were not read (no Python was claimed, so this is not a "
             f"failure)"
         )
+    if unresolved_bases:
+        # #3585: printed at ERROR by _inherited_surfaces; named here too, so
+        # the check's own record says what it did not judge.
+        notes.append(
+            f"ERROR: {len(unresolved_bases)} standard-library base(s) could "
+            f"not be resolved on this host, so the methods those classes "
+            f"inherit were not judged: {'; '.join(unresolved_bases[:5])}"
+        )
     scan_note = f" {'; '.join(notes)}." if notes else ""
 
     if not flagged:
+        if not symbol_set:
+            return CompletenessCheck(
+                check_name="api_symbols_exist",
+                passed=True,
+                details=(
+                    "N1 gathered no symbols, and no method call in the spec's "
+                    "code fences needed them: each is to code the spec "
+                    f"defines, a dependency or the standard library.{scan_note}"
+                ),
+            )
         return CompletenessCheck(
             check_name="api_symbols_exist",
             passed=True,
@@ -4187,22 +4387,32 @@ def _candidate_matches_new_file(candidate: Path, new_file_paths: set[str]) -> bo
     return False
 
 
+def _read_pyproject(pyproject: Path, purpose: str) -> dict:
+    """The parsed pyproject.toml, or ``CompletenessCannotCheck`` naming it (#3585).
+
+    The caller checks that the file exists first; absence is its answer.
+    """
+    try:
+        return tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CompletenessCannotCheck(
+            f"cannot read {pyproject} for {purpose}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 def _discover_pyproject_source_roots(repo_root: Path) -> tuple[str, ...]:
-    """Best-effort discovery of source roots from pyproject.toml.
+    """Source roots the target repo's pyproject.toml declares.
 
     Reads `[tool.poetry.packages]` (with `from = "X"`) and
     `[tool.setuptools.packages.find]` (with `where = ["X"]`) entries.
-    Malformed pyproject files return (); the caller falls back to the
-    static prefix list. Closes #1477.
+    Closes #1477. No pyproject declares none, which is an answer. A pyproject
+    that exists and cannot be read or parsed raises ``CompletenessCannotCheck``
+    (#3585); it used to return (), so a src layout went unseen.
     """
     pyproject = repo_root / "pyproject.toml"
     if not pyproject.exists():
         return ()
-    try:
-        import tomllib
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, ValueError, ImportError):
-        return ()
+    data = _read_pyproject(pyproject, "the source roots it declares")
     roots: list[str] = []
     poetry_packages = (
         data.get("tool", {}).get("poetry", {}).get("packages", [])
@@ -4314,16 +4524,15 @@ def _pyproject_declared_package(repo_root: Path) -> set[str]:
     `[tool.poetry.packages].include`, `[project].name` and `[tool.poetry].name`
     all name the package the repo is. A distribution name uses dashes where the
     import name uses underscores, so both spellings are returned.
+
+    No pyproject declares nothing. One that exists and cannot be read or
+    parsed raises ``CompletenessCannotCheck`` (#3585); it used to return an
+    empty set, so the repo's own package was judged as foreign.
     """
     pyproject = repo_root / "pyproject.toml"
-    if not pyproject.is_file():
+    if not pyproject.exists():
         return set()
-    try:
-        import tomllib
-
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, ValueError, ImportError):
-        return set()
+    data = _read_pyproject(pyproject, "the package it declares")
 
     names: set[str] = set()
 
@@ -4376,12 +4585,17 @@ def _first_party_tops(repo_root: Path) -> set[str]:
 
     Signal 3 is deliberately not applied at the repo root. A flat-layout
     mid-build repo is covered by signal 2 instead.
+
+    A root or ``src/`` that is not a directory holds no packages, which is an
+    answer. One that cannot be listed, and a pyproject that cannot be read,
+    raise ``CompletenessCannotCheck`` (#3585); they used to be skipped, so a
+    package the repo owns could be judged as foreign.
     """
     tops: set[str] = set()
     for base in (repo_root, repo_root / "src"):
+        if not base.is_dir():
+            continue
         try:
-            if not base.is_dir():
-                continue
             for child in base.iterdir():
                 if not child.is_dir():
                     continue
@@ -4389,22 +4603,27 @@ def _first_party_tops(repo_root: Path) -> set[str]:
                     tops.add(child.name)
                 elif base.name == "src" and any(child.glob("*.py")):
                     tops.add(child.name)
-        except OSError:
-            continue
+        except OSError as exc:
+            raise CompletenessCannotCheck(
+                f"cannot list {base} to find the target repo's own packages: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
-    try:
-        tops |= _pyproject_declared_package(repo_root)
-    except OSError:
-        pass
+    tops |= _pyproject_declared_package(repo_root)
     return tops
 
 
-def _target_env_python(repo_root: Path) -> str | None:
-    """Absolute python path of the TARGET repo's poetry venv, or None.
+def _target_env_python(repo_root: Path) -> str:
+    """Absolute python path of the TARGET repo's poetry venv.
 
     Asks poetry for the env path explicitly instead of `poetry run python`
     — poetry silently falls through to PATH when no venv exists (#1904),
     which would answer the probe from the WRONG environment.
+
+    Raises ``CompletenessCannotCheck`` when poetry cannot run, exits non-zero
+    (its stderr is quoted), or names an env that holds no python (#3585). Each
+    used to return None, which the probe read as "cannot validate" and every
+    caller passed over.
     """
     try:
         proc = subprocess.run(
@@ -4414,35 +4633,50 @@ def _target_env_python(repo_root: Path) -> str | None:
             text=True,
             timeout=30,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CompletenessCannotCheck(
+            f"cannot ask poetry for {repo_root}'s environment: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
     if proc.returncode != 0:
-        return None
-    env_path = Path(proc.stdout.strip())
+        raise CompletenessCannotCheck(
+            f"`poetry env info --path` in {repo_root} exited {proc.returncode}: "
+            f"{proc.stderr.strip() or '(no stderr)'}"
+        )
+    reported = proc.stdout.strip()
+    if not reported:
+        raise CompletenessCannotCheck(
+            f"`poetry env info --path` in {repo_root} printed no environment"
+        )
+    env_path = Path(reported)
     for candidate in (env_path / "Scripts" / "python.exe", env_path / "bin" / "python"):
         if candidate.is_file():
             return str(candidate)
-    return None
+    raise CompletenessCannotCheck(
+        f"poetry names {env_path} as {repo_root}'s environment, which holds no "
+        f"python (looked for Scripts/python.exe and bin/python)"
+    )
 
 
-def _probe_target_env(repo_root: Path, tops: list[str]) -> dict[str, bool] | None:
+def _probe_target_env(repo_root: Path, tops: list[str]) -> dict[str, bool]:
     """One batched find_spec probe inside the target repo's venv (#1901).
 
-    Returns {top_level: importable} — or None when the environment cannot
-    answer (no venv, timeout, bad output). Callers MUST treat None as
-    "cannot validate", never as "missing": a wrong-environment verdict is
-    worse than no verdict (#1904).
+    Returns {top_level: importable}. A wrong-environment verdict is worse
+    than no verdict (#1904), so when the environment cannot answer (no venv,
+    a failed or timed-out probe, output that is not a JSON object) this raises
+    ``CompletenessCannotCheck`` with the return code and stderr (#3585). It
+    used to return None, and every caller passed the imports it could not
+    check.
     """
     if not tops:
         return {}
     python = _target_env_python(repo_root)
-    if python is None:
-        return None
     script = (
         "import importlib.util, json, sys; "
         "print(json.dumps({n: importlib.util.find_spec(n) is not None "
         "for n in sys.argv[1:]}))"
     )
+    where = f"the import probe in {repo_root}'s environment ({python})"
     try:
         proc = subprocess.run(
             [python, "-c", script, *tops],
@@ -4451,14 +4685,29 @@ def _probe_target_env(repo_root: Path, tops: list[str]) -> dict[str, bool] | Non
             text=True,
             timeout=60,
         )
-        if proc.returncode != 0 or not proc.stdout.strip():
-            return None
-        result = json.loads(proc.stdout.strip().splitlines()[-1])
-        if not isinstance(result, dict):
-            return None
-        return {str(k): bool(v) for k, v in result.items()}
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CompletenessCannotCheck(
+            f"{where} could not run: {type(exc).__name__}: {exc}"
+        ) from exc
+    output = proc.stdout.strip()
+    if proc.returncode != 0 or not output:
+        raise CompletenessCannotCheck(
+            f"{where} exited {proc.returncode} with "
+            f"{'output' if output else 'no output'}: "
+            f"{proc.stderr.strip() or '(no stderr)'}"
+        )
+    last = output.splitlines()[-1]
+    try:
+        result = json.loads(last)
+    except ValueError as exc:
+        raise CompletenessCannotCheck(
+            f"{where} printed {last[:200]!r}, which is not JSON: {exc}"
+        ) from exc
+    if not isinstance(result, dict):
+        raise CompletenessCannotCheck(
+            f"{where} printed {last[:200]!r}, which is not a JSON object"
+        )
+    return {str(k): bool(v) for k, v in result.items()}
 
 
 _KNOWN_STDLIB_TOPS: frozenset[str] = frozenset({

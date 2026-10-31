@@ -99,7 +99,12 @@ class ErrorPathReport:
 
     @property
     def ok(self) -> bool:
-        return not self.untested and not self.platform_gap
+        """True only for a check that ran and found no untested error path.
+
+        #3585: a report that did not run (no implementation fence to read) is
+        not ok. It used to be, and its caller recorded the check as passed.
+        """
+        return self.ran and not self.untested and not self.platform_gap
 
     @property
     def platform_gap(self) -> bool:
@@ -160,7 +165,11 @@ def format_report(report: ErrorPathReport) -> str:
     the second.
     """
     if not report.ran:
-        return f"Error-path coverage not applicable: {report.reason}."
+        # #3585: "cannot be checked", not "not applicable": the check failed.
+        return (
+            f"Error-path coverage cannot be checked: {report.reason}. A check "
+            f"that cannot run is not a pass (#3585)."
+        )
 
     lines: list[str] = []
 

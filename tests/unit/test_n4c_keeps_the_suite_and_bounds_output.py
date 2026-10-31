@@ -166,11 +166,17 @@ class TestTheRecord:
         assert any(n.endswith("augment-response.md") for n in names), names
         assert any(n.endswith("augment-response-retry2.md") for n in names), names
 
-    def test_no_audit_dir_means_no_files_and_no_failure(self, worktree):
-        with patch.object(augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, "")):
+    def test_no_audit_dir_halts_before_any_call(self, worktree):
+        """#3585: with no audit dir the record was skipped silently; now the
+        node halts before it spends a generation that could not be examined."""
+        with patch.object(
+            augment_tests, "call_claude_for_file", return_value=(NEW_TESTS, ""),
+        ) as call:
             result = augment_tests_for_coverage(_state(worktree, audit_dir=""))
 
-        assert result["next_node"] == "N5_verify_green"
+        assert result["next_node"] == "end"
+        assert "audit directory" in result["error_message"]
+        call.assert_not_called()
 
 
 class TestTheCeiling:
@@ -268,9 +274,11 @@ class TestTheCeiling:
         ):
             result = augment_tests_for_coverage(_state(worktree))
 
-        assert result["next_node"] == "N5_verify_green"
+        # #3585: the timeout halts with the provider's error; it returned to N5.
+        assert result["next_node"] == "end"
+        assert "timed out after 900s" in result["error_message"]
         assert (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8") == before
-        assert "no new tests generated: timed out after 900s" in capsys.readouterr().out
+        assert "timed out after 900s" in capsys.readouterr().err
 
 
 # Run 37's shape: nine additions, two of which fault the interpreter under a
@@ -298,8 +306,9 @@ class TestAdditionsAreRun:
     """#2902: N4c runs what it adds and keeps only what passes."""
 
     def test_failing_additions_are_dropped_and_the_passing_kept(self, worktree, capsys):
-        # The repair pass (#2903) is exercised in its own class; here it
-        # returns nothing, so what is measured is the vetting alone.
+        # The repair pass (#2903) is exercised in its own class; here its call
+        # fails, so what is measured is the vetting alone. #3585: a failed
+        # repair call halts, keeping only the first pass's passing additions.
         with patch.object(augment_tests, "call_claude_for_file",
                           side_effect=[(THREE_TESTS, ""), ("", "no repair")]), \
              patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
@@ -311,14 +320,13 @@ class TestAdditionsAreRun:
         assert "def test_covers_the_error_path" in scaffold
         assert "def test_covers_the_platform_branch" not in scaffold
         assert "def test_nt_sweep_returns_empty_list_on_zero_length" not in scaffold
-        out = capsys.readouterr().out
+        err = capsys.readouterr().err
         assert (
-            "[N4c] dropped test_nt_sweep_returns_empty_list_on_zero_length: "
+            "ERROR [N4c] dropped test_nt_sweep_returns_empty_list_on_zero_length: "
             "OSError: exception: access violation writing 0x0000000000000000 (#2902)"
-        ) in out
-        assert "[N4c] dropped test_covers_the_platform_branch: assert 0.0 == 30.0 (#2902)" in out
-        assert "[N4c] added 1 test(s)" in out
-        assert len(result["test_files"]) == 4
+        ) in err
+        assert "ERROR [N4c] dropped test_covers_the_platform_branch: assert 0.0 == 30.0 (#2902)" in err
+        assert "no repair" in result["error_message"]
 
     def test_when_none_pass_the_file_is_restored(self, worktree, capsys):
         before = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
@@ -330,20 +338,25 @@ class TestAdditionsAreRun:
                    return_value=_pytest_says(all_fail, 1, 3)):
             result = augment_tests_for_coverage(_state(worktree))
 
+        # #3585: and the node halts; it returned to N5 with no reason.
         assert (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8") == before
-        assert "none of the added tests pass on this machine" in capsys.readouterr().out
-        assert len(result["test_files"]) == 4
+        assert "none of the" in result["error_message"]
+        assert "none of the" in capsys.readouterr().err
+        assert result["next_node"] == "end"
 
     def test_when_the_file_no_longer_collects_everything_is_dropped(self, worktree, capsys):
+        """#3585: a vetting run that executes nothing is a check that could
+        not run. The additions are removed and the node halts with the cause."""
         before = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
         broken = "E   ImportError: cannot import name 'gone' from 'boostgauge.collector'\n"
         with patch.object(augment_tests, "call_claude_for_file", return_value=(THREE_TESTS, "")), \
              patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest",
                    return_value=_pytest_says(broken, 0, 0, 0, rc=2)):
-            augment_tests_for_coverage(_state(worktree))
+            result = augment_tests_for_coverage(_state(worktree))
 
         assert (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8") == before
-        assert "ImportError: cannot import name 'gone'" in capsys.readouterr().out
+        assert "ImportError: cannot import name 'gone'" in result["error_message"]
+        assert "ImportError: cannot import name 'gone'" in capsys.readouterr().err
 
     def test_the_helper_keeps_imports_and_helpers_with_the_survivors(self, worktree):
         from assemblyzero.workflows.testing.nodes.augment_tests import _keep_passing_additions
@@ -528,9 +541,12 @@ class TestTheRepairPass:
         scaffold = (worktree / "tests" / "test_issue_4.py").read_text(encoding="utf-8")
         assert "assert DataCollector is not None" not in scaffold
         assert "def test_covers_the_error_path" in scaffold
-        out = capsys.readouterr().out
-        assert "[N4c] repair dropped test_covers_the_platform_branch: assert False (#2903)" in out
-        assert "[N4c] added 1 test(s)" in out
+        captured = capsys.readouterr()
+        # #3585: a dropped test is a failed test, said at ERROR on stderr.
+        assert (
+            "ERROR [N4c] repair dropped test_covers_the_platform_branch: assert False (#2903)"
+        ) in captured.err
+        assert "[N4c] added 1 test(s)" in captured.out
 
 
 class TestReached:

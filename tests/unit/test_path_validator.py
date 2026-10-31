@@ -165,12 +165,14 @@ class TestLoadContextFiles:
         assert "# file b" in content
         assert errors == []
 
-    def test_skips_invalid_files(self, tmp_path):
+    def test_one_invalid_file_leaves_no_partial_context(self, tmp_path):
+        """ADR 0236: a rejection is named, and the files that loaded are not
+        returned as the context in place of the one the operator named."""
         good = tmp_path / "good.py"
         good.write_text("# good")
         bad_path = str(tmp_path / "missing.py")
         content, errors = load_context_files([str(good), bad_path], tmp_path)
-        assert "# good" in content
+        assert content == ""
         assert len(errors) == 1
         assert "REJECTED" in errors[0]
 

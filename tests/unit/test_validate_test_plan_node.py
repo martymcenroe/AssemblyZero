@@ -124,9 +124,10 @@ class TestNodeRoutesToGeminiOnPass:
 class TestNodeRoutesToDraftOnFail:
     """T120: Node returns feedback on failure."""
 
-    def test_node_routes_to_draft_on_fail(self):
+    def test_node_routes_to_draft_on_fail(self, tmp_path):
         """T120: Failing LLD sets validation result and feedback."""
-        state = _make_state(current_draft=LLD_FAILING)
+        # #3585: a failing draft is preserved in the audit_dir, or N1b halts.
+        state = _make_state(current_draft=LLD_FAILING, audit_dir=str(tmp_path))
         result = validate_test_plan_node(state)
         assert result["test_plan_validation_result"]["passed"] is False
         assert "user_feedback" in result
@@ -208,19 +209,22 @@ class TestNodeEdgeCases:
 class TestCounterResetAfterReview:
     """Issue #567: test_plan_validation_attempts resets after Gemini review."""
 
-    def test_review_resets_counter(self):
+    def test_review_resets_counter(self, tmp_path):
         """Review node return dict includes test_plan_validation_attempts: 0."""
         from assemblyzero.workflows.requirements.nodes.review import review
 
+        # #3585: N3 halts on an audit_dir or a target repo that does not exist.
+        (tmp_path / "repo").mkdir()
+        (tmp_path / "audit").mkdir()
         state = {
             "workflow_type": "lld",
             "assemblyzero_root": str(Path(__file__).parent.parent.parent),
-            "target_repo": "/fake/repo",
+            "target_repo": str(tmp_path / "repo"),
             "config_mock_mode": True,
             "config_reviewer": "mock:review",
             "config_gates_draft": True,
             "config_gates_verdict": True,
-            "audit_dir": "/tmp/fake_audit",
+            "audit_dir": str(tmp_path / "audit"),
             "current_draft": "# 99 - Feature\n\n## 1. Context\n\nContent.\n",
             "verdict_history": [],
             "verdict_count": 0,

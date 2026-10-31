@@ -63,6 +63,16 @@ paid for twice (#1586, #1698).
 ``_max_matching`` was imported too, for the outcome fallback's bipartite
 assignment. #2619 removed the fallback, so the import went with it -- an unused
 import is a live reference to a removed mechanism.
+
+A check that cannot run is not a pass (#3585, ADR 0236)
+--------------------------------------------------------
+
+The abstention above still reports ``ran=False`` and says why, but it is no
+longer ``ok``: its caller set ``passed=report.ok``, so an LLD with no criteria
+table, or with untagged rows, passed the gate unverified. And a criteria row
+the check cannot read -- the wrong number of cells, or neither a REQ tag nor an
+ID -- raises ``CriteriaTableError`` naming it, where it used to be skipped and
+the criterion dropped from the count.
 """
 
 from __future__ import annotations
@@ -98,6 +108,14 @@ MODE_EXACT = "exact (criterion IDs)"
 #: a constant kept "for compatibility" is how a removed mode gets resurrected.
 
 
+class CriteriaTableError(ValueError):
+    """A row of the LLD's pass-criteria table cannot be read as a criterion (#3585).
+
+    The LLD is the upstream artifact, so no spec revision can mend it. The
+    message names the row.
+    """
+
+
 @dataclass(frozen=True)
 class Criterion:
     """One row of the LLD's pass-criteria table."""
@@ -120,7 +138,13 @@ class CoverageReport:
 
     @property
     def ok(self) -> bool:
-        return not self.missing
+        """True only for a check that ran and found every criterion tested.
+
+        #3585: a report that did not run is not ok. It used to be, because
+        ``missing`` was empty, and the gate passed on a check that verified
+        nothing.
+        """
+        return self.ran and not self.missing
 
     @property
     def covered(self) -> int:
@@ -155,6 +179,13 @@ def lld_criteria(lld: str) -> list[Criterion]:
     beside an ID column. Anything else in an LLD -- a risk grid, an alternatives
     table -- is left alone rather than mis-read as criteria, the same
     conservatism ``is_decision_table`` applies in the form checker.
+
+    A row with no content at all states nothing and is passed over.
+
+    Raises:
+        CriteriaTableError: a row of a qualifying table has a different number
+            of cells from its header, or carries neither a REQ tag nor an ID
+            (#3585). Both used to be skipped, dropping the criterion.
     """
     criteria: list[Criterion] = []
 
@@ -168,8 +199,15 @@ def lld_criteria(lld: str) -> list[Criterion]:
             continue
 
         for row in table.rows:
-            if len(row) != len(header) or not any(cell.strip() for cell in row):
+            if not any(cell.strip() for cell in row):
                 continue
+            if len(row) != len(header):
+                raise CriteriaTableError(
+                    f"the pass-criteria table at LLD line {table.line_no} has a row "
+                    f"with {len(row)} cell(s) under a {len(header)}-column header "
+                    f"({' | '.join(header)}): | {' | '.join(row)} |. An unescaped "
+                    f"'|' inside a cell splits it; escape it as '\\|'"
+                )
 
             row_id = row[id_at].replace("`", "").strip() if id_at is not None else ""
             scenario = row[scenario_at] if scenario_at is not None else row_id
@@ -178,7 +216,11 @@ def lld_criteria(lld: str) -> list[Criterion]:
             tag = _req_key(row)
             key = tag or row_id
             if not key:
-                continue
+                raise CriteriaTableError(
+                    f"the pass-criteria table at LLD line {table.line_no} has a row "
+                    f"with neither a REQ tag nor an ID, so its criterion cannot be "
+                    f"named: | {' | '.join(row)} |"
+                )
 
             criteria.append(
                 Criterion(
@@ -217,7 +259,14 @@ def spec_tests(spec: str) -> list[tuple[str, str]]:
 
 
 def criteria_coverage(spec: str, lld: str) -> CoverageReport:
-    """Which LLD pass criteria have no test in the spec."""
+    """Which LLD pass criteria have no test in the spec.
+
+    A report that cannot be established (no criteria table, untagged rows)
+    has ``ran=False`` and is not ``ok`` (#3585).
+
+    Raises:
+        CriteriaTableError: a criteria row cannot be read (see lld_criteria).
+    """
     criteria = lld_criteria(lld)
     if not criteria:
         return CoverageReport(
@@ -280,7 +329,11 @@ def format_report(report: CoverageReport) -> str:
     """The failure text the drafter reads. Names every miss at once, so one
     revision can address the whole set rather than one per iteration."""
     if not report.ran:
-        return f"Criterion coverage not applicable: {report.reason}."
+        # #3585: "cannot be checked", not "not applicable": the check failed.
+        return (
+            f"Criterion coverage cannot be checked: {report.reason}. A check "
+            f"that cannot run is not a pass (#3585)."
+        )
 
     head = (
         f"{report.covered}/{len(report.criteria)} LLD pass criteria have a test "

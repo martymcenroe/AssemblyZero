@@ -88,7 +88,15 @@ class TestTheDrafterSeesDeclarations:
         assert "test_x.py" not in surface
 
     def test_no_base_files_yields_empty_not_a_bare_header(self, repo):
-        assert _base_api_surface(repo, "origin/no-such-branch") == ""
+        """origin/main ships only README.md. #3585: a ref git cannot read now
+        raises BaseTreeError, where it read as a base with no files."""
+        assert _base_api_surface(repo, "origin/main") == ""
+
+    def test_a_base_git_cannot_read_raises(self, repo):
+        from assemblyzero.workflows.implementation_spec.base_tree import BaseTreeError
+
+        with pytest.raises(BaseTreeError, match="origin/no-such-branch"):
+            _base_api_surface(repo, "origin/no-such-branch")
 
     def test_the_budget_truncates_visibly(self, repo):
         surface = _base_api_surface(repo, "origin/hardening-run-14", max_chars=80)

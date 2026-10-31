@@ -156,19 +156,28 @@ class TestGenerateSpecEditScriptIntegration:
     """The revision path tries edit-script first and falls back safely."""
 
     def _base_revision_state(self, tmp_path):
+        # #3585: generate_spec halts on a verdict the pinning gate cannot read
+        # and without a lineage directory. The complaint used to name `f()` in
+        # bare text, which pinning could not read, so it abstained and these
+        # edits passed unenforced; it now names the two functions the edits
+        # touch, and the edits pass because they are named.
+        lineage = tmp_path / "lineage"
+        lineage.mkdir(exist_ok=True)
         return {
             "issue_number": 7,
             "assemblyzero_root": str(tmp_path),
             "repo_root": str(tmp_path),
             "spec_draft": SPEC,
-            "completeness_issues": ["Functions missing examples: f()"],
+            "completeness_issues": [
+                "Functions missing examples: `load_config()`, `validate_config()`"
+            ],
             "review_feedback": "",
             "review_iteration": 1,
             "max_iterations": 3,
             "config_mock_mode": False,
             "config_drafter": "gemini:3.1-pro",
             "lld_content": "# LLD",
-            "audit_dir": "",
+            "audit_dir": str(lineage),
         }
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.check_spec_size_or_raise", create=True)

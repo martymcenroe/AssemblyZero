@@ -14,12 +14,24 @@ from assemblyzero.utils.shell import run_command
 import json
 import logging
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
 # Module logger for GUARD messages
 logger = logging.getLogger(__name__)
+
+
+class WorkflowAuditError(RuntimeError):
+    """An event could not be written to the workflow audit log (ADR 0236).
+    Names the log, the event and the cause."""
+
+
+def _loud(message: str) -> None:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[AUDIT] %s", message)
+    print(f"ERROR [AUDIT] {message}", file=sys.stderr, flush=True)
 
 
 def gate_log(message: str) -> None:
@@ -116,9 +128,20 @@ def next_file_number(audit_dir: Path) -> int:
 
     Returns:
         Next file number (starts at 1 if directory is empty).
+
+    Raises:
+        FileNotFoundError: naming the directory, after an ERROR line, when it
+            does not exist (ADR 0236). It used to answer 1, as if the
+            directory were empty, and the file saved under that number had
+            nowhere to go. Callers check or create the directory first.
     """
-    if not audit_dir.exists():
-        return 1
+    if not audit_dir.is_dir():
+        message = (
+            f"the audit directory {audit_dir} does not exist, so no audit file "
+            f"can be numbered or saved in it"
+        )
+        _loud(message)
+        raise FileNotFoundError(message)
 
     max_num = 0
     for f in audit_dir.iterdir():
@@ -257,11 +280,15 @@ def log_workflow_execution(
         workflow_type: Type of workflow ("testing", "lld", "issue").
         event: Event type ("start", "complete", "error", "phase_complete").
         details: Optional dict with additional event details.
+
+    Raises:
+        WorkflowAuditError: naming the log, the event and the cause, after an
+            ERROR line, when the log's directory cannot be made or the line
+            cannot be appended (ADR 0236). The failure used to be a WARNING
+            and the run went on, so the log silently lost the event. The run
+            ends through its entry point's handler, which alerts.
     """
     log_file = target_repo / WORKFLOW_AUDIT_FILE
-
-    # Ensure directory exists
-    log_file.parent.mkdir(parents=True, exist_ok=True)
 
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -275,11 +302,17 @@ def log_workflow_execution(
         entry["details"] = details
 
     try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
     except OSError as e:
-        # Don't fail the workflow if audit logging fails
-        logger.warning(f"Failed to write workflow audit log: {e}")
+        message = (
+            f"the {workflow_type} workflow's {event!r} event for issue "
+            f"#{issue_number} could not be written to the workflow audit log "
+            f"{log_file}: {type(e).__name__}: {e}"
+        )
+        _loud(message)
+        raise WorkflowAuditError(message) from e
 
 
 def parse_pytest_output(output: str) -> dict:

@@ -15,10 +15,12 @@ insufficient LLD content) to avoid wasting Gemini API calls.
 """
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.projects_root import REPO_ROOT
 from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,
     parse_markdown_verdict,
@@ -142,76 +144,33 @@ def check_requirement_coverage(
     }
 
 
-def load_review_prompt(repo_root: Path) -> str:
+def load_review_prompt(root: Path | None = None) -> str:
     """Load the test plan review prompt template.
 
+    The prompt is part of AssemblyZero, not of the repository under test, so
+    it is read from this checkout (`projects_root.REPO_ROOT`) unless a root is
+    given. It was read from the TARGET's root, where it never is, and a
+    missing file became a built-in default prompt without a word (ledger
+    0908, line 156): every review of another repository's plan ran on a
+    prompt nobody maintained.
+
     Args:
-        repo_root: Repository root path.
+        root: The checkout to read the prompt from; AssemblyZero's own when
+            omitted.
 
     Returns:
         Review prompt content.
+
+    Raises:
+        FileNotFoundError: the prompt file is not there, naming the path.
     """
-    prompt_path = repo_root / REVIEW_PROMPT_PATH
-
-    if not prompt_path.exists():
-        # Use default prompt if file doesn't exist
-        return _default_review_prompt()
-
+    prompt_path = (root if root is not None else REPO_ROOT) / REVIEW_PROMPT_PATH
+    if not prompt_path.is_file():
+        raise FileNotFoundError(
+            f"the test-plan review prompt {prompt_path} is missing, so the "
+            f"test plan cannot be reviewed"
+        )
     return prompt_path.read_text(encoding="utf-8")
-
-
-def _default_review_prompt() -> str:
-    """Default review prompt if file not found."""
-    return """# Test Plan Review Prompt
-
-You are reviewing a test plan extracted from a Low-Level Design (LLD) document.
-Your goal is to ensure the test plan provides adequate coverage and uses real, executable tests.
-
-## Review Criteria
-
-### 1. Coverage Analysis (CRITICAL)
-- [ ] 100% of requirements have corresponding tests (ADR 0207)
-- [ ] Each requirement maps to at least one test scenario
-- [ ] Edge cases are covered (empty inputs, error conditions, boundaries)
-
-### 2. Test Reality Check (CRITICAL)
-- [ ] Tests are executable code, not human manual steps
-- [ ] No test delegates to "manual verification"
-- [ ] No test says "verify by inspection" or similar
-- [ ] Each test has clear assertions
-
-### 3. Test Type Appropriateness
-- [ ] Unit tests are truly isolated (mock dependencies)
-- [ ] Integration tests test real component interactions
-- [ ] E2E tests cover critical user paths
-
-### 4. Mock Strategy
-- [ ] External dependencies (APIs, DB) are mocked appropriately
-- [ ] Mocks are realistic and don't hide bugs
-
-## Output Format
-
-Provide your verdict in this exact format:
-
-```
-## Coverage Analysis
-- Requirements covered: X/Y (Z%)
-- Missing coverage: [list any gaps]
-
-## Test Reality Issues
-- [list any tests that aren't real executable tests]
-
-## Verdict
-[ ] **APPROVED** - Test plan is ready for implementation
-[ ] **BLOCKED** - Test plan needs revision
-
-Mark EXACTLY ONE option with [X].
-
-## Required Changes (if BLOCKED)
-1. [specific change needed]
-2. [specific change needed]
-```
-"""
 
 
 def build_review_context(state: TestingWorkflowState) -> str:
@@ -384,8 +343,10 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
 
-    # Load review prompt
-    review_prompt = load_review_prompt(repo_root)
+    # Load review prompt: AssemblyZero's own, never the target's (ledger
+    # 0908, line 156). A missing prompt raises FileNotFoundError naming it;
+    # the run's entry point reports and alerts it.
+    review_prompt = load_review_prompt()
 
     # Build review context
     context = build_review_context(state)
@@ -412,6 +373,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     if guard_errors:
         reason = "; ".join(guard_errors)
         print(f"    [GUARD] BLOCKED: {reason}")
+        _loud(f"GUARD: Mechanical pre-checks failed — {reason}")
         log_workflow_execution(
             target_repo=repo_root,
             issue_number=state.get("issue_number", 0),
@@ -487,6 +449,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         print(f"    Reviewer: {reviewer_spec}")
         reviewer = get_provider(reviewer_spec, effort=reviewer_seat.effort)
     except ValueError as e:
+        _loud(f"Invalid reviewer: {e}")
         return {
             "error_message": f"Invalid reviewer: {e}",
             "test_plan_status": "BLOCKED",
@@ -532,7 +495,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                 f"Reviewer failed after up to {attempts_made} attempt(s) "
                 f"({retry_policy_name} retry policy): {last_error}"
             )
-            print(f"    [ERROR] {error_msg}")
+            _loud(error_msg)
 
             # Save error to audit trail
             if audit_dir.exists():
@@ -577,9 +540,13 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         node_cost_usd = get_cumulative_cost() - cost_before
 
     except Exception as e:
-        print(f"    [ERROR] Unexpected error during review: {e}")
+        # Ledger 0908, line 579: the error is named with its type at ERROR on
+        # stderr, and returned for HALT, which alerts once the router sends
+        # every error there (see route_after_review).
+        error_msg = f"Review error: {type(e).__name__}: {e}"
+        _loud(error_msg)
         return {
-            "error_message": f"Review error: {e}",
+            "error_message": error_msg,
             "test_plan_status": "BLOCKED",
         }
 
@@ -599,19 +566,35 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         structured = parse_markdown_verdict(verdict_content)
         if structured:
             print("    [N1.5] verdict read from the review's own output template, not JSON (#2837)")
+    rejection = ""
+    gemini_feedback = ""
+    test_plan_status = ""
     if not structured:
+        rejection = "no schema-valid verdict found"
+    else:
+        test_plan_status = structured["verdict"]
+        # Map REVISE -> BLOCKED for workflow purposes
+        if test_plan_status == "REVISE":
+            test_plan_status = "BLOCKED"
+        if test_plan_status == "BLOCKED":
+            gemini_feedback = _blocked_feedback(structured, verdict_content)
+            if not gemini_feedback:
+                # Ledger 0908, line 710: the reviser was sent "See full
+                # verdict for details." and had nothing to act on. A BLOCKED
+                # verdict that names no change is a verdict nobody can use.
+                rejection = (
+                    "a BLOCKED verdict that names no required change, so the "
+                    "revision has nothing to act on"
+                )
+    if rejection:
         excerpt = verdict_content.strip().replace("\n", " ")[:160]
         msg = (
-            "Test-plan reviewer response rejected: no schema-valid verdict "
-            f"found | response begins: {excerpt!r}"
+            f"Test-plan reviewer response rejected: {rejection} | response "
+            f"begins: {excerpt!r}"
         )
-        print(f"    ERROR: {msg}")
+        _loud(msg)
         return {"error_message": msg}
     verdict_method = "structured"
-    test_plan_status = structured["verdict"]
-    # Map REVISE -> BLOCKED for workflow purposes
-    if test_plan_status == "REVISE":
-        test_plan_status = "BLOCKED"
     print(f"    Verdict: {test_plan_status} (structured JSON)")
 
     # Log review result
@@ -639,18 +622,8 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     )
 
     if test_plan_status == "BLOCKED":
-        # Issue #494: Extract feedback from structured data if available
-        if structured:
-            feedback_parts = []
-            if structured.get("summary"):
-                feedback_parts.append(structured["summary"])
-            for issue in structured.get("blocking_issues", []):
-                feedback_parts.append(
-                    f"[{issue.get('severity', 'BLOCKING')}] {issue.get('section', '?')}: {issue.get('issue', '?')}"
-                )
-            gemini_feedback = "\n".join(feedback_parts) if feedback_parts else _extract_feedback(verdict_content)
-        else:
-            gemini_feedback = _extract_feedback(verdict_content)
+        # The feedback was read above, where a BLOCKED verdict naming no
+        # change is rejected (ledger 0908, line 710).
         # Closes #1490: BLOCKED is an actionable verdict, not an error.
         # Setting error_message previously short-circuited
         # route_after_review's "revise" policy, forcing END instead of
@@ -682,6 +655,36 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     }
 
 
+def _loud(message: str) -> None:
+    """N1's ERROR line on stderr, at the point of failure (ADR 0236)."""
+    print(f"ERROR [N1] {message}", file=sys.stderr)
+
+
+def _blocked_feedback(structured: dict, verdict_content: str) -> str:
+    """What a BLOCKED verdict asks the reviser to change, or "" when nothing.
+
+    In order: the verdict's summary and blocking issues (#494); a "Required
+    Changes" section or numbered list in the response; the rationale, which
+    the verdict schema requires and which says why the plan is blocked. The
+    rationale was never read, so a JSON verdict with no blocking issues sent
+    the reviser "See full verdict for details." (ledger 0908, line 710).
+    """
+    parts: list[str] = []
+    if structured.get("summary"):
+        parts.append(structured["summary"])
+    for issue in structured.get("blocking_issues", []) or []:
+        parts.append(
+            f"[{issue.get('severity', 'BLOCKING')}] {issue.get('section', '?')}: "
+            f"{issue.get('issue', '?')}"
+        )
+    if parts:
+        return "\n".join(parts)
+    extracted = _extract_feedback(verdict_content)
+    if extracted:
+        return extracted
+    return (structured.get("rationale") or "").strip()
+
+
 def _extract_feedback(verdict_content: str) -> str:
     """Extract required changes from verdict.
 
@@ -689,7 +692,10 @@ def _extract_feedback(verdict_content: str) -> str:
         verdict_content: Gemini response text.
 
     Returns:
-        Feedback string.
+        The "Required Changes" section, or the numbered list after BLOCKED;
+        "" when there is neither. It returned "See full verdict for
+        details.", which the reviser read as feedback (ledger 0908, line
+        710); the caller now decides what no extractable change means.
     """
     # Look for "Required Changes" section
     import re
@@ -707,7 +713,7 @@ def _extract_feedback(verdict_content: str) -> str:
     if match:
         return match.group(1).strip()
 
-    return "See full verdict for details."
+    return ""
 
 
 def _mock_review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:

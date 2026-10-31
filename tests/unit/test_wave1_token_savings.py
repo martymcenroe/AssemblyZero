@@ -397,6 +397,9 @@ class TestScaffoldHashStagnation:
             "scaffold_attempts": 1,
             "generated_tests": test_content,
             "previous_scaffold_hash": content_hash,
+            # Ledger 0908, line 1043: escalate needs the node's named halt;
+            # without it the router raises (see the loud-failure tests).
+            "error_message": "the scaffolder reproduced its output",
         }
 
         assert should_regenerate(state) == "escalate"
@@ -472,6 +475,8 @@ class TestScaffoldHashStagnation:
             "scaffold_attempts": 3,
             "generated_tests": "different content",
             "previous_scaffold_hash": "some_hash",
+            # Ledger 0908, line 1043: escalate needs the node's named halt.
+            "error_message": "the scaffold failed validation 3 times",
         }
 
         assert should_regenerate(state) == "escalate"

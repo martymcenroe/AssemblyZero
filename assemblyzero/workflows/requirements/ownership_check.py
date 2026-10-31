@@ -371,6 +371,23 @@ def check_table_form(report, own: OwnershipReport, violation_cls) -> None:
                 )
             )
 
+        if own.joinable and not variable.owner_prefix:
+            # #3585: in a table that joins by group tag, an untagged row's
+            # keys cannot be joined to their owner, and check_criteria skips
+            # them as reported; this is that report.
+            report.violations.append(
+                violation_cls(
+                    kind="ownership-table",
+                    where=row_where,
+                    detail=(
+                        f"variable {variable.name}'s owner carries no group tag "
+                        f"while other rows do, so no criterion asserting its "
+                        f"keys can be checked against its owner: "
+                        f"{variable.owner_source!r}"
+                    ),
+                )
+            )
+
         owners = _named_owner_groups(variable.owner_source)
         if owners > 1:
             report.violations.append(
@@ -456,7 +473,7 @@ def check_criteria(report, own: OwnershipReport, criteria, violation_cls) -> Non
                 continue
 
             if not variable.owner_prefix:
-                continue  # already reported as a malformed row
+                continue  # reported by check_table_form as an untagged row (#3585)
 
             if group == variable.owner_prefix:
                 continue

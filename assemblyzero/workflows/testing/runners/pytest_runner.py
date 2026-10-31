@@ -14,10 +14,27 @@ from assemblyzero.workflows.testing.framework_detector import (
 )
 from assemblyzero.workflows.testing.runners.base_runner import (
     BaseTestRunner,
+    RunnerError,
     combined_output,
+    loud,
+    output_head,
 )
 
 logger = logging.getLogger(__name__)
+
+#: pytest's exit codes for a run that finished: 0, every test passed; 1,
+#: some failed. Every other code is a run whose tests were not all run and
+#: judged, so its counts are not the suite's (ADR 0236).
+FINISHED_EXIT_CODES: frozenset[int] = frozenset({0, 1})
+
+#: What pytest means by each exit code that is not a finished run. Closed:
+#: pytest's `ExitCode` enum, 2 to 5.
+UNFINISHED_EXIT_CODES: dict[int, str] = {
+    2: "interrupted, or stopped by errors during collection",
+    3: "internal error",
+    4: "usage error",
+    5: "no tests collected",
+}
 
 
 class PytestRunner(BaseTestRunner):
@@ -32,7 +49,8 @@ class PytestRunner(BaseTestRunner):
     ) -> TestRunResult:
         """Run pytest with --tb=short -q and parse output.
 
-        Uses --json-report if available, falls back to stdout parsing.
+        Reads the counts from pytest's summary line; an exit code other than
+        0 or 1 raises RunnerError (`parse_results`).
         `measure_coverage` is accepted and ignored (#4246): the green phase
         measures pytest's coverage through `run_pytest`, with pytest-cov.
         """
@@ -59,15 +77,34 @@ class PytestRunner(BaseTestRunner):
     ) -> TestRunResult:
         """Parse pytest output into unified TestRunResult.
 
-        Attempts JSON report parsing first, falls back to regex on stdout.
-        `stderr`, when given separately, is read with `raw_output` (#3065).
+        Reads the counts from pytest's summary line. `stderr`, when given
+        separately, is read with `raw_output` (#3065).
+
+        ADR 0236: an exit code other than 0 or 1 raises RunnerError after an
+        ERROR line, naming the code, what pytest means by it and the head of
+        the output. Such a run did not run and judge its tests, and its
+        counts, mostly zero, read as a run where nothing failed.
+
+        `coverage_percent` is pytest-cov's TOTAL percentage when the output
+        carries the table, and None when it does not: a run not asked to
+        measure coverage prints none, and None is "not measured" (#4246),
+        where it used to read 0%.
         """
         raw_output = combined_output(raw_output, stderr)
+        if exit_code not in FINISHED_EXIT_CODES:
+            meaning = UNFINISHED_EXIT_CODES.get(exit_code, "not an exit code pytest defines")
+            message = (
+                f"pytest in {self.project_dir} ended with exit {exit_code} "
+                f"({meaning}), so its tests were not all run and judged and its "
+                f"counts are not the suite's. Output: {output_head(raw_output)}"
+            )
+            loud(message)
+            raise RunnerError(message)
         passed = 0
         failed = 0
         skipped = 0
         errors = 0
-        coverage_percent = 0.0
+        coverage_percent: float | None = None
 
         # Try to parse the summary line: "X passed, Y failed, Z skipped"
         summary_match = re.search(

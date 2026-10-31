@@ -403,11 +403,11 @@ class TestItSaysSoWhenItDidNotRun:
         assert update.get("requirements_unverified"), "it halted"
         assert read_unverified(tmp_path) == []
 
-    def test_the_surviving_fail_open_path_still_records(self, tmp_path, provider, calm):
-        """#2462: the model answered, but every conflict it reported lacked a
-        divergence condition. That path still PROCEEDS -- halting there would
-        stop the roll on a finding the check itself could not state -- so it is
-        exactly the case the banner exists for, and it must keep feeding it.
+    def test_the_last_fail_open_path_now_halts_and_records_nothing(self, tmp_path, provider, calm):
+        """#2462's path: the model answered, but every conflict it reported
+        lacked a divergence condition. It used to proceed and record the
+        unverified state; #3585 (ADR 0236) halts it as REQUIREMENTS UNVERIFIED,
+        and a halt reports itself, so it records nothing.
         """
         provider(_result(True, json.dumps({
             "is_consistent": False,
@@ -420,9 +420,8 @@ class TestItSaysSoWhenItDidNotRun:
 
         update = analyze_requirements(_state(tmp_path))
 
-        assert update == {}, "this one proceeds, by the decision recorded in #2462"
-        records = read_unverified(tmp_path)
-        assert len(records) == 1 and records[0]["issue"] == 7
+        assert update.get("requirements_unverified"), "it halted"
+        assert read_unverified(tmp_path) == []
 
     def test_a_verdict_records_nothing(self, tmp_path, provider, calm):
         provider(OK)

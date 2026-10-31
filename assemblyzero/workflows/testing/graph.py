@@ -22,9 +22,9 @@ Graph structure:
          error         BLOCKED              scaffold_only         validation
            |              |                     |                   result
            v              v                     v                      |
-          END     loop back to LLD             END                    / \\
-                  (outside workflow)                                 /   \\
-                                                                pass   fail
+          HALT     N1.5 revise, HALT           END                    / \\
+                   when revisions are                                /   \\
+                   spent (#3585)                                pass   fail
                                                                  |       |
                                                                  v       v
     N2_5 (pass) -> N3_verify_red -> N4_implement_code ------> N2 (retry)
@@ -56,8 +56,16 @@ Graph structure:
                                                           |
                                                           v
                                                          END
+
+#3585 (ADR 0236): every stop a router decides goes to HALT, which alerts. The
+routers used to end the run at END for an iteration cap, a spent budget, a
+BLOCKED test plan or a route nobody named; END writes no halt bundle and tells
+no one, and the stage read the empty error_message as a pass. A router's own
+state writes are discarded at the graph boundary (#2018), so the node in front
+of it records the reason (`_records_its_stop`), and HALT's alert carries it.
 """
 
+import sys
 from typing import Any, Callable, Literal
 
 from langgraph.graph import END, StateGraph
@@ -104,17 +112,26 @@ from assemblyzero.core.halt_node import create_halt_node
 from assemblyzero.core.llm_provider import get_cumulative_cost
 
 
+class CheckpointFailed(RuntimeError):
+    """A git checkpoint after a node failed, and the run stops (#3585)."""
+
+
 def _wrap_with_checkpoint(node_fn: Callable[..., dict[str, Any]],
                             ckpt_name: str) -> Callable[..., dict[str, Any]]:
     """Wrap a TDD node so it triggers a git checkpoint after it returns.
 
-    Pulls worktree_path and issue_number out of the workflow state. The
-    checkpoint itself is best-effort (see commit_checkpoint) -- any
-    failure is logged but never propagated to the node's caller, so a
-    flaky network or missing remote can't break the workflow.
+    Pulls worktree_path and issue_number out of the workflow state.
 
     Issue #689 -- 2026-01-31 lost 6,114 lines because TDD nodes didn't
     commit between phases.
+
+    #3585 (ledger 0908, graph.py:128): a checkpoint that raises stops the
+    run. This wrapper used to print the error and carry on, so a run went on
+    with its work uncommitted and nobody was told. It now says the failure at
+    ERROR on stderr, naming the checkpoint, the node, the worktree and the
+    issue, and raises CheckpointFailed from it. The run's caller alerts once:
+    the entry point's main handler, or the orchestrator's impl stage, whose
+    failed result routes to its HALT.
     """
     def wrapped(state: dict[str, Any]) -> dict[str, Any]:
         result = node_fn(state)
@@ -127,7 +144,14 @@ def _wrap_with_checkpoint(node_fn: Callable[..., dict[str, Any]],
         try:
             commit_checkpoint(worktree, issue_n, ckpt_name)
         except Exception as e:
-            print(f"  [CP:{ckpt_name}] wrapper caught unexpected error: {e}")
+            message = (
+                f"the [CP:{ckpt_name}] git checkpoint after "
+                f"{getattr(node_fn, '__name__', 'the node')} failed in {worktree} "
+                f"(issue {issue_n}): {type(e).__name__}: {e}; the run stops, and "
+                f"the node's work is in the worktree uncommitted"
+            )
+            print(f"ERROR [CP:{ckpt_name}] {message}", file=sys.stderr)
+            raise CheckpointFailed(message) from e
         return result
 
     # #2813: the same carry `narrated` performs, for the same reason. This
@@ -139,6 +163,218 @@ def _wrap_with_checkpoint(node_fn: Callable[..., dict[str, Any]],
     wrapped.__module__ = getattr(node_fn, "__module__", wrapped.__module__)
     wrapped.__wrapped__ = node_fn
     return wrapped
+
+
+def _records_its_stop(
+    node_fn: Callable[..., dict[str, Any]],
+    stop: Callable[[dict[str, Any]], dict[str, str]],
+    label: str,
+) -> Callable[..., dict[str, Any]]:
+    """Wrap a node so a stop its router will take is recorded as its reason.
+
+    #3585: the router after this node halts on a condition the node did not
+    record (an iteration cap, a budget, a BLOCKED plan, a route it did not
+    name). A router cannot write state, so without this HALT's alert would
+    carry a reason synthesized from nothing. `stop` is the same function the
+    router consults, so the two cannot disagree about when the run stops. A
+    reason the node recorded itself is left as it is.
+    """
+    def records_stop(state: dict[str, Any]) -> dict[str, Any]:
+        result = node_fn(state)
+        if (result or {}).get("error_message"):
+            return result
+        halt = stop({**state, **(result or {})})
+        if not halt:
+            return result
+        print(f"ERROR [{label}] {halt['error_message']}", file=sys.stderr)
+        return {**(result or {}), **halt}
+
+    # Same identity carry as _wrap_with_checkpoint (#2813).
+    records_stop.__name__ = getattr(node_fn, "__name__", "records_stop")
+    records_stop.__module__ = getattr(node_fn, "__module__", records_stop.__module__)
+    records_stop.__wrapped__ = node_fn
+    return records_stop
+
+
+def _halt_unrecorded(label: str, halt: dict[str, str]) -> Literal["HALT"]:
+    """Say a stop the node did not record, at ERROR on stderr, and halt.
+
+    In the built graph the node's `_records_its_stop` has already recorded it
+    and the router halts on error_message first; this is the router alone.
+    """
+    print(f"ERROR [{label}] {halt['error_message']}", file=sys.stderr)
+    return "HALT"
+
+
+def _issue(state: dict[str, Any]) -> Any:
+    return state.get("issue_number") or "?"
+
+
+def _stop_after_review(state: dict[str, Any]) -> dict[str, str]:
+    """The halt a BLOCKED test plan takes, or {} while it can be revised.
+
+    #3585 (ledger 0908, graph.py:227, :232, :245): a BLOCKED verdict is a gate
+    that failed. Under auto_mode (which `--review none`, the default, sets) or
+    test_plan_policy=auto it used to be walked past to N2; under strict, and
+    when the revisions were spent, it ended at END with a print. It is now
+    revised while revisions remain, whatever the policy says about auto, and
+    halts when none remain. Strict allows none.
+    """
+    from assemblyzero.workflows.testing.nodes.revise_test_plan import (
+        MAX_REVISION_CYCLES,
+    )
+
+    if state.get("test_plan_status") != "BLOCKED":
+        return {}
+    verdict = state.get("test_plan_verdict") or "BLOCKED"
+    if state.get("test_plan_policy", "revise") == "strict":
+        return {"error_message": (
+            f"Test plan revision budget spent: test_plan_policy=strict allows "
+            f"no revision, and N1 returned BLOCKED for issue {_issue(state)}: "
+            f"{verdict}"
+        )}
+    if state.get("test_plan_revision_count", 0) >= MAX_REVISION_CYCLES:
+        return {"error_message": (
+            f"Test plan revision budget spent: the plan for issue "
+            f"{_issue(state)} is still BLOCKED after {MAX_REVISION_CYCLES} "
+            f"revision cycle(s): {verdict}"
+        )}
+    return {}
+
+
+def _stop_after_validate(state: dict[str, Any]) -> dict[str, str]:
+    """The halt N2.5's carried route takes, or {} when it continues or retries.
+
+    #3585 (ledger 0908, graph.py:318): an exhausted scaffold names its own halt
+    (#2331). A carried "escalate" with no reason, or a route the graph does not
+    know, used to end at END. No carried route (a state from before #2676) is
+    left to the router's `should_regenerate`.
+    """
+    route = state.get("scaffold_route", "")
+    if route in ("", "continue", "regenerate"):
+        return {}
+    if route == "escalate":
+        return {"error_message": (
+            f"N2.5: the generated test suite cannot be used for issue "
+            f"{_issue(state)}, and regeneration is exhausted; the node carried "
+            f"route 'escalate' without naming the halt"
+        )}
+    return {"error_message": (
+        f"Unrecognised route after N2.5: validate_tests_mechanical carried "
+        f"scaffold_route {route!r} for issue {_issue(state)}, and the graph has "
+        f"no such edge"
+    )}
+
+
+#: The routes N3 names, each an edge of the graph.
+_RED_ROUTES = ("N4_implement_code", "N5_verify_green", "N2_scaffold_tests")
+
+
+def _stop_after_red(state: dict[str, Any]) -> dict[str, str]:
+    """The halt for a route N3 did not name, or {}.
+
+    #3585 (ledger 0908, graph.py:355): every stop N3 makes records a reason,
+    so a next_node outside its routes is a broken contract. It ended at END
+    silently, and the stage read the empty error_message as a pass.
+    """
+    next_node = state.get("next_node", "")
+    if next_node in _RED_ROUTES:
+        return {}
+    return {"error_message": (
+        f"Unrecognised route after N3: verify_red_phase named next_node "
+        f"{next_node!r} for issue {_issue(state)} and recorded no reason; the "
+        f"graph has no such edge"
+    )}
+
+
+def _stop_after_green(state: dict[str, Any]) -> dict[str, str]:
+    """The halt N5's route takes, or {} when the route stands.
+
+    #3585 (ledger 0908, graph.py:438, :447, :451, :471, :478, :488): the
+    iteration cap, the spent coverage attempts, the cost budget and a route
+    N5 did not name each ended the run at END. #2344 made the first say so on
+    stdout; none reached HALT, so none alerted and the empty error_message read
+    as a pass.
+    """
+    next_node = state.get("next_node", "")
+    if next_node in ("N2_scaffold_tests", "N6_e2e_validation", "N7_finalize"):
+        return {}
+    iteration = state.get("iteration_count", 0)
+    max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
+    budget = state.get("cost_budget_usd", 0.0)
+
+    # #2327: a green-but-under-covered result routes to test additions, never
+    # to implementation revision. Bounded by the same iteration and budget
+    # limits as the implement loop, and additionally by its own attempt count
+    # -- an LLM that cannot reach the target will not be asked forever.
+    if next_node == "N4c_augment_tests":
+        if iteration >= max_iterations:
+            return {"error_message": (
+                f"Green phase failed after {iteration} iteration(s): coverage "
+                f"for issue {_issue(state)} is under its target and the "
+                f"iteration cap of {max_iterations} is reached, so no further "
+                f"tests can be added"
+            )}
+        if state.get("coverage_augment_attempts", 0) >= MAX_COVERAGE_AUGMENT_ATTEMPTS:
+            return {"error_message": (
+                f"Coverage test additions spent: {MAX_COVERAGE_AUGMENT_ATTEMPTS} "
+                f"attempt(s) to add tests for issue {_issue(state)} did not "
+                f"reach the coverage target. The run halts rather than route "
+                f"to implementation: the uncovered lines are a test gap, and "
+                f"revising the implementation to close it would reward "
+                f"deleting the code that is not covered"
+            )}
+        if budget > 0 and (cumulative := get_cumulative_cost()) > budget:
+            return {"error_message": (
+                f"[BUDGET] cost ${cumulative:.2f} exceeds the ${budget:.2f} "
+                f"cost budget for issue {_issue(state)} before N4c could add "
+                f"tests"
+            )}
+        return {}
+
+    if next_node == "N4_implement_code":
+        if iteration >= max_iterations:
+            # #2344: N5 asked for another revision and cannot have one. That
+            # is a failure of the loop, not a quiet finish.
+            return {"error_message": (
+                f"Green phase failed after {iteration} iteration(s): N5 asked "
+                f"for another implementation revision for issue "
+                f"{_issue(state)} and the cap of {max_iterations} is reached. "
+                f"The last result stands, and it is not a pass"
+            )}
+        # Issue #640: Budget check before looping back
+        if budget > 0 and (cumulative := get_cumulative_cost()) > budget:
+            return {"error_message": (
+                f"[BUDGET] cost ${cumulative:.2f} exceeds the ${budget:.2f} "
+                f"cost budget for issue {_issue(state)} before another "
+                f"implementation revision"
+            )}
+        return {}
+
+    return {"error_message": (
+        f"Unrecognised route after N5: verify_green_phase named next_node "
+        f"{next_node!r} for issue {_issue(state)} and recorded no reason; the "
+        f"graph has no such edge"
+    )}
+
+
+def _stop_after_e2e(state: dict[str, Any]) -> dict[str, str]:
+    """The halt at the e2e iteration cap, or {}.
+
+    #3585 (ledger 0908, graph.py:513): an E2E failure that asks for another
+    revision at the cap ended at END silently.
+    """
+    if state.get("next_node", "") != "N4_implement_code":
+        return {}
+    iteration = state.get("iteration_count", 0)
+    max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
+    if iteration >= max_iterations:
+        return {"error_message": (
+            f"E2E failed after {iteration} iteration(s): N6 asked for another "
+            f"implementation revision for issue {_issue(state)} and the cap of "
+            f"{max_iterations} is reached"
+        )}
+    return {}
 
 
 def route_after_load(
@@ -184,66 +420,49 @@ def route_after_revision(
 
 def route_after_review(
     state: TestingWorkflowState,
-) -> Literal["N2_scaffold_tests", "N1_5_revise_test_plan", "end", "HALT"]:
+) -> Literal["N2_scaffold_tests", "N1_5_revise_test_plan", "HALT"]:
     """Route after N1 (review_test_plan).
 
-    Issue #1072: BLOCKED no longer terminates by default. The
-    test_plan_policy controls behavior:
+    Issue #1072: BLOCKED no longer terminates by default; it is revised up to
+    MAX_REVISION_CYCLES times.
 
-    - "revise" (default): route to N1_5_revise_test_plan up to
-      MAX_REVISION_CYCLES; END after exhaustion.
-    - "auto": continue to N2_scaffold_tests despite BLOCKED (matches
-      the legacy auto_mode bypass).
-    - "strict": END on BLOCKED (legacy default behavior).
+    #3585 (ADR 0236; ledger 0908, graph.py:217, :227, :232, :245): a BLOCKED
+    plan is never walked past and never ends the run quietly.
 
-    The legacy `auto_mode` flag is honored for backward compatibility:
-    when set, it forces the auto path regardless of test_plan_policy.
+    - Any recorded reason halts. Under auto_mode, which `--review none` (the
+      default) sets, an N1 error used to be ignored and the run went on to N2.
+    - "revise" (default) and "auto": revise up to MAX_REVISION_CYCLES, then
+      HALT. "auto" and the legacy auto_mode flag used to continue to N2 past
+      the BLOCKED verdict; they now revise, as "revise" does.
+    - "strict": HALT on BLOCKED. It used to end at END with no alert.
+
+    The halts are recorded by N1's `_records_its_stop` from
+    `_stop_after_review`, so HALT's alert carries the verdict.
 
     Args:
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, or HALT.
     """
     from assemblyzero.workflows.testing.nodes.revise_test_plan import (
         MAX_REVISION_CYCLES,
     )
 
-    error = state.get("error_message", "")
-    test_plan_status = state.get("test_plan_status", "")
-    auto_mode = state.get("auto_mode", False)
-    policy = state.get("test_plan_policy", "revise")
-    revision_count = state.get("test_plan_revision_count", 0)
-
-    if error and not auto_mode:
+    if (state.get("error_message") or "").strip():
         return "HALT"
 
-    if test_plan_status == "BLOCKED":
-        # Legacy auto_mode flag OR policy=auto bypasses the gate.
-        if auto_mode or policy == "auto":
-            print(
-                "    [AUTO] Continuing despite BLOCKED verdict "
-                "(test_plan_policy=auto)"
-            )
-            return "N2_scaffold_tests"
-        # Strict policy preserves the original END-on-BLOCKED behavior.
-        if policy == "strict":
-            # Closes #1493: ASCII-only print (Windows cp1252).
-            print("    [STRICT] BLOCKED -> END (test_plan_policy=strict)")
-            return "end"
-        # Default revise policy: try to fix the test plan up to N cycles.
-        if revision_count < MAX_REVISION_CYCLES:
-            # Closes #1493: ASCII-only print (Windows cp1252).
-            print(
-                f"    [REVISE] BLOCKED -> N1.5 revise cycle "
-                f"{revision_count + 1}/{MAX_REVISION_CYCLES}"
-            )
-            return "N1_5_revise_test_plan"
+    if state.get("test_plan_status") == "BLOCKED":
+        halt = _stop_after_review(state)
+        if halt:
+            return _halt_unrecorded("N1", halt)
+        revision_count = state.get("test_plan_revision_count", 0)
+        # Closes #1493: ASCII-only print (Windows cp1252).
         print(
-            f"    [REVISE] BLOCKED after {MAX_REVISION_CYCLES} revision "
-            "cycles — END"
+            f"    [REVISE] BLOCKED -> N1.5 revise cycle "
+            f"{revision_count + 1}/{MAX_REVISION_CYCLES}"
         )
-        return "end"
+        return "N1_5_revise_test_plan"
 
     return "N2_scaffold_tests"
 
@@ -276,7 +495,7 @@ def route_after_scaffold(
 
 def route_after_validate(
     state: TestingWorkflowState,
-) -> Literal["N3_verify_red", "N2_scaffold_tests", "end", "HALT"]:
+) -> Literal["N3_verify_red", "N2_scaffold_tests", "HALT"]:
     """Route after N2.5 (validate_tests_mechanical).
 
     Issue #335: Routes based on test validation results.
@@ -284,7 +503,10 @@ def route_after_validate(
     Routes to:
     - N3_verify_red: Validation passed, continue normal flow
     - N2_scaffold_tests: Validation failed, attempts remain, retry
-    - END: Validation failed and regeneration is exhausted, or an error
+    - HALT: an error, or validation failed and regeneration is exhausted.
+      #3585 (ledger 0908, graph.py:318): an exhaustion that recorded no
+      reason, or a route the graph does not know, used to end at END; N2.5's
+      `_records_its_stop` now records it from `_stop_after_validate`.
 
     #2331: this used to route an exhausted scaffold to N4_implement_code, and
     the comment there said "escalate to Claude". It escalated to nothing. A
@@ -302,11 +524,15 @@ def route_after_validate(
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, or HALT.
     """
     error = state.get("error_message", "")
     if error:
         return "HALT"
+
+    halt = _stop_after_validate(state)
+    if halt:
+        return _halt_unrecorded("N2.5", halt)
 
     # Use the should_regenerate function from validate_tests_mechanical
     decision = should_regenerate(state)
@@ -316,13 +542,19 @@ def route_after_validate(
     elif decision == "regenerate":
         return "N2_scaffold_tests"
 
-    return "end"
+    # A state from before #2676 carries no route, and its recomputed decision
+    # escalated without a recorded reason.
+    return _halt_unrecorded("N2.5", {"error_message": (
+        f"N2.5: the generated test suite cannot be used for issue "
+        f"{_issue(state)}; should_regenerate decided {decision!r} and no "
+        f"reason was recorded"
+    )})
 
 
 def route_after_red(
     state: TestingWorkflowState,
 ) -> Literal[
-    "N4_implement_code", "N2_scaffold_tests", "N5_verify_green", "end", "HALT",
+    "N4_implement_code", "N2_scaffold_tests", "N5_verify_green", "HALT",
 ]:
     """Route after N3 (verify_red_phase).
 
@@ -332,13 +564,19 @@ def route_after_red(
         state: Current workflow state.
 
     Returns:
-        Next node name, or HALT when the node recorded a reason (#2756).
+        Next node name, or HALT when the node recorded a reason (#2756) or
+        named a route the graph does not have (#3585, ledger 0908,
+        graph.py:355; it used to end at END silently).
     """
     error = state.get("error_message", "")
     next_node = state.get("next_node", "")
 
     if error:
         return "HALT"
+
+    halt = _stop_after_red(state)
+    if halt:
+        return _halt_unrecorded("N3", halt)
 
     if next_node == "N4_implement_code":
         return "N4_implement_code"
@@ -350,10 +588,7 @@ def route_after_red(
         return "N5_verify_green"
 
     # Issue #292: Exit code 4/5 routes back to scaffold
-    if next_node == "N2_scaffold_tests":
-        return "N2_scaffold_tests"
-
-    return "end"
+    return "N2_scaffold_tests"
 
 
 def route_after_implement(
@@ -421,99 +656,61 @@ def route_after_green(
     state: TestingWorkflowState,
 ) -> Literal[
     "N6_e2e_validation", "N7_finalize", "N4_implement_code",
-    "N4c_augment_tests", "N2_scaffold_tests", "end", "HALT",
+    "N4c_augment_tests", "N2_scaffold_tests", "HALT",
 ]:
     """Route after N5 (verify_green_phase).
 
     Issue #292: Added N2_scaffold_tests route for exit codes 4/5.
 
+    #3585 (ADR 0236; ledger 0908, graph.py:438, :447, :451, :471, :478,
+    :488): the iteration cap, the spent coverage attempts, the cost budget and
+    a route N5 did not name halt. Each used to end at END, and the stage read
+    the empty error_message as a pass. N5's `_records_its_stop` records the
+    reason from `_stop_after_green`, so HALT's alert carries it.
+
     Args:
         state: Current workflow state.
 
     Returns:
-        Next node name, or HALT when the node recorded a reason (#2756).
+        Next node name, or HALT.
     """
     error = state.get("error_message", "")
     next_node = state.get("next_node", "")
 
     if error:
         return "HALT"
+
+    halt = _stop_after_green(state)
+    if halt:
+        return _halt_unrecorded("N5", halt)
 
     # Issue #292: Exit code 4/5 routes back to scaffold
     if next_node == "N2_scaffold_tests":
         return "N2_scaffold_tests"
-
-    # #2327: a green-but-under-covered result routes to test additions, never
-    # to implementation revision. Bounded by the same iteration and budget
-    # limits as the implement loop, and additionally by its own attempt count
-    # -- an LLM that cannot reach the target will not be asked forever.
+    # #2327: test additions, never implementation revision, for coverage.
     if next_node == "N4c_augment_tests":
-        iteration = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
-        if iteration >= max_iterations:
-            return "end"
-        if state.get("coverage_augment_attempts", 0) >= MAX_COVERAGE_AUGMENT_ATTEMPTS:
-            print(
-                f"    [COVERAGE] {MAX_COVERAGE_AUGMENT_ATTEMPTS} test-addition "
-                f"attempt(s) did not reach the target. Halting rather than "
-                f"routing to implementation -- the uncovered lines are a test "
-                f"gap, and revising the implementation to close it would "
-                f"reward deleting the code that is not covered."
-            )
-            return "end"
-        budget = state.get("cost_budget_usd", 0.0)
-        if budget > 0 and get_cumulative_cost() > budget:
-            print("    [BUDGET] exceeded. Halting.")
-            return "end"
         return "N4c_augment_tests"
-
-    # Check for iteration loop back to implement
     if next_node == "N4_implement_code":
-        # Check max iterations
-        iteration = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
-        if iteration >= max_iterations:
-            # #2344: N5 asked for another revision and cannot have one. That
-            # is a failure of the loop, not a quiet finish -- returning "end"
-            # silently left an empty error_message, and the stage read empty
-            # as passed while holding a failing test. Say what happened, so
-            # the verdict downstream is built on a stated fact.
-            print(
-                f"    [ITERATION CAP] N5 asked for another implementation "
-                f"revision at iteration {iteration}/{max_iterations}. The cap "
-                f"is reached, so the loop stops here with its last result "
-                f"standing -- this is not a pass."
-            )
-            return "end"
-        # Issue #640: Budget check before looping back
-        budget = state.get("cost_budget_usd", 0.0)
-        if budget > 0:
-            cumulative = get_cumulative_cost()
-            if cumulative > budget:
-                print(f"    [BUDGET] ${cumulative:.2f} exceeds ${budget:.2f} budget. Halting.")
-                return "end"
         return "N4_implement_code"
-
     if next_node == "N6_e2e_validation":
         return "N6_e2e_validation"
-
     # Skip E2E - go directly to finalize
-    if next_node == "N7_finalize":
-        return "N7_finalize"
-
-    return "end"
+    return "N7_finalize"
 
 
 def route_after_e2e(
     state: TestingWorkflowState,
-) -> Literal["N7_finalize", "N4_implement_code", "end", "HALT"]:
+) -> Literal["N7_finalize", "N4_implement_code", "HALT"]:
     """Route after N6 (e2e_validation).
+
+    #3585 (ledger 0908, graph.py:513): an E2E failure at the iteration cap
+    halts; it ended at END silently. N6's `_records_its_stop` records it.
 
     Args:
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, or HALT.
     """
     error = state.get("error_message", "")
     next_node = state.get("next_node", "")
@@ -521,12 +718,12 @@ def route_after_e2e(
     if error:
         return "HALT"
 
+    halt = _stop_after_e2e(state)
+    if halt:
+        return _halt_unrecorded("N6", halt)
+
     # E2E failure may loop back to implement
     if next_node == "N4_implement_code":
-        iteration = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
-        if iteration >= max_iterations:
-            return "end"
         return "N4_implement_code"
 
     return "N7_finalize"
@@ -601,22 +798,27 @@ def build_testing_workflow() -> StateGraph:
     def _add(name, fn):
         workflow.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS, stage="impl"))
 
-    # Add nodes
+    # Add nodes. #3585: a node whose router can halt on a condition the node
+    # does not record is wrapped by `_records_its_stop`, so the reason reaches
+    # HALT's alert.
     _add("N0_load_lld", load_lld)
-    _add("N1_review_test_plan", review_test_plan)
+    _add("N1_review_test_plan",
+         _records_its_stop(review_test_plan, _stop_after_review, "N1"))
     _add("N1_5_revise_test_plan", revise_test_plan)  # Issue #1072
     # Issue #689: checkpoint after N2/N4/N5 so a crash between phases
     # doesn't lose generated tests / implementation code.
     _add("N2_scaffold_tests", _wrap_with_checkpoint(scaffold_tests, "post-scaffold"))
-    _add("N2_5_validate_tests", validate_tests_mechanical_node)  # Issue #335
-    _add("N3_verify_red", verify_red_phase)
+    _add("N2_5_validate_tests",  # Issue #335
+         _records_its_stop(validate_tests_mechanical_node, _stop_after_validate, "N2.5"))
+    _add("N3_verify_red", _records_its_stop(verify_red_phase, _stop_after_red, "N3"))
     # #3563: N4 runs under the run's model profile.
     _add("N4_implement_code", _wrap_with_checkpoint(implement_code_under_profile, "post-impl"))
     _add("N4b_completeness_gate", completeness_gate)  # Issue #147
     _add("N4_5_mechanical_hooks", mechanical_hooks)
     _add("N4c_augment_tests", augment_tests_for_coverage)  # #2327
-    _add("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))
-    _add("N6_e2e_validation", e2e_validation)
+    _add("N5_verify_green", _wrap_with_checkpoint(
+        _records_its_stop(verify_green_phase, _stop_after_green, "N5"), "post-green"))
+    _add("N6_e2e_validation", _records_its_stop(e2e_validation, _stop_after_e2e, "N6"))
     # Issue #1626: checkpoint after N7 so the test/implementation reports written
     # and archived by finalize() are committed to the impl worktree (and thus
     # land on target main when the impl PR squash-merges) instead of being left
@@ -648,14 +850,14 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N1 -> N2 / N1.5 / END (Issue #1072: revise on BLOCKED)
+    # N1 -> N2 / N1.5 / HALT (Issue #1072: revise on BLOCKED). #3585: no
+    # "end"; a BLOCKED plan with no revision left halts.
     workflow.add_conditional_edges(
         "N1_review_test_plan",
         route_after_review,
         {
             "N2_scaffold_tests": "N2_scaffold_tests",
             "N1_5_revise_test_plan": "N1_5_revise_test_plan",
-            "end": END,
             "HALT": "HALT",  # #2756
         },
     )
@@ -681,7 +883,8 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N2.5 -> N3 or N2 (retry) or N4 (escalate) - Issue #335
+    # N2.5 -> N3 or N2 (retry) or N4 (escalate) - Issue #335. #3585: no
+    # "end"; an exhausted scaffold halts.
     workflow.add_conditional_edges(
         "N2_5_validate_tests",
         route_after_validate,
@@ -689,12 +892,12 @@ def build_testing_workflow() -> StateGraph:
             "N3_verify_red": "N3_verify_red",
             "N2_scaffold_tests": "N2_scaffold_tests",
             "N4_implement_code": "N4_implement_code",
-            "end": END,
             "HALT": "HALT",  # #2756
         },
     )
 
-    # N3 -> N4 or N2 (exit code routing) - Issue #292
+    # N3 -> N4 or N2 (exit code routing) - Issue #292. #3585: no "end"; a
+    # route N3 did not name halts.
     workflow.add_conditional_edges(
         "N3_verify_red",
         route_after_red,
@@ -702,7 +905,6 @@ def build_testing_workflow() -> StateGraph:
             "N4_implement_code": "N4_implement_code",
             "N5_verify_green": "N5_verify_green",  # #2337
             "N2_scaffold_tests": "N2_scaffold_tests",
-            "end": END,
             "HALT": "HALT",  # #2756
         },
     )
@@ -731,6 +933,7 @@ def build_testing_workflow() -> StateGraph:
     )
 
     # N5 -> N6 or N7 (skip E2E) or N4 (iteration loop) or N2 (exit code routing) - Issue #292
+    # #3585: no "end"; a cap, a budget or an unnamed route halts.
     workflow.add_conditional_edges(
         "N5_verify_green",
         route_after_green,
@@ -740,7 +943,6 @@ def build_testing_workflow() -> StateGraph:
             "N4_implement_code": "N4_implement_code",
             "N4c_augment_tests": "N4c_augment_tests",  # #2327
             "N2_scaffold_tests": "N2_scaffold_tests",
-            "end": END,
             "HALT": "HALT",  # #2756
         },
     )
@@ -769,14 +971,13 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N6 -> N7 or N4 (iteration loop)
+    # N6 -> N7 or N4 (iteration loop). #3585: no "end"; the cap halts.
     workflow.add_conditional_edges(
         "N6_e2e_validation",
         route_after_e2e,
         {
             "N7_finalize": "N7_finalize",
             "N4_implement_code": "N4_implement_code",
-            "end": END,
             "HALT": "HALT",  # #2756
         },
     )

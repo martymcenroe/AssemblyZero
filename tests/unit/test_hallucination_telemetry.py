@@ -2,9 +2,9 @@
 
 Pins the record-only contract: the instrument measures invented-API calls
 in both the spec draft and the LLD, writes structured events to both
-sinks, and can never — under any failure — alter the completeness gate's
-verdict. Clean runs still write events, and "detector could not run" is
-recorded as ``skipped``, never as silence.
+sinks, and no event alters the completeness gate's verdict. Clean runs still
+write events, and "detector could not run" is recorded as ``skipped``, never
+as silence. A failure to record is a failure (#3585): N3 halts with its cause.
 
 Issue: #1812
 """
@@ -41,8 +41,13 @@ HALLUCINATED_SPEC = (
     "# Implementation Spec\n\n" + _FILLER + "\n"
     f"```python\nresult = question.{FAKE_CALL}()\n```\n"
 )
-CLEAN_LLD = "# LLD\n\n```python\nobj = Question.from_dict(data)\n```\n"
-HALLUCINATED_LLD = f"# LLD\n\n```python\nobj = question.{FAKE_CALL}()\n```\n"
+#: #3585: N3 reads the LLD's pass criteria, and halts on an LLD without them.
+_CRITERIA = (
+    "\n| ID | Scenario | Pass Criteria |\n|----|----------|---------------|\n"
+    "| 010 | the change (REQ-1) | works |\n"
+)
+CLEAN_LLD = "# LLD\n\n```python\nobj = Question.from_dict(data)\n```\n" + _CRITERIA
+HALLUCINATED_LLD = f"# LLD\n\n```python\nobj = question.{FAKE_CALL}()\n```\n" + _CRITERIA
 
 
 def _read_jsonl(az_root):
@@ -57,8 +62,20 @@ def _read_jsonl(az_root):
 
 
 @pytest.fixture
-def state(tmp_path):
-    """Minimal node state with live audit + JSONL sinks under tmp_path."""
+def state(tmp_path, monkeypatch):
+    """Minimal node state with live audit + JSONL sinks under tmp_path.
+
+    #3585: `question` is a root nothing in these fences binds, so N3 asks the
+    target environment whether it imports; tmp_path has no environment, and
+    the probe would halt N3. These tests are about telemetry, so a probe that
+    answers "imports none of them" stands in.
+    """
+    import sys
+
+    vc = sys.modules[
+        "assemblyzero.workflows.implementation_spec.nodes.validate_completeness"
+    ]
+    monkeypatch.setattr(vc, "_probe_target_env", lambda _repo, tops: {t: False for t in tops})
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
     return {
@@ -248,11 +265,11 @@ class TestNodeTelemetry:
         lld_events = [e for e in _read_jsonl(tmp_path) if e["artifact"] == "lld"]
         assert [e["passed"] for e in lld_events] == [False, True]
 
-    def test_telemetry_failure_cannot_change_the_verdict(
+    def test_a_telemetry_failure_halts_n3_with_its_cause(
         self, state, tmp_path, monkeypatch, capsys
     ):
-        baseline = validate_completeness(dict(state))
-
+        """#3585 (ADR 0236): the failure is not swallowed. It used to print a
+        WARNING and leave the verdict as it was, with the measurement lost."""
         # The nodes package re-exports the function under the module's own
         # name, so `import ... as vc` would grab the function. sys.modules
         # is unambiguous.
@@ -268,6 +285,7 @@ class TestNodeTelemetry:
         monkeypatch.setattr(vc, "record_hallucination_event", boom)
         result = validate_completeness(dict(state))
 
-        assert result["validation_passed"] == baseline["validation_passed"]
-        assert result["completeness_issues"] == baseline["completeness_issues"]
-        assert "telemetry" in capsys.readouterr().out.lower()
+        assert result["validation_passed"] is False
+        assert "telemetry" in result["completeness_cannot_check"]
+        assert "RuntimeError: telemetry sink exploded" in result["error_message"]
+        assert "ERROR [N3]" in capsys.readouterr().err

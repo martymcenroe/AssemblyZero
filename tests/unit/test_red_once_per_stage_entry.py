@@ -155,11 +155,14 @@ class TestTheMarker:
         state = _state(worktree, retry_mode="", iteration_count=0)
         assert _implementation_already_exists(state) is False
 
-    def test_a_corrupt_marker_abstains(self, worktree: Path) -> None:
+    def test_a_corrupt_marker_raises(self, worktree: Path) -> None:
+        """#3585 (ledger 0908 line 1036): a marker that is there and cannot
+        be read is a failure, not "no marker"; N3 halts on it."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import PhaseStepError
+
         (worktree / RED_MARKER_NAME).write_text("{not json", encoding="utf-8")
-        assert read_red_marker(_state(worktree)) is None
-        # The file evidence still carries the later-attempt case.
-        assert _implementation_already_exists(_state(worktree)) is True
+        with pytest.raises(PhaseStepError, match=RED_MARKER_NAME):
+            read_red_marker(_state(worktree))
 
 
 class TestGenuinePreExistingStillHalts:

@@ -51,6 +51,14 @@ def _make_arc_repo(tmp_path):
     (skins / "stingray.py").write_text("x = 1", encoding="utf-8")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-m", "arc: ships skins.stingray")
+    # #3585: the base is read from origin only (a local branch is never
+    # fast-forwarded, #2021), so the arc is pushed to a bare origin beside the
+    # repo, outside its working tree.
+    upstream = tmp_path.with_name(tmp_path.name + "-origin.git")
+    upstream.mkdir()
+    _git(upstream, "init", "--bare", "-b", "main")
+    _git(tmp_path, "remote", "add", "origin", str(upstream))
+    _git(tmp_path, "push", "-q", "origin", "main", "arc")
     _git(tmp_path, "checkout", "-q", "main")
     return tmp_path
 

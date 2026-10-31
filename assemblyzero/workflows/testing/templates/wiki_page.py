@@ -5,8 +5,18 @@ Issue #93: N8 Documentation Node
 Generates wiki pages from LLD content following AssemblyZero wiki standards.
 """
 
+import logging
 import re
+import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def _loud(message: str) -> None:
+    """One ERROR line on stderr and in the log (ADR 0236 property 1)."""
+    logger.error("[WIKI] %s", message)
+    print(f"ERROR [WIKI] {message}", file=sys.stderr, flush=True)
 
 
 def extract_overview_from_lld(lld_content: str) -> str:
@@ -88,7 +98,27 @@ def generate_wiki_page(
 
     Returns:
         Path to generated wiki page.
+
+    Raises:
+        ValueError: naming the feature, the issue and the headings searched,
+            after an ERROR line and before anything is written, when the LLD
+            has no overview (ADR 0236). The page used to say "*Overview not
+            extracted from LLD.*" in its place.
     """
+    # Extract content from LLD
+    overview = extract_overview_from_lld(lld_content)
+    if not overview:
+        message = (
+            f"the wiki page for {feature_name} (issue #{issue_number}) cannot be "
+            f"written from its LLD: the LLD has no overview (headings searched: "
+            f"'1. Overview', '1. Context', '1. Context & Goal', "
+            f"'1. Introduction', 'Overview')"
+        )
+        _loud(message)
+        raise ValueError(message)
+    diagram = extract_mermaid_diagram(lld_content)
+    features = extract_features_from_lld(lld_content)
+
     wiki_dir = repo_root / "wiki"
     wiki_dir.mkdir(parents=True, exist_ok=True)
 
@@ -96,11 +126,6 @@ def generate_wiki_page(
     filename = feature_name.replace(" ", "-").replace("/", "-")
     filename = re.sub(r"[^a-zA-Z0-9-]", "", filename)
     wiki_path = wiki_dir / f"{filename}.md"
-
-    # Extract content from LLD
-    overview = extract_overview_from_lld(lld_content)
-    diagram = extract_mermaid_diagram(lld_content)
-    features = extract_features_from_lld(lld_content)
 
     # Build wiki page content
     content_parts = [
@@ -114,10 +139,7 @@ def generate_wiki_page(
         "",
     ]
 
-    if overview:
-        content_parts.append(overview)
-    else:
-        content_parts.append("*Overview not extracted from LLD.*")
+    content_parts.append(overview)
 
     content_parts.extend(["", "---", ""])
 
@@ -152,7 +174,7 @@ def generate_wiki_page(
     return wiki_path
 
 
-def update_wiki_sidebar(wiki_page_path: Path, section: str = "Reference") -> bool:
+def update_wiki_sidebar(wiki_page_path: Path, section: str = "Reference") -> bool | None:
     """Update wiki sidebar to include new page.
 
     Args:
@@ -160,13 +182,19 @@ def update_wiki_sidebar(wiki_page_path: Path, section: str = "Reference") -> boo
         section: Sidebar section to add the page under.
 
     Returns:
-        True if sidebar was updated, False otherwise.
+        True if the sidebar was updated; False if it already links the page;
+        None if the wiki has no `_Sidebar.md`. False and None are both
+        legitimate answers and quiet (ADR 0236 rule 6; ledger 0908, 169 and
+        N8's 289): `generate_wiki_page` makes the wiki directory itself, so a
+        repository with no wiki gets a page and no sidebar, and most have
+        none. They used to be one answer, False, so N8 could not say which;
+        N8 now names each.
     """
     wiki_dir = wiki_page_path.parent
     sidebar_path = wiki_dir / "_Sidebar.md"
 
-    if not sidebar_path.exists():
-        return False
+    if not sidebar_path.is_file():
+        return None
 
     # Get page name from filename (without .md)
     page_name = wiki_page_path.stem

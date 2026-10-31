@@ -4,6 +4,7 @@ Manages prompt context size and produces compact file summaries.
 """
 
 import ast
+import sys
 
 # Issue #324: Large file thresholds for diff-based generation
 LARGE_FILE_LINE_THRESHOLD = 500  # Lines
@@ -22,23 +23,37 @@ def estimate_context_tokens(lld_content: str, completed_files: list[tuple[str, s
     return total_chars // 4
 
 
-def summarize_file_for_context(content: str) -> str:
+def summarize_file_for_context(content: str, filepath: str = "") -> str:
     """Extract imports and signatures from a Python file for compact context.
 
     Issue #373: Instead of embedding full file bodies (~20KB+) in accumulated
     context, extract only what subsequent files need: imports, class/function
     signatures, and their docstrings. Reduces context from ~20KB to ~2-3KB.
 
+    Content that does not parse as Python is summarized by its first 50
+    lines. For a file that is not Python (`filepath` not ending ``.py``, or
+    no `filepath`) that is the answer, said nowhere. For a ``.py`` file it
+    is a failure the summary works around: an ERROR line names the file and
+    the syntax error (#3585). The summary is context for the next file, not
+    a gate, so it goes on.
+
     Args:
         content: Full Python file content.
+        filepath: The file's path, to name it and to tell Python from not.
 
     Returns:
         Compact summary with imports and signatures.
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError:
-        # If we can't parse it, return first 50 lines as fallback
+    except SyntaxError as exc:
+        if filepath.endswith(".py"):
+            print(
+                f"ERROR [N4] {filepath} does not parse (line {exc.lineno}: "
+                f"{exc.msg}); the context for later files carries its first "
+                f"50 lines instead of its signatures",
+                file=sys.stderr, flush=True,
+            )
         lines = content.split("\n")
         return "\n".join(lines[:50]) + "\n# ... (truncated, syntax error in original)\n"
 

@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from assemblyzero.workflows.testing.nodes.cleanup import (
+    CleanupError,
     cleanup,
     route_after_document,
 )
@@ -26,20 +28,25 @@ class TestRouteAfterDocument:
         state: dict[str, Any] = {"issue_number": 180}
         assert route_after_document(state) == "N9_cleanup"
 
+    # #3585 (ledger 0908 line 47): no issue_number after N8 used to route to
+    # END with an INFO line, and the run ended without its cleanup. It raises.
     def test_route_no_issue(self) -> None:
-        """T290: Returns 'end' when no issue_number."""
+        """T290: Raises CleanupError when no issue_number."""
         state: dict[str, Any] = {"lld_content": "something"}
-        assert route_after_document(state) == "end"
+        with pytest.raises(CleanupError, match="issue_number"):
+            route_after_document(state)
 
     def test_route_issue_zero(self) -> None:
-        """Returns 'end' when issue_number is 0 (falsy)."""
+        """Raises when issue_number is 0 (falsy)."""
         state: dict[str, Any] = {"issue_number": 0}
-        assert route_after_document(state) == "end"
+        with pytest.raises(CleanupError, match="issue_number"):
+            route_after_document(state)
 
     def test_route_issue_none(self) -> None:
-        """Returns 'end' when issue_number is None."""
+        """Raises when issue_number is None."""
         state: dict[str, Any] = {"issue_number": None}
-        assert route_after_document(state) == "end"
+        with pytest.raises(CleanupError, match="issue_number"):
+            route_after_document(state)
 
 
 # === T010: N9 node wired in graph ===
@@ -115,9 +122,9 @@ class TestCleanupHappyPath:
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "worktree_path": str(tmp_path / "worktree"),
             "repo_root": str(repo_root),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
         result = cleanup(state)
@@ -151,9 +158,9 @@ class TestCleanupPrNotMerged:
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "worktree_path": str(tmp_path / "worktree"),
             "repo_root": str(repo_root),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
         result = cleanup(state)
@@ -178,9 +185,9 @@ class TestCleanupNoPrUrl:
         state: dict[str, Any] = {
             "issue_number": 180,
             "repo_root": str(repo_root),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
         result = cleanup(state)
@@ -202,9 +209,9 @@ class TestCleanupNoLineageDir:
             "issue_number": 999,
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "repo_root": str(tmp_path),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
         result = cleanup(state)
@@ -225,7 +232,8 @@ class TestCleanupDirtyWorktree:
         mock_remove_wt: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """T060: Dirty worktree not force-removed, logged."""
+        """T060: Dirty worktree not force-removed. #3585: the refusal raises
+        CleanupError; it used to be a WARNING on the way to END."""
         mock_check.return_value = True
         mock_get_branch.return_value = "issue-180-cleanup"
         mock_remove_wt.side_effect = subprocess.CalledProcessError(
@@ -243,14 +251,14 @@ class TestCleanupDirtyWorktree:
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "worktree_path": str(tmp_path / "dirty-worktree"),
             "repo_root": str(repo_root),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
-        # Should not raise — error caught gracefully
-        result = cleanup(state)
-        assert result["pr_merged"] is True
+        with pytest.raises(CleanupError, match="modified or untracked"):
+            cleanup(state)
+        mock_remove_wt.assert_called_once()  # never with --force
 
 
 # === T270: All subprocess errors caught ===
@@ -259,7 +267,8 @@ class TestCleanupErrorHandling:
     def test_cleanup_all_errors_caught(
         self, mock_check: MagicMock, tmp_path: Path
     ) -> None:
-        """T270: Subprocess errors and timeouts logged, not raised."""
+        """T270: #3585 -- a PR check that times out raises CleanupError; it
+        used to be logged and recorded as a skip reason."""
         mock_check.side_effect = subprocess.TimeoutExpired(
             cmd=["gh"], timeout=10
         )
@@ -268,22 +277,19 @@ class TestCleanupErrorHandling:
             "issue_number": 180,
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "repo_root": str(tmp_path),
-            "final_coverage": 0.0,
-            "target_coverage": 95.0,
-            "outcome": "FAILURE",
+            "coverage_achieved": 0.0,
+            "coverage_target": 95.0,
+            "workflow_status": "failed",
         }
 
-        # Should not raise
-        result = cleanup(state)
-        assert "cleanup_skipped_reason" in result
-        reason_lower = result["cleanup_skipped_reason"].lower()
-        assert "failed" in reason_lower or "timeout" in reason_lower
+        with pytest.raises(CleanupError, match="TimeoutExpired"):
+            cleanup(state)
 
     @patch("assemblyzero.workflows.testing.nodes.cleanup.check_pr_merged")
     def test_cleanup_called_process_error_caught(
         self, mock_check: MagicMock, tmp_path: Path
     ) -> None:
-        """T270b: CalledProcessError caught and logged."""
+        """T270b: #3585 -- a CalledProcessError from the PR check raises."""
         mock_check.side_effect = subprocess.CalledProcessError(
             returncode=1, cmd=["gh"], stderr="not found"
         )
@@ -292,14 +298,13 @@ class TestCleanupErrorHandling:
             "issue_number": 180,
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "repo_root": str(tmp_path),
-            "final_coverage": 0.0,
-            "target_coverage": 95.0,
-            "outcome": "FAILURE",
+            "coverage_achieved": 0.0,
+            "coverage_target": 95.0,
+            "workflow_status": "failed",
         }
 
-        result = cleanup(state)
-        assert result["pr_merged"] is False
-        assert result["cleanup_skipped_reason"] != ""
+        with pytest.raises(CleanupError, match="CalledProcessError"):
+            cleanup(state)
 
 
 # === T300: State fields updated correctly ===
@@ -320,9 +325,9 @@ class TestCleanupStateFields:
             "issue_number": 180,
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "repo_root": str(repo_root),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
         result = cleanup(state)
@@ -353,9 +358,9 @@ class TestCleanupSummaryPaths:
             "issue_number": 180,
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "repo_root": str(repo_root),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
         result = cleanup(state)
@@ -407,9 +412,9 @@ class TestCleanupSummaryPaths:
             "pr_url": "https://github.com/martymcenroe/AssemblyZero/pull/42",
             "worktree_path": str(tmp_path / "worktree"),
             "repo_root": str(repo_root),
-            "final_coverage": 96.5,
-            "target_coverage": 95.0,
-            "outcome": "SUCCESS",
+            "coverage_achieved": 96.5,
+            "coverage_target": 95.0,
+            "workflow_status": "completed",
         }
 
         result = cleanup(state)

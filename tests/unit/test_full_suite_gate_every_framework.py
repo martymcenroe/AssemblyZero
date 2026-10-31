@@ -50,6 +50,15 @@ def _runner(targeted: dict, full: dict) -> MagicMock:
     return runner
 
 
+@pytest.fixture(autouse=True)
+def _a_git_worktree(tmp_path):
+    """#3585: the gate lists the run's droppings with `git status`, which
+    halts the phase outside a repository; a run's worktree is always one."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+
 def _state(tmp_path, **overrides) -> dict:
     state = {
         "test_files": [str(tmp_path / "web" / "tests" / "a.test.ts")],
@@ -136,7 +145,9 @@ class TestThePytestGateCannotPassOnNothing:
 
         state = {
             "repo_root": str(tmp_path), "issue_number": 3087, "audit_dir": "",
-            "test_files": [str(test_file)], "implementation_files": [],
+            # #3585: N5 halts when nothing names a coverage target.
+            "test_files": [str(test_file)],
+            "implementation_files": [str(tmp_path / "pkg" / "mod.py")],
             "files_to_modify": [], "coverage_target": 90, "iteration_count": 0,
             "framework_config": {"framework": "pytest"},
         }

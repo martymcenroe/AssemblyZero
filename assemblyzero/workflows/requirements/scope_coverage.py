@@ -250,7 +250,9 @@ class ScopeReport:
 
     @property
     def ok(self) -> bool:
-        return not self.violations
+        """No violation, and something was judged (#3585: a vacuous report
+        used to be ``ok``; only its disclosure said NOT CHECKED)."""
+        return not self.violations and not self.vacuous
 
     @property
     def vacuous(self) -> bool:
@@ -428,6 +430,23 @@ def element_rows(body: str) -> dict[str, str]:
     return rows
 
 
+def _criteria_row_ids(body: str) -> set[str]:
+    """Every row ID of every criteria table (the first cell of each row)."""
+    return {
+        row[0].strip()
+        for table in parse_tables(body or "")
+        if is_criteria_table(table)
+        for row in table.rows
+        if row and row[0].strip()
+    }
+
+
+def _alias_row_ids(rows: str) -> list[str]:
+    """The row IDs an alias names: `S1, S3`, `S1 and S3`, `S1 + S3`."""
+    tokens = rows.replace(",", " ").replace("+", " ").replace("&", " ").split()
+    return [token for token in tokens if token.lower() not in {"and", "or"}]
+
+
 def criteria_row_count(body: str) -> int:
     return sum(
         len(t.rows) for t in parse_tables(body or "") if is_criteria_table(t)
@@ -468,12 +487,31 @@ def check_scope_coverage(title: str, body: str) -> ScopeReport:
 
     aliases = declared_aliases(body)
     exclusions = declared_exclusions(body)
+    row_ids = set(rows.values()) | _criteria_row_ids(body)
 
     for element in report.elements:
         key = element.key
         if key in rows:
             report.matched[key] = rows[key]
         elif key in aliases:
+            # #3585: an alias claims that named rows carry the element; a row
+            # ID the table does not have disposes of nothing.
+            named = _alias_row_ids(aliases[key])
+            unknown = [row for row in named if row not in row_ids]
+            if unknown or not named:
+                report.violations.append(
+                    Violation(
+                        kind="scope-alias-unknown-row",
+                        where=element.term,
+                        detail=(
+                            f"declared as carried by {aliases[key]!r}, and the "
+                            f"criteria table has no row "
+                            f"{', '.join(unknown) if unknown else '(none named)'}; "
+                            f"name rows that exist, or add the row"
+                        ),
+                    )
+                )
+                continue
             report.aliased[key] = aliases[key]
         elif key in exclusions:
             report.excluded[key] = exclusions[key]

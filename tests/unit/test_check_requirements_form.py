@@ -502,7 +502,8 @@ class TestReportHonesty:
     def test_a_clean_report_still_names_what_it_did_not_verify(self, ids_body):
         rendered = fc.render_report(fc.check_form(ids_body), "cache")
 
-        assert "RESULT: PASS" in rendered
+        # #3585: no variable table, so ownership was not examined: NOT CHECKED.
+        assert "RESULT: NOT CHECKED" in rendered
         assert "Not verified" in rendered
         assert "states the CORRECT" in rendered
 
@@ -619,10 +620,9 @@ class TestAVacuousTableCheckDoesNotReadAsAPass:
             line for line in fc.render_report(report, "x").splitlines()
             if line.startswith("RESULT:")
         )
-        assert verdict == (
-            "RESULT: PASS -- 0 violations of the ADR 0226 form. "
-            "VACUOUS on tables: 1 present, 0 examined."
-        )
+        # #3585: the qualification is now the verdict itself: NOT CHECKED.
+        assert verdict.startswith("RESULT: NOT CHECKED -- 0 violations in what was examined")
+        assert "decision tables (1 present, none of the checked kind)" in verdict
 
     def test_it_says_what_the_verdict_does_not_cover(self, report):
         rendered = fc.render_report(report, "x")
@@ -666,13 +666,10 @@ class TestAVacuousTableCheckDoesNotReadAsAPass:
         assert "Decision tables: 0 found, so 0 checked." in rendered
         assert "VACUOUS on tables" not in rendered
 
-    def test_the_ears_and_ownership_branches_are_left_alone(self, report):
-        """Scoped to tables deliberately.
-
-        Extending the qualification to every vacuous branch would decree the
-        fleet-wide vacuity invariant by implementation, and that invariant is
-        a standing proposal for the operator to ratify.
-        """
+    def test_the_ears_and_ownership_branches_are_not_checked_too(self, report):
+        """#3585: the vacuity invariant this test once kept out of the verdict
+        is ADR 0236's rule (accepted 2026-10-06). Vacuous EARS and vacuous
+        ownership render NOT CHECKED, naming what was not examined."""
         no_requirements = fc.check_form("# t\n\nsome prose\n")
         rendered = fc.render_report(no_requirements, "x")
 
@@ -681,7 +678,9 @@ class TestAVacuousTableCheckDoesNotReadAsAPass:
         verdict = next(
             line for line in rendered.splitlines() if line.startswith("RESULT:")
         )
-        assert verdict == "RESULT: PASS -- 0 violations of the ADR 0226 form."
+        assert verdict.startswith("RESULT: NOT CHECKED")
+        assert "EARS (no '## Requirements' section)" in verdict
+        assert "variable ownership (no variable table)" in verdict
 
 
 # ---------------------------------------------------------------------------
@@ -698,8 +697,10 @@ class TestCli:
     def test_passing_file_exits_zero(self, capsys):
         code = self._cli().main(["--file", str(BOOSTGAUGE_7)])
 
+        # #3585: this body has no variable table, so the verdict is NOT
+        # CHECKED; the tool's exit code still reads `report.ok` (violations).
         assert code == 0
-        assert "RESULT: PASS" in capsys.readouterr().out
+        assert "RESULT: NOT CHECKED" in capsys.readouterr().out
 
     def test_violations_exit_one(self, tmp_path, capsys):
         bad = tmp_path / "bad.md"
@@ -736,7 +737,7 @@ class TestCli:
         code = cli.main(["--repo", str(tmp_path), "--issue", "7"])
 
         assert code == 0
-        assert "RESULT: PASS" in capsys.readouterr().out
+        assert "RESULT: NOT CHECKED" in capsys.readouterr().out  # #3585
 
 
 class TestARequirementSentenceCarriesNoId:

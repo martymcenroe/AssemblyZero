@@ -187,7 +187,9 @@ class TestVacuousStates:
         report = fc.check_form("## Acceptance Criteria\n\n- [ ] one thing\n")
         text = fc.render_report(report, "x")
 
-        assert "PASS" in text
+        # #3585: the verdict itself says NOT CHECKED, not PASS.
+        assert "RESULT: NOT CHECKED" in text
+        assert "RESULT: PASS" not in text
         assert "Ownership was not checked" in text
 
     def test_a_prose_owner_table_is_disclosed_not_flooded(self):

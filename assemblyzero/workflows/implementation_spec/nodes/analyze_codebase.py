@@ -13,17 +13,27 @@ This node populates:
 - pattern_references: list[PatternRef] - similar patterns found
 - files_to_modify: Updated with current_content for Modify/Delete files
 - error_message: "" on success, error text on failure
+
+#3585 (ADR 0236): everything this node gathers is what the drafter is told
+about the target repo, so a gap in it is a spec drafted blind. A file the plan
+names that is missing, unreadable or unparseable, a file the context needs
+that cannot be read, and a base git cannot answer each stop the node: the
+helpers raise naming the file and the cause, and the node returns an
+``error_message`` that ``route_after_analyze`` sends to HALT, which alerts.
+They used to print a WARNING to stdout and leave the context smaller.
 """
 
 import ast
-import re
 from dataclasses import dataclass
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 from assemblyzero.workflows.implementation_spec.base_tree import (
+    BaseTreeError,
     base_ref,
+    exists_on_base,
     read_from_base,
     reclassify_against_base,
 )
@@ -64,6 +74,46 @@ SKIP_DIRS = {
     "done",
 }
 
+#: The change types an LLD's Section 2.1 table may carry, as load_lld
+#: normalises them.
+CHANGE_TYPES = ("Add", "Modify", "Delete")
+
+
+class CodebaseReadError(RuntimeError):
+    """N1 cannot read what it needs (#3585).
+
+    A file the plan or the context needs is missing, is not a file, cannot be
+    read or does not parse, or a plan entry carries a change type N1 cannot
+    act on. The message names the file and the cause. The node turns it into
+    an ``error_message`` routed to HALT.
+    """
+
+
+def _read_or_raise(path: Path, what: str, **read_kwargs: Any) -> str:
+    """Read ``path`` as text, or raise CodebaseReadError naming it and why."""
+    try:
+        return path.read_text(**read_kwargs)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CodebaseReadError(
+            f"cannot read {what} {path}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def _syntax_detail(exc: SyntaxError) -> str:
+    """Where a parse failed, as 'line N: message'."""
+    return f"line {exc.lineno}: {exc.msg}" if exc.lineno else exc.msg
+
+
+def _halt(issue_number: Any, reason: str) -> dict[str, Any]:
+    """The node's failure result: loud on stderr, routed to HALT (#3585)."""
+    message = f"[N1] analyze_codebase for issue #{issue_number}: {reason}"
+    print(f"ERROR {message}", file=sys.stderr, flush=True)
+    return {
+        "current_state_snapshots": {},
+        "pattern_references": [],
+        "error_message": message,
+    }
+
 
 # =============================================================================
 # Main Node
@@ -86,7 +136,7 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
         state: Current workflow state. Requires:
             - files_to_modify: List[FileToModify] from N0
             - lld_content: Raw LLD markdown (for context in excerpt extraction)
-            - repo_root: Repository root path (optional, defaults to cwd)
+            - repo_root: Repository root path (required; never the cwd, #391)
 
     Returns:
         Dict with state field updates:
@@ -94,11 +144,20 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
         - pattern_references: List[PatternRef] for similar patterns
         - files_to_modify: Updated list with current_content populated
         - error_message: "" on success, error text on failure
+
+    Every failure returns an ``error_message`` naming the issue, the file and
+    the cause, which ``route_after_analyze`` sends to HALT (#3585): no files
+    in the plan, a Modify or Delete target that is missing, not a file,
+    unreadable or unparseable, an unknown change type, a context file that
+    cannot be read, and a base git cannot answer. An Add whose parent
+    directory does not exist yet is not a failure: the implementation creates
+    the directory.
     """
     print("\n[N1] Analyzing codebase...")
 
     files_to_modify = state.get("files_to_modify", [])
     lld_content = state.get("lld_content", "")
+    issue_number = state.get("issue_number", 0)
 
     # Resolve repo root — never fall back to cwd (Issue #391)
     repo_root_str = state.get("repo_root", "")
@@ -112,20 +171,40 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     repo_root = Path(repo_root_str)
 
     # --------------------------------------------------------------------------
-    # GUARD: Must have files to analyze
+    # GUARD: Must have files to analyze (#3585: an empty plan used to pass
+    # with a WARNING, and the drafter specified nothing in particular)
     # --------------------------------------------------------------------------
     if not files_to_modify:
-        print("    [GUARD] WARNING: No files to analyze from LLD")
-        # Issue #490: Still compute repo structure even with no files
-        repo_structure = get_repo_structure(str(repo_root))
-        return {
-            "current_state_snapshots": {},
-            "pattern_references": [],
-            "repo_structure": repo_structure,
-            "error_message": "",
-        }
+        return _halt(
+            issue_number,
+            "the LLD's Section 2.1 lists no files to modify, so there is nothing "
+            "to specify",
+        )
     # --------------------------------------------------------------------------
 
+    try:
+        return _analyze(
+            files_to_modify, lld_content, repo_root,
+            state.get("base_branch", ""), issue_number,
+        )
+    except (BaseTreeError, CodebaseReadError) as exc:
+        return _halt(issue_number, f"{type(exc).__name__}: {exc}")
+
+
+def _analyze(
+    files_to_modify: list[FileToModify],
+    lld_content: str,
+    repo_root: Path,
+    base_branch: str,
+    issue_number: Any,
+) -> dict[str, Any]:
+    """The analysis itself, once the guards have passed.
+
+    Returns the node's success result, or its failure result when the symbol
+    gather names a file that did not parse. Raises BaseTreeError or
+    CodebaseReadError for anything it cannot read; ``analyze_codebase`` halts
+    on both.
+    """
     print(f"    Repo root: {repo_root}")
     print(f"    Files to analyze: {len(files_to_modify)}")
 
@@ -133,7 +212,6 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     # checkout. Mid-arc a file the LLD calls "Add" is already on the attempt
     # branch, put there by an earlier phase, and specifying it as new is what
     # produced a spec describing modules to create instead of modules to extend.
-    base_branch = state.get("base_branch", "")
     files_to_modify, base_notes = reclassify_against_base(
         files_to_modify, repo_root, base_branch
     )
@@ -141,133 +219,21 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
         print(f"    [BASE] {note}")
     base_ref_name = base_ref(repo_root, base_branch) if base_branch else ""
 
-    # Step 1: Load current content for Modify/Delete files
+    # Step 1: Load current content for Modify/Delete files. #3585: the first
+    # file that cannot be loaded raises, and the node halts; nothing partial
+    # reaches the drafter.
     current_state_snapshots: dict[str, str] = {}
     updated_files: list[FileToModify] = []
-    warnings: list[str] = []
 
     for file_spec in files_to_modify:
-        file_path = file_spec["path"]
-        change_type = file_spec["change_type"]
-        full_path = repo_root / file_path
-
-        if change_type in ("Modify", "Delete"):
-            # #2033: the checkout is on the default branch, so a file an earlier
-            # phase landed on the attempt branch is absent here while being very
-            # much present in the tree the implementation is cut from. Read the
-            # base before concluding the file does not exist.
-            if not full_path.exists() and base_ref_name:
-                base_content = read_from_base(repo_root, base_ref_name, file_path)
-                if base_content:
-                    excerpt = extract_relevant_excerpt(
-                        file_path, base_content, lld_content
-                    )
-                    current_state_snapshots[file_path] = excerpt
-                    updated_files.append(FileToModify(
-                        path=file_path,
-                        change_type=change_type,
-                        description=file_spec["description"],
-                        current_content=base_content,
-                    ))
-                    print(
-                        f"    [BASE] Loaded from {base_ref_name}: {file_path} "
-                        f"({len(excerpt):,} chars excerpt)"
-                    )
-                    continue
-
-            # --------------------------------------------------------------------------
-            # GUARD: File must exist for Modify/Delete
-            # --------------------------------------------------------------------------
-            if not full_path.exists():
-                msg = f"File not found for {change_type}: {file_path}"
-                print(f"    [GUARD] WARNING: {msg}")
-                warnings.append(msg)
-                updated_files.append(FileToModify(
-                    path=file_path,
-                    change_type=change_type,
-                    description=file_spec["description"],
-                    current_content=None,
-                ))
-                continue
-            # --------------------------------------------------------------------------
-
-            if not full_path.is_file():
-                msg = f"Path is not a file for {change_type}: {file_path}"
-                print(f"    [GUARD] WARNING: {msg}")
-                warnings.append(msg)
-                updated_files.append(FileToModify(
-                    path=file_path,
-                    change_type=change_type,
-                    description=file_spec["description"],
-                    current_content=None,
-                ))
-                continue
-
-            # Read file content with size guard
-            try:
-                file_size = full_path.stat().st_size
-                if file_size > MAX_FILE_SIZE_BYTES:
-                    print(
-                        f"    [WARN] Large file ({file_size:,} bytes): {file_path} "
-                        f"— will summarize aggressively"
-                    )
-
-                content = full_path.read_text(encoding="utf-8-sig")
-            except (OSError, UnicodeDecodeError) as e:
-                msg = f"Failed to read {file_path}: {e}"
-                print(f"    [WARN] {msg}")
-                warnings.append(msg)
-                updated_files.append(FileToModify(
-                    path=file_path,
-                    change_type=change_type,
-                    description=file_spec["description"],
-                    current_content=None,
-                ))
-                continue
-
-            # Extract relevant excerpt
-            excerpt = extract_relevant_excerpt(file_path, content, lld_content)
-            current_state_snapshots[file_path] = excerpt
-
-            # Update file spec with loaded content
-            updated_files.append(FileToModify(
-                path=file_path,
-                change_type=change_type,
-                description=file_spec["description"],
-                current_content=content,
-            ))
-
-            print(f"    Loaded: {file_path} ({len(excerpt):,} chars excerpt)")
-
-        elif change_type == "Add":
-            # Verify parent directory exists
-            parent = full_path.parent
-            if not parent.exists():
-                msg = f"Parent directory missing for Add: {parent}"
-                print(f"    [GUARD] WARNING: {msg}")
-                warnings.append(msg)
-            else:
-                print(f"    Verified parent exists: {file_path}")
-
-            # Keep file spec unchanged for Add files
-            updated_files.append(FileToModify(
-                path=file_path,
-                change_type=change_type,
-                description=file_spec["description"],
-                current_content=None,
-            ))
-        else:
-            # Unknown change type — pass through
-            updated_files.append(file_spec)
+        loaded, excerpt = _load_planned_file(
+            file_spec, repo_root, base_ref_name, lld_content
+        )
+        updated_files.append(loaded)
+        if excerpt is not None:
+            current_state_snapshots[loaded["path"]] = excerpt
 
     print(f"    Loaded {len(current_state_snapshots)} file excerpts")
-
-    if warnings:
-        print(f"    Warnings: {len(warnings)}")
-        for w in warnings[:5]:
-            print(f"      - {w}")
-        if len(warnings) > 5:
-            print(f"      ... and {len(warnings) - 5} more")
 
     # Step 2: Find similar implementation patterns
     pattern_references = find_pattern_references(files_to_modify, repo_root)
@@ -301,13 +267,14 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     # methods defined deep in a class body are captured.
     # #2393: the gather reports what it could NOT read. An unparseable
     # target-repo file used to be regex-scraped into the symbol universe
-    # silently; now it is named and excluded, and the exclusion is printed
-    # where the operator reads the run rather than discovered downstream as a
-    # mystery hallucination flag.
+    # silently, then excluded with a line on stdout. #3585: it halts, since a
+    # spec judged against a smaller universe than the repo has is judged
+    # wrongly. The excerpt step above already halts on such a file; this is
+    # the backstop for the yardstick itself.
     gather = gather_symbols(updated_files)
     gathered_symbols = gather.symbols
     if gather.unreadable:
-        print(gather.describe())
+        return _halt(issue_number, gather.describe())
 
     # #2052: the plan is not the universe. This gathered only files_to_modify,
     # so a spec CALLING an earlier phase's API without modifying its file was
@@ -355,6 +322,115 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     }
 
 
+def _load_planned_file(
+    file_spec: FileToModify,
+    repo_root: Path,
+    base_ref_name: str,
+    lld_content: str,
+) -> tuple[FileToModify, str | None]:
+    """One planned file, with its content loaded, and its excerpt.
+
+    Returns ``(file, excerpt)``: a Modify or Delete target with its content
+    and excerpt, or an Add with no content and ``None``.
+
+    Raises:
+        CodebaseReadError: a Modify or Delete target that does not exist, is
+            not a file, cannot be read or does not parse, or an unknown change
+            type (#3585). Each used to be passed on with no content and a
+            WARNING on stdout, and the drafter specified a change to a file
+            nobody had read.
+        BaseTreeError: the base cannot be read.
+    """
+    file_path = file_spec["path"]
+    change_type = file_spec["change_type"]
+    full_path = repo_root / file_path
+
+    if change_type == "Add":
+        # An Add may create its own package, so a parent that does not exist
+        # yet is the plan, not a failure: the implementation makes the
+        # directory.
+        parent = full_path.parent
+        if not parent.exists():
+            print(f"    Parent directory does not exist yet for Add: {parent}")
+        else:
+            print(f"    Verified parent exists: {file_path}")
+        return FileToModify(
+            path=file_path,
+            change_type=change_type,
+            description=file_spec["description"],
+            current_content=None,
+        ), None
+
+    if change_type not in CHANGE_TYPES:
+        raise CodebaseReadError(
+            f"{file_path} has change type {change_type!r}, which is not one of "
+            f"{', '.join(CHANGE_TYPES)}"
+        )
+
+    # #2033: the checkout is on the default branch, so a file an earlier phase
+    # landed on the attempt branch is absent here while being very much
+    # present in the tree the implementation is cut from. Read the base before
+    # concluding the file does not exist. Asked with exists_on_base rather than
+    # by the content: an empty file the base ships is still the file to modify.
+    from_base = (
+        not full_path.exists()
+        and bool(base_ref_name)
+        and exists_on_base(repo_root, base_ref_name, file_path)
+    )
+    if from_base:
+        # A BOM is dropped as the checkout's utf-8-sig read drops it (#2507).
+        content = read_from_base(
+            repo_root, base_ref_name, file_path
+        ).removeprefix(chr(0xFEFF))
+        source = f"{file_path} on {base_ref_name}"
+    else:
+        # ----------------------------------------------------------------------
+        # GUARD: File must exist for Modify/Delete
+        # ----------------------------------------------------------------------
+        if not full_path.exists():
+            where = f"the checkout or {base_ref_name}" if base_ref_name else "the checkout"
+            raise CodebaseReadError(
+                f"{change_type} target {file_path} does not exist in {where}"
+            )
+        if not full_path.is_file():
+            raise CodebaseReadError(f"{change_type} target {file_path} is not a file")
+
+        try:
+            file_size = full_path.stat().st_size
+        except OSError as exc:
+            raise CodebaseReadError(
+                f"cannot stat the {change_type} target {full_path}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if file_size > MAX_FILE_SIZE_BYTES:
+            print(
+                f"    [WARN] Large file ({file_size:,} bytes): {file_path} "
+                f"— will summarize aggressively"
+            )
+        content = _read_or_raise(
+            full_path, f"the {change_type} target", encoding="utf-8-sig",
+        )
+        source = file_path
+
+    # #3779 made interface_surface raise on Python that does not parse, where
+    # it summarised the file's head as if it were the interface.
+    try:
+        excerpt = extract_relevant_excerpt(file_path, content, lld_content)
+    except SyntaxError as exc:
+        raise CodebaseReadError(
+            f"{source} does not parse ({_syntax_detail(exc)})"
+        ) from exc
+
+    label = f"[BASE] Loaded from {base_ref_name}" if from_base else "Loaded"
+    print(f"    {label}: {file_path} ({len(excerpt):,} chars excerpt)")
+    return FileToModify(
+        path=file_path,
+        change_type=change_type,
+        description=file_spec["description"],
+        current_content=content,
+    ), excerpt
+
+
 # =============================================================================
 # Excerpt Extraction
 # =============================================================================
@@ -380,6 +456,10 @@ def extract_relevant_excerpt(
 
     Returns:
         Extracted excerpt suitable for inclusion in the Implementation Spec.
+
+    Raises:
+        SyntaxError: a Python file that does not parse (#3779); its head used
+            to stand in for its interface. The node halts on it (#3585).
     """
     # Determine file type
     suffix = Path(file_path).suffix.lower()
@@ -475,6 +555,11 @@ def find_pattern_references(
     Returns:
         List of PatternRef dicts with file locations and relevance info.
         Limited to MAX_PATTERN_REFS entries.
+
+    Raises:
+        CodebaseReadError: a candidate pattern file cannot be read (#3585).
+            It used to be skipped without a word, and the drafter was shown
+            other patterns as if those were all there were.
     """
     patterns: list[PatternRef] = []
     seen_paths: set[str] = set()  # Avoid duplicate pattern references
@@ -562,10 +647,7 @@ def _find_node_patterns(
             continue
 
         # Read first portion to determine line count
-        try:
-            content = node_file.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError):
-            continue
+        content = _read_or_raise(node_file, "the node pattern file", encoding="utf-8-sig")
 
         lines = content.split("\n")
         end_line = min(len(lines), 50)  # First 50 lines for pattern
@@ -622,10 +704,7 @@ def _find_state_patterns(
         if rel_path in seen:
             continue
 
-        try:
-            content = state_file.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError):
-            continue
+        content = _read_or_raise(state_file, "the state pattern file", encoding="utf-8-sig")
 
         lines = content.split("\n")
         end_line = min(len(lines), 100)
@@ -671,10 +750,7 @@ def _find_graph_patterns(
         if rel_path in seen:
             continue
 
-        try:
-            content = graph_file.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError):
-            continue
+        content = _read_or_raise(graph_file, "the graph pattern file", encoding="utf-8-sig")
 
         lines = content.split("\n")
         end_line = min(len(lines), 100)
@@ -729,10 +805,7 @@ def _find_test_patterns(
 
         # Prefer workflow-related tests
         if "workflow" in test_file.name.lower():
-            try:
-                content = test_file.read_text(encoding="utf-8-sig")
-            except (OSError, UnicodeDecodeError):
-                continue
+            content = _read_or_raise(test_file, "the test pattern file", encoding="utf-8-sig")
 
             lines = content.split("\n")
             end_line = min(len(lines), 80)
@@ -777,10 +850,7 @@ def _find_tool_patterns(
         if rel_path in seen:
             continue
 
-        try:
-            content = tool_file.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError):
-            continue
+        content = _read_or_raise(tool_file, "the tool pattern file", encoding="utf-8-sig")
 
         lines = content.split("\n")
         end_line = min(len(lines), 60)
@@ -816,60 +886,57 @@ def _build_project_context(repo_root: Path) -> str:
 
     Returns:
         Formatted project context string, or empty if nothing found.
+
+    A file that is absent gives no context, which is an answer: not every repo
+    has a CLAUDE.md. One that exists and cannot be read raises
+    CodebaseReadError naming it (#3585); it used to be dropped without a word,
+    and the drafter wrote without the project's rules.
     """
     parts: list[str] = []
+    read = {"encoding": "utf-8-sig", "errors": "replace"}
 
     # CLAUDE.md conventions
     claude_md_path = repo_root / "CLAUDE.md"
     if claude_md_path.exists():
-        try:
-            content = claude_md_path.read_text(encoding="utf-8-sig", errors="replace")
-            # Keep first 2000 chars — enough for key rules
-            if len(content) > 2000:
-                content = content[:2000] + "\n... (truncated)"
-            parts.append(f"### CLAUDE.md (Project Rules)\n\n{content}")
-        except OSError:
-            pass
+        content = _read_or_raise(claude_md_path, "the project rules", **read)
+        # Keep first 2000 chars — enough for key rules
+        if len(content) > 2000:
+            content = content[:2000] + "\n... (truncated)"
+        parts.append(f"### CLAUDE.md (Project Rules)\n\n{content}")
 
     # README summary
     readme_path = repo_root / "README.md"
     if readme_path.exists():
-        try:
-            content = readme_path.read_text(encoding="utf-8-sig", errors="replace")
-            # Just first 1500 chars for project overview
-            if len(content) > 1500:
-                content = content[:1500] + "\n... (truncated)"
-            parts.append(f"### README (Project Overview)\n\n{content}")
-        except OSError:
-            pass
+        content = _read_or_raise(readme_path, "the project README", **read)
+        # Just first 1500 chars for project overview
+        if len(content) > 1500:
+            content = content[:1500] + "\n... (truncated)"
+        parts.append(f"### README (Project Overview)\n\n{content}")
 
     # Project metadata from pyproject.toml
     pyproject_path = repo_root / "pyproject.toml"
     if pyproject_path.exists():
-        try:
-            content = pyproject_path.read_text(encoding="utf-8-sig", errors="replace")
-            # Extract just [tool.poetry] or [project] section (first 500 chars)
-            # Don't include full dependency list
-            lines = content.splitlines()
-            meta_lines = []
-            in_section = False
-            for line in lines:
-                if line.strip().startswith("[tool.poetry]") or line.strip().startswith("[project]"):
-                    in_section = True
-                elif line.strip().startswith("[") and in_section:
-                    break
-                if in_section:
-                    meta_lines.append(line)
-                if len(meta_lines) > 15:
-                    break
-            if meta_lines:
-                parts.append(
-                    "### Project Metadata\n\n```toml\n"
-                    + "\n".join(meta_lines)
-                    + "\n```"
-                )
-        except OSError:
-            pass
+        content = _read_or_raise(pyproject_path, "the project metadata", **read)
+        # Extract just [tool.poetry] or [project] section (first 500 chars)
+        # Don't include full dependency list
+        lines = content.splitlines()
+        meta_lines = []
+        in_section = False
+        for line in lines:
+            if line.strip().startswith("[tool.poetry]") or line.strip().startswith("[project]"):
+                in_section = True
+            elif line.strip().startswith("[") and in_section:
+                break
+            if in_section:
+                meta_lines.append(line)
+            if len(meta_lines) > 15:
+                break
+        if meta_lines:
+            parts.append(
+                "### Project Metadata\n\n```toml\n"
+                + "\n".join(meta_lines)
+                + "\n```"
+            )
 
     if not parts:
         return ""
@@ -892,6 +959,10 @@ def _extract_import_dependencies(
 
     Returns:
         Formatted import dependency map, or empty if nothing found.
+
+    A file not yet on disk (an Add) has no imports, which is an answer. One
+    that exists and cannot be read or parsed raises CodebaseReadError naming
+    it (#3585); it used to vanish from the map without a word.
     """
     dep_map: dict[str, list[str]] = {}
 
@@ -902,17 +973,22 @@ def _extract_import_dependencies(
         if not full_path.exists() or not file_path.endswith(".py"):
             continue
 
+        # utf-8-sig, not utf-8 (#2507): a UTF-8 BOM survives a plain
+        # utf-8 read as U+FEFF, which ast.parse rejects -- so a BOM'd
+        # file silently vanished from the drafter's context here while
+        # Python's own importer ran it fine. Identical to the repair
+        # fail_open_audit made to itself; utf-8-sig == utf-8 when no
+        # BOM is present.
+        content = _read_or_raise(
+            full_path, "the planned file for its imports", encoding="utf-8-sig",
+        )
         try:
-            # utf-8-sig, not utf-8 (#2507): a UTF-8 BOM survives a plain
-            # utf-8 read as U+FEFF, which ast.parse rejects -- so a BOM'd
-            # file silently vanished from the drafter's context here while
-            # Python's own importer ran it fine. Identical to the repair
-            # fail_open_audit made to itself; utf-8-sig == utf-8 when no
-            # BOM is present.
-            content = full_path.read_text(encoding="utf-8-sig")
-            tree = ast.parse(content)
-        except (OSError, SyntaxError):
-            continue
+            tree = ast.parse(content, filename=file_path)
+        except SyntaxError as exc:
+            raise CodebaseReadError(
+                f"the planned file {file_path} does not parse, so its imports "
+                f"cannot be mapped ({_syntax_detail(exc)})"
+            ) from exc
 
         imports: list[str] = []
         for node in ast.walk(tree):
@@ -938,26 +1014,32 @@ def _extract_import_dependencies(
 
 
 def _list_base_python_files(repo_root: Path, base_ref_name: str) -> list[str]:
-    """Non-test .py paths on the base ref, capped with a visible message."""
+    """Every non-test .py path on the base ref.
+
+    Raises:
+        BaseTreeError: git cannot list the base (#3585). It used to return
+            [], which read as a base with no Python, so the API surface and
+            the symbol universe silently lost the whole base.
+
+    #3585: the list is no longer capped at 200. Past the cap, calls into the
+    files left out were judged against a universe that did not hold them, and
+    a stdout note was all that said so.
+    """
     result = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", base_ref_name],
-        cwd=str(repo_root), capture_output=True, text=True,
+        ["git", "ls-tree", "-r", "--full-tree", "--name-only", base_ref_name],
+        cwd=str(repo_root), capture_output=True, text=True, check=False,
         encoding="utf-8", errors="replace",
     )
     if result.returncode != 0:
-        return []
-    paths = [
+        stderr = (result.stderr or "").strip() or "(no stderr)"
+        raise BaseTreeError(
+            f"cannot list the Python files on {base_ref_name}: `git ls-tree` in "
+            f"{repo_root} exited {result.returncode}: {stderr}"
+        )
+    return [
         p.strip() for p in result.stdout.splitlines()
         if p.strip().endswith(".py") and not p.strip().startswith("tests/")
     ]
-    cap = 200
-    if len(paths) > cap:
-        print(
-            f"    [BASE] sweep capped at {cap} of {len(paths)} .py file(s); "
-            f"calls into uncovered files may be misflagged"
-        )
-        paths = paths[:cap]
-    return paths
 
 
 def _base_api_surface(
@@ -974,9 +1056,15 @@ def _base_api_surface(
 
     A phase that must CALL an earlier phase's API needs to read that API's
     declaration, exactly as a human would before writing the call.
-    """
-    from assemblyzero.workflows.implementation_spec.base_tree import read_from_base
 
+    Raises:
+        BaseTreeError: git cannot list or read the base (#3585).
+        CodebaseReadError: a base file does not parse (#3779 made the
+            summariser raise; it used to summarise the file's head).
+
+    A base file that is empty (an empty ``__init__.py``) has no interface and
+    is skipped; ls-tree listed it, so read_from_base's "" can only mean empty.
+    """
     sections: list[str] = [
         "## Existing APIs on the integration branch "
         "(call these EXACTLY as declared — do not invent parameter names)"
@@ -987,7 +1075,14 @@ def _base_api_surface(
         content = read_from_base(repo_root, base_ref_name, rel)
         if not content:
             continue
-        summary = _summarize_python_file(content).strip()
+        try:
+            # The BOM, as in _extract_symbols_from_base (#2507).
+            summary = _summarize_python_file(content.removeprefix(chr(0xFEFF))).strip()
+        except SyntaxError as exc:
+            raise CodebaseReadError(
+                f"{rel} on {base_ref_name} does not parse, so its API cannot be "
+                f"shown to the drafter ({_syntax_detail(exc)})"
+            ) from exc
         if not summary:
             continue
         block = f"### {rel}\n{summary}"
@@ -1010,50 +1105,38 @@ def _extract_symbols_from_base(repo_root: Path, base_ref_name: str) -> set[str]:
 
     Read through git, never the checkout -- the checkout sits on the default
     branch and mid-arc carries none of the arc (#2033's two-trees rule).
-    Tests are excluded (their helpers are not an API surface), and the sweep
-    is capped: past the cap the check degrades toward false positives, which
-    the message below makes visible rather than silent.
+    Tests are excluded (their helpers are not an API surface).
+
+    Raises:
+        BaseTreeError: git cannot list or read the base (#3585). It used to
+            return an empty or partial set, so correct calls into the base
+            were flagged as hallucinated.
+        CodebaseReadError: a base file does not parse (#3585). Its names used
+            to be scraped by regex, the fallback #2393 removed from the
+            planned files' gather.
+
+    #3585: the sweep is no longer capped at 200 files; past the cap the check
+    judged calls into the uncovered files against a universe without them.
     """
-    from assemblyzero.workflows.implementation_spec.base_tree import read_from_base
-
-    result = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", base_ref_name],
-        cwd=str(repo_root), capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
-    )
-    if result.returncode != 0:
-        return set()
-
-    paths = [
-        p.strip() for p in result.stdout.splitlines()
-        if p.strip().endswith(".py") and not p.strip().startswith("tests/")
-    ]
-    cap = 200
-    if len(paths) > cap:
-        print(
-            f"    [BASE] symbol sweep capped at {cap} of {len(paths)} .py "
-            f"file(s); calls into uncovered files may be misflagged"
-        )
-        paths = paths[:cap]
-
-    _def_re = re.compile(r"^\s*def\s+(\w+)", re.MULTILINE)
-    _cls_re = re.compile(r"^\s*class\s+(\w+)", re.MULTILINE)
     symbols: set[str] = set()
-    for rel in paths:
+    for rel in _list_base_python_files(repo_root, base_ref_name):
         content = read_from_base(repo_root, base_ref_name, rel)
         if not content:
             continue
-        # A BOM in the committed blob survives git-show's decode as U+FEFF
-        # and would push a parseable file onto the lossier regex path (#2507).
+        # A BOM in the committed blob survives git-show's decode as U+FEFF,
+        # which ast.parse rejects (#2507).
         content = content.removeprefix(chr(0xFEFF))
         try:
-            tree = ast.parse(content)
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    symbols.add(node.name)
-        except SyntaxError:
-            symbols.update(_def_re.findall(content))
-            symbols.update(_cls_re.findall(content))
+            tree = ast.parse(content, filename=rel)
+        except SyntaxError as exc:
+            raise CodebaseReadError(
+                f"{rel} on {base_ref_name} does not parse, so its symbols cannot "
+                f"join the universe the spec is checked against "
+                f"({_syntax_detail(exc)})"
+            ) from exc
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                symbols.add(node.name)
     return symbols
 
 
@@ -1066,7 +1149,10 @@ class SymbolGather:
     unreadable: list[tuple[str, str]]
 
     def describe(self) -> str:
-        """One line naming what was excluded, or "" when nothing was."""
+        """One line naming what did not parse, or "" when everything did.
+
+        The node halts with this line as its reason (#3585).
+        """
         if not self.unreadable:
             return ""
         listed = "; ".join(f"{path} ({err})" for path, err in self.unreadable[:3])
@@ -1076,10 +1162,9 @@ class SymbolGather:
             else ""
         )
         return (
-            f"    [SYMBOLS] {len(self.unreadable)} target-repo .py file(s) did "
-            f"NOT parse and were EXCLUDED from the symbol universe: "
-            f"{listed}{more}. The spec is judged against a smaller universe "
-            f"than the repo actually has (#2393)."
+            f"{len(self.unreadable)} target-repo .py file(s) did not parse: "
+            f"{listed}{more}. Without them the spec would be judged against a "
+            f"smaller universe than the repo has (#2393), so the stage halts (#3585)."
         )
 
 
@@ -1106,11 +1191,12 @@ def gather_symbols(files: list[FileToModify]) -> SymbolGather:
     "No function returns an empty result, an UNKNOWN, or a silent downgrade
     because it could not read its input."
 
-    So an unparseable file is now named and excluded, and the exclusion is
-    counted and reported. Excluded rather than fatal: a target repo mid-build
-    can hold a broken file, and refusing the whole stage over one would trade a
-    quiet wrong answer for a loud useless one. What must not happen is the
-    third option the code took -- inventing symbols and saying nothing.
+    So an unparseable file is named, with its parse error, in ``unreadable``,
+    and this function still gathers every file that does parse. #3585 (ADR
+    0236): what the caller does with that list changed. The node used to print
+    the exclusion and go on; it now halts, because a spec checked against a
+    universe missing a file is checked wrongly, and only the operator can mend
+    the file.
     """
     symbols: set[str] = set()
     unreadable: list[tuple[str, str]] = []
@@ -1137,8 +1223,17 @@ def gather_symbols(files: list[FileToModify]) -> SymbolGather:
 
 
 def _extract_symbols_from_files(files: list[FileToModify]) -> list[str]:
-    """The symbol list alone, for callers that do not report exclusions."""
-    return gather_symbols(files).symbols
+    """The symbol list alone.
+
+    Raises:
+        CodebaseReadError: a file did not parse (#3585). This used to return
+            the smaller list without a word, for callers that do not report
+            exclusions; a caller that wants the misses uses gather_symbols.
+    """
+    gather = gather_symbols(files)
+    if gather.unreadable:
+        raise CodebaseReadError(gather.describe())
+    return gather.symbols
 
 
 def _names_similar(name_a: str, name_b: str) -> bool:

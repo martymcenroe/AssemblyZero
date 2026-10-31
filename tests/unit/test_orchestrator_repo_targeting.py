@@ -133,9 +133,12 @@ def test_spec_threads_repo_root(mock_detect, mock_create_graph):
     assert captured["assemblyzero_root"] == AZ_ROOT
 
 
+# The stubbed git cuts no worktree, so there is nothing to provision;
+# provisioning a worktree that is not there refuses (ADR 0236, #3585).
+@patch("assemblyzero.workflows.orchestrator.stages.provision_worktree", return_value=[])
 @patch("assemblyzero.workflows.testing.graph.build_testing_workflow")
 @patch("assemblyzero.workflows.orchestrator.stages.run_command")
-def test_impl_carves_worktree_from_target(mock_run, mock_create_graph):
+def test_impl_carves_worktree_from_target(mock_run, mock_create_graph, _no_provisioning):
     captured: dict = {}
     mock_create_graph.return_value = _capturing_graph(captured, {"error_message": ""})
 
