@@ -44,6 +44,7 @@ from assemblyzero.workflows.implementation_spec.state import (
     PatternRef,
 )
 from assemblyzero.workflows.implementation_spec.base_tree import (
+    BaseTreeError,
     base_ref,
     exists_on_base,
     read_from_base,
@@ -53,6 +54,7 @@ from assemblyzero.workflows.implementation_spec.check_classification import (
     is_proxy,
 )
 from assemblyzero.workflows.implementation_spec.criteria_coverage import (
+    CriteriaTableError,
     criteria_coverage,
     format_report as format_coverage_report,
 )
@@ -371,10 +373,16 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     else:
         try:
             checks = _run_checks(state, spec_draft)
-        except CompletenessCannotCheck as exc:
+        except (CompletenessCannotCheck, BaseTreeError, CriteriaTableError) as exc:
             # #3767, #3585: every check that cannot run halts through here;
-            # route_after_validation sends it to HALT, which alerts.
-            message = f"N3 completeness gate cannot run: {exc}"
+            # route_after_validation sends it to HALT, which alerts. The base
+            # tree and the criteria join raise their own types when git or the
+            # criteria table cannot be read (#3585), named here with the cause.
+            cause = (
+                str(exc) if isinstance(exc, CompletenessCannotCheck)
+                else f"{type(exc).__name__}: {exc}"
+            )
+            message = f"N3 completeness gate cannot run: {cause}"
             print(f"ERROR [N3] {message}", file=sys.stderr)
             return {
                 "completeness_issues": [message],

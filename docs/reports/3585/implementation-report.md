@@ -141,3 +141,9 @@ Settled by #3887 and #3891 (PR #3901); unchanged here. Four rows no test reached
 - **`nodes/human_gate.py` (146).** Reaching the gate while it is disabled is a misrouted graph and halts; it used to proceed to N5 as a "safety fallback".
 - **`table_injection.py` (139).** A machine-owned decision-table block that holds no criteria table raises `DamagedInjectionError`; it used to read around the damage to every criteria table in the LLD. N2 checks it before the drafter is paid.
 - **`core/gate_registry.py`.** The gate's new return makes the no-draft guard index 1; `spec.input_precondition` names both.
+
+## Assembling the two halves
+
+- **N3 halts on the second half's errors.** `base_tree` raises `BaseTreeError` and `criteria_coverage` raises `CriteriaTableError`; both reach N3 from inside its checks, where the first half caught only `CompletenessCannotCheck`, so they escaped N3 as a crash. N3's one handler now takes all three and names the type and cause of the two new ones. It returns through the same statement, so no halt site moves. Pinned by `tests/unit/test_spec_n3_assembly_routing.py` (3 tests).
+- **WON'T DO: halting N3 on an error-path report that did not run.** The second half's notes asked for it. The report's only not-run cause (`error_path_coverage.py:131`) is a draft with no implementation code, which is a defect in the draft that the drafter can repair. N3 sends draft defects back for revision and halts at the cap, so this stays a failed check.
+- **The passing-validation test** in `test_implementation_spec_workflow.py` gained one raise-free implementation fence: it existed only in the first half's form, and the second half's error-path rule failed it.
