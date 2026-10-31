@@ -37,3 +37,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 41 passed across the 5 files that use the pytest runner.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.
+
+## runners/playwright_runner.py
+
+**New: `tests/unit/test_playwright_runner_loud_failure.py` (9).**
+
+**Before the fix, measured** against HEAD's module: 8 failed, 1 passed. The eight site tests failed; the one that passed pins a readable report.
+
+**Changed tests:** `test_playwright_runner.py::test_parse_invalid_json` now expects `RunnerError` where it expected a fallback result.
+
+**Neighbouring suites:** 52 passed across the 5 files that use the Playwright runner.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issue as at HEAD.
