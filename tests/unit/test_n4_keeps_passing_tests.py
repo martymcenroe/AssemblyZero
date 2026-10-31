@@ -201,13 +201,17 @@ class TestNothingToKeep:
 
         assert kept == Kept(only_the_failing_one, [], [])
 
-    def test_an_unparseable_patch_is_left_for_the_syntax_gate(self):
+    def test_an_unparseable_patch_stops(self):
+        """#3585: it used to be returned untouched, the contract unkept."""
         broken = RUN_39 + "\ndef broken(:\n"
 
-        assert keep_passing_tests_as_written(RUN_32, broken, PASSING) == Kept(broken, [], [])
+        with pytest.raises(SyntaxError):
+            keep_passing_tests_as_written(RUN_32, broken, PASSING)
 
-    def test_an_unparseable_prior_keeps_nothing(self):
-        assert keep_passing_tests_as_written("def x(:\n", RUN_39, PASSING) == Kept(RUN_39, [], [])
+    def test_an_unparseable_prior_stops(self):
+        """#3585: it used to keep nothing, without a word."""
+        with pytest.raises(SyntaxError):
+            keep_passing_tests_as_written("def x(:\n", RUN_39, PASSING)
 
 
 class TestADeletedPassingTestComesBack:
@@ -247,13 +251,13 @@ class TestADeletedPassingTestComesBack:
         methods = [n.name for n in tree.body[0].body if isinstance(n, ast.FunctionDef)]
         assert methods == ["test_kept", "test_gone"]
 
-    def test_a_method_whose_class_is_gone_is_not_re_homed(self):
+    def test_a_method_whose_class_is_gone_is_not_re_homed_and_stops(self):
+        """#3585: the passing test used to be dropped without a word."""
         before = "class TestGroup:\n    def test_gone(self):\n        assert 2\n"
         after = "def test_new():\n    assert 3\n"
 
-        kept = keep_passing_tests_as_written(before, after, {"test_gone"})
-
-        assert kept == Kept(after, [], [])
+        with pytest.raises(ValueError, match="TestGroup.test_gone"):
+            keep_passing_tests_as_written(before, after, {"test_gone"})
 
     def test_a_changed_method_is_restored_in_place(self):
         before = "class TestGroup:\n    def test_kept(self):\n        assert 1\n"
@@ -344,7 +348,7 @@ def test_the_implementer_keeps_passing_tests_before_it_writes():
         / "orchestrator.py"
     ).read_text(encoding="utf-8")
 
-    guard = source.index("keep_passing_tests_as_written(prior_text, code, contract)")
+    guard = source.index("keep_passing_tests_as_written(prior_text, code, contract")
     write = source.index("# Write file (atomic: write to temp, then rename)")
     assert guard < write
     assert "(#2905)" in source
@@ -404,12 +408,14 @@ class TestTheSpecSuiteGovernsASharedName:
         assert release_spec_twins(PASSING, "") == (PASSING, set())
         assert release_spec_twins(set(), SPEC_SUITE) == (set(), set())
 
-    def test_an_unparseable_spec_suite_releases_nothing(self):
+    def test_an_unparseable_spec_suite_stops(self):
+        """#3585: it used to release nothing, without a word."""
         from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
             release_spec_twins,
         )
 
-        assert release_spec_twins(PASSING, "def broken(:\n") == (PASSING, set())
+        with pytest.raises(SyntaxError):
+            release_spec_twins(PASSING, "def broken(:\n")
 
     def test_a_method_in_the_spec_suite_counts(self):
         from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
@@ -428,8 +434,8 @@ class TestTheSpecSuiteGovernsASharedName:
             / "orchestrator.py"
         ).read_text(encoding="utf-8")
 
-        release = source.index("release_spec_twins(contract, spec_source)")
-        keep = source.index("keep_passing_tests_as_written(prior_text, code, contract)")
+        release = source.index("release_spec_twins(contract, spec_source")
+        keep = source.index("keep_passing_tests_as_written(prior_text, code, contract")
         assert release < keep
         assert "(#2910)" in source
 
@@ -528,13 +534,16 @@ class TestTheVerifierAlignsTwins:
 
         assert align_spec_twins(plan, RUN_41_SPEC_SUITE) == (plan, [], [])
 
-    def test_an_unparseable_side_aligns_nothing(self):
+    def test_an_unparseable_side_stops(self):
+        """#3585: either side used to align nothing, without a word."""
         from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
             align_spec_twins,
         )
 
-        assert align_spec_twins(RUN_39, "def broken(:\n") == (RUN_39, [], [])
-        assert align_spec_twins("def broken(:\n", RUN_41_SPEC_SUITE) == ("def broken(:\n", [], [])
+        with pytest.raises(SyntaxError):
+            align_spec_twins(RUN_39, "def broken(:\n")
+        with pytest.raises(SyntaxError):
+            align_spec_twins("def broken(:\n", RUN_41_SPEC_SUITE)
 
     def test_the_verifier_rewrites_the_plan_file_and_says_so(self, tmp_path, capsys):
         from assemblyzero.workflows.testing.nodes.verify_phases import (

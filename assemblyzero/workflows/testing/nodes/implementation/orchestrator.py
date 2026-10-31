@@ -1213,14 +1213,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 spec_source = _read_or_stop(
                     spec_suite, "the spec suite, which decides the contract (#2910)"
                 )
-                contract, released = release_spec_twins(contract, spec_source)
+                contract, released = release_spec_twins(contract, spec_source, path=str(spec_suite))
                 if released:
                     print(
                         f"        [N4] {len(released)} test(s) also in the spec suite "
                         f"are the spec's to define; this file's copy is free to "
                         f"change: {', '.join(sorted(released))} (#2910)"
                     )
-            kept = keep_passing_tests_as_written(prior_text, code, contract)
+            kept = keep_passing_tests_as_written(prior_text, code, contract, path=filepath)
             if kept.restored or kept.returned:
                 code = kept.source
                 names = ", ".join(sorted(kept.restored + kept.returned))
