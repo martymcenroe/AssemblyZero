@@ -13,6 +13,16 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 - **Kept and pinned (101, 418, 499, 557, 963, 975).** The parse answers that say "nothing here" for text whose syntax error another check reports, now documented in their docstrings, and the two budget halts, which already reach HALT.
 - **Where the raises go.** `HelperSourceUnreadable` is handled by the node and also reaches `assemblyzero/speedrun/answer_key.py`, which has no handler, so the answer key stops on an unreadable neighbour. `ScaffoldExhausted` is raised inside graph execution and reaches the entry point's handler. In `assemblyzero/workflows/testing/graph.py`, `route_after_validate` still maps "escalate" to `end`; that return is now reached only with `error_message` set, which the router sends to HALT first.
 
+### nodes/scaffold_tests.py (11 ledger rows: 9 fixed, 2 compliant and pinned)
+
+- **No Section 10 raises (105).** `parse_lld_test_section` raises ValueError naming the headings it looked for. It returned no scenarios, which read the same as an empty test plan.
+- **No `assert True` (325, 342).** Where no assertion can be derived from a scenario's expected behaviour, the generated test is `assert False` with a "TDD RED" message naming that behaviour. `assert True` passed with no implementation at all, so a scaffold no one replaced read as green.
+- **Bodies that do not parse halt N2 (787, 788).** `unbound_names` raises `ScaffoldImportError` naming the line of the emitted file and the parser's message; `_scaffold_python_tests` returns it as `error_message`, routed to HALT, before anything is written. It used to repair nothing and leave the refusal to N2.5, which then regenerated a transcription that comes out byte for byte the same.
+- **A finder that raises halts N2 (833, 834).** A name `importlib`'s finder raises on is reported with the test that uses it and the cause, by the same route.
+- **A missing audit directory halts N2 (1069, 1199).** `_require_audit_dir` runs before either scaffold writes anything: a state naming no directory, or one that is not a directory, raises FileNotFoundError, and N2 halts through `_halt_scaffold_framework`. The single-pytest path now catches ValueError and OSError into that halt, as the multi-framework path already did. An unset `audit_dir` used to be `Path("")`, the working directory, so the scaffold's audit copy landed wherever the run was started.
+- **Kept and pinned (435, 1153).** An unsupported framework raises; no scenarios is the GUARD halt.
+- **Where the raises go.** `parse_lld_test_section` and the assertion generator have no caller outside the tests. `ScaffoldImportError`'s new causes also reach `implementation_spec/nodes/validate_completeness.py`, which already catches it and fails its Section 10 check with the message.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.

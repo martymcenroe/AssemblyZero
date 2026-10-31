@@ -160,8 +160,15 @@ class TestMissingModuleImports:
 
         assert missing_module_imports(source, target) == []
 
-    def test_unparseable_source_reports_nothing(self, target):
-        assert missing_module_imports("def test_a(:\n", target) == []
+    def test_unparseable_source_raises(self, target):
+        """Ledger 0908, line 787: it reported nothing, and the scaffold went
+        on to a refusal regeneration could not change."""
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
+            ScaffoldImportError,
+        )
+
+        with pytest.raises(ScaffoldImportError, match="do not parse"):
+            missing_module_imports("def test_a(:\n", target)
 
     def test_each_module_is_reported_once_by_its_first_user(self, target):
         source = (
