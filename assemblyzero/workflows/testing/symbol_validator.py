@@ -24,10 +24,29 @@ from __future__ import annotations
 
 import ast
 import difflib
+import logging
+import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 #: Where a package's source is conventionally rooted, most specific first.
 _SOURCE_ROOTS = ("src", "")
+
+
+class SymbolCheckError(ValueError):
+    """The imports could not be checked (ADR 0236): the test source, or a
+    module of the repository's own that it imports from, cannot be read or
+    parsed. Names the file and the cause. A check that cannot run is a
+    failure, never "every import resolves"."""
+
+
+def _cannot_check(message: str) -> SymbolCheckError:
+    """The SymbolCheckError for `message`, after its ERROR line on stderr
+    and in the log (ADR 0236 property 1)."""
+    logger.error("[SYMBOLS] %s", message)
+    print(f"ERROR [SYMBOLS] {message}", file=sys.stderr, flush=True)
+    return SymbolCheckError(message)
 
 
 def module_source_path(module: str, repo_root: Path) -> Path | None:
@@ -50,11 +69,13 @@ def module_source_path(module: str, repo_root: Path) -> Path | None:
     return None
 
 
-def exported_names(source_path: Path) -> set[str] | None:
-    """Names a module binds at module level, or None if it cannot be parsed.
+def exported_names(source_path: Path) -> set[str]:
+    """Names a module binds at module level.
 
-    None means "could not tell", and the caller must treat that as no
-    finding: a module this cannot read is not evidence of a bad import.
+    Raises SymbolCheckError naming the file and the cause, after an ERROR
+    line, when the module cannot be read or parsed (ADR 0236). It returned
+    None, which the check read as "no finding", so an import from a module
+    nobody could read passed as good.
 
     #2895: "module level" includes the bodies of `if`, `try`, `with`, `for`
     and `while` statements that sit at module level, at any nesting of those
@@ -68,8 +89,11 @@ def exported_names(source_path: Path) -> set[str] | None:
     """
     try:
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError):
-        return None
+    except (OSError, SyntaxError, ValueError) as e:
+        raise _cannot_check(
+            f"the module {source_path} cannot be read or parsed, so the names "
+            f"a test imports from it cannot be checked: {type(e).__name__}: {e}"
+        ) from e
 
     names: set[str] = set()
     _collect_module_bindings(tree.body, names)
@@ -129,15 +153,22 @@ def validate_test_imports(test_source: str, repo_root: Path) -> list[str]:
     """Names a generated test imports that its target module does not export.
 
     Returns one message per bad symbol, each naming the module, the missing
-    name and the closest available matches. An empty list means either
-    everything resolves or nothing could be checked -- this never guesses.
+    name and the closest available matches. An empty list means every
+    import from the repository's own modules resolves; a module that is not
+    the repository's own (stdlib, third party) is not this check's to make.
+
+    Raises SymbolCheckError, after an ERROR line, when the check cannot run
+    (ADR 0236): the test source does not parse, or a module of the
+    repository's own it imports from cannot be read or parsed. Both used to
+    return an empty list, the same answer as "everything resolves".
     """
     try:
         tree = ast.parse(test_source)
-    except SyntaxError:
-        # A file that does not parse is a different failure, reported
-        # elsewhere. Returning findings here would be noise on top of it.
-        return []
+    except (SyntaxError, ValueError) as e:
+        raise _cannot_check(
+            f"the test source does not parse, so its imports cannot be "
+            f"checked: {type(e).__name__}: {e}"
+        ) from e
 
     errors: list[str] = []
     for node in ast.walk(tree):
@@ -148,8 +179,6 @@ def validate_test_imports(test_source: str, repo_root: Path) -> list[str]:
         if source_path is None:
             continue  # not ours to check
         available = exported_names(source_path)
-        if available is None:
-            continue  # could not read it; not evidence of a fault
         # #2904: `from package import submodule` binds the submodule whatever
         # the package's __init__ says. boostgauge's is empty, and
         # `from boostgauge import collector` was refused with nothing to offer.

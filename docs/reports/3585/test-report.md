@@ -121,3 +121,17 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 75 passed across 4 files, among them the entry point's loud-failure tests and the context-injection tests.
 
 **Audits:** 0 new loud-failure sites, and this module's swallowed handler is now stale in the baseline; no new fail-open; halt sites pass. Ruff finds one fewer issue than at HEAD.
+
+## symbol_validator.py
+
+**New: `tests/unit/test_symbol_validator_loud_failure.py` (7).**
+
+**Before the fix, measured:** 4 failed, 3 passed. The four site tests failed. The three that passed pin a module that is not the repository's own, a good name, and a missing name with its near match.
+
+**Changed tests:**
+- `test_generated_test_symbols.py`: the unparseable source and the unreadable module now expect `SymbolCheckError`.
+- `test_symbol_validator_sees_conditional_bindings.py`: `test_an_unparseable_module_is_still_none` is now `test_an_unparseable_module_raises`.
+
+**Neighbouring suites:** 129 passed across 8 files: the validator's tests and N4c's.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.

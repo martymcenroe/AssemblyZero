@@ -64,3 +64,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **Every failed context file is said (164, 177).** A rejection, or a read that fails, is an ERROR line naming the file and the cause. The read handler names OSError and UnicodeDecodeError where it caught every exception.
 - **No partial context.** When any file fails, no content comes back, only the errors. The one caller, `tools/run_implement_from_lld.py`, already refuses to start on any error, and its handler alerts.
 - **Kept (65).** A file that cannot be statted is a rejection with its reason.
+
+### symbol_validator.py (3 ledger rows: 3 fixed)
+
+- **A check that cannot run raises.** A module of the target's own that cannot be read or parsed (71, 152), and a test source that does not parse (137), raise `SymbolCheckError`, a ValueError, naming the file and the cause after an ERROR line. They returned None or an empty list, the same answer as "every import resolves".
+- **Not the repository's own is still quiet.** An import from the standard library or a third-party package is not this check's to make.
+- **Where the raise goes.** N4c (`nodes/augment_tests.py`) does not catch it, so the run ends through the entry point's handler, which alerts. Catching it at N4c's two calls and returning it as `error_message` would end the run at HALT instead.

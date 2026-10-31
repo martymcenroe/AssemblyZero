@@ -25,6 +25,7 @@ from assemblyzero.workflows.testing.nodes.augment_tests import (
     build_revision_prompt,
 )
 from assemblyzero.workflows.testing.symbol_validator import (
+    SymbolCheckError,
     exported_names,
     module_source_path,
     validate_test_imports,
@@ -90,23 +91,32 @@ def test_reexported_imports_count(repo: Path) -> None:
     "from unittest.mock import patch\n",        # third-party / stdlib
     "from boostgauge.config import *\n",        # star import
     "from . import sibling\n",                  # relative
-    "def test_broken(:\n",                      # unparseable
     "",
 ])
 def test_never_invents_a_finding(repo: Path, source: str) -> None:
-    """Anything it cannot decide must produce no finding, never a guess."""
+    """An import that is not the repository's own produces no finding, never
+    a guess."""
     assert validate_test_imports(source, repo) == []
 
 
-def test_unreadable_module_is_not_evidence(tmp_path: Path) -> None:
+def test_an_unparseable_test_source_cannot_be_checked(repo: Path) -> None:
+    """ADR 0236: a check that cannot run raises; it used to return no
+    findings, the same answer as "every import resolves"."""
+    with pytest.raises(SymbolCheckError, match="does not parse"):
+        validate_test_imports("def test_broken(:\n", repo)
+
+
+def test_unreadable_module_cannot_be_checked(tmp_path: Path) -> None:
+    """ADR 0236: an import from a module nobody can read is never passed as
+    good; it used to be no finding."""
     pkg = tmp_path / "src" / "boostgauge"
     pkg.mkdir(parents=True)
     (pkg / "config.py").write_text("def broken(:\n", encoding="utf-8")
 
-    assert exported_names(pkg / "config.py") is None
-    assert validate_test_imports(
-        "from boostgauge.config import anything\n", tmp_path,
-    ) == []
+    with pytest.raises(SymbolCheckError, match="config.py"):
+        exported_names(pkg / "config.py")
+    with pytest.raises(SymbolCheckError):
+        validate_test_imports("from boostgauge.config import anything\n", tmp_path)
 
 
 def test_module_outside_the_repo_is_skipped(repo: Path) -> None:
