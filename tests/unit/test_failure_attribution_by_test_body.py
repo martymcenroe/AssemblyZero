@@ -157,11 +157,13 @@ class TestTheRuleStaysConservative:
         assert is_attributed(corpus, "src/boostgauge/collector.py", repo)
         assert not is_attributed(corpus, "src/boostgauge/collectors/windows.py", repo)
 
-    def test_an_unparseable_planned_file_attributes_nothing(self, repo):
+    def test_an_unparseable_planned_file_stops_attribution(self, repo):
+        """#3585: it used to attribute nothing, a guess said nothing about."""
         (repo / "src" / "boostgauge" / "broken.py").write_text(
             "def (:\n", encoding="utf-8"
         )
-        assert not is_attributed(CORPUS, "src/boostgauge/broken.py", repo)
+        with pytest.raises(SyntaxError):
+            is_attributed(CORPUS, "src/boostgauge/broken.py", repo)
 
     def test_a_missing_test_file_attributes_nothing(self, repo):
         corpus = CORPUS.replace("tests/test_issue_4.py", "tests/test_gone.py")

@@ -31,6 +31,12 @@ Callers: N4 lets the raises reach the runner, which alerts. N5's `_align_plan_fi
 
 Callers: `validate_code_response` is called by N4's retry loop and batch path; neither catches, so the runner alerts.
 
+### edit_script_fix.py (5 rows)
+
+- **Attribution by test body (#2861) does not guess around a file it cannot read** (273, 303). A planned Python file or a failing test's file that cannot be read or does not parse is an ERROR line naming it, and the exception propagates. A file that is not on disk, or not Python, is still an answer: it defines or uses nothing.
+- **497, 503, 507** are fallbacks the orchestrator takes; it alerts on them (see orchestrator.py above).
+- The two `# fail-open:` tags are gone.
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |

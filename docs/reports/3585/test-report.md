@@ -23,3 +23,10 @@ Each module's new test file was run against the unchanged module first; every si
 - Changed existing test: `test_zero_needs_denominator.py::TestConftestOptionValidation::test_unparseable_new_code_abstains_here` becomes `test_unparseable_new_code_stops_here` and asserts the SyntaxError.
 - Neighbouring suites (the ten unit files that import the parsers): 150 passed and 1 failed, the test above; after the change, 20 passed in the two files it touches.
 - Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
+
+## edit_script_fix.py
+
+- New: `tests/unit/test_edit_script_fix_loud_failure.py`, 9 tests. Before the fix: 5 failed, 4 passed. After: 9 passed. Rows 497, 503 and 507 are tested in `test_orchestrator_loud_failure.py`.
+- Changed existing test: `test_failure_attribution_by_test_body.py::test_an_unparseable_planned_file_attributes_nothing` becomes `test_an_unparseable_planned_file_stops_attribution` and asserts the SyntaxError.
+- Neighbouring suites (the 13 unit files that import the module or its functions): 192 passed.
+- Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
