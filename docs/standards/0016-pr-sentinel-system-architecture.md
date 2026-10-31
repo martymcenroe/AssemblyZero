@@ -157,7 +157,7 @@ Two things follow that matter more than the answer:
 | Property | Value |
 |----------|-------|
 | Location | `martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml` |
-| Caller | `.github/workflows/auto-reviewer.yml` in each repo (deployed by `deploy_auto_reviewer_fleet.py`) |
+| Caller | `.github/workflows/auto-reviewer.yml` in each repo (deployed by `deploy_auto_reviewer_workflow.py`) |
 | Default required checks input | `"issue-reference"` |
 | Match strategy | **Substring:** `select(.name \| contains("issue-reference"))` |
 | Approval identity | Cerberus-AZ GitHub App (via `REVIEWER_APP_ID` + `REVIEWER_APP_PRIVATE_KEY` secrets) |
@@ -198,7 +198,7 @@ Every repo MUST have these branch protection settings on `main`:
 
 | Configuration | Context value | How it gets there |
 |---------------|--------------|-------------------|
-| **Fleet majority (48 repos)** | `pr-sentinel / issue-reference` | Set by `deploy_auto_reviewer_fleet.py` or `fix_branch_protections.py` |
+| **Fleet majority (48 repos)** | `pr-sentinel / issue-reference` | Set by `fix_branch_protections.py` |
 | **AssemblyZero + Sextant** | `issue-reference` with `app_id: 15368` | Set manually or by `new_repo.py` |
 
 **Both configurations work** because:
@@ -249,10 +249,9 @@ Used for fleet-wide operations that require elevated access. Always scripted, al
 
 | Script | Purpose | Required Scopes |
 |--------|---------|----------------|
-| `deploy_auto_reviewer_fleet.py` | Deploy caller workflow + enable reviews | `repo` + `workflow` |
+| `deploy_auto_reviewer_workflow.py` | Deploy the caller workflow to repos missing it | `repo` + `workflow` |
 | `fix_branch_protections.py` | Set protection on unprotected repos | `repo` + `admin:repo_hook` + `read:org` |
 | `merge_sentinel_permissions_prs.py` | Merge workflow permission fix PRs | `repo` |
-| `push_workflow_fixes.py` | Push workflow file changes | `workflow` |
 | `github_protection_audit.py` | Audit branch protection fleet-wide | `repo` + `admin:repo_hook` + `read:org` (audit mode) |
 | `new_repo.py` | Create new repos with protection | Optional classic PAT for admin scope |
 
