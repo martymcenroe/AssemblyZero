@@ -1,12 +1,6 @@
 {
-  "count": 154,
+  "count": 124,
   "entries": {
-    "assemblyzero/hooks/cascade_action.py::handle_cascade_detection::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 64
-    },
     "assemblyzero/metrics/collector.py::count_gemini_verdicts::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
@@ -49,89 +43,11 @@
       "kind": "swallowed_handler",
       "line": 218
     },
-    "assemblyzero/speedrun/convergence.py::_append::fail_open_tag::1": {
-      "detail": "# fail-open: a run that cannot write its record still has to finish.",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 91
-    },
-    "assemblyzero/speedrun/convergence.py::_append::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 90
-    },
-    "assemblyzero/speedrun/convergence.py::read_records::fail_open_tag::1": {
-      "detail": "# fail-open: one truncated line -- a roll killed mid-write -- must",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 186
-    },
-    "assemblyzero/speedrun/factory_report.py::_parse_halted_at::fail_open_tag::1": {
-      "detail": "# fail-open: a bundle with an unreadable stamp cannot be placed against",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 928
-    },
-    "assemblyzero/speedrun/factory_report.py::_parse_ts::fail_open_tag::1": {
-      "detail": "# fail-open: try the next format. None is returned only when all",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 511
-    },
-    "assemblyzero/speedrun/factory_report.py::_under::fail_open_tag::1": {
-      "detail": "# fail-open: deliberately toward EXCLUSION. This answers \"is this",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 852
-    },
-    "assemblyzero/speedrun/factory_report.py::parse_since::fail_open_tag::1": {
-      "detail": "# fail-open: trying the next format is the point of the loop, not",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 496
-    },
-    "assemblyzero/speedrun/factory_report.py::read_halt_bundles::fail_open_tag::1": {
-      "detail": "# fail-open: one corrupt bundle drops that halt from the",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 972
-    },
-    "assemblyzero/speedrun/factory_report.py::scan_run_log::fail_open_tag::1": {
-      "detail": "# fail-open: an unstattable log keeps an empty mtime, and scan_run_logs",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 631
-    },
-    "assemblyzero/speedrun/factory_report.py::scan_run_log::fail_open_tag::2": {
-      "detail": "# fail-open: one unreadable log must not kill a report over the other",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 647
-    },
-    "assemblyzero/speedrun/factory_report.py::scan_run_logs::fail_open_tag::1": {
-      "detail": "# fail-open: a repo with no runs directory has never been rolled, which",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 764
-    },
     "assemblyzero/speedrun/healing.py::record_heal::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 151
-    },
-    "assemblyzero/speedrun/must_resolve.py::file_all_conflicts::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 721
-    },
-    "assemblyzero/speedrun/restore.py::restore_artifact::fail_open_tag::1": {
-      "detail": "# fail-open: a path outside the repo cannot be on any of the",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 200
     },
     "assemblyzero/spelunking/engine.py::run_all_probes::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -150,72 +66,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 49
-    },
-    "assemblyzero/telemetry/actor.py::detect_github_user::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 48
-    },
-    "assemblyzero/telemetry/emitter.py::_get_dynamo_client::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 68
-    },
-    "assemblyzero/telemetry/emitter.py::_write_to_buffer::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 84
-    },
-    "assemblyzero/telemetry/emitter.py::emit::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 151
-    },
-    "assemblyzero/telemetry/emitter.py::emit::swallowed_handler::2": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 156
-    },
-    "assemblyzero/telemetry/emitter.py::flush::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 192
-    },
-    "assemblyzero/telemetry/emitter.py::flush::swallowed_handler::2": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 200
-    },
-    "assemblyzero/telemetry/emitter.py::flush::swallowed_handler::3": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 203
-    },
-    "assemblyzero/telemetry/store.py::CallStore.write::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 71
-    },
-    "assemblyzero/utils/codebase_reader.py::parse_project_metadata::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 340
-    },
-    "assemblyzero/utils/codebase_reader.py::parse_project_metadata::swallowed_handler::2": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 369
     },
     "assemblyzero/utils/metrics_aggregator.py::MetricsAggregator.collect_repo_metrics::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -342,36 +192,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 58
-    },
-    "assemblyzero/workflows/narration.py::_record_entry::fail_open_tag::1": {
-      "detail": "# fail-open: a diagnostic that can take a roll down is worse than a",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 161
-    },
-    "assemblyzero/workflows/narration.py::_record_entry::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 160
-    },
-    "assemblyzero/workflows/narration.py::_set_call_context::fail_open_tag::1": {
-      "detail": "# fail-open: this runs BEFORE the node does, so an exception here would",
-      "issue": 3581,
-      "kind": "fail_open_tag",
-      "line": 182
-    },
-    "assemblyzero/workflows/narration.py::_set_call_context::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 181
-    },
-    "assemblyzero/workflows/narration.py::narrated._wrapped::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 114
     },
     "assemblyzero/workflows/orchestrator/graph.py::_record_stage_entry::fail_open_tag::1": {
       "detail": "# fail-open: a stage must not fail to run because its diagnostic could",
@@ -797,25 +617,25 @@
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 3971
+      "line": 3977
     },
     "tools/speedrun_roll.py::main::swallowed_handler::2": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 4008
+      "line": 4014
     },
     "tools/speedrun_roll.py::main::swallowed_handler::3": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 4020
+      "line": 4026
     },
     "tools/speedrun_roll.py::main::swallowed_handler::4": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
       "kind": "swallowed_handler",
-      "line": 4061
+      "line": 4067
     },
     "tools/speedrun_roll.py::persisted_profile_name::fail_open_tag::1": {
       "detail": "# fail-open: no readable state means nothing to resume, so nothing",

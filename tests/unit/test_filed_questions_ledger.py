@@ -123,13 +123,18 @@ class TestTheLedgerRecordsWhatWasFiled:
         assert result.action == "commented"
         assert [e["number"] for e in read_filed(repo)] == [240]
 
-    def test_recording_never_raises(self, repo):
-        """The roll is already halting. Losing a ledger line costs the summary
-        a number; raising would cost the halt."""
-        with patch.object(Path, "mkdir", side_effect=OSError("read-only")):
-            assert record_filed(repo, number=1, title="t") is False
+    def test_a_record_that_cannot_be_written_raises(self, repo):
+        """ADR 0236 (#3585): a lost ledger line is a question the launch gate
+        may not see. It raises naming the ledger; file_must_resolve alerts and
+        returns a failed result, so the halt is still unchanged."""
+        with (
+            patch.object(Path, "mkdir", side_effect=OSError("read-only")),
+            pytest.raises(OSError, match="filed-questions ledger"),
+        ):
+            record_filed(repo, number=1, title="t")
 
-    def test_a_corrupt_line_costs_one_entry_not_the_file(self, repo):
+    def test_a_corrupt_line_alerts_and_stops_the_read(self, repo, operator_alerts):
+        """ADR 0236 (#3585): a skipped line can hide an open question."""
         path = filed_ledger_path(repo)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -139,7 +144,9 @@ class TestTheLedgerRecordsWhatWasFiled:
             encoding="utf-8",
         )
 
-        assert [e["number"] for e in read_filed(repo)] == [273, 275]
+        with pytest.raises(ValueError, match=":2 is not JSON"):
+            read_filed(repo)
+        assert len(operator_alerts) == 1
 
     def test_entries_before_the_batch_are_excluded(self, repo):
         """A question ruled on last week must not reappear in tonight's block."""

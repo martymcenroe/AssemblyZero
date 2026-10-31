@@ -67,16 +67,32 @@ def load_gate_config(target_repo: Path | str) -> GateConfig | None:
     A present-but-unreadable file returns None the same as an absent one is
     NOT acceptable -- a repo that declared a gate and then broke the
     declaration must not silently roll ungated. Malformed JSON raises.
+
+    So does a declaration without ``renderer_cmd`` or ``separation_floor``
+    (#3585): the first defaulted to an empty command that failed only at
+    render time, and the second to 0, which silently turned the palette-floor
+    guardrail off. An explicit floor of 0 is the repo's declared choice.
     """
     path = Path(target_repo) / CONFIG_REL
     if not path.is_file():
         return None
     data = json.loads(path.read_text(encoding="utf-8-sig"))
+    renderer_cmd = tuple(str(part) for part in data.get("renderer_cmd") or [])
+    if not renderer_cmd:
+        raise ValueError(
+            f"{path} declares a visual gate with no renderer_cmd; the gate "
+            f"cannot render the contract"
+        )
+    if "separation_floor" not in data:
+        raise ValueError(
+            f"{path} declares a visual gate with no separation_floor; the "
+            f"palette-floor guardrail would be off"
+        )
     return GateConfig(
         issues=tuple(int(n) for n in data.get("issues", [])),
-        renderer_cmd=tuple(str(part) for part in data.get("renderer_cmd", [])),
+        renderer_cmd=renderer_cmd,
         contract=str(data.get("contract", "")),
-        separation_floor=float(data.get("separation_floor", 0)),
+        separation_floor=float(data["separation_floor"]),
         ruled=dict(data.get("ruled", {})),
         open_browser=bool(data.get("open_browser", True)),
         notify=dict(data.get("notify", {})),

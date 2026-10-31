@@ -37,6 +37,11 @@ def handle_cascade_detection(
 
     Returns:
         True if auto-approval should proceed, False if blocked.
+
+    A block whose telemetry event cannot be built or written alerts the
+    operator with the session id and the cause, and still blocks: the block
+    never depended on the telemetry (ADR 0236, #3585). It used to be a bare
+    ``pass``, and the event was lost with nobody told.
     """
     action = result["recommended_action"]
 
@@ -61,9 +66,20 @@ def handle_cascade_detection(
             action_taken=action_taken,
         )
         log_cascade_event(event)
-    except Exception:  # noqa: BLE001
-        # Telemetry failure must not affect blocking behavior
-        pass
+    except Exception as exc:  # noqa: BLE001 - the block below never depends on it
+        # Lazy, like the telemetry import above: hooks/__init__ imports this
+        # module, and the alert path must not join that import chain.
+        from assemblyzero.core import alert
+
+        alert.alert_operator(
+            what=f"record the cascade block for session {session_id} ({action_taken})",
+            where="assemblyzero/hooks/cascade_action.py handle_cascade_detection",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence=(
+                "the event is missing from the cascade telemetry log, so the "
+                "detector's accuracy stats leave it out; auto-approve is still blocked"
+            ),
+        )
 
     # Print block message to stderr
     message = format_block_message(result)

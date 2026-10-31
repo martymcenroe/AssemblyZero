@@ -5,7 +5,6 @@ Issue #774: Tests for record construction, store writes, instrumentation context
 
 import datetime
 import json
-import logging
 import threading
 from pathlib import Path
 from unittest.mock import patch
@@ -470,9 +469,10 @@ class TestConcurrentWrites:
 
 
 class TestWriteFailure:
-    """T170: Write failure is non-fatal; warning logged."""
+    """T170, revised by #3585: a write failure alerts and raises; it used to
+    be a WARNING and the record was lost."""
 
-    def test_oserror_does_not_propagate(self, tmp_store: CallStore, caplog):
+    def test_oserror_alerts_and_propagates(self, tmp_store: CallStore, operator_alerts):
         record = LLMCallRecord(
             record_id=make_record_id(),
             timestamp_utc=now_utc_iso(),
@@ -483,7 +483,8 @@ class TestWriteFailure:
         )
 
         with patch("builtins.open", side_effect=OSError("disk full")):
-            with caplog.at_level(logging.WARNING):
+            with pytest.raises(OSError, match="disk full"):
                 tmp_store.write(record)
 
-        assert "Failed to write telemetry record" in caplog.text
+        assert len(operator_alerts) == 1
+        assert "disk full" in operator_alerts[0]["cause"]

@@ -31,9 +31,13 @@ def _main(repo, codes, attempts=1):
         calls.append(issue)
         return codes[len(calls) - 1]
 
+    # #3585: a fake `.git` cannot answer `git status`, which now raises
+    # rather than read as "no untracked files"; the baseline read is stubbed
+    # like the other git-touching checks.
     with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
             patch.object(sr, "roll_issue", _roll), \
             patch.object(sr, "restore_repo", lambda *a: []), \
+            patch.object(sr, "untracked_files", lambda *_a: []), \
             patch.object(sr.time, "sleep", lambda s: None):
         code = sr.main(
             ["--repo", str(repo), "--issue", "2", "--issue", "5",
@@ -83,6 +87,7 @@ class TestTheBudgetIsRetired:
                 patch.object(sr, "roll_issue",
                              lambda *a: calls.append(1) or 1), \
                 patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "untracked_files", lambda *_a: []), \
                 patch.object(sr.time, "sleep", lambda s: None):
             code = sr.main(["--repo", str(repo), "--issue", "2"])
         assert code == 1

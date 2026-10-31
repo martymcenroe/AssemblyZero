@@ -78,6 +78,15 @@ def extract_paths_from_lld(lld_content: str) -> LLDPathSpec:
 
     Returns:
         LLDPathSpec with categorized file paths.
+
+    Content with no Section 2.1 returns an empty spec, quietly, and that is
+    the contract rather than a swallowed failure (ADR 0236, #3585). On a real
+    implementation run the content is the implementation SPEC, which
+    ``load_lld`` stores under ``lld_content``: its files table is
+    ``## 2. Files to Implement`` and it has no Section 2.1 by design. The
+    implementation node adds every path of that table to the allowed set
+    itself, so the empty answer here costs the enforcement nothing, while a
+    raise would halt every implementation run.
     """
     spec: LLDPathSpec = {
         "implementation_files": [],

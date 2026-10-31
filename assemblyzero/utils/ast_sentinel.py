@@ -44,6 +44,15 @@ IMPLICIT_GLOBALS: frozenset[str] = frozenset({
 DISABLE_COMMENT = "sentinel: disable-line"
 
 
+class SentinelCannotRun(RuntimeError):
+    """The sentinel could not analyse a file: it does not parse or cannot be read.
+
+    Raised, never returned as a finding (ADR 0236, #3585). A file the sentinel
+    cannot read has not been checked, and a finding would let a caller file the
+    check that never ran as an advisory about one symbol.
+    """
+
+
 @dataclass
 class SentinelError:
     """A single undefined-symbol error found by the sentinel."""
@@ -466,15 +475,17 @@ def analyze_source(source: str, filename: str = "<string>") -> SentinelResult:
 
     Returns:
         SentinelResult with any errors found.
+
+    Raises:
+        SentinelCannotRun: the source does not parse, so it cannot be checked.
     """
     try:
         tree = ast.parse(source, filename=filename)
     except SyntaxError as e:
-        return SentinelResult(errors=[SentinelError(
-            name="<syntax>",
-            line=e.lineno or 0,
-            message=f"Syntax error in {filename}: {e}",
-        )])
+        raise SentinelCannotRun(
+            f"AST sentinel cannot check {filename}: SyntaxError at line "
+            f"{e.lineno or 0}: {e.msg}"
+        ) from e
 
     source_lines = source.splitlines()
     visitor = SymbolSentinel(source_lines=source_lines)
@@ -491,16 +502,18 @@ def analyze_file(path: str | Path) -> SentinelResult:
 
     Returns:
         SentinelResult with any errors found.
+
+    Raises:
+        SentinelCannotRun: the file cannot be read or decoded as UTF-8, or does
+            not parse.
     """
     path = Path(path)
     try:
         source = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        return SentinelResult(errors=[SentinelError(
-            name="<io>",
-            line=0,
-            message=f"Cannot read {path}: {e}",
-        )])
+        raise SentinelCannotRun(
+            f"AST sentinel cannot read {path}: {type(e).__name__}: {e}"
+        ) from e
 
     return analyze_source(source, filename=str(path))
 

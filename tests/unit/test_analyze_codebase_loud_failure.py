@@ -88,6 +88,19 @@ class TestRepoPath:
         assert "origin/main does not resolve" in out["error_message"]
 
 
+class TestProjectMetadata:
+    def test_a_project_config_that_will_not_parse_halts_naming_it(self, tmp_path, capsys):
+        """The reader raises on it (#4417); N0b halts, never an uncaught raise."""
+        repo = _repo(tmp_path / "repo")
+        (repo / "pyproject.toml").write_text("[project\nname = ", encoding="utf-8")
+
+        out = ac.analyze_codebase(_state(repo))
+
+        assert _halts(out)
+        assert "pyproject.toml" in out["error_message"]
+        _said_error(capsys)
+
+
 class TestSelectedFiles:
     def test_191_a_key_file_that_cannot_be_read_halts_naming_it(self, tmp_path, capsys):
         repo = _repo(tmp_path / "repo")

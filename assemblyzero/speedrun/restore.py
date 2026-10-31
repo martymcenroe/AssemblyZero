@@ -27,6 +27,32 @@ from pathlib import Path
 from assemblyzero.core.settlement import sha256_text
 from assemblyzero.speedrun.leavings import _run
 
+#: What ``git show <ref>:<path>`` says when the answer is simply "not here":
+#: the ref does not exist, or the path is not on it. A closed list of git's
+#: own messages; any other failure is a git error, not an absence (#3585).
+_ABSENT_MARKERS = (
+    "invalid object name",
+    "unknown revision",
+    "bad revision",
+    "does not exist in",
+    "exists on disk, but not in",
+)
+
+
+class RestoreError(RuntimeError):
+    """A git command the restore search depends on failed (#3585).
+
+    Raised rather than read as "no refs" or "not on this ref": either reading
+    makes a preserved artifact look unrestorable.
+    """
+
+
+def _git_failed(cmd: list[str], result) -> RestoreError:
+    stderr = (result.stderr or "").strip() or "(no stderr)"
+    return RestoreError(
+        f"`{' '.join(cmd)}` exited {result.returncode}: {stderr}"
+    )
+
 
 def graveyard_leavings_refs(repo_root: Path) -> list[str]:
     """Every `graveyard/leavings-*` ref, newest first.
@@ -36,16 +62,14 @@ def graveyard_leavings_refs(repo_root: Path) -> list[str]:
     cleared artifact is always on one of these, and the newest is the one
     the last run wrote.
     """
-    result = _run(
-        [
-            "git", "for-each-ref", "--format=%(refname:short)",
-            "refs/heads/graveyard/leavings-*",
-            "refs/remotes/origin/graveyard/leavings-*",
-        ],
-        cwd=repo_root,
-    )
+    cmd = [
+        "git", "for-each-ref", "--format=%(refname:short)",
+        "refs/heads/graveyard/leavings-*",
+        "refs/remotes/origin/graveyard/leavings-*",
+    ]
+    result = _run(cmd, cwd=repo_root)
     if result.returncode != 0:
-        return []
+        raise _git_failed(cmd, result)
     refs = [
         line.strip()
         for line in (result.stdout or "").splitlines() if line.strip()
@@ -73,16 +97,14 @@ def graveyard_issue_lld_refs(repo_root: Path, issue: int) -> list[str]:
     time order -- same reasoning as `graveyard_leavings_refs`, same
     immunity to history rewrites perturbing committer dates.
     """
-    result = _run(
-        [
-            "git", "for-each-ref", "--format=%(refname:short)",
-            f"refs/heads/graveyard/{issue}-lld-*",
-            f"refs/remotes/origin/graveyard/{issue}-lld-*",
-        ],
-        cwd=repo_root,
-    )
+    cmd = [
+        "git", "for-each-ref", "--format=%(refname:short)",
+        f"refs/heads/graveyard/{issue}-lld-*",
+        f"refs/remotes/origin/graveyard/{issue}-lld-*",
+    ]
+    result = _run(cmd, cwd=repo_root)
     if result.returncode != 0:
-        return []
+        raise _git_failed(cmd, result)
     refs = [
         line.strip()
         for line in (result.stdout or "").splitlines() if line.strip()
@@ -190,18 +212,21 @@ def restore_artifact(
     (run-issue2-052813) was implemented against an August draft. The durable
     copy and the base now come first (`_sources`). A graveyard copy that is
     not the settled LLD, by content hash, is refused and named, never used.
+
+    Returns False only when no source holds the file: every ref is absent or
+    does not carry the path. Raises ``ValueError`` for a path outside the
+    repo, which is a caller's mistake rather than an absence, and
+    ``RestoreError`` when a git command fails for any other reason (#3585).
     """
     path = Path(artifact)
     if path.is_file():
         return True
-    try:
-        rel = path.relative_to(repo_root)
-    except ValueError:
-        # fail-open: a path outside the repo cannot be on any of the
-        # repo's refs; False is the honest "not restorable", exactly what
-        # this returned when it lived in speedrun_roll (the move into the
-        # audited package is what made the site newly visible).
-        return False
+    if not path.is_relative_to(repo_root):
+        raise ValueError(
+            f"{artifact} is outside the repo {repo_root}; no ref of the repo "
+            f"can hold it"
+        )
+    rel = path.relative_to(repo_root)
 
     is_lld = rel.name == f"LLD-{issue:03d}.md"
     settled_sha = _settled_lld_sha(_main_checkout(repo_root), issue) if is_lld else None
@@ -213,10 +238,14 @@ def restore_artifact(
                 continue
             content = source.read_text(encoding="utf-8")
         else:
-            show = _run(
-                ["git", "show", f"{where}:{rel.as_posix()}"], cwd=repo_root
-            )
-            if show.returncode != 0 or not show.stdout:
+            show_cmd = ["git", "show", f"{where}:{rel.as_posix()}"]
+            show = _run(show_cmd, cwd=repo_root)
+            if show.returncode != 0:
+                stderr = (show.stderr or "").lower()
+                if not any(marker in stderr for marker in _ABSENT_MARKERS):
+                    raise _git_failed(show_cmd, show)
+                continue  # this ref is absent, or does not carry the path
+            if not show.stdout:
                 continue
             content = show.stdout
             if (

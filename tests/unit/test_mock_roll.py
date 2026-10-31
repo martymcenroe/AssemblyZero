@@ -473,9 +473,8 @@ class TestTheGraphRecordsWhereItWent:
                 pass
         finally:
             set_active(None)
-        records, unreadable = read_records(target_repo)
-        assert unreadable == 0
-        return records
+        # #3585: read_records raises on a line that is not a record.
+        return read_records(target_repo)
 
     def test_a_run_through_the_real_graph_records_every_node_it_entered(
         self, target_repo, monkeypatch, capsys

@@ -6,14 +6,18 @@ from log grepping. Lines land on the workflow's stdout, which the roll
 redirects to the per-roll log and the follower streams to the operator's
 console (standard 0026).
 
-Narration must never cost a run: every failure path here degrades to
-silence, and a node missing from the atlas warns once, by name, and the
-roll continues.
+Every failure here is loud (ADR 0236, #3585). A node with no atlas entry
+fails the graph build. A narration line that cannot be built or printed, and a
+call-recording context that cannot be set, alert the operator and raise before
+the node runs. A convergence record that cannot be written raises out of the
+store, which alerts itself. These used to degrade to silence, so a node's model
+calls could be filed under the node before it and a run could lose its record
+with nothing said.
 """
 
 from __future__ import annotations
 
-_warned: set[str] = set()
+from assemblyzero.core import alert
 
 #: Nodes that are a human checkpoint only while their gate is configured on,
 #: mapped to the state key that says so. Closes #2188.
@@ -57,12 +61,9 @@ def _gate_is_off(node_id: str, state) -> bool:
 
 
 def _line_for(node_id: str, atlas: dict, total: int, state=None) -> list[str]:
-    entry = atlas.get(node_id)
-    if entry is None:
-        if node_id not in _warned:
-            _warned.add(node_id)
-            return [f"NODE {node_id} (no atlas entry -- see #2157)"]
-        return []
+    # `narrated` refuses a node with no atlas entry at graph build, so a
+    # missing one here is a KeyError, which `_announce` alerts on.
+    entry = atlas[node_id]
 
     ordinal = entry.get("ordinal")
     position = f"[{ordinal}/{total}] " if ordinal else ""
@@ -105,14 +106,19 @@ def narrated(node_id: str, fn, atlas: dict, total: int, stage: str = ""):
     the position record is -- this is the one place every node announces
     itself, so a graph cannot grow a node whose calls are recorded with no
     stage, no node name and no round.
+
+    Raises ``ValueError`` at wrap time, which is graph-build time, when
+    ``node_id`` has no atlas entry (#3585): the graph has grown a node the
+    atlas does not describe, and nothing should run until it does.
     """
+    if node_id not in atlas:
+        raise ValueError(
+            f"graph node {node_id!r} has no atlas entry (stage {stage or '-'}); "
+            f"add it to the graph's atlas (#2157) before the graph can be built"
+        )
 
     def _wrapped(state, *args, **kwargs):
-        try:
-            for line in _line_for(node_id, atlas, total, state):
-                print(line, flush=True)
-        except Exception:  # noqa: BLE001 - narration never costs a run
-            pass
+        _announce(node_id, atlas, total, state)
         if stage:
             _record_entry(node_id, atlas, total, stage, state)
             _set_call_context(node_id, stage, state)
@@ -136,33 +142,49 @@ def narrated(node_id: str, fn, atlas: dict, total: int, stage: str = ""):
     return _wrapped
 
 
+def _announce(node_id: str, atlas: dict, total: int, state) -> None:
+    """Print the NODE and NEXT lines; alert and raise if they cannot be made.
+
+    The lines are the operator's view of where the run is. A line that cannot
+    be built (a broken atlas entry, a state that raises) or printed (a closed
+    stdout) used to be dropped with a bare ``pass``; now the node does not run
+    past it (#3585).
+    """
+    try:
+        for line in _line_for(node_id, atlas, total, state):
+            print(line, flush=True)
+    except Exception as exc:
+        alert.alert_operator(
+            what=f"narrate graph node {node_id} on entry",
+            where="assemblyzero/workflows/narration.py narrated",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence=f"node {node_id} does not run, and the run stops",
+        )
+        raise
+
+
 def _record_entry(node_id: str, atlas: dict, total: int, stage: str, state) -> None:
     """Append this node's entry to the convergence record (#2721).
 
-    Silent on every failure, for the same reason narration is: a run must not
-    die because a diagnostic could not be written. The absence is visible at the
-    other end -- the report says which source it used, so a run with no records
-    reads as a run with no records and never as a run that passed.
-    """
-    try:
-        from assemblyzero.speedrun.convergence import record_node_enter
+    A record that cannot be written raises out of the store, which alerts the
+    operator with the path and the cause (#3585); this wrap lets it propagate,
+    so the node does not run without its record.
 
-        repo_root = state.get("repo_root", "") if hasattr(state, "get") else ""
-        if not repo_root:
-            return
-        record_node_enter(
-            repo_root,
-            stage,
-            node_id,
-            int((atlas.get(node_id) or {}).get("ordinal", 0) or 0),
-            total,
-        )
-    except Exception:  # noqa: BLE001 - the record never costs a run
-        # fail-open: a diagnostic that can take a roll down is worse than a
-        # missing diagnostic, and the missing one is reported -- the factory
-        # report names its source, so a run with no records reads as a run with
-        # no records rather than as a run that passed.
+    A state with no ``repo_root`` records nothing: there is no repository to
+    put the record in, and guessing one would file it in the wrong store.
+    """
+    from assemblyzero.speedrun.convergence import record_node_enter
+
+    repo_root = state.get("repo_root", "") if hasattr(state, "get") else ""
+    if not repo_root:
         return
+    record_node_enter(
+        repo_root,
+        stage,
+        node_id,
+        int((atlas.get(node_id) or {}).get("ordinal", 0) or 0),
+        total,
+    )
 
 
 def _set_call_context(node_id: str, stage: str, state) -> None:
@@ -172,16 +194,24 @@ def _set_call_context(node_id: str, stage: str, state) -> None:
     carry, so the recording lands beside the lineage the run writes rather than
     in a new store. A node with no audit directory in state records nothing,
     which is the honest outcome: there is no run-scoped place to put it.
+
+    A context that cannot be set alerts the operator and raises (#3585). It
+    used to be swallowed, so every model call the node made was recorded
+    against whichever node ran before it.
     """
     try:
         from assemblyzero.core.call_recording import set_context
 
         audit_dir = state.get("audit_dir", "") if hasattr(state, "get") else ""
         set_context(stage, node_id, str(audit_dir or ""))
-    except Exception:  # noqa: BLE001 - the recording never costs a run
-        # fail-open: this runs BEFORE the node does, so an exception here would
-        # take down a node that had not started, to protect a diagnostic. The
-        # cost of continuing is bounded and visible: calls made in this node
-        # are recorded against whichever node was entered last, and the replay
-        # reports the recording it read rather than assuming one exists.
-        return
+    except Exception as exc:
+        alert.alert_operator(
+            what=f"set the call-recording context for graph node {node_id}",
+            where="assemblyzero/workflows/narration.py _set_call_context",
+            cause=f"{type(exc).__name__}: {exc} (stage {stage})",
+            consequence=(
+                f"node {node_id} does not run: its model calls would be "
+                f"recorded against the node before it"
+            ),
+        )
+        raise

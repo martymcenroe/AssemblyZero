@@ -303,9 +303,10 @@ def run_verification_gate(lld_path: Path, project_root: Path | None = None) -> L
     Raises:
         LLDVerificationError: If path is invalid or approval is not genuine
     """
-    # Security: Validate path is within project
-    if project_root:
-        validate_lld_path(lld_path, project_root)
+    # Security: Validate path is within project. Always: with no project root
+    # the check runs on the current directory, as validate_lld_path documents.
+    # A skipped check would let the gate pass a file it never placed (#3585).
+    validate_lld_path(lld_path, project_root)
     
     # Read LLD content
     if not lld_path.exists():
