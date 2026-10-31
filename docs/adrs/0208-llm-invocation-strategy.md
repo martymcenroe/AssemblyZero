@@ -1,6 +1,6 @@
 # ADR 0208: LLM Invocation Strategy
 
-**Status:** Accepted; superseded in part on 2026-09-24 by ADR 0234 (Gemini in agy drafts and validates; Claude holds no seat)
+**Status:** Accepted; superseded in part on 2026-09-24 by ADR 0234 (Gemini in agy drafts and validates; Claude holds no seat); amended on 2026-10-31 by #2864 (the paid Anthropic API path and the CLI-to-API fallback are removed)
 **Date:** 2026-02-19
 **Deciders:** Orchestrator
 **Context:** Documenting the multi-provider LLM invocation architecture used across all workflows
@@ -13,7 +13,7 @@ AssemblyZero orchestrates multiple LLM providers for different purposes: draftin
 
 Key constraints:
 - Claude Max subscription provides free `claude -p` usage (headless CLI)
-- Anthropic API is pay-per-token (fallback only)
+- ~~Anthropic API is pay-per-token (fallback only)~~ (removed, #2864: this fleet does not pay per token)
 - Gemini must be a *different model family* for adversarial review value
 - MCP tools must be disabled in workflow subprocesses to prevent side effects
 - Workflows must survive rate limits, timeouts, and credential rotation
@@ -22,13 +22,21 @@ Key constraints:
 
 ## Decision
 
+> **Amended by #2864 (2026-10-31).** `AnthropicProvider`, `FallbackProvider`, the
+> `anthropic:` spec, `--allow-api` and the `anthropic` and `langchain-anthropic`
+> dependencies are removed. `claude:` returns `ClaudeCLIProvider` directly. When
+> the CLI is rate-limited or fails, the call fails loudly and the run waits for
+> the quota to renew; nothing falls back and nothing spends. The rows and
+> sections below that describe the API are struck through and kept as the record.
+> `tests/unit/test_no_api_key_path.py` fails if a paid path comes back.
+
 ### Four Providers, Three Roles
 
 | Provider | Class | Role | Cost Model |
 |----------|-------|------|------------|
 | **Claude CLI** | `ClaudeCLIProvider` | No seat since 2026-09-24 (ADR 0234); before that the drafter/implementer | Max subscription; withdrawn from the workflow for budget |
-| **Anthropic API** | `AnthropicProvider` | Paid fallback for CLI failures | Per-token ($5-25/M output) |
-| **Fallback** | `FallbackProvider` | CLI→API automatic failover | Free first, paid if needed |
+| ~~**Anthropic API**~~ | ~~`AnthropicProvider`~~ | ~~Paid fallback for CLI failures~~ | removed, #2864 |
+| ~~**Fallback**~~ | ~~`FallbackProvider`~~ | ~~CLI→API automatic failover~~ | removed, #2864 |
 | **Gemini** | `GeminiProvider` | Adversarial reviewer | Free (API preview/quota) |
 
 ### Provider Selection
@@ -36,10 +44,9 @@ Key constraints:
 The `get_provider(spec)` factory resolves provider specs like `claude:opus` or `gemini:3.1-pro`:
 
 1. **Claude specs** (`claude:opus`, `claude:sonnet`, `claude:haiku`):
-   - If `ANTHROPIC_API_KEY` exists in `.env`: returns `FallbackProvider(CLI→API)`
-   - Otherwise: returns `ClaudeCLIProvider` alone
+   - Returns `ClaudeCLIProvider` alone (#2864; it once returned `FallbackProvider(CLI→API)` when an API key sat in `.env`)
 2. **Gemini specs** (`gemini:3.1-pro`): returns `GeminiProvider`
-3. **Anthropic specs** (`anthropic:opus`): returns `AnthropicProvider` directly
+3. ~~**Anthropic specs** (`anthropic:opus`): returns `AnthropicProvider` directly~~ (removed, #2864: `anthropic:` is an unknown provider and raises `ValueError`)
 
 ### Claude CLI Invocation
 
@@ -70,13 +77,7 @@ Critical flags:
 
 ### Fallback Behavior
 
-`FallbackProvider` wraps CLI + API with automatic failover:
-
-1. Try CLI with 180-second timeout (shorter window)
-2. On any failure (timeout, parse error, rate limit): fall back to API with 300-second timeout
-3. Return whichever succeeds, or the last error
-
-This is transparent to callers — they receive a unified `LLMCallResult` regardless of which provider actually served the request.
+~~`FallbackProvider` wrapped CLI + API with automatic failover.~~ Removed in #2864. A failed or rate-limited CLI call returns a failed `LLMCallResult` and is logged as an ERROR line. A usage limit also records when the quota renews (`assemblyzero/core/capacity.py`), and the caller routes the failure to HALT, which alerts the operator. The run waits for the quota; it does not spend.
 
 ### Gemini: drafter and reviewer since 2026-09-24 (ADR 0234); review only before that
 
@@ -124,7 +125,7 @@ All providers return `LLMCallResult`:
 class LLMCallResult:
     success: bool
     response: Optional[str]           # Parsed response text
-    provider: str                     # "claude", "gemini", "anthropic"
+    provider: str                     # "claude", "gemini"
     model_used: str
     duration_ms: int
     input_tokens: int
@@ -143,7 +144,7 @@ This enables consistent token accounting, cost tracking, and rate-limit detectio
 
 ### Positive
 - ~~Zero marginal cost for Claude drafting via Max subscription~~ (withdrawn 2026-09-24: the Anthropic budget is the constraint; ADR 0234)
-- **Automatic resilience** via CLI→API fallback
+- ~~**Automatic resilience** via CLI→API fallback~~ (removed, #2864: a rate-limited CLI waits, it does not spend)
 - ~~Adversarial value from cross-family review (Claude builds, Gemini reviews)~~ (superseded 2026-09-24: both seats are Gemini; ADR 0234)
 - **Deterministic workflows** via MCP/tool disabling in subprocesses
 - **Resume capability** via LangGraph checkpointing
@@ -155,7 +156,7 @@ This enables consistent token accounting, cost tracking, and rate-limit detectio
 - Gemini model availability depends on preview program access
 
 ### Risks
-- Claude Max subscription terms could change (mitigated by API fallback)
+- Claude Max subscription terms could change (no API fallback exists, #2864)
 - Gemini preview models may be deprecated (mitigated by model mapping layer)
 - SQLite databases grow over time (mitigated by archive tooling)
 

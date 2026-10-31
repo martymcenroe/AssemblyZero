@@ -169,11 +169,9 @@ AssemblyZero detects **silent model downgrades**:
 | Provider | Class | Use Case | Cost Model |
 |----------|-------|----------|------------|
 | **Claude CLI** (`claude -p`) | `ClaudeCLIProvider` | Drafting, implementation | Free (Max subscription) |
-| **Anthropic API** | `AnthropicProvider` | Automatic fallback | Per-token |
-| **Fallback** | `FallbackProvider` | CLI (180s) → API (300s) | Free first, paid if needed |
 | **Gemini** | `GeminiProvider` | Adversarial review only | Free (API quota) |
 
-Claude is invoked via `claude -p` with `--tools ""` and `--strict-mcp-config` — no tools, no MCP, deterministic side-effect-free calls. The Anthropic API exists only as a paid fallback for resilience.
+Claude is invoked via `claude -p` with `--tools ""` and `--strict-mcp-config` — no tools, no MCP, deterministic side-effect-free calls. There is no paid Anthropic API path and no fallback to one (#2864): when the CLI is rate-limited or fails, the call fails loudly and the run waits for the quota to renew.
 
 ### LangGraph State Machines
 

@@ -47,7 +47,7 @@ The five named modes from the boostgauge readiness audit (`0002` §2). Each has 
 **Symptom:**
 
 - Console: `[ERROR] Reviewer failed after up to N attempts: ... credit balance is too low / quota exhausted` (or similar).
-- Verdict source: `BillingError` from `classify_anthropic_error` / `classify_gemini_error` (errors.py).
+- Verdict source: `BillingError` from the classifiers in `errors.py` (`classify_anthropic_error` was removed with the paid API path, #2864).
 - `LLMCallResult.retryable=False` — auto-retry does NOT apply (correctly, since retrying a billing error wastes more money).
 
 **First-line defense:** None. Billing errors are explicitly non-retryable.
@@ -71,7 +71,7 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
     --reviewer claude:haiku
 ```
 
-**Operator recovery (alternate):** If Anthropic API key billing is the problem, the `claude` CLI provider via Max subscription is free — verify `set_api_policy(False)` (default, see `llm_provider.py:144`). If you've manually opted into the API with `--allow-api`, drop the flag.
+**Operator recovery (alternate):** There is no paid Anthropic API path (#2864), so a billing or quota halt on a Claude seat is the subscription's weekly quota. Wait for it to renew; nothing falls back and nothing spends.
 
 **When to abort:** PyPI publish path (#1074) is unaffected — that's PyPI side, not LLM cost. For LLM-cost halts, abort only if you've already exceeded the workflow's built-in cost budget by 3× and the failure is stagnating regardless.
 
@@ -285,7 +285,7 @@ The decision tree is the operator-side version of `classify_halt(state)` from #1
 
 | Section | Related |
 |---|---|
-| §2.1 cost / quota | `errors.py` `BillingError`; `set_api_policy` in `llm_provider.py:144` |
+| §2.1 cost / quota | `errors.py` `BillingError` |
 | §2.2 transient | **AZ #1071** (workflow auto-retry), `assemblyzero/utils/retry.py`, `--retry-policy` flag |
 | §2.3 stagnation | AZ #503 (origin), `--resume-review` (added by #536), `--review` flag |
 | §2.4 mechanical | **Standard 0019** (the validator's checks), `validate_mechanical.py`, lineage dir layout |

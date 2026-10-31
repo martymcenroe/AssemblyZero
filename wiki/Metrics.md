@@ -103,7 +103,6 @@ Per-call cost tracking is now production. Every LLM call records:
 | **Token budget usage** | `budget_summary()` | **Live** — saved to audit trail |
 | **Provider pricing** | Opus $5/$25, Sonnet $3/$15, Haiku $1/$5 per M | **Configured** |
 | **Cache economics** | Read: 10% of input price, Create: 125% | **Tracked** |
-| **FallbackProvider savings** | CLI (free) vs API (paid) | **Tracked** |
 
 **Budget guard:** Default `$5.00` per workflow run. Circuit breaker trips when next iteration would exceed token budget.
 
