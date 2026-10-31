@@ -1,7 +1,8 @@
 """N3 and N5: Verify Red/Green Phase nodes for TDD Testing Workflow.
 
 N3 (verify_red_phase): Verify all tests fail before implementation
-N5 (verify_green_phase): Verify all tests pass with coverage target
+N5 (verify_green_phase): Verify all tests pass, and that they reach the lines
+the run added or changed (#4436; ADR 0207)
 
 Issue #292: Added pytest exit code routing. Exit codes 4/5 (syntax/collection
 errors) route back to N2_scaffold_tests instead of endlessly looping through
@@ -16,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,8 +31,21 @@ from assemblyzero.workflows.testing.audit import (
     parse_pytest_output,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.changed_lines import (
+    ChangedLineCoverage,
+    changed_lines,
+    describe_uncovered,
+    is_code_under_test,
+    judge_changed_lines,
+    run_base_commit,
+)
 from assemblyzero.workflows.testing.checkpoints import CheckpointError, record_measurement
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
+from assemblyzero.workflows.testing.coverage_report import (
+    FileLines,
+    read_coverage,
+    read_coverage_py_report,
+)
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
 from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
     align_spec_twins,
@@ -56,8 +71,11 @@ from assemblyzero.workflows.testing.framework_detector import (
     source_extensions,
 )
 from assemblyzero.workflows.testing.framework_ownership import (
+    RunFramework,
     TestFileOwnershipError,
     inside,
+    judges_source,
+    measures_lines,
     owner_of,
     run_frameworks,
 )
@@ -809,7 +827,7 @@ def _summarize_collection_failure(output: str) -> str:
 def run_pytest(
     test_files: list[str],
     coverage_module: str | list[str] | None = None,
-    coverage_target: int | None = None,
+    coverage_report: Path | str | None = None,
     repo_root: Path | None = None,
     continue_on_collection_errors: bool = False,
 ) -> dict:
@@ -820,7 +838,8 @@ def run_pytest(
         coverage_module: Module(s) to measure coverage for -- one ``--cov``
             per entry, and pytest-cov reports their union (#2710). A string
             is a one-entry list.
-        coverage_target: Coverage threshold percentage.
+        coverage_report: Where to write coverage.py's JSON report, the
+            per-line data the green phase judges changed lines by (#4436).
         repo_root: Repository root for running pytest.
         continue_on_collection_errors: #2893 -- run the files that collect
             when one does not, so a single broken import does not silence
@@ -868,8 +887,12 @@ def run_pytest(
             ) from exc
         cmd.extend(f"--cov={target}" for target in targets)
         cmd.append("--cov-report=term-missing")
-        if coverage_target:
-            cmd.append(f"--cov-fail-under={coverage_target}")
+        if coverage_report:
+            cmd.append(f"--cov-report=json:{coverage_report}")
+        # #4436: whole-file coverage decides nothing. An explicit 0 also
+        # overrides a `fail_under` in the target's own coverage config, which
+        # pytest-cov would otherwise enforce on the whole module.
+        cmd.append("--cov-fail-under=0")
 
     where = str(repo_root) if repo_root else "the current directory"
     try:
@@ -1543,6 +1566,151 @@ def _coverage_target(state: TestingWorkflowState, framework_config: dict | None)
     if value is None:
         return state.get("coverage_target", 90)
     return value
+
+
+#: Where the green phase's coverage.py JSON report goes, beneath the worktree
+#: (#4436). `.assemblyzero/` is what a checkpoint never commits.
+GREEN_COVERAGE_REPORT = Path(".assemblyzero") / "green-coverage.json"
+
+
+def _measured_directories(changed: dict[str, set[int]]) -> list[str]:
+    """The `--cov` directories that make the report answer for every changed
+    file (#4436).
+
+    A module target no test imports is left out of the report; a directory
+    target reports the file at zero. So a changed file no test reaches reads
+    as a real zero with nameable lines, and the only file left absent is one
+    the project itself omits, which halts (#2637).
+
+    A run that changed no source measures the repository root, so that "no
+    changed executable lines" comes from a report that was written: with
+    nothing but a module target, coverage collects no data when no test
+    imports it, writes no report, and a legitimate test-only run would halt.
+    The whole-file figure widens with the scope, and decides nothing.
+    """
+    return sorted({os.path.dirname(path) or "." for path in changed}) or ["."]
+
+
+def _fresh_coverage_report(repo_root: Path) -> Path:
+    """The path this run's JSON report goes to, with its directory made and
+    any earlier run's report gone, so it can never be read as this one's
+    (#4436, the rule #4246 set for the json-summary)."""
+    report = repo_root / GREEN_COVERAGE_REPORT
+    try:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.unlink(missing_ok=True)
+    except OSError as e:
+        raise CoverageReportError(
+            f"an earlier run's coverage report at {report} cannot be cleared, "
+            f"so this run's could not be told from it: {type(e).__name__}: {e}"
+        ) from e
+    return report
+
+
+def _discard_coverage_report(report: Path) -> None:
+    """Take the report out of the worktree once it has been read (#4436). It
+    is this phase's own working file. `.assemblyzero/` keeps it out of a
+    checkpoint, but a target need not ignore that directory, and an untracked
+    file there reads as a dirty worktree to the landing, which refuses it."""
+    try:
+        report.unlink(missing_ok=True)
+    except OSError as e:
+        raise _step_failed(
+            "N5",
+            f"the coverage report at {report} cannot be removed, so the "
+            f"worktree cannot land clean: {type(e).__name__}: {e}",
+        ) from e
+
+
+def _changed_source_lines(
+    state: TestingWorkflowState, framework: TestFramework, framework_config: dict | None,
+) -> dict[str, set[int]]:
+    """The lines of this framework's source the run added or changed against
+    its base commit, by repository path (#4436). See `changed_lines`.
+
+    Raises CoverageReportError (ChangedLinesError) when the base cannot be
+    determined or git cannot say. An empty answer is a real one: git ran, and
+    no source of this framework changed.
+    """
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+    base = run_base_commit(
+        repo_root, state.get("base_branch", ""), state.get("base_commit", ""),
+    )
+    directory = os.path.normpath((framework_config or {}).get("working_directory") or ".")
+    run = RunFramework(framework_config or {}, framework, directory)
+    frameworks = run_frameworks(state)
+    changed = changed_lines(
+        repo_root, base,
+        lambda path: is_code_under_test(path) and judges_source(path, run, frameworks),
+    )
+    print(
+        f"    [N5] {_framework_label(framework, framework_config)}: "
+        f"{sum(len(lines) for lines in changed.values())} line(s) of "
+        f"{len(changed)} source file(s) changed since {base[:12]} (#4436)"
+    )
+    return changed
+
+
+def _judge_coverage(
+    state: TestingWorkflowState,
+    repo_root: Path,
+    label: str,
+    changed: dict[str, set[int]],
+    read_report: Callable[[], dict[str, FileLines]],
+    whole_file: float,
+    target: float,
+) -> ChangedLineCoverage:
+    """Judge the run's changed lines and say what was judged (#4436).
+
+    The report is read whether or not anything changed (R5): "no changed
+    executable lines" comes from a measurement that succeeded, or it does not
+    come at all. A framework with nothing to judge says so in the log (R2).
+    Whole-file coverage is reported either way, and decides nothing (R3).
+
+    Raises CoverageReportError when the report cannot be read or a changed
+    file is not in it.
+    """
+    verdict = judge_changed_lines(changed, read_report(), repo_root)
+    if verdict.judged:
+        print(
+            f"    [N5] {label}: {verdict.covered} of {verdict.total} changed "
+            f"executable line(s) covered ({verdict.percent:.1f}%, target "
+            f"{target}%); whole-file coverage {whole_file:.1f}% is reported "
+            f"and decides nothing (#4436)"
+        )
+    else:
+        print(
+            f"    [N5] {label}: no changed executable lines, so coverage is "
+            f"not judged; whole-file coverage {whole_file:.1f}% is reported "
+            f"and decides nothing (#4436)"
+        )
+    log_workflow_execution(
+        target_repo=repo_root,
+        issue_number=state.get("issue_number", 0),
+        workflow_type="testing",
+        event="changed_line_coverage" if verdict.judged else "coverage_not_judged",
+        details={
+            "framework": label,
+            "covered": verdict.covered,
+            "total": verdict.total,
+            "percent": verdict.percent if verdict.judged else None,
+            "target": target,
+            "whole_file_coverage": whole_file,
+            "uncovered": describe_uncovered(verdict.uncovered),
+        },
+    )
+    return verdict
+
+
+def _shortfall_summary(verdict: ChangedLineCoverage, target: float) -> str:
+    """The sentence that names a shortfall's lines (#4436, R4), for N4c, the
+    implementer's next round, and any halt."""
+    return (
+        f"Coverage of the lines this run changed is {verdict.percent:.1f}% "
+        f"against a target of {target}%. Uncovered changed lines: "
+        f"{describe_uncovered(verdict.uncovered)}."
+    )
 
 
 def _leg_sources(state: TestingWorkflowState, leg: _Leg, root: str) -> list[str]:
@@ -2807,6 +2975,18 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"    Running pytest with coverage target: {coverage_target}%")
 
+    # #4436: what the run changed comes first. It is what the gate judges, and
+    # no base commit is a measurement that cannot be taken, so it halts before
+    # the suite runs.
+    label = _framework_label(TestFramework.PYTEST, state.get("framework_config"))
+    try:
+        changed = _changed_source_lines(
+            state, TestFramework.PYTEST, state.get("framework_config"),
+        )
+        coverage_report = _fresh_coverage_report(repo_root)
+    except CoverageReportError as e:
+        return _halt_coverage_unreadable(label, e)
+
     # Determine coverage scope from implementation files: EVERY non-test
     # source file the run implements, never just the first (#2710).
     # run-issue4-172600 added collector.py and collectors/windows.py and was
@@ -2814,7 +2994,6 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # never in the report.
     impl_files = state.get("implementation_files", [])
     coverage_targets: list[str] = []
-    coverage_module: str | list[str] | None = None
 
     for impl_path in impl_files:
         # Skip test files (in tests/ directory)
@@ -2833,103 +3012,15 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
         target = _path_to_cov_target(rel_path, repo_root)
         if target and target not in coverage_targets:
             coverage_targets.append(target)
-    if coverage_targets:
-        coverage_module = coverage_targets
-
-    # Issue #462: When all impl files are test files (test-only issues),
-    # fall back to files_to_modify from LLD to find the source module
-    if not coverage_module:
-        files_to_modify = state.get("files_to_modify", [])
-        for file_info in files_to_modify:
-            fpath = file_info.get("path", "")
-            if "test" in fpath.lower():
-                continue
-            if fpath.endswith("__init__.py"):
-                continue
-            if not fpath.endswith(".py"):
-                continue
-            # Issue #474: Use helper that handles both packages and standalone scripts
-            coverage_module = _path_to_cov_target(fpath, repo_root)
-            print(f"    [N5] Derived coverage module from LLD files_to_modify: {coverage_module}")
-            break
-
-    # Issue #462 fallback 2: reverse-map test file name to source module
-    # e.g., tests/unit/test_circuit_breaker.py → find circuit_breaker.py in repo
-    if not coverage_module and test_files:
-        for tf in test_files:
-            tf_name = Path(tf).name  # e.g., test_circuit_breaker.py
-            if tf_name.startswith("test_"):
-                src_name = tf_name[5:]  # e.g., circuit_breaker.py
-                # Search for matching source file in repo
-                matches = list(repo_root.rglob(src_name)) if repo_root else []
-                # Filter to .py files not in tests/ directories
-                for match in matches:
-                    match_parts = match.relative_to(repo_root).parts
-                    if any(p.lower() in ("tests", "test") for p in match_parts):
-                        continue
-                    # Issue #474: Use helper that handles both packages and standalone scripts
-                    rel_path = match.relative_to(repo_root)
-                    coverage_module = _path_to_cov_target(rel_path, repo_root)
-                    print(f"    [N5] Derived coverage module from test filename: {coverage_module}")
-                    break
-                if coverage_module:
-                    break
-
-    # Issue #474: Last resort — infer from any available file paths before
-    # falling back to a hardcoded default.  Previous versions always fell
-    # back to "assemblyzero", which measured 0% for tools/ targets.
-    if not coverage_module:
-        # Try ALL files (including non-.py) to at least get the right directory
-        all_candidate_paths = [
-            p for p in impl_files
-            if not any(part.lower() in ("tests", "test") for part in Path(p).parts)
-        ]
-        if not all_candidate_paths:
-            all_candidate_paths = [
-                fi.get("path", "")
-                for fi in state.get("files_to_modify", [])
-                if fi.get("path") and "test" not in fi["path"].lower()
-            ]
-        # #3585 (ledger 0908 lines 2387 and 2393): a candidate outside the
-        # repository built a scope from an absolute path, and nothing to go on
-        # measured a hard-coded module that is not this repository's. Both
-        # halt; a relative candidate is already relative to the repository.
-        if not all_candidate_paths:
-            raise _step_failed(
-                "N5",
-                "no coverage target can be derived: no implementation source "
-                "file, no planned source file, and no test file named after a "
-                "source file in the repository; a default module would measure "
-                "the wrong code",
-            )
-        rel = Path(all_candidate_paths[0])
-        if repo_root and rel.is_absolute():
-            try:
-                rel = rel.relative_to(repo_root)
-            except ValueError as exc:
-                raise _step_failed(
-                    "N5",
-                    f"the coverage scope cannot be taken from {rel}: it is "
-                    f"outside the repository {repo_root}",
-                ) from exc
-        if not rel.parts:
-            raise _step_failed(
-                "N5", f"no coverage target can be derived from the path {rel!s}",
-            )
-        # Use the top-level directory as coverage scope
-        coverage_module = str(rel.parts[0]).replace("\\", "/")
-        print(f"    [N5] Fallback: inferred coverage scope from file paths: {coverage_module}")
-
-    coverage_targets = (
-        [coverage_module] if isinstance(coverage_module, str)
-        else list(coverage_module or [])
-    )
+    for directory in _measured_directories(changed):
+        if directory not in coverage_targets:
+            coverage_targets.append(directory)
     print(f"    Coverage module: {', '.join(coverage_targets) if coverage_targets else None}")
 
     result = run_pytest(
         test_files,
         coverage_module=coverage_targets or None,
-        coverage_target=coverage_target,
+        coverage_report=coverage_report,
         repo_root=repo_root,
         # #2893: one uncollectable file must not zero the measurement.
         continue_on_collection_errors=True,
@@ -2939,23 +3030,73 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     parsed = result["parsed"]
 
     print(f"    [N5] Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed | "
-          f"Coverage: {parsed.get('coverage', 0):.1f}% | Exit: {exit_code} "
+          f"Whole-file coverage: {parsed.get('coverage', 0):.1f}% | Exit: {exit_code} "
           f"({describe_run_outcome(exit_code, parsed.get('failed'))})")
+
+    # Save output to audit trail (#3585: a named audit dir that is gone halts)
+    file_num = _save_phase_output(state, "N5", "green-phase.txt", output)
+
+    passed_count = parsed.get("passed", 0)
+    failed_count = parsed.get("failed", 0)
+    error_count = parsed.get("errors", 0)
+    # #4436: the figure every route below reads. While tests fail coverage
+    # decides nothing, so it stays pytest's whole-file total there. When every
+    # test passed it becomes the coverage of the lines the run changed; with
+    # none to judge, the whole-file total stands as a report (R2, R3).
+    coverage_achieved = parsed.get("coverage", 0)
+    verdict: ChangedLineCoverage | None = None
+
+    # #2637: before any coverage arithmetic, establish that coverage was
+    # MEASURED. A report with nothing in it used to yield 0.0, which is
+    # indistinguishable from a genuinely untested module -- which is how 15
+    # passing tests were routed to "test gap" while N4c, reading the same
+    # empty report, found nothing to target and bounced back. Absence is a
+    # measurement failure and halts as one, naming what was sought and what
+    # the report held. It never blames the LLD or the spec, which is what the
+    # stagnation halt did.
+    # Three conditions, each of them narrowing this to the case it is for.
+    #
+    # * The run finished: exit 2 to 5 route below, and write no report.
+    # * Tests passing and none failing -- while tests fail the run routes on
+    #   the failures and never consults coverage.
+    # * At least one test ACTUALLY RAN. Zero collected belongs to #2548's
+    #   law, which names the collection error; that diagnosis is more specific
+    #   and must not be preempted by a coverage complaint.
+    if exit_code in (0, 1) and failed_count == 0 and error_count == 0 and passed_count > 0:
+        try:
+            verdict = _judge_coverage(
+                state, repo_root, label, changed,
+                lambda: read_coverage_py_report(coverage_report, repo_root),
+                float(parsed.get("coverage", 0) or 0.0), coverage_target,
+            )
+        except CoverageReportError as e:
+            reasons = read_coverage(output).reasons
+            cause = f"{e}; coverage said: {'; '.join(reasons)}" if reasons else e
+            _msg = _halt_coverage_unreadable(label, cause)["error_message"]
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": 0.0,
+                "previous_passed": passed_count,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": _msg,
+            }
+        if verdict.judged:
+            coverage_achieved = verdict.percent
+    _discard_coverage_report(coverage_report)
 
     # #2867: the measurement rides the checkpoint it describes -- HEAD is the
     # post-impl commit N4 just cut -- so a later resume can prefer the best
     # preserved attempt over the newest.
-    _n5_passed = int(parsed.get("passed", 0) or 0)
-    _n5_failed = int(parsed.get("failed", 0) or 0)
+    _n5_passed = int(passed_count or 0)
+    _n5_failed = int(failed_count or 0)
     noted = _note_measurement(
-        repo_root, _n5_passed, _n5_passed + _n5_failed,
-        float(parsed.get("coverage", 0) or 0.0),
+        repo_root, _n5_passed, _n5_passed + _n5_failed, float(coverage_achieved or 0.0),
     )
     if noted is not None:
         return noted
-
-    # Save output to audit trail (#3585: a named audit dir that is gone halts)
-    file_num = _save_phase_output(state, "N5", "green-phase.txt", output)
 
     # Issue #292: Check exit code FIRST for routing decisions
     # Exit codes 4/5 mean scaffold is broken — not an implementation problem.
@@ -3050,60 +3191,8 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
             ),
         }
 
-    # Analyze results (exit codes 0 and 1)
-    passed_count = parsed.get("passed", 0)
-    failed_count = parsed.get("failed", 0)
-    error_count = parsed.get("errors", 0)
-    coverage_achieved = parsed.get("coverage", 0)
-
-    # #2637: before any coverage arithmetic, establish that coverage was
-    # MEASURED. A target absent from the report yields no TOTAL row, the
-    # percent parser defaults to 0.0, and 0.0 is then indistinguishable from a
-    # genuinely untested module -- which is how 15 passing tests were routed to
-    # "test gap" while N4c, reading the same empty report, found nothing to
-    # target and bounced back. Absence is a measurement failure and halts as
-    # one, naming what was sought and what the report held. It never blames
-    # the LLD or the spec, which is what the stagnation halt did.
-    # Three conditions, each of them narrowing this to the case it is for.
-    #
-    # * Tests passing and none failing -- while tests fail the run routes on
-    #   the failures and never consults coverage.
-    # * At least one test ACTUALLY RAN. Zero collected belongs to #2548's
-    #   law, which names the collection error; that diagnosis is more specific
-    #   and must not be preempted by a coverage complaint.
-    # * The number is about to be read as a SHORTFALL. At or above target the
-    #   run succeeds either way, and second-guessing a report that harmed
-    #   nothing would fail runs over an unfamiliar layout.
-    from assemblyzero.workflows.testing.coverage_report import read_coverage
-
-    # #2710: every target is measured or named absent. The first absent one
-    # carries the failure message, so a two-file feature whose second module
-    # never reached the report is refused for that module by name.
-    _readings = [read_coverage(output, target) for target in coverage_targets] or [
-        read_coverage(output, "")
-    ]
-    _absent = [reading for reading in _readings if not reading.measured]
-    _reading = _absent[0] if _absent else _readings[0]
-    _below_target = coverage_achieved < coverage_target  # #3089: the same target
-    if (
-        failed_count == 0
-        and error_count == 0
-        and passed_count > 0
-        and _below_target
-        and _absent
-    ):
-        _msg = _reading.failure_message()
-        print(f"    [N5] {_msg}")
-        return {
-            "green_phase_output": output,
-            "coverage_achieved": 0.0,
-            "previous_passed": passed_count,
-            "file_counter": file_num,
-            "pytest_exit_code": exit_code,
-            "iteration_count": iteration_count + 1,
-            "next_node": "end",
-            "error_message": _msg,
-        }
+    # Analyze results (exit codes 0 and 1): the counts and the coverage figure
+    # are read above, ahead of the measurement note.
 
     # Stagnation detection: coverage must improve by >=1% each iteration
     previous_coverage = state.get("previous_coverage", -1.0)
@@ -3387,8 +3476,13 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
                     passing_tests=sorted(passing_test_names(output)))
         return updates
 
-    # Check coverage
-    if coverage_achieved < coverage_target:
+    # Check coverage. #4436: of the lines the run changed; a run with none to
+    # judge has no shortfall, whatever the whole-file figure says (R2).
+    if verdict is not None and verdict.judged and coverage_achieved < coverage_target:
+        # R4: the shortfall names its lines, to whoever reads this next.
+        named = _shortfall_summary(verdict, coverage_target)
+        print(f"    [N5] {named}")
+        failure_summary = f"{named}\n\n{failure_summary}" if failure_summary else named
         # #2841: the same grace for a loop still gaining coverage.
         if iteration_count + 1 >= max_iterations:
             granted = _cap_grace(
@@ -3406,11 +3500,13 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
                 "previous_passed": passed_count,
                 "previous_green_failures": current_green_failures,
                 "test_failure_summary": failure_summary,
+                "uncovered_changed_lines": verdict.uncovered,
+                "coverage_module": coverage_targets,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
                 "next_node": "end",
-                "error_message": f"Green phase failed after {max_iterations} iterations: coverage {coverage_achieved:.1f}% < target {coverage_target}%",
+                "error_message": f"Green phase failed after {max_iterations} iterations: coverage {coverage_achieved:.1f}% < target {coverage_target}%. {named}",
             }
 
         # Stagnation check: one shared decision, see coverage_has_stagnated,
@@ -3441,6 +3537,8 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
                 "previous_passed": passed_count,
                 "previous_green_failures": current_green_failures,
                 "test_failure_summary": failure_summary,
+                "uncovered_changed_lines": verdict.uncovered,
+                "coverage_module": coverage_targets,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -3487,6 +3585,8 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
             "previous_passed": passed_count,
             "previous_green_failures": current_green_failures,
             "test_failure_summary": failure_summary,
+            "uncovered_changed_lines": verdict.uncovered,  # #4436: N4c's lines
+            "coverage_module": coverage_targets,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
@@ -3508,6 +3608,10 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Success: all tests pass and coverage meets target
     print(f"    [N5] Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
+    judged_keys = {
+        "coverage_judged": bool(verdict and verdict.judged),
+        "uncovered_changed_lines": {},
+    }
 
     # #2919: the green state is the best state, and it is snapshotted before
     # anything downstream can regress from it. run-issue4-141929 went green
@@ -3532,6 +3636,7 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
         if gate is not None:
             return {
                 **green_updates,
+                **judged_keys,
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
@@ -3594,6 +3699,7 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     if state.get("skip_e2e"):
         return {
             **green_updates,
+            **judged_keys,
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
@@ -3611,6 +3717,7 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
 
     return {
         **green_updates,
+        **judged_keys,
         "green_phase_output": output,
         "coverage_achieved": coverage_achieved,
         "previous_coverage": coverage_achieved,
@@ -3656,11 +3763,13 @@ def _note_measurement(
     return None
 
 
-def _halt_coverage_unreadable(label: str, error: Exception) -> dict[str, Any]:
-    """The green phase's halt when a Jest or Vitest run whose tests all
-    passed has no coverage report it can read (#4246). Never 0% in its
-    place: a percentage no report backs would be read as a test gap and sent
-    to N4c for tests that cannot close it. Routed to HALT, which alerts."""
+def _halt_coverage_unreadable(label: str, error: Exception | str) -> dict[str, Any]:
+    """The green phase's halt when a run whose tests all passed has no
+    coverage measurement it can read (#4246): the report is missing or
+    broken, a changed file is not in it, or what the run changed cannot be
+    established (#4436). Never 0% in its place, and never zero changed lines:
+    a figure no report backs would be read as a test gap, or as nothing to
+    judge. Routed to HALT, which alerts."""
     message = (
         f"COVERAGE MEASUREMENT FAILED: [N5] {label}: {error}. No percentage "
         f"exists to judge. This is a harness or measurement defect, not a "
@@ -3890,6 +3999,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     aggregated_errors = 0
     aggregated_total = 0
     min_coverage = 100.0
+    min_unjudged = 100.0  # #4436: reported when no framework had a line to judge
+    any_judged = False
     highest_exit = 0
     file_counter = state.get("file_counter", 0)
     final_next_node = None
@@ -3903,9 +4014,25 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     for leg in legs:
         if multi and not leg.test_files:
-            _no_targeted_tests("N5", "green", state, leg)
-            whole_suite_only.append(leg)
-            continue
+            # #4436: a framework with no test in this run and no changed
+            # source has nothing to judge. One whose source the run did change
+            # is judged like any other, on the suite it has: no test file here
+            # means the run names none, not that nothing reaches those lines.
+            try:
+                changed = (
+                    _changed_source_lines(state, leg.framework, leg.config)
+                    if measures_lines(leg.framework) else {}
+                )
+            except CoverageReportError as e:
+                return _halt_coverage_unreadable(leg.label, e)
+            if not changed:
+                _no_targeted_tests("N5", "green", state, leg)
+                whole_suite_only.append(leg)
+                continue
+            print(
+                f"    [N5] {leg.label}: no test file of this run belongs to it, "
+                f"and the run changed its source; judged on its whole suite (#4436)"
+            )
         leg_state = _leg_state(state, leg) if multi else state
 
         if leg.framework != TestFramework.PYTEST:
@@ -3965,10 +4092,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 f"{leg.label}'s green result carries no coverage figure, so "
                 f"the run's coverage cannot be judged",
             )
-        min_coverage = min(min_coverage, res["coverage_achieved"])
+        # #4436: a framework with no changed line has a whole-file figure,
+        # which reports and does not judge, so it is no part of the run's
+        # minimum while any framework has lines to judge.
+        if res.get("coverage_judged", True):
+            any_judged = True
+            min_coverage = min(min_coverage, res["coverage_achieved"])
+        else:
+            min_unjudged = min(min_unjudged, res["coverage_achieved"])
 
         if not final_next_node:
             final_next_node = next_node
+
+    if not any_judged:
+        min_coverage = min_unjudged
+    merged["coverage_judged"] = any_judged
 
     # #3087: a framework with no test in this run still has its whole suite
     # run, once, after every targeted framework is green.
@@ -4220,6 +4358,7 @@ def _verify_green_non_pytest(
     total_scenarios = state.get("total_scenarios", 0)
 
     print(f"    Running {framework.value} with coverage target: {coverage_target}%")
+    label = _framework_label(framework, framework_config)
 
     try:
         runner = get_runner(
@@ -4241,11 +4380,27 @@ def _verify_green_non_pytest(
             # #3585 (ledger 0908 line 3599): it used to measure lines instead.
             raise _step_failed(
                 "N5",
-                f"{_framework_label(framework, framework_config)}'s coverage_type "
+                f"{label}'s coverage_type "
                 f"{coverage_type!r} is not one of "
                 f"{', '.join(t.value for t in CoverageType)}, so the coverage "
                 f"gate cannot tell what to measure",
             ) from exc
+
+    # #4436: what the run changed comes first, as on the pytest path, and each
+    # changed file is named to the report, so one no test loads reads as a
+    # real zero. Scenario coverage names no line, so there is nothing to ask.
+    changed: dict[str, set[int]] = {}
+    include: dict[str, list[str]] = {}
+    if coverage_type != CoverageType.SCENARIO:
+        try:
+            changed = _changed_source_lines(state, framework, framework_config)
+        except CoverageReportError as e:
+            return _halt_coverage_unreadable(label, e)
+        directory = framework_config.get("working_directory") or "."
+        if changed:
+            include["coverage_include"] = [
+                os.path.relpath(path, directory).replace("\\", "/") for path in sorted(changed)
+            ]
 
     # #4246: Jest and Vitest measure line coverage on this run; it used to be
     # left off, so every run read 0%. A run whose tests all pass and whose
@@ -4254,11 +4409,10 @@ def _verify_green_non_pytest(
         result = runner.run_tests(
             test_paths=test_files,
             measure_coverage=coverage_type != CoverageType.SCENARIO,
+            **include,
         )
     except CoverageReportError as e:
-        return _halt_coverage_unreadable(
-            _framework_label(framework, framework_config), e,
-        )
+        return _halt_coverage_unreadable(label, e)
 
     output = result["raw_output"]
     passed = result["passed"]
@@ -4266,6 +4420,11 @@ def _verify_green_non_pytest(
     errors = result["errors"]
     exit_code = result["exit_code"]
 
+    # #4436: the gate reads `coverage_achieved`. For a framework that measures
+    # lines it is the coverage of the lines the run changed, once every test
+    # has passed. A framework with none to judge keeps the whole-file figure
+    # as a report (R2, R3); scenario coverage has no lines and is as it was.
+    verdict: ChangedLineCoverage | None = None
     if coverage_type == CoverageType.SCENARIO:
         # Playwright: coverage = passed / total_scenarios
         coverage_achieved = runner.compute_scenario_coverage(result, total_scenarios) * 100.0
@@ -4280,9 +4439,22 @@ def _verify_green_non_pytest(
             f"{coverage_achieved:.1f}%" if measured is not None
             else "not measured while tests fail or none ran"
         )
+        # A non-zero exit with no failure is its own halt, below (#3585).
+        if measured is not None and exit_code == 0:
+            try:
+                verdict = _judge_coverage(
+                    state, repo_root, label, changed,
+                    lambda: runner.read_line_coverage(),
+                    coverage_achieved, coverage_target,
+                )
+            except CoverageReportError as e:
+                return _halt_coverage_unreadable(label, e)
+            if verdict.judged:
+                coverage_achieved = verdict.percent
+    coverage_judged = verdict is None or verdict.judged
 
     print(f"    [N5] Results: {passed} passed, {failed} failed | "
-          f"Coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
+          f"Whole-file coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
 
     # #3585 (ledger 0908 line 3592): the runner reports a timeout, a missing
     # command or an OS error as exit -1. That is a crash, never a collection
@@ -4389,14 +4561,25 @@ def _verify_green_non_pytest(
             "error_message": "",
         }
 
-    # All tests pass — check coverage
-    if coverage_achieved < coverage_target:
+    # All tests pass — check coverage. #4436: of the lines the run changed, or
+    # of the scenarios; a framework with no line to judge has no shortfall.
+    if coverage_judged and coverage_achieved < coverage_target:
+        # R4: the shortfall names its lines. Scenario coverage has none.
+        named = _shortfall_summary(verdict, coverage_target) if verdict else ""
+        if named:
+            print(f"    [N5] {named}")
+        line_keys = {
+            "uncovered_changed_lines": verdict.uncovered if verdict else {},
+            "test_failure_summary": named,
+        }
         if iteration_count + 1 >= max_iterations:
             error_msg = (
                 f"Green phase failed after {max_iterations} iterations: "
                 f"coverage {coverage_achieved:.1f}% < target {coverage_target}%"
+                + (f". {named}" if named else "")
             )
             return {
+                **line_keys,
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
@@ -4422,6 +4605,7 @@ def _verify_green_non_pytest(
         if should_trip:
             print(f"    {trip_reason}")
             return {
+                **line_keys,
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
@@ -4444,6 +4628,7 @@ def _verify_green_non_pytest(
             f"gap, routing to test additions (never to implementation)"
         )
         return {
+            **line_keys,
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
@@ -4459,6 +4644,7 @@ def _verify_green_non_pytest(
     # Success
     print(f"    [N5] Green phase PASSED: {passed} tests, "
           f"{coverage_achieved:.1f}% coverage ({framework.value})")
+    judged_keys = {"coverage_judged": coverage_judged, "uncovered_changed_lines": {}}
 
     # #3087: #842's full-suite regression gate, which this path never ran.
     if not state.get("full_suite_validated", False):
@@ -4467,6 +4653,7 @@ def _verify_green_non_pytest(
         )
         if gate is not None:
             return {
+                **judged_keys,
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
@@ -4492,6 +4679,7 @@ def _verify_green_non_pytest(
 
     if state.get("skip_e2e"):
         return {
+            **judged_keys,
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
@@ -4505,6 +4693,7 @@ def _verify_green_non_pytest(
         }
 
     return {
+        **judged_keys,
         "green_phase_output": output,
         "coverage_achieved": coverage_achieved,
         "previous_coverage": coverage_achieved,

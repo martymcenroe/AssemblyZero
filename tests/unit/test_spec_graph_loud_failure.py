@@ -31,6 +31,7 @@ def _failed(**kw) -> dict:
         "max_iterations": 3,
         "completeness_issues": ["a check failed"],
         "grace_revision_for": [],
+        "repo_root": str(REPO_ROOT),
     }
     state.update(kw)
     return state

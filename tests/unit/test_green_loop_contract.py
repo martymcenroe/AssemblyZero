@@ -26,6 +26,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.testing.nodes import verify_phases
 from assemblyzero.workflows.testing.nodes.implementation import (
     orchestrator as impl_orchestrator,
@@ -39,6 +41,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     run_pytest,
     verify_green_phase,
 )
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 #: The five files run 9's LLD listed, in the order the implementer wrote them.
 RUN9_FILES = (
@@ -183,7 +187,7 @@ class TestTheScaffoldIsTheContract:
 
 
 class TestCoverageScopeIsTheWholeFeature:
-    def _capture(self, coverage_module, coverage_target=95):
+    def _capture(self, coverage_module):
         with patch.object(verify_phases, "run_command") as run_command:
             run_command.return_value = SimpleNamespace(
                 returncode=0, stdout="", stderr=""
@@ -191,7 +195,6 @@ class TestCoverageScopeIsTheWholeFeature:
             run_pytest(
                 ["tests/test_x.py"],
                 coverage_module=coverage_module,
-                coverage_target=coverage_target,
             )
         return run_command.call_args.args[0]
 
@@ -203,7 +206,9 @@ class TestCoverageScopeIsTheWholeFeature:
             "--cov=boostgauge.collectors.windows"
         )
         assert cmd.count("--cov-report=term-missing") == 1
-        assert "--cov-fail-under=95" in cmd
+        # #4436: whole-file coverage decides nothing, and this overrides a
+        # `fail_under` in the target's own config.
+        assert "--cov-fail-under=0" in cmd
 
     def test_a_single_string_is_a_one_entry_list(self) -> None:
         cmd = self._capture("boostgauge.collector")
@@ -245,28 +250,9 @@ class TestCoverageScopeIsTheWholeFeature:
 
         assert mock_pytest.call_args_list[0].kwargs["coverage_module"] == ["pkg.thing"]
 
-    @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_a_target_missing_from_the_report_is_named(self, mock_pytest, tmp_path: Path) -> None:
-        """#2636's law, per target: the second module never reached the
-        report, so the run is refused for THAT module by name."""
-        (tmp_path / "src" / "pkg").mkdir(parents=True)
-        (tmp_path / "src" / "pkg" / "__init__.py").touch()
-        (tmp_path / "src" / "pkg" / "thing.py").touch()
-        (tmp_path / "src" / "pkg" / "other.py").touch()
-        mock_pytest.return_value = _pytest(1, passed=3, coverage=72, report=REPORT_72)
-
-        result = verify_green_phase(_state(
-            tmp_path,
-            implementation_files=[
-                str(tmp_path / "src" / "pkg" / "thing.py"),
-                str(tmp_path / "src" / "pkg" / "other.py"),
-            ],
-            previous_passed=3, previous_coverage=72.0,
-        ))
-
-        assert result["next_node"] == "end"
-        assert "pkg.other" in result["error_message"]
-        assert "pkg.thing" not in result["error_message"]
+    # #4436: "a target missing from the report is named" holds per changed
+    # file now, with a real report:
+    # test_changed_line_coverage.py::test_t6_a_changed_file_the_report_does_not_name_halts
 
 
 # ---------------------------------------------------------------------------

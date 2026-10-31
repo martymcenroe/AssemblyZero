@@ -12,7 +12,7 @@
 The TDD Testing Workflow (Issue #101, #102) enforces two coverage metrics:
 
 1. **Requirement Coverage:** Percentage of LLD requirements that have corresponding tests
-2. **Code Coverage:** Percentage of implementation lines executed by tests
+2. **Code Coverage:** Percentage of the lines a change adds or modifies that are executed by tests
 
 Traditional guidance for human teams suggests 80-90% code coverage, with "diminishing returns" cited above that threshold. This reflects:
 - Human time is expensive
@@ -46,9 +46,9 @@ Implementation:
 - N1 (review_test_plan) blocks if requirement coverage < 100%
 - Gemini reviews test plan for complete requirement mapping
 
-### Code Coverage: 95%
+### Code Coverage: 95% of Changed Lines
 
-**At least 95% of implementation lines must be executed by tests.**
+**At least 95% of the executable lines a change adds or modifies must be executed by tests, for each test framework. A new file counts whole.**
 
 Rationale:
 - The remaining 5% accommodates genuinely untestable code:
@@ -57,10 +57,16 @@ Rationale:
   - Some error handling paths
 - 100% code coverage often leads to meaningless tests just to hit lines
 - 95% is strict enough to catch most gaps while allowing pragmatism
+- The number is about the change, not the file. A whole file's coverage says what its history did; a run can add ten fully tested lines to a large module and still read 25% (#4436). Graded on the whole file, that run can never pass, whatever it writes.
 
 Implementation:
-- N5 (verify_green_phase) uses `pytest --cov-fail-under=95`
-- Can be overridden per-LLD if justified (e.g., heavy I/O code)
+- N5 (`verify_green_phase`) judges the lines the run added or changed against its base commit, one framework at a time. The base is where the run's history left its integration branch, so a resumed run and a run on a seed branch are judged on their own changes.
+- Line data comes from coverage.py's JSON report for pytest and Istanbul's `coverage-final.json` for Vitest and Jest. A line is executable when the tool says so: comments, blank lines, docstrings and type-only lines are in no denominator. A later line of a multi-line statement is judged as that statement.
+- A test file is judged on nothing. A framework with no changed executable lines is not judged on coverage, and the log says so.
+- Whole-file coverage is still reported, and decides nothing. N5 passes `--cov-fail-under=0` and switches off Vitest's and Jest's thresholds, so neither the gate nor a target's own configuration can fail a run on it.
+- A measurement that cannot be taken halts: a report that is missing or unreadable, a changed file the report does not name, or a base commit that cannot be determined. It is never read as zero changed lines.
+- A shortfall names the uncovered changed lines, and N4c writes tests for those lines only.
+- The target is the LLD's when it declares one, and `--coverage-target` wins over the LLD on every load path. The run says which target it uses and where it came from.
 
 ---
 
@@ -83,7 +89,7 @@ Implementation:
 
 - **Iteration time:** LLMs are parallel; test generation is fast
 - **Low-value tests:** Gemini review in N1 catches "assert True" style tests
-- **Blocking:** Coverage target can be overridden via `--coverage-target` flag with justification
+- **Blocking:** Coverage target can be overridden via `--coverage-target` flag with justification; the flag wins over the LLD's target
 
 ---
 
@@ -113,8 +119,11 @@ Implementation:
 ```
 [x] Requirement coverage = 100%
     - Every REQ-X in LLD has ≥1 test scenario
-[x] Code coverage ≥ 95%
-    - pytest --cov reports at least 95%
+[x] Code coverage ≥ 95% of changed lines
+    - N5 reports at least 95% of the executable lines the run added or
+      changed against its base commit, for each framework; a new file
+      counts whole
+    - Whole-file coverage is reported and decides nothing
     - If <95%, must specify --coverage-target with justification
 ```
 
@@ -125,4 +134,6 @@ Implementation:
 - ADR 0205 - Test-First Philosophy
 - Issue #101 - Test Plan Reviewer
 - Issue #102 - TDD Initialization
+- Issue #4436 - The gate judges changed lines, not whole files
+- `assemblyzero/workflows/testing/changed_lines.py` - What the run changed, and which of those lines its tests ran
 - `assemblyzero/workflows/testing/` - Implementation

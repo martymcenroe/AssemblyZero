@@ -24,6 +24,8 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     verify_green_phase,
 )
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 VERIFY = "assemblyzero.workflows.testing.nodes.verify_phases"
 VITEST = {"framework": "vitest", "coverage_type": "line", "working_directory": "web"}
 

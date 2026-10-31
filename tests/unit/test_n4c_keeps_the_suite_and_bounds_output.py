@@ -94,6 +94,10 @@ def _state(worktree: Path, **overrides) -> dict:
         "audit_dir": str(worktree / "audit"),
         "test_files": files,
         "green_phase_output": GREEN_OUTPUT,
+        "uncovered_changed_lines": {
+            "src/boostgauge/collector.py": [56, 57, 58, 63],
+            "src/boostgauge/collectors/windows.py": [86, 153, 154, 155, 156, 157, 158],
+        },
         "coverage_achieved": 91.0,
         "coverage_target": 95,
         "coverage_module": "",

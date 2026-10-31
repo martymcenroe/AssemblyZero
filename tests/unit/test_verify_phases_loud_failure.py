@@ -26,6 +26,8 @@ import pytest
 
 from assemblyzero.workflows.testing.nodes import verify_phases as vp
 
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
@@ -140,7 +142,7 @@ class TestRunPytest:
         monkeypatch.setattr(vp, "run_command", lambda *a, **k: pytest.fail("pytest ran"))
 
         with pytest.raises(RuntimeError, match="pytest-cov") as raised:
-            vp.run_pytest(["tests/test_x.py"], coverage_module="pkg", coverage_target=90)
+            vp.run_pytest(["tests/test_x.py"], coverage_module="pkg")
 
         _is_step_error(raised)
 
@@ -594,34 +596,10 @@ class TestAlignWithTheSpec:
 
 
 class TestCoverageScope:
-    def test_2387_a_candidate_outside_the_repository_halts(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(vp, "run_pytest", lambda *a, **k: pytest.fail("pytest ran"))
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        outside = tmp_path / "elsewhere" / "settings.json"
-        state = {
-            **_green_project(repo),
-            "implementation_files": [str(outside)],
-            "test_files": [str(repo / "tests" / "test_nothing_matches.py")],
-        }
-
-        result = vp.verify_green_phase(state)
-
-        assert str(outside) in result["error_message"]
-        assert "outside" in result["error_message"]
-
-    def test_2393_no_derivable_coverage_target_halts(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(vp, "run_pytest", lambda *a, **k: pytest.fail("pytest ran"))
-        state = {
-            **_green_project(tmp_path),
-            "implementation_files": [],
-            "test_files": [str(tmp_path / "tests" / "test_nothing_matches.py")],
-        }
-
-        result = vp.verify_green_phase(state)
-
-        assert "coverage target" in result["error_message"]
-        assert "assemblyzero" not in result["error_message"]
+    # Ledger lines 2387 and 2393 guarded a derivation that is gone (#4436):
+    # the scope is the run's changed files, or the repository root when it
+    # changed none, so no candidate path is taken from anywhere else.
+    # test_changed_line_coverage.py runs both for real.
 
     def test_3310_a_leg_result_without_a_coverage_figure_halts(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
@@ -792,8 +770,9 @@ _COMPLIANT = {
     1276: "_verify_red_pytest_single::return::1",
     1423: "_verify_red_pytest_single::return::2",
     1605: "_verify_red_pytest_single::return::3",
-    2526: "_verify_green_pytest_single::return::0",
-    2584: "_verify_green_pytest_single::return::1",
+    # #4436 read the report ahead of the exit-code stop, so these two swapped.
+    2526: "_verify_green_pytest_single::return::1",
+    2584: "_verify_green_pytest_single::return::0",
     2669: "_zero_collected_route::return::0",
     2721: "_verify_green_pytest_single::return::2",
     2811: "_verify_green_pytest_single::return::3",

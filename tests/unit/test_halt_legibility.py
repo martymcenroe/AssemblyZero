@@ -143,6 +143,7 @@ class TestTheHaltNodeUsesIt:
         node = halt_node.create_halt_node("implementation_spec")
         node({
             "issue_number": 1,
+            "repo_root": str(tmp_path),
             "error_message": "",
             "review_verdict": "REVISE",
             "review_iteration": 3,
@@ -180,6 +181,7 @@ class TestTheHaltNodeUsesIt:
 
         halt_node.create_halt_node("implementation_spec")({
             "issue_number": 1,
+            "repo_root": str(tmp_path),
             "error_message": "Spec review BLOCKED: REQUIREMENTS CONFLICT: ...",
         })
 

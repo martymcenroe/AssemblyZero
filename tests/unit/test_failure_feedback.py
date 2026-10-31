@@ -10,6 +10,9 @@ from assemblyzero.workflows.testing.nodes.verify_phases import (
     _build_failure_summary,
     verify_green_phase,
 )
+import pytest
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 
 # ===========================================================================

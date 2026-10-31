@@ -9,7 +9,11 @@ previous iteration.
 
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 
 def _make_state(**overrides):

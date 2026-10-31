@@ -684,6 +684,11 @@ def run_workflow(
 
     if not check_and_consume(
         "implementation_spec", args.issue,
+        # #4292: the halt files are the repository's own, and a --mock run's
+        # are a mock's: issue #N of another repository, or a rehearsal's halt,
+        # is never this run's contract.
+        repo_root=target_repo,
+        mock=bool(args.mock),
         accept_changed=args.accept_changed_inputs,
         log=_contract_log,
     ):

@@ -22,6 +22,7 @@ from assemblyzero.core.halt_evidence import (
     write_halt_evidence,
 )
 from assemblyzero.core.halt_node import create_halt_node
+from assemblyzero.core.halt_paths import repository_dirname
 
 REFUSAL = (
     "[PINNING] refused: 1 line(s) starting '```python' — locked content "
@@ -133,7 +134,11 @@ class TestTheHaltEmitsIt:
         # `write_halt_evidence` writes fixed filenames, so the old unscoped
         # form left ONE bundle on the whole machine -- overwritten by the next
         # halt of any repo, and by the orchestrator's own relay of this one.
-        scoped = [p for p in store.iterdir() if p.is_dir()]
+        # #4292: and the state directory is the repository's own.
+        scoped = [
+            p for p in (store / repository_dirname(state["repo_root"])).iterdir()
+            if p.is_dir()
+        ]
         assert len(scoped) == 1, f"expected one scoped bundle dir, got {scoped}"
         assert scoped[0].name.startswith("halt-implementation_spec-331-")
         assert (scoped[0] / "halt-evidence.md").exists()
@@ -157,7 +162,11 @@ class TestTheHaltEmitsIt:
         create_halt_node("implementation_spec")(state)
         create_halt_node("orchestrator")(state)
         capsys.readouterr()
-        names = sorted(p.name for p in store.iterdir() if p.is_dir())
+        names = sorted(
+            p.name
+            for p in (store / repository_dirname(state["repo_root"])).iterdir()
+            if p.is_dir()
+        )
         assert names == [
             "halt-implementation_spec-331-run-issue4-183941",
             "halt-orchestrator-331-run-issue4-183941",

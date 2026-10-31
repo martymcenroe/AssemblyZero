@@ -4,9 +4,9 @@ Both ledger rows for this module are compliant, and stay as they are. A
 report with no TOTAL row (137) and a report whose table leaves out the
 target (143) are each a reading in the state ABSENT, with no percentage and
 a failure message naming what was sought and what the report held. That is
-the module's documented contract (#2637), and its two callers treat ABSENT
-as a measurement failure: N5 stops with the message, and N4c sets it as an
-error that its router sends to HALT. These tests pin the contract.
+the module's documented contract (#2637). Since #4436 the gate reads the
+per-line report, so this reading supplies coverage's own reason to N5's halt
+when that report is missing. These tests pin the contract.
 
 Line numbers in the names are ledger 0908's, at its base `79e18ad1`.
 """

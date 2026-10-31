@@ -15,6 +15,25 @@ import pytest
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
 
+@pytest.fixture
+def coverage_as_reported(monkeypatch):
+    """Stands in for the changed-line measurement (#4436), for a test of N5's
+    routing that fakes its test run: the run's whole-file figure is read as
+    the changed-line figure, so the test's own number drives the route. A test
+    of the measurement itself does not use this; see
+    `test_changed_line_coverage.py`, which runs it for real."""
+    from assemblyzero.workflows.testing.changed_lines import ChangedLineCoverage
+    from assemblyzero.workflows.testing.nodes import verify_phases
+
+    def judged(_state, _root, _label, _changed, _read_report, whole_file, _target):
+        return ChangedLineCoverage(1, 1, float(whole_file))
+
+    monkeypatch.setattr(verify_phases, "_changed_source_lines", lambda *_a: {})
+    monkeypatch.setattr(verify_phases, "_measured_directories", lambda _changed: [])
+    monkeypatch.setattr(verify_phases, "_fresh_coverage_report", lambda root: root / "report.json")
+    monkeypatch.setattr(verify_phases, "_judge_coverage", judged)
+
+
 @dataclass
 class _FakePreflightResult:
     passed: bool = True

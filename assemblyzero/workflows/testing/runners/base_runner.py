@@ -11,6 +11,7 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 
+from assemblyzero.workflows.testing.coverage_report import CoverageReportError, FileLines
 from assemblyzero.workflows.testing.framework_detector import (
     FrameworkConfig,
     TestRunResult,
@@ -20,14 +21,6 @@ logger = logging.getLogger(__name__)
 
 # Default subprocess timeout in seconds
 DEFAULT_TIMEOUT = 300
-
-
-class CoverageReportError(RuntimeError):
-    """A run asked to measure coverage whose report cannot be read (#4246).
-
-    Raised, never read as 0%: a percentage no report backs is a measurement
-    failure, not a coverage gap. Names the report's path and the cause.
-    """
 
 
 class RunnerError(RuntimeError):
@@ -243,14 +236,29 @@ class BaseTestRunner(ABC):
         extra_args: list[str] | None = None,
         *,
         measure_coverage: bool = False,
+        coverage_include: list[str] | None = None,
     ) -> TestRunResult:
         """Execute tests and return unified results.
 
         `measure_coverage` (#4246) asks a runner that measures line coverage
         to do so and to report it in `coverage_percent`; a runner whose
         coverage is measured elsewhere (pytest's, by `run_pytest`) or is
-        scenario coverage (Playwright's) ignores it."""
+        scenario coverage (Playwright's) ignores it.
+
+        `coverage_include` (#4436) names files, relative to `project_dir`,
+        the report must cover whether or not a test loads them, so a file no
+        test reaches reads as measured at zero; a runner that does not
+        measure line coverage here ignores it."""
         raise NotImplementedError
+
+    def read_line_coverage(self) -> dict[str, FileLines]:
+        """The run's per-line coverage, by repository path (#4436). A runner
+        with no such report raises CoverageReportError: the green phase asks
+        this only of a framework it judges by lines."""
+        raise CoverageReportError(
+            f"{self.framework_name} in {self.project_dir} writes no per-line "
+            f"coverage report"
+        )
 
     @abstractmethod
     def parse_results(

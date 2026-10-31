@@ -74,7 +74,8 @@ class TestingWorkflowState(TypedDict, total=False):
         test_plan_section: Extracted Section 10 (Test Plan).
         test_scenarios: Parsed test scenarios from test plan.
         detected_test_types: Types of tests detected (unit, integration, etc.).
-        coverage_target: Target code coverage percentage.
+        coverage_target: Target coverage percentage, of the lines the run
+            added or changed (ADR 0207, #4436).
         requirements: List of requirements from LLD.
 
         # Workflow tracking
@@ -89,7 +90,8 @@ class TestingWorkflowState(TypedDict, total=False):
         completed_files: List of (filepath, content) tuples for context accumulation (#272).
         red_phase_output: Pytest output from red phase verification.
         green_phase_output: Pytest output from green phase verification.
-        coverage_achieved: Actual coverage percentage achieved.
+        coverage_achieved: Coverage of the lines the run changed; whole-file
+            coverage when it changed none (#4436).
         e2e_output: E2E test output.
 
         # Review artifacts
@@ -159,6 +161,14 @@ class TestingWorkflowState(TypedDict, total=False):
     # Worktree isolation (for multi-branch safety)
     worktree_path: str  # Path to worktree if created
     original_repo_root: str  # Original repo root (for reference)
+    #: #4436: the integration branch the run was cut from. N5 measures what
+    #: the run changed from where its history left this branch. MUST stay
+    #: declared (#2018): an undeclared key is discarded at the invoke boundary.
+    base_branch: str
+    #: #4436: the base commit, frozen by the launcher for a run that works in
+    #: place on a branch its own checkpoints move, where a merge-base would
+    #: read as nothing changed. Empty when `base_branch` answers.
+    base_commit: str
 
     # LLD content
     lld_content: str
@@ -171,6 +181,9 @@ class TestingWorkflowState(TypedDict, total=False):
     spec_test_suite: dict
     detected_test_types: list[str]
     coverage_target: int
+    #: #4266: where `coverage_target` came from, in words the run prints:
+    #: the operator's flag, the document that declares it, or ADR 0207.
+    coverage_target_source: str
     requirements: list[str]
     # #2552: why `requirements` is empty, when it is — "no requirements
     # declared" vs "requirements unreadable" naming the searched path. ""
@@ -190,10 +203,18 @@ class TestingWorkflowState(TypedDict, total=False):
     test_files: list[str]
     implementation_files: list[str]
     completed_files: list[tuple[str, str]]  # Issue #272: (filepath, content) for context accumulation
-    coverage_module: str  # Module path for coverage measurement (e.g., "assemblyzero.workflows.scout")
+    #: What N5 measured, in `--cov` form. #4436: N4c's vetting run measures the
+    #: same scope, so it can say which of the uncovered lines it reached.
+    coverage_module: str | list[str]
     red_phase_output: str
     green_phase_output: str
     coverage_achieved: float
+    #: #4436: False when the run changed no executable line, so coverage
+    #: judged nothing and `coverage_achieved` is the whole-file figure.
+    coverage_judged: bool
+    #: #4436: the changed lines no test reached, by repository path: what N4c
+    #: writes tests for, and nothing else. MUST stay declared (#2018).
+    uncovered_changed_lines: dict[str, list[int]]
     #: #2344: how many N5 measurement rounds the implementation loop may take.
     #: MUST be seeded into state at invoke time. It used to be absent, and the
     #: two readers guessed differently -- N5 printed "Iteration 2/5" while the

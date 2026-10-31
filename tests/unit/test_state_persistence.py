@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
+from assemblyzero.core.halt_paths import repository_dirname
 from assemblyzero.core.state_persistence import (
     save_state_snapshot,
     load_state_snapshot,
@@ -27,16 +28,26 @@ from assemblyzero.core.state_persistence import (
 
 
 @pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """The repository a run was against (#4292); a directory git does not
+    know is its own root."""
+    path = tmp_path / "repo"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
 def state_dir(tmp_path: Path) -> Path:
     """Temporary state directory for isolation."""
     return tmp_path / "workflow_state"
 
 
 @pytest.fixture
-def sample_state() -> dict:
+def sample_state(repo: Path) -> dict:
     """A representative workflow state dict."""
     return {
         "issue_number": 102,
+        "repo_root": str(repo),
         "spec_draft": "# Implementation Spec\n\n...",
         "review_iteration": 2,
         "error_message": "Gemini 503",
@@ -59,11 +70,11 @@ class TestSaveStateSnapshot:
         assert path.exists()
         assert path.suffix == ".json"
 
-    def test_save_creates_directory(self, state_dir: Path) -> None:
+    def test_save_creates_directory(self, state_dir: Path, repo: Path) -> None:
         """Saving state creates the directory if it doesn't exist."""
         assert not state_dir.exists()
         with patch("assemblyzero.core.state_persistence.STATE_DIR", state_dir):
-            save_state_snapshot("requirements", 1, {"key": "value"})
+            save_state_snapshot("requirements", 1, {"key": "value", "repo_root": str(repo)})
         assert state_dir.exists()
 
     def test_save_valid_json(self, state_dir: Path, sample_state: dict) -> None:
@@ -83,20 +94,20 @@ class TestSaveStateSnapshot:
 class TestLoadStateSnapshot:
     """Tests for load_state_snapshot()."""
 
-    def test_load_missing_returns_none(self, state_dir: Path) -> None:
+    def test_load_missing_returns_none(self, state_dir: Path, repo: Path) -> None:
         """Loading from non-existent path returns None."""
         with patch("assemblyzero.core.state_persistence.STATE_DIR", state_dir):
-            result = load_state_snapshot("requirements", 999)
+            result = load_state_snapshot("requirements", 999, repo_root=repo)
         assert result is None
 
-    def test_load_corrupt_json_raises(self, state_dir: Path) -> None:
+    def test_load_corrupt_json_raises(self, state_dir: Path, repo: Path) -> None:
         """#3797: corrupt JSON is not "no snapshot"; it raises, naming the file."""
-        state_dir.mkdir(parents=True, exist_ok=True)
-        corrupt_path = state_dir / "implementation_spec-42.json"
+        corrupt_path = state_dir / repository_dirname(repo) / "implementation_spec-42.json"
+        corrupt_path.parent.mkdir(parents=True, exist_ok=True)
         corrupt_path.write_text("NOT VALID JSON {{{", encoding="utf-8")
         with patch("assemblyzero.core.state_persistence.STATE_DIR", state_dir), \
                 pytest.raises(RuntimeError, match="implementation_spec-42.json"):
-            load_state_snapshot("implementation_spec", 42)
+            load_state_snapshot("implementation_spec", 42, repo_root=repo)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -107,11 +118,11 @@ class TestLoadStateSnapshot:
 class TestRoundTrip:
     """Tests for save/load round-trip correctness."""
 
-    def test_save_load_roundtrip(self, state_dir: Path, sample_state: dict) -> None:
+    def test_save_load_roundtrip(self, state_dir: Path, sample_state: dict, repo: Path) -> None:
         """Saving then loading preserves all state fields."""
         with patch("assemblyzero.core.state_persistence.STATE_DIR", state_dir):
             save_state_snapshot("implementation_spec", 102, sample_state)
-            loaded = load_state_snapshot("implementation_spec", 102)
+            loaded = load_state_snapshot("implementation_spec", 102, repo_root=repo)
 
         assert loaded is not None
         assert loaded["issue_number"] == 102
@@ -119,12 +130,12 @@ class TestRoundTrip:
         assert loaded["review_iteration"] == 2
         assert loaded["error_message"] == "Gemini 503"
 
-    def test_overwrite_on_rerun(self, state_dir: Path) -> None:
+    def test_overwrite_on_rerun(self, state_dir: Path, repo: Path) -> None:
         """Saving twice for the same workflow/issue overwrites the first."""
         with patch("assemblyzero.core.state_persistence.STATE_DIR", state_dir):
-            save_state_snapshot("requirements", 50, {"version": 1})
-            save_state_snapshot("requirements", 50, {"version": 2})
-            loaded = load_state_snapshot("requirements", 50)
+            save_state_snapshot("requirements", 50, {"version": 1, "repo_root": str(repo)})
+            save_state_snapshot("requirements", 50, {"version": 2, "repo_root": str(repo)})
+            loaded = load_state_snapshot("requirements", 50, repo_root=repo)
 
         assert loaded is not None
         assert loaded["version"] == 2

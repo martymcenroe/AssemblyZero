@@ -82,6 +82,35 @@ def _framework_configs(
     return configs
 
 
+def resolve_coverage_target(
+    state: TestingWorkflowState, lld_content: str, document: str,
+) -> tuple[int, int | None, str]:
+    """The coverage target the run uses, and where it came from (#4266).
+
+    The operator's `--coverage-target`, which the launcher puts in the state
+    before N0 runs, wins on every load path. Else the document's declared
+    target. Else ADR 0207's 95. The answer is said out loud, and it is what
+    every framework's target and the run's `coverage_target` are written from
+    (#3089): the two used to be read separately on each path, and on the spec
+    path the document overwrote the flag without a word.
+
+    Returns (the target, the target that governs every framework or None when
+    each keeps its own default, the source in words). `document` names the
+    file the target would be declared in.
+    """
+    flagged = state.get("coverage_target")
+    if flagged is not None:
+        target, governing, source = flagged, flagged, "--coverage-target, the operator's flag"
+    else:
+        declared = declared_coverage_target(lld_content)
+        if declared is not None:
+            target, governing, source = declared, declared, f"declared in {document}"
+        else:
+            target, governing, source = extract_coverage_target(lld_content), None, "ADR 0207's default"
+    print(f"    Coverage target: {target}% ({source})")
+    return target, governing, source
+
+
 def _framework_resolution_failed(issue_number: int, error: ValueError) -> dict[str, Any]:
     """N0's halt when the run cannot say which frameworks test it, or where
     (#4236, #4237). Routed to HALT, which alerts the operator; deterministic,
@@ -1177,7 +1206,9 @@ def _load_from_issue(  # pragma: no cover
     test_scenarios = parse_test_scenarios(test_plan_section) if test_plan_section else []
     detected_types = detect_test_types(lld_content)
     requirements = extract_requirements(lld_content)
-    coverage_target = extract_coverage_target(lld_content) or 80
+    coverage_target, governing_target, target_source = resolve_coverage_target(
+        state, lld_content, f"the body of issue #{issue_number}",
+    )
     try:
         files_to_modify = extract_files_to_modify(lld_content)
     except WorkflowParsingError as e:
@@ -1200,9 +1231,8 @@ def _load_from_issue(  # pragma: no cover
     # Issue #381: Detect test framework(s). #4236: every one is kept.
     # #3089: the target the run uses (the operator's, else the issue's
     # declared one) governs every framework; with neither, each keeps its own.
-    declared_target = state.get("coverage_target", declared_coverage_target(lld_content))
     try:
-        fw_configs = _framework_configs(lld_content, str(repo_root), declared_target)  # #3707
+        fw_configs = _framework_configs(lld_content, str(repo_root), governing_target)  # #3707
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
     frameworks = [config["framework"] for config in fw_configs]
@@ -1220,6 +1250,8 @@ def _load_from_issue(  # pragma: no cover
             "body_length": len(body),
             "scenario_count": len(test_scenarios),
             "frameworks": [f.value for f in frameworks],
+            "coverage_target": coverage_target,
+            "coverage_target_source": target_source,
         },
     )
 
@@ -1229,7 +1261,8 @@ def _load_from_issue(  # pragma: no cover
         "test_plan_section": test_plan_section or "",
         "test_scenarios": test_scenarios,
         "detected_test_types": detected_types or ["unit"],
-        "coverage_target": state.get("coverage_target", coverage_target),
+        "coverage_target": coverage_target,
+        "coverage_target_source": target_source,
         "requirements": requirements,
         "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
@@ -1456,9 +1489,10 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     else:
         print(f"    Found {len(requirements)} requirements (from LLD)")
 
-    # Extract coverage target
-    coverage_target = extract_coverage_target(lld_content)
-    print(f"    Coverage target: {coverage_target}%")
+    # #4266: the operator's flag, else the spec's declared target, else ADR 0207.
+    coverage_target, governing_target, target_source = resolve_coverage_target(
+        state, lld_content, f"the spec at {lld_path_obj}",
+    )
 
     # Extract files to modify from Section 2.1
     try:
@@ -1491,11 +1525,11 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     save_audit_file(audit_dir, file_num, "test-plan.md", test_plan_content)
 
     # Issue #381: Detect test framework(s). #4236: every one is kept.
-    # #3089: the LLD's declared target governs every framework, as it
-    # governs the run's `coverage_target` here; with none, each keeps its own.
+    # #3089, #4266: the target the run uses (the operator's, else the spec's
+    # declared one) governs every framework; with neither, each keeps its own.
     try:
         fw_configs = _framework_configs(  # #3707
-            lld_content, str(repo_root), declared_coverage_target(lld_content),
+            lld_content, str(repo_root), governing_target,
         )
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
@@ -1513,6 +1547,8 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
             "scenario_count": len(test_scenarios),
             "test_types": detected_types,
             "frameworks": [f.value for f in frameworks],
+            "coverage_target": coverage_target,
+            "coverage_target_source": target_source,
         },
     )
 
@@ -1533,6 +1569,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         "spec_test_suite": spec_test_suite,
         "detected_test_types": detected_types,
         "coverage_target": coverage_target,
+        "coverage_target_source": target_source,
         "requirements": requirements,
         "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
@@ -1616,10 +1653,19 @@ Requirement: REQ-2
     file_num = next_file_number(audit_dir)
     mock_lld_path = save_audit_file(audit_dir, file_num, "lld.md", mock_lld)
 
+    # #4266: the operator's flag wins here too. Without it the mock run's
+    # target is 90, on every framework (#3089).
+    flagged = state.get("coverage_target")
+    mock_target = flagged if flagged is not None else 90
+    target_source = (
+        "--coverage-target, the operator's flag" if flagged is not None
+        else "the mock run's fixed target"
+    )
+    print(f"    Coverage target: {mock_target}% ({target_source})")
+
     # Issue #381: Detect test framework (even in mock mode). #4236: every one.
     try:
-        # #3089: the mock run's target, 90, on every framework.
-        fw_configs = _framework_configs(mock_lld, str(repo_root), 90)  # #3707
+        fw_configs = _framework_configs(mock_lld, str(repo_root), mock_target)  # #3707
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
 
@@ -1634,7 +1680,8 @@ Requirement: REQ-2
         "test_plan_section": "### test_login_success\n...",
         "test_scenarios": mock_scenarios,
         "detected_test_types": ["unit"],
-        "coverage_target": 90,
+        "coverage_target": mock_target,
+        "coverage_target_source": target_source,
         "requirements": ["REQ-1: User login", "REQ-2: Input validation", "REQ-3: Error logging"],
         "audit_dir": str(audit_dir),
         "file_counter": file_num,

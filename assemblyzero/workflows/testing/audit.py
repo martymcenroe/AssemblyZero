@@ -58,6 +58,7 @@ class TestReportMetadata(TypedDict):
     implementation_files: list[str]
     coverage_achieved: float
     coverage_target: int
+    coverage_scope: str  # "changed lines", or "whole files, not judged" (#4436)
     total_iterations: int
     test_count: int
     passed_count: int
@@ -234,7 +235,7 @@ def generate_test_report(
 | Total Tests | {metadata["test_count"]} |
 | Passed | {metadata["passed_count"]} |
 | Failed | {metadata["failed_count"]} |
-| Coverage | {metadata["coverage_achieved"]:.1f}% |
+| Coverage ({metadata["coverage_scope"]}) | {metadata["coverage_achieved"]:.1f}% |
 | Target | {metadata["coverage_target"]}% |
 | E2E Passed | {"Yes" if metadata["e2e_passed"] else "No" if metadata.get("e2e_passed") is not None else "Skipped"} |
 | Iterations | {metadata["total_iterations"]} |

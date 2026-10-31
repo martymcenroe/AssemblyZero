@@ -28,6 +28,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from assemblyzero.core.halt_paths import (
+    halt_directory,
+    repository_key,
+    run_key,
+    state_is_mock,
+    state_repo_root,
+)
 from assemblyzero.core.state_persistence import STATE_DIR
 
 #: State keys that name input artifacts a resume re-reads. Key-generic on
@@ -50,6 +57,10 @@ _COUNTED_LIST_KEYS = (
 class ResumeContractUnreadable(RuntimeError):
     """The halt's contract exists but cannot be read or parsed (#3788)."""
 
+    def __init__(self, message: str, path: Path | None = None) -> None:
+        super().__init__(message)
+        self.path = path
+
 
 def _sha256_file(path: Path) -> str | None:
     """The file's sha256, or None when it does not exist.
@@ -63,8 +74,21 @@ def _sha256_file(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def contract_path(workflow: str, issue: int, directory: Path | None = None) -> Path:
-    return (directory or STATE_DIR) / f"resume-contract-{workflow}-{issue}.json"
+def contract_directory(repo_root: Path | str, mock: bool) -> Path:
+    """Where a run's halt files live: its repository's own directory (#4292)."""
+    return halt_directory(repo_root, mock, STATE_DIR)
+
+
+def contract_path(workflow: str, issue: int | str, directory: Path) -> Path:
+    """The contract's file in ``directory``. ``issue`` is the run key: the
+    issue number, or a brief run's key (``halt_paths.run_key``)."""
+    return Path(directory) / f"resume-contract-{workflow}-{issue}.json"
+
+
+def _unscoped_contract_path(workflow: str, issue: int | str) -> Path:
+    """Where a contract written before #4292 is: one directory for every
+    repository, named by workflow and issue alone."""
+    return contract_path(workflow, issue, STATE_DIR)
 
 
 def build_resume_contract(
@@ -98,10 +122,17 @@ def build_resume_contract(
             "sha256": _sha256_file(Path(state_snapshot)),
         }
 
+    # #4292: the contract names the repository it was written for, whether it
+    # was a mock's, and the key its files carry. A state that names no
+    # repository raises ``UnkeyableRun``: a contract nobody can attribute is
+    # the defect this field ends.
     return {
-        "contract_version": 1,
+        "contract_version": 2,
         "workflow": workflow,
         "issue": int(state.get("issue_number", 0) or 0),
+        "run_key": run_key(state),
+        "repository": repository_key(state_repo_root(state)),
+        "mock": state_is_mock(state),
         "halted_at": datetime.now(tz=timezone.utc).isoformat(),
         "audit_dir": str(state.get("audit_dir", "") or ""),
         "inputs": inputs,
@@ -110,11 +141,9 @@ def build_resume_contract(
     }
 
 
-def save_resume_contract(
-    contract: dict, directory: Path | None = None
-) -> Path:
+def save_resume_contract(contract: dict, directory: Path) -> Path:
     target = contract_path(
-        contract["workflow"], contract["issue"], directory
+        contract["workflow"], contract["run_key"], directory
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(contract, indent=2), encoding="utf-8")
@@ -122,7 +151,7 @@ def save_resume_contract(
 
 
 def load_resume_contract(
-    workflow: str, issue: int, directory: Path | None = None
+    workflow: str, issue: int | str, directory: Path
 ) -> dict | None:
     path = contract_path(workflow, issue, directory)
     if not path.exists():
@@ -135,7 +164,8 @@ def load_resume_contract(
     except (OSError, json.JSONDecodeError) as exc:
         raise ResumeContractUnreadable(
             f"the resume contract {path} exists but cannot be read: "
-            f"{type(exc).__name__}: {exc}"
+            f"{type(exc).__name__}: {exc}",
+            path,
         ) from exc
 
 
@@ -184,10 +214,64 @@ def verify_resume_contract(contract: dict) -> list[str]:
     return mismatches
 
 
+#: What `_ownership` answers.
+THIS_REPOSITORY = "this"
+OTHER_REPOSITORY = "other"
+UNKNOWN_REPOSITORY = "unknown"
+
+
+def _ownership(
+    contract: dict, repository: str, repo_root: Path | str
+) -> tuple[str, str]:
+    """Whose halt a contract describes: ``(answer, detail)`` (#4292).
+
+    A contract written since #4292 names its repository. One written before
+    it does not, and is attributed from its ``audit_dir``, which lies inside
+    the repository's ``docs/lineage``: the directory above that is the
+    repository, or a worktree of it, and `repository_key` maps either to the
+    primary checkout. A contract that cannot be attributed is UNKNOWN, never
+    guessed at: no audit_dir, one outside any ``docs/lineage``, or a root that
+    is gone and is not this run's own path. A root git cannot read raises
+    from ``repository_key``; ``check_and_consume`` refuses on it.
+    """
+    named = contract.get("repository")
+    if named:
+        if named == repository:
+            return THIS_REPOSITORY, repository
+        return OTHER_REPOSITORY, str(named)
+
+    audit_dir = str(contract.get("audit_dir") or "")
+    if not audit_dir:
+        return UNKNOWN_REPOSITORY, "it names no repository and its audit_dir is empty"
+    parts = Path(audit_dir).parts
+    root = None
+    for index in range(len(parts) - 1):
+        if parts[index] == "docs" and parts[index + 1] == "lineage":
+            root = Path(*parts[:index]) if index else None
+            break
+    if root is None:
+        return UNKNOWN_REPOSITORY, (
+            f"it names no repository and its audit_dir {audit_dir} is not "
+            "inside a docs/lineage directory"
+        )
+    if root.is_dir():
+        owner = repository_key(root)
+        return (THIS_REPOSITORY if owner == repository else OTHER_REPOSITORY), owner
+    ours = {repository, Path(repo_root).resolve().as_posix()}
+    if root.resolve().as_posix() in ours:
+        return THIS_REPOSITORY, repository
+    return UNKNOWN_REPOSITORY, (
+        f"it names no repository, and {root}, where its audit_dir points, is "
+        "gone, so it cannot be told from a removed worktree of another repository"
+    )
+
+
 def check_and_consume(
     workflow: str,
-    issue: int,
+    issue: int | str,
     *,
+    repo_root: Path | str,
+    mock: bool = False,
     accept_changed: bool = False,
     directory: Path | None = None,
     log: Callable[[str], None] = print,
@@ -198,27 +282,110 @@ def check_and_consume(
     silent pass — the contract constrains resumes, never first runs. A
     verified or explicitly-accepted contract is deleted: it described the
     halt it came from, and the next halt writes its own.
+
+    #4292: a contract belongs to a repository. ``repo_root`` (a worktree or
+    its primary checkout) says which, and the contract is looked for in that
+    repository's own directory, a mock run's in its ``mock`` subdirectory, so
+    another repository's issue of the same number and a mock's halt are never
+    read here. ``directory`` overrides the location, not the ownership check.
+
+    A contract written before #4292 sits in the shared directory with no
+    repository field. It is attributed from its ``audit_dir`` (`_ownership`):
+    this repository's is verified and consumed as before; another's is
+    left where it is and does not hold this run; one that cannot be
+    attributed refuses the run, by name, rather than be guessed at. Nothing
+    is rewritten or moved.
     """
     from assemblyzero.core import alert
 
-    path = contract_path(workflow, issue, directory)
+    where = f"assemblyzero.core.resume_contract.check_and_consume ({workflow})"
+    alert_issue = issue if isinstance(issue, int) and issue else None
+    repository = repository_key(repo_root)
+    own_directory = (
+        Path(directory) if directory is not None
+        else contract_directory(repo_root, mock)
+    )
+    path = contract_path(workflow, issue, own_directory)
+    unscoped = False
     try:
-        contract = load_resume_contract(workflow, issue, directory)
+        contract = load_resume_contract(workflow, issue, own_directory)
+        if contract is None and directory is None:
+            legacy = _unscoped_contract_path(workflow, issue)
+            contract = load_resume_contract(workflow, issue, STATE_DIR)
+            if contract is not None:
+                path, unscoped = legacy, True
     except ResumeContractUnreadable as exc:
         # #3788: refused, by name, with an alert; it used to resume unverified.
         alert.alert_operator(
             what="the resume contract cannot be read, so the resume cannot be verified",
-            where=f"assemblyzero.core.resume_contract.check_and_consume ({workflow})",
+            where=where,
             cause=str(exc),
             consequence=(
                 "the resume is refused before any token is spent; inspect the "
-                f"contract at {path}, or move it aside to run without verification"
+                f"contract at {exc.path or path}, or move it aside to run "
+                "without verification"
             ),
-            issue=issue or None,
+            repo=repository,
+            issue=alert_issue,
         )
         return False
     if contract is None:
         return True
+
+    from assemblyzero.workflows.requirements.git_operations import GitOperationError
+
+    try:
+        owner, detail = _ownership(contract, repository, repo_root)
+    except (OSError, GitOperationError) as exc:
+        # #4292: git cannot place the repository the contract's audit_dir
+        # points at, so the contract cannot be attributed. Refused by name.
+        log(f"RESUME CONTRACT: refusing, {path} cannot be attributed: {exc} (#4292)")
+        alert.alert_operator(
+            what="the resume was refused: its contract cannot be attributed to a repository",
+            where=where,
+            cause=f"{path}: {type(exc).__name__}: {exc}",
+            consequence=(
+                "the resume did not start and the contract was not consumed; "
+                f"move {path} aside if it is not a halt of this run"
+            ),
+            repo=repository,
+            issue=alert_issue,
+        )
+        return False
+    if owner == OTHER_REPOSITORY and unscoped:
+        log(
+            f"resume contract: {path} was written for {detail}, not for "
+            f"{repository}; it is left where it is and does not hold this run"
+        )
+        return True
+    refusal = ""
+    if owner == OTHER_REPOSITORY:
+        refusal = (
+            f"the contract at {path} was written for {detail}, and this run is "
+            f"for {repository}"
+        )
+    elif owner == UNKNOWN_REPOSITORY:
+        refusal = f"the contract at {path} cannot be attributed to a repository: {detail}"
+    elif "repository" in contract and bool(contract.get("mock", False)) != mock:
+        refusal = (
+            f"the contract at {path} was written by a "
+            f"{'mock' if contract.get('mock') else 'real'} run, and this is a "
+            f"{'mock' if mock else 'real'} run"
+        )
+    if refusal:
+        log(f"RESUME CONTRACT: refusing, {refusal} (#4292)")
+        alert.alert_operator(
+            what="the resume was refused: its contract is not this run's",
+            where=where,
+            cause=refusal,
+            consequence=(
+                "the resume did not start and the contract was not consumed; "
+                f"move {path} aside if it is not a halt of this run"
+            ),
+            repo=repository,
+            issue=alert_issue,
+        )
+        return False
     try:
         mismatches = verify_resume_contract(contract)
     except OSError as exc:
@@ -229,7 +396,7 @@ def check_and_consume(
             where=f"assemblyzero.core.resume_contract.check_and_consume ({workflow})",
             cause=f"{type(exc).__name__}: {exc}",
             consequence="the resume is refused before any token is spent",
-            issue=issue or None,
+            issue=alert_issue,
         )
         return False
     if mismatches and not accept_changed:
@@ -253,7 +420,7 @@ def check_and_consume(
                 "the resume did not start; rerun with --accept-changed-inputs "
                 "to proceed against the changed world"
             ),
-            issue=issue or None,
+            issue=alert_issue,
         )
         return False
     if mismatches:
@@ -283,6 +450,6 @@ def check_and_consume(
                 "the resume proceeds; the leftover contract will be checked "
                 "again by the next launch for this issue until it is removed"
             ),
-            issue=issue or None,
+            issue=alert_issue,
         )
     return True

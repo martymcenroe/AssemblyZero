@@ -136,6 +136,33 @@ def owner_of(path: str, frameworks: list[RunFramework], root: str) -> int:
     )
 
 
+def measures_lines(framework: TestFramework) -> bool:
+    """Whether a framework's coverage is of lines (#4436). Playwright's is of
+    scenarios: a browser test names no line of the source."""
+    return framework != TestFramework.PLAYWRIGHT
+
+
+def judges_source(path: str, run: RunFramework, frameworks: list[RunFramework]) -> bool:
+    """`path` (POSIX, relative to the repository) is source this framework is
+    judged on (#4436): its file type, in its directory, and no framework that
+    measures lines in a deeper directory holds it. `owner_of`'s rule, for a
+    source file: a Vitest in `web/` judges `web/src/a.ts`, and a Jest at the
+    root does not."""
+    native = path.replace("/", os.sep)
+
+    def holds(candidate: RunFramework) -> bool:
+        return (
+            measures_lines(candidate.framework)
+            and path.endswith(source_extensions(candidate.framework))
+            and inside(native, candidate.directory)
+        )
+
+    if not holds(run):
+        return False
+    deepest = max(_depth(other.directory) for other in (run, *frameworks) if holds(other))
+    return _depth(run.directory) == deepest
+
+
 def is_test_file(path: str) -> bool:
     """Whether a file N4 wrote is a test file (#4245): a Python file named
     `test_*` in a `tests/` directory, N4's rule since #460, or a file ending

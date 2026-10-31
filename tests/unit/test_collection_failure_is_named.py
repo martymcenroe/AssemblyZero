@@ -15,9 +15,13 @@ and a re-run by hand. Everything needed was in the output the whole time.
 """
 
 
+import pytest
+
 from assemblyzero.workflows.testing.nodes.verify_phases import (
     describe_collection_failures,
 )
+
+pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
 LIVE_OUTPUT = """
 ==================== ERRORS ====================

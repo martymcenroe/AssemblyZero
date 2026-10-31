@@ -33,6 +33,11 @@ from assemblyzero.core.errors import (
     classify_http_status,
     is_capacity_message,
 )
+from assemblyzero.core.halt_paths import (
+    UnkeyableRun,
+    run_key,
+    state_repo_root,
+)
 from assemblyzero.core.recovery_plan import generate_recovery_plan
 #: STATE_DIR looks unused and is not: `tests/unit/test_halt_node.py` patches it
 #: HERE, on this module, to redirect the snapshot away from the real state
@@ -208,8 +213,7 @@ def _halt_bundle_dirname(workflow_name: str, state: dict) -> str:
     """
     from assemblyzero.speedrun.convergence import current_run_tag
 
-    issue = state.get("issue_number", 0) if hasattr(state, "get") else 0
-    parts = [str(workflow_name), str(issue), current_run_tag() or "norun"]
+    parts = [str(workflow_name), run_key(state), current_run_tag() or "norun"]
     cleaned = [
         "".join(c if (c.isalnum() or c in "-_") else "-" for c in part) or "x"
         for part in parts
@@ -252,6 +256,26 @@ def create_halt_node(workflow_name: str):
         # 2. Determine which stage halted (from state context)
         stage = _infer_stage(state, workflow_name)
 
+        # 2a. #4292: the halt's files are named for the repository, whether
+        # the run was a mock, and the run's key. A state that gives none of
+        # them cannot be filed anywhere a resume would not mistake it, so the
+        # halt stops here, alerting; it never files the halt under a guess.
+        try:
+            key = run_key(state, issue_number)
+            state_repo_root(state)
+        except UnkeyableRun as exc:
+            _alert.alert_operator(
+                what=f"the {workflow_name} halt could not name its files",
+                where=f"{workflow_name} HALT, stage {stage}",
+                cause=f"{type(exc).__name__}: {exc}; the halt reason was: {error_message}",
+                consequence=(
+                    "the run stopped; no state snapshot, recovery plan or "
+                    "resume contract was written"
+                ),
+                issue=issue_number or None,
+            )
+            raise
+
         # 3. Save full state to disk
         state_path = save_state_snapshot(
             workflow_name, issue_number, state, trigger="halt"
@@ -268,6 +292,7 @@ def create_halt_node(workflow_name: str):
             cost_budget_usd=cost_budget,
         )
         plan.state_path = str(state_path)
+        plan.run_key = key
 
         # 5. Save plan to same directory as state
         plan_path = plan.save(state_path.parent)
@@ -305,7 +330,7 @@ def create_halt_node(workflow_name: str):
             contract = build_resume_contract(
                 state, workflow_name, state_snapshot=state_path
             )
-            save_resume_contract(contract)
+            save_resume_contract(contract, state_path.parent)
             if audit_dir_str:
                 _require_audit_dir(audit_dir_str)
                 save_resume_contract(contract, Path(audit_dir_str))
