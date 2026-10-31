@@ -97,3 +97,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Changed tests:** none.
 
 **Neighbouring suites:** 51 passed across the 3 files that read the coverage report.
+
+## audit.py, the testing workflow's
+
+**New: `tests/unit/test_testing_audit_loud_failure.py` (8).** One is a strict xfail recording the open site 320.
+
+**Before the fix, measured:** 3 failed, 4 passed, 1 xfailed. The three site tests failed. The four that passed pin an empty directory as file 1, numbering after the highest file, a working append, and a TOTAL row read.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** 616 passed and 1 xfailed across 17 files: the module's importers, and the node tests that number and log audit records.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.

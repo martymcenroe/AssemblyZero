@@ -52,3 +52,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 ### coverage_report.py (2 ledger rows: both compliant, pinned)
 
 - **Unchanged, by design.** No TOTAL row (137) and a table that leaves out the target (143) are each a reading in the state ABSENT, with no percentage and a message naming what was sought and what the report held. That is the module's contract (#2637). N5 stops on it, and N4c returns it as an error that its router sends to HALT. The new tests pin the contract.
+
+### audit.py, the testing workflow's (3 ledger rows: 2 fixed, 1 left for the verify_phases batch)
+
+- **A missing audit directory raises (121).** `next_file_number` raises FileNotFoundError naming it, after an ERROR line. It answered 1, as if the directory were empty. Every caller checks or creates the directory first.
+- **A lost audit event raises (280).** `log_workflow_execution` raises `WorkflowAuditError` naming the workflow, the event, the issue, the log and the cause, after an ERROR line, when the log's directory cannot be made or the line cannot be appended. It logged a WARNING and went on. The run ends through its entry point's handler, which alerts.
+- **No coverage table still reads 0.0 (320).** `nodes/verify_phases.py`, another batch's file, compares and records the value as a number, so None would raise there. The fix needs that file first; a strict xfail records the open site. N5 already catches the absence with `coverage_report.read_coverage` before it decides a route.
