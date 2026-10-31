@@ -353,6 +353,36 @@ def make_run_id() -> str:
 # =============================================================================
 
 
+class LineageSourceError(ValueError):
+    """What `move_lineage_to_done` was given is not a run's lineage (#4303)."""
+
+
+def _lineage_relative_path(audit_dir: Path, target_repo: Path) -> Path:
+    """`audit_dir` relative to the target's active/ root, or LineageSourceError.
+
+    `shutil.move` falls back to copy-then-delete, so a wrong source is not a
+    misplaced file: `Path("")` is the working directory, and moving it deletes
+    the checkout the run was started from (#4303). Only a directory strictly
+    inside `<target>/docs/lineage/active/` is a lineage, and nothing that holds
+    the working directory or the target repository ever is.
+    """
+    active_root = (target_repo / AUDIT_ACTIVE_DIR).resolve()
+    source = audit_dir.resolve()
+    if not source.is_dir():
+        raise LineageSourceError(f"{audit_dir} is not a directory")
+    if active_root not in source.parents:
+        raise LineageSourceError(
+            f"{audit_dir} resolves to {source}, which is not strictly inside "
+            f"the lineage root {active_root}"
+        )
+    for kept in (Path.cwd().resolve(), target_repo.resolve()):
+        if source == kept or source in kept.parents:
+            raise LineageSourceError(
+                f"{audit_dir} resolves to {source}, which holds {kept}"
+            )
+    return source.relative_to(active_root)
+
+
 def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path:
     """Move a lineage directory from active/ to done/ on workflow completion.
 
@@ -361,7 +391,7 @@ def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path:
 
     Args:
         audit_dir: The active lineage directory (e.g., target_repo/docs/lineage/active/42-lld).
-        target_repo: Target repository root (used for log messages).
+        target_repo: Target repository root.
 
     Returns:
         Path to the done/ directory: where the lineage was moved, or where it
@@ -371,10 +401,15 @@ def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path:
         FileNotFoundError: the lineage directory does not exist (#3585). Every
             caller checks for it first, so reaching here without one is a
             failure; it used to be an INFO "skipping" and None.
+        LineageSourceError: `audit_dir` is not a directory strictly inside
+            `<target_repo>/docs/lineage/active/`, or it holds the working
+            directory or the target repository (#4303). Raised before anything
+            on disk changes. It used to fall back to `audit_dir.name`, which
+            for `Path(".")` is empty, so `done/` itself became the destination.
         OSError: the move failed (#3585); it used to be logged without the
             repo and returned None, and the caller went on.
 
-    Both failures alert the operator, naming the directory and the repo.
+    Every failure alerts the operator, naming the directory and the repo.
     """
     def _alert(exc: Exception, consequence: str) -> None:
         alert.alert_operator(
@@ -393,16 +428,16 @@ def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path:
         _alert(missing, "the workflow stops at finalize; nothing is moved")
         raise missing
 
+    try:
+        relative = _lineage_relative_path(audit_dir, target_repo)
+    except LineageSourceError as exc:
+        _alert(exc, "the workflow stops at finalize; nothing is moved")
+        raise
+
     # Build destination by mirroring the structure under active/ to done/.
     # Previously this used audit_dir.name (last segment only), which threw
     # away the parent {issue}-{type}/ when the run-scoped subdirectory layout
     # introduced an extra path segment. Closes #1467.
-    active_root = target_repo / AUDIT_ACTIVE_DIR
-    try:
-        relative = audit_dir.relative_to(active_root)
-    except ValueError:
-        # audit_dir is not under active/ — fall back to legacy behavior
-        relative = Path(audit_dir.name)
     done_dir = target_repo / AUDIT_DONE_DIR / relative
     done_dir.parent.mkdir(parents=True, exist_ok=True)
 

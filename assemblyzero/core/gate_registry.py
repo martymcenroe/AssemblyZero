@@ -541,7 +541,11 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         # and an LLD rebuild from refs that raised (line 324). Each used to be
         # a WARN, and the run went on with the spec standing in for the LLD.
         + _s(f"{_TS}/nodes/load_lld.py::load_lld::return", 4)
-        + _s(f"{_TS}/nodes/load_lld.py::_halt_input_unreadable::return", 0),
+        + _s(f"{_TS}/nodes/load_lld.py::_halt_input_unreadable::return", 0)
+        # #4303: N0 sets audit_dir on every route to N7, so an unset one is a
+        # state no run should reach. It read as the working directory, which
+        # the lineage move would then have deleted.
+        + _s(f"{_TS}/nodes/finalize.py::finalize::return", 0),
     ),
     Gate(
         "infra.missing_spec", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,

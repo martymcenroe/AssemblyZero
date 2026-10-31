@@ -184,7 +184,7 @@ def workspace(tmp_path: Path):
         # reviewer's, and the replay would report a divergence that is an
         # artifact of the harness rather than of the code. Caught exactly that
         # way while building this test.
-        lineage = tmp_path / "lineage"
+        lineage = repo / "docs" / "lineage" / "active" / "999-implspec"
         if lineage.exists():
             _rmtree(lineage)
 
@@ -210,13 +210,14 @@ def _state(tmp_path: Path, repo: Path, lld_path: Path) -> dict:
     # #3585: generate_spec halts when the lineage directory is missing, as the
     # orchestrator and the standalone runner always create it first. N5 used to
     # create it here, after N2's first draft had gone unsaved.
-    (tmp_path / "lineage").mkdir(exist_ok=True)
+    lineage = repo / "docs" / "lineage" / "active" / "999-implspec"
+    lineage.mkdir(parents=True, exist_ok=True)
     return {
         "issue_number": 999,
         "lld_path": str(lld_path),
         "repo_root": str(repo),
         "assemblyzero_root": str(ROOT),
-        "audit_dir": str(tmp_path / "lineage"),
+        "audit_dir": str(lineage),
         "base_branch": "main",
         "lld_content": "",
         "files_to_modify": [],
