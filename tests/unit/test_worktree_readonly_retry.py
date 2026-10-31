@@ -91,11 +91,12 @@ class TestClearingTheAttribute:
     def test_an_absent_path_is_zero_not_an_error(self, tmp_path):
         assert wt.clear_readonly(tmp_path / "nope") == 0
 
-    def test_it_never_raises_on_an_unreadable_corner(self, tmp_path):
-        """This runs on the failure path of a removal that has already gone
-        wrong; a crash here would replace a reported problem with a traceback."""
+    def test_a_chmod_that_fails_raises(self, tmp_path):
+        """ADR 0236 (#3585): a partly cleared tree used to return as if the
+        clearing worked. The OSError now leaves, and the sweep alerts on it."""
         d = tmp_path / "tree"
         d.mkdir()
+        os.chmod(d, stat.S_IREAD)
 
         def _boom(*_a, **_k):
             raise OSError("nope")
@@ -103,9 +104,11 @@ class TestClearingTheAttribute:
         original = os.chmod
         os.chmod = _boom
         try:
-            assert wt.clear_readonly(d) == 0
+            with pytest.raises(OSError, match="nope"):
+                wt.clear_readonly(d)
         finally:
             os.chmod = original
+            os.chmod(d, stat.S_IWRITE | stat.S_IREAD)
 
 
 class TestTheRetry:

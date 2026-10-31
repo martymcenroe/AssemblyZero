@@ -24,20 +24,34 @@ removed. That is what lets this ship without waiting on a proven archive.
 **Never `--force`, anywhere.** A worktree that resists a plain remove is a fact
 to surface, not to overpower -- it is reported by name and the roll continues.
 `test_sweep_source_contains_no_force` asserts this against this file's source.
+
+**Every failure reaches the operator (ADR 0236, #3585).** A worktree list that
+cannot be read raises before anything moves, because reading it as "nothing
+registered" would relocate every pipeline worktree as an orphan. Each entry
+the sweep cannot finish alerts the operator with its cause, a graveyard push
+that fails keeps the worktree, ReadOnly clearing raises rather than clear part
+of a tree, and an unexpected OSError alerts and stops the sweep.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import os
 import shutil
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.core import alert
 from assemblyzero.speedrun.preserved import record_preserved
+
+logger = logging.getLogger(__name__)
+
+_WHERE = "assemblyzero/speedrun/worktrees.py"
 
 WORKTREES_REL = Path("data/worktrees")
 ORPHANED_DIRNAME = "orphaned"
@@ -91,11 +105,32 @@ def legacy_worktree_path(repo: Path | str, issue: int, *, lld: bool = False) -> 
 # ---------------------------------------------------------------------------
 
 
+class WorktreeSweepError(RuntimeError):
+    """git could not answer a question the sweep needs answered."""
+
+
 def registered_worktrees(repo: Path) -> set[Path]:
+    """Every worktree git has registered for `repo`, resolved.
+
+    A `git worktree list` that fails alerts the operator and raises
+    `WorktreeSweepError` with its exit code and stderr. An empty set here
+    would make every pipeline worktree look unregistered, and the sweep would
+    relocate each one as an orphan.
+    """
     result = _run(["git", "-C", str(repo), "worktree", "list", "--porcelain"])
     paths: set[Path] = set()
     if result.returncode != 0:
-        return paths
+        cause = (
+            f"git -C {repo} worktree list exited {result.returncode}: "
+            f"{(result.stderr or '').strip()}"
+        )
+        alert.alert_operator(
+            what="list the registered worktrees", where=f"{_WHERE} registered_worktrees",
+            cause=cause,
+            consequence="no pipeline worktree is swept or counted; nothing is moved",
+            repo=str(repo),
+        )
+        raise WorktreeSweepError(cause)
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
             paths.add(Path(line[len("worktree ") :].strip()).resolve())
@@ -136,6 +171,17 @@ def is_dirty(path: Path) -> bool:
     if result.returncode != 0:
         # Cannot read its state. Treated as dirty so the preserve path runs
         # rather than the remove path -- unknown is never "safe to discard".
+        # The failure itself is the operator's to know (ADR 0236).
+        alert.alert_operator(
+            what=f"read the state of pipeline worktree {path.name}",
+            where=f"{_WHERE} is_dirty",
+            cause=(
+                f"git -C {path} status exited {result.returncode}: "
+                f"{(result.stderr or '').strip()}"
+            ),
+            consequence="the worktree is treated as dirty and preserved, never discarded",
+            repo=str(path),
+        )
         return True
     return bool(result.stdout.strip())
 
@@ -206,35 +252,49 @@ def _is_permission_error(stderr: str) -> bool:
     return "permission denied" in lowered or "access is denied" in lowered
 
 
+def _readonly_failed(step: str, target: Path, exc: OSError) -> None:
+    logger.error(
+        "[SWEEP] clearing ReadOnly: cannot %s %s: %s: %s",
+        step, target, type(exc).__name__, exc,
+    )
+
+
 def clear_readonly(root: Path) -> int:
     """Clear the ReadOnly attribute across a tree. Returns dirs+files changed.
 
-    Walks bottom-up so a directory is cleared after its children, and never
-    raises: this runs on the failure path of a removal that has already gone
-    wrong, and an unreadable corner must not turn a retry into a crash.
+    An absent root is 0, and so is a filesystem with no ReadOnly attribute:
+    off Windows `os.stat` has no `st_file_attributes`, and there is nothing to
+    clear. A tree that cannot be listed, a path that cannot be stat'd, and a
+    chmod that fails log at ERROR and re-raise the `OSError` (ADR 0236): a
+    partly cleared tree used to return as if the clearing had worked, and the
+    sweep then reported the retry's failure without its cause.
     """
-    changed = 0
     if not root.exists():
         return 0
+    if not hasattr(os.stat(root), "st_file_attributes"):
+        return 0
 
-    targets: list[Path] = [root]
     try:
-        targets.extend(root.rglob("*"))
-    except OSError:
-        pass
+        targets: list[Path] = [root, *root.rglob("*")]
+    except OSError as exc:
+        _readonly_failed("list the tree under", root, exc)
+        raise
 
+    changed = 0
     for target in targets:
         try:
             attrs = os.stat(target).st_file_attributes
-        except (OSError, AttributeError):
-            continue
+        except OSError as exc:
+            _readonly_failed("stat", target, exc)
+            raise
         if not attrs & _READONLY:
             continue
         try:
             os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
-            changed += 1
-        except OSError:
-            continue
+        except OSError as exc:
+            _readonly_failed("chmod", target, exc)
+            raise
+        changed += 1
     return changed
 
 
@@ -259,6 +319,32 @@ def _remove_worktree(repo: Path, path: Path, log) -> subprocess.CompletedProcess
     return _run(["git", "-C", str(repo), "worktree", "remove", str(path)])
 
 
+def _sweep_failed(
+    repo: Path,
+    path: Path,
+    state: str,
+    *,
+    what: str,
+    cause: str,
+    consequence: str,
+    detail: str,
+    where: str,
+    action: str = "reported",
+    branch: str | None = None,
+) -> SweepEntry:
+    """Alert the operator about one entry the sweep could not finish.
+
+    The entry is still returned and the sweep goes on to the next worktree:
+    each is handled on its own, and nothing here deletes content, so stopping
+    would only strand the rest.
+    """
+    alert.alert_operator(
+        what=what, where=f"{_WHERE} {where}", cause=cause,
+        consequence=consequence, repo=str(repo),
+    )
+    return SweepEntry(path, state, action, ok=False, branch=branch, detail=detail)
+
+
 def _preserve_dirty(repo: Path, path: Path, log) -> SweepEntry:
     """Commit a dirty worktree's content to a graveyard branch, then remove it."""
     branch = current_branch(path) or "detached"
@@ -271,7 +357,19 @@ def _preserve_dirty(repo: Path, path: Path, log) -> SweepEntry:
             detail=f"could not create {grave}: {created.stderr.strip()}",
         )
 
-    _run(["git", "-C", str(path), "add", "-A"])
+    added = _run(["git", "-C", str(path), "add", "-A"])
+    if added.returncode != 0:
+        stderr = (added.stderr or "").strip()
+        return _sweep_failed(
+            repo, path, "dirty", where="_preserve_dirty", branch=grave,
+            what=f"stage stranded worktree {path.name} for preservation on {grave}",
+            cause=f"git add -A exited {added.returncode}: {stderr}",
+            consequence=(
+                "nothing is committed and the worktree is kept as it was; "
+                "a commit now would preserve less than the tree holds"
+            ),
+            detail=f"git add -A failed: {stderr}",
+        )
     committed = _run([
         "git", "-C", str(path), "commit",
         "-m", f"chore(graveyard): preserve stranded worktree {path.name}",
@@ -283,24 +381,59 @@ def _preserve_dirty(repo: Path, path: Path, log) -> SweepEntry:
         )
 
     pushed = _run(["git", "-C", str(path), "push", "-u", "origin", grave])
-    if pushed.returncode != 0:
-        # The local branch already holds the content, so the work is safe. A
-        # push failure is reported and the sweep proceeds; refusing here would
-        # strand the worktree again for a reason unrelated to its content.
-        log(f"    push of {grave} failed (content is safe on the local branch)")
 
     # #2355: write down what was preserved, as it is preserved. The archiver
     # used to infer the set from a `graveyard/<run>*` prefix this line has
-    # never produced, so it bundled none of them.
-    record_preserved(
-        repo, grave, source="sweep", detail=f"stranded worktree {path.name}"
-    )
+    # never produced, so it bundled none of them. Written even when the push
+    # failed: the local branch holds the content either way.
+    unrecorded = ""
+    try:
+        record_preserved(
+            repo, grave, source="sweep", detail=f"stranded worktree {path.name}"
+        )
+    except (OSError, ValueError) as exc:
+        unrecorded = f"{type(exc).__name__}: {exc}"
+        alert.alert_operator(
+            what=f"record graveyard branch {grave} in the preserved-branch ledger",
+            where=f"{_WHERE} _preserve_dirty",
+            cause=unrecorded,
+            consequence=(
+                "the archive finds the branch only by its graveyard/ prefix, with "
+                "no attribution; the content is safe on the branch"
+            ),
+            repo=str(repo),
+        )
+
+    if pushed.returncode != 0:
+        # ADR 0236 (#3585): the local branch holds the content, but a branch
+        # that exists only here is not preserved against this checkout going,
+        # so the worktree stays until the push can be made.
+        stderr = (pushed.stderr or "").strip()
+        return _sweep_failed(
+            repo, path, "dirty", where="_preserve_dirty", branch=grave,
+            what=f"push graveyard branch {grave} for stranded worktree {path.name}",
+            cause=f"git push exited {pushed.returncode}: {stderr}",
+            consequence=(
+                f"the worktree is kept; its content is committed to {grave}, "
+                "which exists only in this checkout"
+            ),
+            detail=f"committed to {grave} but the push failed, so not removed: {stderr}",
+        )
 
     removed = _remove_worktree(repo, path, log)
     if removed.returncode != 0:
+        stderr = (removed.stderr or "").strip()
+        return _sweep_failed(
+            repo, path, "dirty", where="_preserve_dirty", branch=grave,
+            what=f"remove stranded worktree {path.name} after preserving it on {grave}",
+            cause=f"git worktree remove exited {removed.returncode}: {stderr}",
+            consequence=f"the worktree stays registered and on disk; its content is on {grave}",
+            detail=f"preserved on {grave} but not removed: {stderr}",
+        )
+    if unrecorded:
         return SweepEntry(
-            path, "dirty", "reported", ok=False, branch=grave,
-            detail=f"preserved on {grave} but not removed: {removed.stderr.strip()}",
+            path, "dirty", "preserved-and-removed", ok=False, branch=grave,
+            detail=f"not recorded in the preserved-branch ledger: {unrecorded}",
         )
     return SweepEntry(path, "dirty", "preserved-and-removed", branch=grave)
 
@@ -313,21 +446,33 @@ def _relocate_orphan(repo: Path, path: Path) -> SweepEntry:
     try:
         shutil.move(str(path), str(dest))
     except OSError as exc:
-        return SweepEntry(
-            path, "orphan", "reported", ok=False, detail=f"could not relocate: {exc}"
+        return _sweep_failed(
+            repo, path, "orphan", where="_relocate_orphan",
+            what=f"relocate unregistered pipeline directory {path.name}",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="the directory stays where it is; nothing in it is deleted",
+            detail=f"could not relocate: {exc}",
         )
     return SweepEntry(dest, "orphan", "relocated", detail=f"from {path}")
+
+
+def _log_to_stderr(msg: str) -> None:
+    """The sweep's log when the caller passes none: never a no-op (ADR 0236)."""
+    sys.stderr.write(f"{msg}\n")
 
 
 def sweep_pipeline_worktrees(repo: Path | str, *, log=None) -> SweepResult:
     """Sweep every pipeline worktree, not only the issue being rolled.
 
-    Returns a result describing what happened to each. Never raises for a
-    single bad worktree: one that cannot be handled is reported by name and the
-    caller continues, because a stuck directory must not cost a roll.
+    Returns a result describing what happened to each. A worktree the sweep
+    cannot finish is reported by name, and the operator is alerted with its
+    cause, and the sweep goes on to the next. A worktree list git cannot give,
+    or an unexpected OSError, alerts and raises: the first before anything
+    moves, the second at the worktree it hit. With no `log`, every line goes
+    to stderr.
     """
     repo = Path(repo).resolve()
-    log = log or (lambda _msg: None)
+    log = log or _log_to_stderr
     result = SweepResult()
 
     registered = registered_worktrees(repo)
@@ -344,12 +489,27 @@ def sweep_pipeline_worktrees(repo: Path | str, *, log=None) -> SweepResult:
                 if removed.returncode == 0:
                     entry = SweepEntry(resolved, "clean", "removed")
                 else:
-                    entry = SweepEntry(
-                        resolved, "clean", "reported", ok=False,
-                        detail=f"git declined to remove it: {removed.stderr.strip()}",
+                    stderr = (removed.stderr or "").strip()
+                    entry = _sweep_failed(
+                        repo, resolved, "clean", where="sweep_pipeline_worktrees",
+                        what=f"remove clean pipeline worktree {resolved.name}",
+                        cause=f"git worktree remove exited {removed.returncode}: {stderr}",
+                        consequence="the worktree stays registered and on disk",
+                        detail=f"git declined to remove it: {stderr}",
                     )
-        except OSError as exc:  # pragma: no cover - defensive
-            entry = SweepEntry(path, "unknown", "reported", ok=False, detail=str(exc))
+        except OSError as exc:
+            log(f"  ERROR: {path.name}: {type(exc).__name__}: {exc}")
+            alert.alert_operator(
+                what=f"sweep pipeline worktree {path.name}",
+                where=f"{_WHERE} sweep_pipeline_worktrees",
+                cause=f"{type(exc).__name__}: {exc}",
+                consequence=(
+                    f"the sweep stops at {path.name}; it and any worktree after "
+                    "it are not handled"
+                ),
+                repo=str(repo),
+            )
+            raise
 
         result.entries.append(entry)
         log(f"  {entry.describe()}")

@@ -243,3 +243,20 @@ The archiver bundles every branch this ledger names. Committed before `worktrees
 Callers: `assemblyzero/speedrun/archive.py` (`recorded_for`, `claimed_by_other_run`) and `factory_report.build_report` read the ledger and do not catch. The two writers are the next two sections.
 
 Compliance: the reader alerts with what, where, cause and consequence and raises; the writer raises with the path and cause to callers that alert.
+
+### speedrun/worktrees.py (13 sites)
+
+The sweep runs at every launch and moves or removes the pipeline's worktrees. A run reaches only the path helpers (`pipeline_worktree_path`); the sweep is `tools/speedrun_roll.py`'s.
+
+- **A worktree list git cannot give alerts and raises before anything moves** (97). `registered_worktrees` returned an empty set, which made every pipeline worktree look unregistered, so the sweep would have relocated each one as an orphan. It now raises the new `WorktreeSweepError` with the exit code and stderr.
+- **A status that fails alerts** (136). The worktree is still treated as dirty and preserved, never discarded.
+- **ReadOnly clearing raises instead of clearing part of a tree** (223, 229, 236). A tree that cannot be listed, a path that cannot be stat'd, and a chmod that fails log at ERROR and re-raise. Off Windows, where `os.stat` has no `st_file_attributes`, there is nothing to clear and the answer is 0, decided once rather than by an `AttributeError` per path.
+- **Every entry the sweep cannot finish alerts** through the new `_sweep_failed`: a failed `git add -A` (274, which used to be ignored, so the commit could preserve less than the tree held), a removal that fails after preserving (300), an orphan that cannot be relocated (315), and a clean worktree that cannot be removed (344). Each is still returned as a problem entry and the sweep goes on to the next worktree.
+- **A graveyard push that fails keeps the worktree and alerts** (286). The branch exists only in this checkout, so the content is not yet preserved against the checkout going.
+- **A branch the ledger cannot record alerts, and the entry is a problem** (295). It is recorded even when the push failed, because the local branch holds the content either way.
+- **With no log, every line goes to stderr** (330); it went to a no-op.
+- **An unexpected OSError alerts and re-raises** (351), naming the worktree the sweep stopped at.
+
+Callers: `tools/speedrun_roll.py` at launch catches `Exception` around the sweep and writes SWEEP FAILED (continuing); every failure above alerts before that. `restore_repo` in the same file calls `registered_worktrees` from the roll's `finally`, so a worktree list that fails there now raises out of it, after the alert.
+
+Compliance: each failure path alerts with what, where, repository, cause and consequence; the list failure and the unexpected OSError stop the sweep, the per-worktree failures stop that worktree's handling and keep its content. Baseline: no loud-baseline entries existed for this module.
