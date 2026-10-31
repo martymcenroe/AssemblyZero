@@ -59,6 +59,10 @@ class _Runner:
             "exit_code": 0 if passed and not failed else 1,
         }
 
+    def require_dependencies(self):
+        """#4236: the runner interface checks its packages before a run;
+        this stand-in has none to check."""
+
     def run_tests(self, test_paths):
         return dict(self._r)
 

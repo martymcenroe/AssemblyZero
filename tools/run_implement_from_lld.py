@@ -1402,6 +1402,42 @@ def main():
     # gitignored data/, not at the root of a worktree the run removes.
     runs_dir = Path(original_repo_root) / "data" / "speedrun" / "runs"
 
+    # #4238: the tree the run works in gets the target's environment before
+    # the graph is built: `poetry install` and `npm ci` where its project
+    # files say so (assemblyzero/workflows/provisioning.py). A failed install
+    # stops the run here, before any model call. --no-worktree works in place,
+    # in the operator's own checkout and environment, and installs nothing.
+    if args.no_worktree:
+        print(
+            f"[implement] [ENV] --no-worktree: the run works in place in "
+            f"{repo_root}, in the environment already there; nothing is installed"
+        )
+    else:
+        from assemblyzero.workflows.provisioning import (
+            ProvisioningError,
+            provision_worktree,
+        )
+
+        try:
+            env_lines = provision_worktree(repo_root, mock=bool(args.mock))
+        except ProvisioningError as exc:
+            reason = str(exc)
+            print(f"[implement] ERROR: {reason}", file=sys.stderr)
+            alert.alert_operator(
+                what="the implementation run could not install its worktree's environment",
+                where="tools/run_implement_from_lld.py main, worktree provisioning",
+                cause=reason,
+                consequence=(
+                    "nothing ran: the graph was not built and no model was "
+                    f"called; {repo_root} is kept as it is"
+                ),
+                repo=str(original_repo_root), issue=args.issue,
+            )
+            record.finish("fail", reason)
+            sys.exit(1)
+        for line in env_lines:
+            print(f"[implement] {line}")
+
     # Issue #288/#289: Load and validate context files
     context_content = ""
     if args.context:

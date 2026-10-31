@@ -204,6 +204,10 @@ class TestingWorkflowState(TypedDict, total=False):
     #: Bounds N4c so an LLM that cannot reach the gate is not asked forever,
     #: and so the shortfall never falls through to implementation revision.
     coverage_augment_attempts: int
+    #: #4246: which framework's coverage fell short when N5 routed to N4c
+    #: ("pytest", "vitest", ...). N4c writes pytest tests only, so a gap in
+    #: any other framework halts there. MUST stay declared (#2018).
+    coverage_gap_framework: str
     previous_coverage: float  # Previous iteration coverage for stagnation detection
     previous_passed: int  # Previous iteration pass count for stagnation detection
     e2e_output: str

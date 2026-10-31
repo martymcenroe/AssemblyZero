@@ -17,11 +17,13 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import NamedTuple
 
+from assemblyzero.workflows.provisioning import ProvisioningError, provision_worktree
 from assemblyzero.workflows.orchestrator.artifacts import (
     detect_existing_artifacts,
     validate_artifact,
@@ -1282,47 +1284,53 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
     return update_stage_result(state, stage, result)
 
 
-_MISSING_ROOT_PACKAGE = "the current project could not be installed"
-
-
-def _provision_worktree_env(worktree_path: Path) -> subprocess.CompletedProcess:
-    """Install the target worktree's dependencies, tolerating a not-yet-built package.
+def _provision_impl_worktree(
+    state: OrchestrationState, stage: str, worktree_path: Path, start_time: float,
+) -> OrchestrationState | None:
+    """Install the worktree's environment before the sub-workflow runs (#4238).
 
     #1904 provisions the worktree so tests run in the TARGET's environment
     rather than AssemblyZero's -- phase 3 of the boostgauge campaign passed on
-    AssemblyZero's Pillow and phase 4 died on the target's psutil. That finding
-    is about DEPENDENCIES; installing the project's own package is incidental.
+    AssemblyZero's Pillow and phase 4 died on the target's psutil. #4238 adds
+    `npm ci` beside `poetry install`, runs both outside the workflow's own
+    virtualenv, and installs a worktree that was reused as well as one just
+    cut: a resume, or a retry after a failed install, used to run on the tree
+    as it was. The rules are `assemblyzero/workflows/provisioning.py`'s; a
+    mock rehearsal plans the same installs and runs none of them.
 
-    #1994: provisioning runs BEFORE the implementation stage writes any code, so
-    on a base that predates the work -- exactly what an idempotent roll requires
-    (#1959, #1968, #1986) -- the project package does not exist yet and poetry
-    refuses with "No file/folder found for package <name>". The first roll of
-    any arc therefore failed to provision.
-
-    So: try the full install, and retry with --no-root ONLY when the failure was
-    the absent root package. Where the package does exist it is still installed,
-    because that is what makes `import <pkg>` resolve the way the target repo
-    expects; dropping it unconditionally would trade a loud failure for a subtle
-    one.
+    Returns None when the worktree is ready. A failed install is a failed
+    stage, not a warning -- tests in the wrong environment are worse than no
+    tests -- and it is not retried: the same install against the same lock
+    fails the same way, so the run halts, and the halt alerts, the first time.
     """
-    result = run_command(
-        ["poetry", "install"],
-        cwd=str(worktree_path), check=False, capture_output=True, text=True,
-    )
-    if result.returncode == 0:
-        return result
+    try:
+        lines = provision_worktree(
+            worktree_path, mock=mock_mode(state), run=run_command,
+        )
+    except ProvisioningError as exc:
+        return _provisioning_failed(state, stage, exc, start_time)
+    for line in lines:
+        print(f"    {line}")
+    return None
 
-    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-    if _MISSING_ROOT_PACKAGE not in combined:
-        return result
 
-    print(
-        "    [ENV] project package not present yet (base predates the code); "
-        "retrying with --no-root"
-    )
-    return run_command(
-        ["poetry", "install", "--no-root"],
-        cwd=str(worktree_path), check=False, capture_output=True, text=True,
+def _provisioning_failed(
+    state: OrchestrationState, stage: str, exc: ProvisioningError, start_time: float,
+) -> OrchestrationState:
+    """The failed impl stage for an install that failed (#4238): an ERROR line
+    now, and the error the HALT node alerts with. #1993: wrapped in
+    update_stage_result, so `issue_number` survives to the state save."""
+    print(f"    [ENV] ERROR: {exc}", file=sys.stderr)
+    return update_stage_result(
+        state,
+        stage,
+        _make_stage_result(
+            status="failed",
+            error_message=str(exc),
+            duration_seconds=time.monotonic() - start_time,
+            attempts=1,
+            transient=False,
+        ),
     )
 
 
@@ -1825,44 +1833,11 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # The pr stage pushes the branch, and that push is the run's
             # product; its own stale-remote reconcile landed in #2349.
 
-            # #1904: provision the worktree's environment. Without this,
-            # `poetry run` silently falls through to PATH for missing
-            # commands and every test executes in AssemblyZero's venv —
-            # phase 3 of the boostgauge campaign passed on AZ's Pillow,
-            # phase 4 died on the target's psutil. A failed install is a
-            # failed stage, not a warning: tests in the wrong environment
-            # are worse than no tests.
-            if (worktree_path / "pyproject.toml").is_file():
-                print("    [ENV] poetry install (target worktree)...")
-                install_result = _provision_worktree_env(worktree_path)
-                if install_result.returncode != 0:
-                    detail = (
-                        (install_result.stderr or "").strip()
-                        or (install_result.stdout or "").strip()
-                        or "no output"
-                    )
-                    # #1993: every OTHER exit from this function returns
-                    # update_stage_result(...). This one returned a bare stage
-                    # result, so `state` -- and with it `issue_number` -- was
-                    # gone by the time graph.py persisted it, and the run died
-                    # with `KeyError: 'issue_number'` from save_orchestration_state.
-                    # The path that exists to REPORT a provisioning failure was
-                    # destroying the report and hiding its own cause.
-                    return update_stage_result(
-                        state,
-                        stage,
-                        _make_stage_result(
-                            status="failed",
-                            error_message=(
-                                f"Worktree environment provisioning failed "
-                                f"(poetry install exit "
-                                f"{install_result.returncode}): {detail[:400]}"
-                            ),
-                            duration_seconds=time.monotonic() - start_time,
-                            attempts=1,
-                        ),
-                    )
-                print("    [ENV] worktree environment ready")
+        # #1904, #4238: the worktree's environment, whether this entry cut the
+        # worktree or found it on disk, before the sub-workflow is built.
+        failed = _provision_impl_worktree(state, stage, worktree_path, start_time)
+        if failed is not None:
+            return failed
 
         # Run implementation workflow
         from assemblyzero.workflows.testing.graph import build_testing_workflow as create_impl_graph

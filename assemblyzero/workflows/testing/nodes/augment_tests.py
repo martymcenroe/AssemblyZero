@@ -21,6 +21,7 @@ rather than rewriting, so tests already proven to pass cannot be lost.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -509,7 +510,13 @@ def coverage_target_file(
     its passing tests as written. Without an issue number the suite cannot
     be named, and the first file stands as before; with only the suite in
     the list, the suite is the only place there is.
+
+    #4246: only a Python test file is a candidate. This node writes pytest
+    functions, and in a run with a Vitest suite too the first plan-owned
+    test file can be a `.test.ts`.
     """
+    python = [f for f in test_files if str(f).endswith(".py")]
+    test_files = python or test_files
     if issue_number is None or not test_files:
         return Path(test_files[0])
     suite = (Path(repo_root) / "tests" / f"test_issue_{issue_number}.py").resolve()
@@ -517,6 +524,23 @@ def coverage_target_file(
         if Path(candidate).resolve() != suite:
             return Path(candidate)
     return Path(test_files[0])
+
+
+def _halt_gap_not_augmentable(state: TestingWorkflowState, framework: str) -> dict[str, Any]:
+    """N4c's halt for a coverage gap in a suite it cannot add tests to
+    (#4246). Routed to HALT by `route_after_augment`, which alerts. Sending
+    the gap to the coder instead is what #2327 forbids: the cheapest edit
+    that raises coverage is deleting the code no test reaches."""
+    achieved = float(state.get("coverage_achieved", 0) or 0)
+    target = state.get("coverage_target", 90)
+    message = (
+        f"[N4c] the {framework} suite's coverage is {achieved:.1f}% against "
+        f"a target of {target}%, and N4c adds pytest tests only: it cannot "
+        f"add {framework} tests for the uncovered lines. The run stops here "
+        f"rather than send a test gap to implementation (#2327, #4246)."
+    )
+    print(f"ERROR {message}", file=sys.stderr)
+    return {"next_node": "end", "error_message": message}
 
 
 def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
@@ -527,6 +551,15 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     never route the shortfall to implementation revision.
     """
     gate_log("[N4c] Adding tests for uncovered lines...")
+
+    # #4246: N5 routes every framework's coverage shortfall here, never to
+    # the coder. This node reads pytest-cov's term-missing report and writes
+    # and vets pytest functions, so a gap in any other framework's suite is
+    # one it cannot fill. A state with no framework named is from before
+    # #4246, when only pytest's shortfall came here.
+    gap = state.get("coverage_gap_framework") or "pytest"
+    if gap != "pytest":
+        return _halt_gap_not_augmentable(state, gap)
 
     output = state.get("green_phase_output", "") or ""
     coverage_achieved = float(state.get("coverage_achieved", 0) or 0)

@@ -12,7 +12,10 @@ from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
     TestRunResult,
 )
-from assemblyzero.workflows.testing.runners.base_runner import BaseTestRunner
+from assemblyzero.workflows.testing.runners.base_runner import (
+    BaseTestRunner,
+    combined_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +27,14 @@ class PytestRunner(BaseTestRunner):
         self,
         test_paths: list[str] | None = None,
         extra_args: list[str] | None = None,
+        *,
+        measure_coverage: bool = False,
     ) -> TestRunResult:
         """Run pytest with --tb=short -q and parse output.
 
         Uses --json-report if available, falls back to stdout parsing.
+        `measure_coverage` is accepted and ignored (#4246): the green phase
+        measures pytest's coverage through `run_pytest`, with pytest-cov.
         """
         # #1904: bare "pytest" resolved from the ORCHESTRATOR's PATH — AZ's
         # venv, not the target repo's. Phase 3 of the boostgauge campaign
@@ -42,14 +49,20 @@ class PytestRunner(BaseTestRunner):
         if test_paths:
             command.extend(test_paths)
 
-        raw_output, exit_code = self._run_subprocess(command)
-        return self.parse_results(raw_output, exit_code)
+        # #3065: pytest's output is for people, and its summary can be on
+        # either stream, so it reads both, joined as they always were.
+        stdout, stderr, exit_code = self._run_subprocess(command)
+        return self.parse_results(combined_output(stdout, stderr), exit_code)
 
-    def parse_results(self, raw_output: str, exit_code: int) -> TestRunResult:
+    def parse_results(
+        self, raw_output: str, exit_code: int, stderr: str = "",
+    ) -> TestRunResult:
         """Parse pytest output into unified TestRunResult.
 
         Attempts JSON report parsing first, falls back to regex on stdout.
+        `stderr`, when given separately, is read with `raw_output` (#3065).
         """
+        raw_output = combined_output(raw_output, stderr)
         passed = 0
         failed = 0
         skipped = 0

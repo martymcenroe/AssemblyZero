@@ -134,7 +134,7 @@ class TestPlaywrightRunnerRunTests:
     @patch.object(PlaywrightRunner, "_run_subprocess")
     def test_t220_invokes_correct_command(self, mock_subprocess, playwright_runner):
         """T220: PlaywrightRunner.run_tests invokes correct command."""
-        mock_subprocess.return_value = ('{"config":{},"suites":[]}', 0)
+        mock_subprocess.return_value = ('{"config":{},"suites":[]}', "", 0)  # #3065
         playwright_runner.run_tests(test_paths=["tests/dashboard.spec.ts"])
 
         args, _ = mock_subprocess.call_args

@@ -24,7 +24,7 @@ class TestPytestRunsInTargetEnv:
     def test_command_goes_through_poetry_run(self, tmp_path):
         runner = _runner(tmp_path)
         with patch.object(
-            runner, "_run_subprocess", return_value=("1 passed", 0)
+            runner, "_run_subprocess", return_value=("1 passed", "", 0)  # #3065
         ) as sub:
             runner.run_tests(test_paths=["tests/unit/test_x.py"])
 
@@ -37,7 +37,7 @@ class TestPytestRunsInTargetEnv:
     def test_extra_args_and_paths_still_ride_along(self, tmp_path):
         runner = _runner(tmp_path)
         with patch.object(
-            runner, "_run_subprocess", return_value=("1 passed", 0)
+            runner, "_run_subprocess", return_value=("1 passed", "", 0)  # #3065
         ) as sub:
             runner.run_tests(
                 test_paths=["tests/unit/test_x.py"],

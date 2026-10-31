@@ -593,7 +593,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.scaffold_import_unresolved", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "Scaffold cannot build the red-phase imports",
-        _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 1),
+        # `_scaffold_python_tests` since #4244 moved the pytest scaffold out
+        # of `scaffold_tests` so a run of several frameworks can call it.
+        _s(f"{_TS}/nodes/scaffold_tests.py::_scaffold_python_tests::return", 1),
         created_by="#4148 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
         notes="a name the Section 10 bodies use is defined in two planned files, or "
               "in none; it used to be imported from the first Add file, which "
@@ -602,14 +604,80 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.no_test_files", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "No test",
-        _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 0)
+        _s(f"{_TS}/nodes/scaffold_tests.py::_scaffold_python_tests::return", 0)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_pytest_single::return", 0, 1)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 0),
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 0)
+        + _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 0)
+        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 0),
         notes=(
             "no scenarios, no test files, or the named file is not on disk. "
             "Lost a fifth site in #2753 when the unreachable run_tests node "
-            "was retired; the four here are live"
+            "was retired. #4236 added the multi-framework phases' own guard, "
+            "the same message, in verify_red_phase and verify_green_phase"
         ),
+    ),
+    Gate(
+        "impl.scaffold_framework_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "tests cannot be",
+        _s(f"{_TS}/nodes/scaffold_tests.py::_halt_scaffold_framework::return", 0),
+        decided_in=f"{_TS}/nodes/scaffold_tests.py::scaffold_tests",
+        created_by="#4244 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="one framework of the run cannot be scaffolded: its runner cannot "
+              "start, its template raises, or its scaffold would land where no "
+              "framework of the run runs it (#4243). N2 used to scaffold the first "
+              "framework alone, so a second framework's red phase had nothing to run",
+    ),
+    Gate(
+        "impl.scaffold_validation_cannot_run", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "scaffold cannot be",
+        _s(f"{_TS}/nodes/validate_tests_mechanical.py::_halt_validation_cannot_run::return", 0),
+        decided_in=f"{_TS}/nodes/validate_tests_mechanical.py::_non_pytest_errors",
+        created_by="#3081 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a Playwright, Jest or Vitest scaffold's validator cannot be built "
+              "(no npx), or the run's frameworks cannot be read. It used to return "
+              "is_valid True with a warning, so a check that could not run passed",
+    ),
+    Gate(
+        "impl.test_file_unowned", "impl", JUDGES_UPSTREAM, ACTION_HALT,
+        "A test file N4 wrote that no",
+        _s(f"{_TS}/nodes/implementation/orchestrator.py::_halt_test_file_unowned::return", 0),
+        decided_in=f"{_TS}/framework_ownership.py::owner_of",
+        created_by="#4245 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N4 wrote a test file (a Python test under tests/, or a .test.ts, "
+              ".test.js, .spec.ts or .spec.js) that no framework of the run runs, "
+              "or that two would. N4 used to register Python tests alone, so a "
+              "TypeScript test it wrote never ran and a regression in it passed",
+    ),
+    Gate(
+        "impl.framework_unresolved", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "the test frameworks for issue",
+        _s(f"{_TS}/nodes/load_lld.py::_framework_resolution_failed::return", 0),
+        created_by="#4237 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="N0 cannot say which runner tests a file the LLD names, or where: no "
+              "directory holding a .test.ts path declares a runner, the LLD names "
+              "a runner the project has nowhere, or a package.json cannot be "
+              "read. It used to place such a runner at the root, where nothing "
+              "was installed, or raise out of the node",
+    ),
+    Gate(
+        "impl.framework_cannot_run", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "The phase stops here: every framework of the run",
+        _s(f"{_TS}/nodes/verify_phases.py::_halt_legs_cannot_run::return", 0),
+        decided_in=f"{_TS}/nodes/verify_phases.py::_framework_legs and ::_preflight_legs",
+        created_by="#4236 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a multi-framework red or green phase where a test file belongs to "
+              "no framework or to two, or a framework's runner or packages are "
+              "missing; no suite runs, so no framework is graded alone",
+    ),
+    Gate(
+        "impl.full_suite_cannot_run", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "the full-suite regression gate cannot",
+        _s(f"{_TS}/nodes/verify_phases.py::_halt_full_suite_gate::return", 0),
+        decided_in=f"{_TS}/nodes/verify_phases.py::_full_suite_gate",
+        created_by="#3087 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a framework's whole suite cannot start, or collects nothing. The "
+              "pytest gate used to read a whole suite that collected nothing as "
+              "'0 tests passed, no regressions' and validate it",
     ),
     # #2753: `impl.test_file_validation` and `impl.test_execution_failed`
     # stood here until 2026-09-04. Every site either row named lived in
@@ -657,9 +725,23 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.coverage_unreadable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "COVERAGE MEASUREMENT FAILED",
         _s(f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage::return", 0)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 1),
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 1)
+        + _s(f"{_TS}/nodes/verify_phases.py::_halt_coverage_unreadable::return", 0),
         decided_in=f"{_TS}/coverage_report.py",
-        notes="a harness defect, never a test gap; see #2690's mapping",
+        notes="a harness defect, never a test gap; see #2690's mapping. Since "
+              "#4246 a Jest or Vitest run whose tests all pass and whose "
+              "json-summary cannot be read halts here too; it read 0%",
+    ),
+    Gate(
+        "impl.coverage_gap_not_augmentable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "and N4c adds pytest tests only",
+        _s(f"{_TS}/nodes/augment_tests.py::_halt_gap_not_augmentable::return", 0),
+        decided_in=f"{_TS}/nodes/augment_tests.py::augment_tests_for_coverage",
+        created_by="#4246 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="a coverage shortfall in a Jest, Vitest or Playwright suite reaches "
+              "N4c, which writes pytest tests only. The shortfall used to go to "
+              "N4_implement_code, where #2327 forbids it: the cheapest edit that "
+              "raises coverage deletes the code no test reaches",
     ),
     Gate(
         "impl.e2e_safety_limit", "impl", JUDGES_BUDGET, ACTION_HALT,
@@ -699,7 +781,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.circuit_breaker", "impl", JUDGES_BUDGET, ACTION_HALT,
         "[CIRCUIT]",
         _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 2)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 5, 7)
+        # 4 and 6 since #3085 moved the zero-collected halt into
+        # `_zero_collected_route`; they were 5 and 7.
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 4, 6)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 2, 4),
         decided_in=f"{_TS}/circuit_breaker.py::check_circuit_breaker",
     ),
@@ -783,7 +867,8 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         # rather than the module that defines the token, which is the honest
         # pointer and the narrowest the check can currently be given.
         "Test(s) failing for a reason no implementation can fix",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 4),
+        # 3 since #3085 moved the zero-collected halt out of this function.
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 3),
         decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase",
         justified_by="#2761",
         notes=(
@@ -828,20 +913,23 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.green.collection_broken", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "collected 0 tests",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 2),
+        _s(f"{_TS}/nodes/verify_phases.py::_zero_collected_route::return", 0),
         created_by="#2546", justified_by="#2723",
         notes=(
             "infrastructure since #2765 (operator ruling 2026-09-04 on "
             "#2723): pytest collecting nothing is a broken suite -- an import "
             "error, a syntax error, a file pytest cannot see -- not a failing "
             "one. Worth keeping either way: a suite that collects zero tests "
-            "trivially passes and would otherwise read as green"
+            "trivially passes and would otherwise read as green. Since #3085 "
+            "one helper both green branches call, so a Jest, Vitest or "
+            "Playwright suite that collects nothing halts here too"
         ),
     ),
     Gate(
         "impl.green.iteration_cap", "impl", JUDGES_BUDGET, ACTION_HALT,
         "Green phase failed after",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 3, 6)
+        # 2 and 5 since #3085 moved the zero-collected halt out; were 3 and 6.
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_green_pytest_single::return", 2, 5)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 1, 3),
     ),
     Gate(
@@ -882,7 +970,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.stagnation.full_suite", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "Full suite regression stagnant",
-        decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase (advisory)",
+        decided_in=f"{_TS}/nodes/verify_phases.py::_full_suite_gate (advisory)",
         created_by="#2723",
         notes="the route below it already sends the named regressions back to N4",
     ),
@@ -944,7 +1032,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_OR}/stages.py::_make_stage_result::stage_result", 0)
         + _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 2)
         + _s(f"{_OR}/stages.py::run_spec_stage::stage_result", 0)
-        + _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 1)
+        + _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 0)
         + _s(f"{_OR}/stages.py::run_cleanup_stage::stage_result", 0),
         created_by="#2677",
         notes="relays a halt a sub-workflow already decided; not a second death",
@@ -974,7 +1062,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "orchestrator.impl_stage_exception", "orchestrator", JUDGES_INFRASTRUCTURE,
         ACTION_HALT, "Implementation stage error",
-        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 3),
+        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 2),
     ),
     Gate(
         "orchestrator.pr_stage_exception", "orchestrator", JUDGES_INFRASTRUCTURE,
@@ -1006,13 +1094,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     ),
     Gate(
         "impl.worktree_env_provisioning", "orchestrator", JUDGES_INFRASTRUCTURE,
-        ACTION_HALT, "Worktree environment provisioning failed",
-        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 0),
+        ACTION_HALT, "worktree provisioning failed",
+        _s(f"{_OR}/stages.py::_provisioning_failed::stage_result", 0),
+        decided_in="assemblyzero/workflows/provisioning.py::ProvisioningError",
+        notes="#4238: the install moved into provisioning.py, whose "
+        "ProvisioningError messages carry this head; _provisioning_failed "
+        "relays them",
     ),
     Gate(
         "infra.worktree", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Git worktree error",
-        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 2),
+        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 1),
     ),
     Gate(
         "orchestrator.pr.no_worktree", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,

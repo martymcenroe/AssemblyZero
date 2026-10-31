@@ -147,49 +147,60 @@ class TestN25FrameworkValidation:
         assert result["validation_result"]["is_valid"] is True
 
     @patch("assemblyzero.workflows.testing.nodes.validate_tests_mechanical.get_runner")
-    def test_playwright_uses_runner_validation(self, mock_get_runner):
-        """Playwright framework triggers runner.validate_test_file()."""
+    def test_playwright_uses_runner_validation(self, mock_get_runner, tmp_path):
+        """Playwright framework triggers runner.validate_test_file() on the
+        file as it is on disk (#3081)."""
         mock_runner = MagicMock()
         mock_runner.validate_test_file.return_value = []  # No errors
         mock_get_runner.return_value = mock_runner
+        content = "import { test } from '@playwright/test';\ntest('works', async () => {});"
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "app.spec.ts").write_text(content, encoding="utf-8")
 
         state = {
-            "generated_tests": "import { test } from '@playwright/test';\ntest('works', async () => {});",
+            "generated_tests": content,
             "parsed_scenarios": {"scenarios": []},
             "scaffold_attempts": 0,
             "framework_config": {"framework": TestFramework.PLAYWRIGHT},
-            "repo_root": ".",
+            "repo_root": str(tmp_path),
             "test_files": ["tests/app.spec.ts"],
         }
         result = validate_tests_mechanical_node(state)
         assert result["validation_result"]["is_valid"] is True
-        mock_runner.validate_test_file.assert_called_once()
+        mock_runner.validate_test_file.assert_called_once_with("tests/app.spec.ts", content)
 
     @patch("assemblyzero.workflows.testing.nodes.validate_tests_mechanical.get_runner")
-    def test_jest_validation_errors_propagated(self, mock_get_runner):
+    def test_jest_validation_errors_propagated(self, mock_get_runner, tmp_path):
         """Jest runner validation errors are captured in result."""
         mock_runner = MagicMock()
         mock_runner.validate_test_file.return_value = [
             "No test structure (describe/it/test) found"
         ]
         mock_get_runner.return_value = mock_runner
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "app.test.ts").write_text(
+            "console.log('not a test');", encoding="utf-8"
+        )
 
         state = {
             "generated_tests": "console.log('not a test');",
             "parsed_scenarios": {"scenarios": []},
             "scaffold_attempts": 0,
             "framework_config": {"framework": "jest"},
-            "repo_root": ".",
+            "repo_root": str(tmp_path),
             "test_files": ["tests/app.test.ts"],
         }
         result = validate_tests_mechanical_node(state)
         assert result["validation_result"]["is_valid"] is False
-        assert len(result["validation_result"]["errors"]) == 1
+        assert result["validation_result"]["errors"] == [
+            "No test structure (describe/it/test) found"
+        ]
         assert result["scaffold_attempts"] == 1
 
     @patch("assemblyzero.workflows.testing.nodes.validate_tests_mechanical.get_runner")
-    def test_runner_unavailable_skips_validation(self, mock_get_runner):
-        """If runner creation fails (e.g., npx missing), skip validation."""
+    def test_runner_unavailable_halts_validation(self, mock_get_runner):
+        """If runner creation fails (e.g., npx missing), the validation cannot
+        run, and that halts (#3081, ADR 0236). It used to pass with a warning."""
         mock_get_runner.side_effect = EnvironmentError("npx not found")
 
         state = {
@@ -200,9 +211,9 @@ class TestN25FrameworkValidation:
             "repo_root": ".",
         }
         result = validate_tests_mechanical_node(state)
-        # Should pass (skip) with a warning
-        assert result["validation_result"]["is_valid"] is True
-        assert len(result["validation_result"]["warnings"]) > 0
+        assert result["validation_result"]["is_valid"] is False
+        assert "npx not found" in result["error_message"]
+        assert result["scaffold_route"] == "escalate"
 
 
 # =============================================================================
