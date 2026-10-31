@@ -60,6 +60,13 @@ ORDINARY_LLD = """# LLD
 | src/app.py | Modify | add a flag |
 """
 
+# visual_gate.config refuses a declaration with no renderer_cmd or separation_floor.
+GATE = {
+    "contract": "docs/design/contract.md",
+    "renderer_cmd": ["python", "tools/render.py"],
+    "separation_floor": 85,
+}
+
 
 def _repo(tmp_path: Path, *, gate: dict | str | None = None) -> Path:
     repo = tmp_path / "repo"
@@ -112,7 +119,7 @@ class TestTheContract:
         assert "repo root" in _cannot_run(out, capsys)
 
     def test_63_a_declared_contract_that_is_missing_halts(self, tmp_path, capsys):
-        repo = _repo(tmp_path, gate={"contract": "docs/design/contract.md"})
+        repo = _repo(tmp_path, gate=GATE)
         out = cm.compile_assertion_manifest(_state(tmp_path, GOOD_LLD, repo_root=str(repo)))
         assert "docs/design/contract.md" in _cannot_run(out, capsys)
 
@@ -122,7 +129,7 @@ class TestTheContract:
         assert "JSONDecodeError" in _cannot_run(out, capsys)
 
     def test_66_a_contract_that_cannot_be_read_halts(self, tmp_path, monkeypatch, capsys):
-        repo = _repo(tmp_path, gate={"contract": "docs/design/contract.md"})
+        repo = _repo(tmp_path, gate=GATE)
         contract = repo / "docs" / "design" / "contract.md"
         contract.write_text("# Contract\n", encoding="utf-8")
         real = Path.read_text
