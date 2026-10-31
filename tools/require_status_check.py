@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Add one context to a branch's required status checks (#3447).
 
-Generalizes the `--require-check` phase of `land_polybolos_ci_workflow.py`,
-which does this correctly but has owner, repo, branch and check name welded in
+Generalizes the `--require-check` phase of a one-shot lander, since deleted
+(#3154), which did this correctly but has owner, repo, branch and check name welded in
 as module constants. A second repository needed the same operation; copying the
 file again would have made three.
 
