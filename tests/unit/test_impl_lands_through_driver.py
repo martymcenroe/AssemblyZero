@@ -270,11 +270,17 @@ class TestAnUnfinishedRunKeepsItsWork:
         self, target_repo, driver_configured, monkeypatch,
     ):
         """Ledger 0908, line 296: an unchecked `git status` read as an empty
-        listing, nothing was kept, and the removal then deleted ignored files."""
+        listing, nothing was kept, and the removal then deleted ignored files.
+
+        The final checkpoint is stubbed to "nothing to commit": since #3810 a
+        broken repository raises at the checkpoint first (the test below), so
+        without the stub this would never reach `git status`."""
+        from assemblyzero.workflows.testing import checkpoints
         from tools.run_implement_from_lld import finish_standalone_run
 
         wt = _worktree_with_work(target_repo)
         (wt / ".git").write_text("gitdir: /nonexistent/worktree\n", encoding="utf-8")
+        monkeypatch.setattr(checkpoints, "commit_checkpoint", lambda *a, **k: False)
         land = _Landed()
         monkeypatch.setattr(merge_driver, "land", land)
 
@@ -284,6 +290,28 @@ class TestAnUnfinishedRunKeepsItsWork:
         assert not land.calls
         assert (wt / "docs" / "lineage" / "active" / "42-testing" / "001-lld.md").exists()
         assert any(ln.startswith("stopped: `git status") for ln in lines), lines
+
+    def test_a_final_checkpoint_that_fails_raises_before_anything_is_moved(
+        self, target_repo, driver_configured, monkeypatch,
+    ):
+        """#3810: the final checkpoint on a broken repository raises
+        CheckpointError out of the finish; main's handler reports and alerts
+        it. Nothing is moved aside and nothing is landed."""
+        from assemblyzero.workflows.testing import checkpoints
+        from tools.run_implement_from_lld import finish_standalone_run
+
+        wt = _worktree_with_work(target_repo)
+        (wt / ".git").write_text("gitdir: /nonexistent/worktree\n", encoding="utf-8")
+        land = _Landed()
+        monkeypatch.setattr(merge_driver, "land", land)
+
+        with pytest.raises(checkpoints.CheckpointError, match="checkpoint final"):
+            finish_standalone_run(target_repo, wt, 42, "main", mock=False)
+
+        assert not land.calls
+        assert (wt / "docs" / "lineage" / "active" / "42-testing" / "001-lld.md").exists()
+        assert (wt / "report.md").read_text(encoding="utf-8") == "late\n"
+        assert not (target_repo / "data" / "runs-kept").exists()
 
     def test_work_the_final_checkpoint_missed_is_never_moved_aside_and_landed(
         self, target_repo, driver_configured, monkeypatch,

@@ -32,9 +32,13 @@ Pushing the branch is the pr stage's job. That push is the run's product,
 it is untouched here, and its own stale-remote reconcile landed in #2349.
 
 Design rules:
-1. **Best-effort.** Checkpoint failures must NOT fail the node they were
-   protecting. The original work survives in the working tree either way;
-   committing is a recovery convenience, not a correctness guarantee.
+1. **A failure is loud and raised (ADR 0236, #3810).** A checkpoint that
+   cannot be committed writes an ERROR line to stderr and raises
+   ``CheckpointError`` naming the worktree and git's stderr. It used to be
+   best-effort: every failure printed "(non-fatal)" to stdout and returned
+   False, which read the same as "nothing to commit", and the standalone
+   finish then had to guess which it was (#4150). Nothing here alerts: the
+   caller that can stop the run does, so one failure is one alert.
 2. **Worktree-scoped.** Stages only files inside the worktree. Excludes
    workflow-internal dirs (.assemblyzero/, data/lineage/) so the checkpoint
    commits represent ONLY the work the human cares about.
@@ -49,10 +53,30 @@ Design rules:
 """
 from __future__ import annotations
 
-import re
+import logging
 import subprocess
+import sys
 from pathlib import Path
 from typing import NamedTuple
+
+logger = logging.getLogger(__name__)
+
+
+class CheckpointError(RuntimeError):
+    """A checkpoint commit or a measurement note failed. Raised, never returned."""
+
+
+def _failed(tag: str, message: str) -> CheckpointError:
+    """Say the failure at ERROR, on stderr and in the log; return the error to raise."""
+    logger.error("[%s] %s", tag, message)
+    print(f"ERROR [{tag}] {message}", file=sys.stderr, flush=True)
+    return CheckpointError(message)
+
+
+def _git_said(result: subprocess.CompletedProcess) -> str:
+    """git's own words for a failed command: its stderr, else its stdout."""
+    return (result.stderr or result.stdout or "").strip()[:400] or "(git printed nothing)"
+
 
 # Paths excluded from checkpoint commits (workflow-internal, not user work).
 # Named once: the standalone finish (#4150) reads this to tell a deliberate
@@ -69,8 +93,10 @@ def commit_checkpoint(worktree_path: str | Path | None,
     """Stage and commit the current state of `worktree_path`. Local only.
 
     Args:
-        worktree_path: Path to the git worktree to checkpoint. If None or
-            not a directory, no-op (returns False).
+        worktree_path: Path to the git worktree to checkpoint. None (or "")
+            means the caller named no worktree, so there is nothing to
+            commit: a quiet False, which is an answer, not a failure. A path
+            that is not a directory is a failure.
         issue_number: Issue number for the commit message reference. Can
             be int, str, or None (omitted from message).
         name: Checkpoint name -- inserted as `[CP:<name>]` in the commit
@@ -78,52 +104,74 @@ def commit_checkpoint(worktree_path: str | Path | None,
             "post-green".
 
     Returns:
-        True if a checkpoint commit was created. False if no-op (no
-        worktree, nothing to commit, or any failure -- failures are
-        warned to stdout but never raised).
+        True if a checkpoint commit was created. False when no worktree was
+        named or nothing was staged (git diff --cached exits 0).
+
+    Raises:
+        CheckpointError: the worktree is not a directory, or git add, git
+            diff --cached or git commit failed, timed out or could not run
+            (#3810). The message names the worktree and git's stderr, and an
+            ERROR line has already gone to stderr.
     """
     if not worktree_path:
         return False
     wt = Path(worktree_path)
+    tag = f"CP:{name}"
     if not wt.is_dir():
-        return False
-
-    try:
-        # Stage everything except workflow-internal dirs
-        add_args = ["git", "-C", str(wt), "add", "-A", "--", "."]
-        add_args.extend(_EXCLUDE_PATHSPECS)
-        _run(add_args, timeout=_GIT_TIMEOUT_S)
-
-        # Skip if nothing staged
-        diff = _run(
-            ["git", "-C", str(wt), "diff", "--cached", "--quiet"],
-            timeout=_GIT_TIMEOUT_S,
+        raise _failed(
+            tag,
+            f"checkpoint {name}: the worktree {wt} is not a directory, so "
+            "nothing could be committed",
         )
-        if diff.returncode == 0:
-            return False  # nothing to commit; benign
 
-        if issue_number is not None:
-            msg = f"[CP:{name}] issue #{issue_number}: workflow checkpoint"
-        else:
-            msg = f"[CP:{name}] workflow checkpoint"
+    def git(*args: str) -> subprocess.CompletedProcess:
+        try:
+            return _run(["git", "-C", str(wt), *args], timeout=_GIT_TIMEOUT_S)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            raise _failed(
+                tag,
+                f"checkpoint {name} in {wt}: `git {args[0]}` could not run: "
+                f"{type(e).__name__}: {e}",
+            ) from e
 
-        commit = _run(
-            ["git", "-C", str(wt), "commit", "-m", msg],
-            timeout=_GIT_TIMEOUT_S,
+    # Stage everything except workflow-internal dirs
+    add = git("add", "-A", "--", ".", *_EXCLUDE_PATHSPECS)
+    if add.returncode != 0:
+        raise _failed(
+            tag,
+            f"checkpoint {name} in {wt}: `git add` failed (exit "
+            f"{add.returncode}): {_git_said(add)}",
         )
-        if commit.returncode != 0:
-            print(f"  [CP:{name}] commit failed (non-fatal): "
-                  f"{(commit.stderr or commit.stdout).strip()[:200]}")
-            return False
 
-        # No push. See the module docstring (#2339): the local commit IS the
-        # recovery artifact, and the push that used to follow could only ever
-        # fail loudly or succeed silently.
-        return True
+    # `--quiet` exits 0 for nothing staged and 1 for staged changes; any
+    # other exit is git failing, not a diff.
+    diff = git("diff", "--cached", "--quiet")
+    if diff.returncode == 0:
+        return False  # nothing to commit: an answer, not a failure
+    if diff.returncode != 1:
+        raise _failed(
+            tag,
+            f"checkpoint {name} in {wt}: `git diff --cached` failed (exit "
+            f"{diff.returncode}): {_git_said(diff)}",
+        )
 
-    except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"  [CP:{name}] checkpoint failed (non-fatal): {e}")
-        return False
+    if issue_number is not None:
+        msg = f"[CP:{name}] issue #{issue_number}: workflow checkpoint"
+    else:
+        msg = f"[CP:{name}] workflow checkpoint"
+
+    commit = git("commit", "-m", msg)
+    if commit.returncode != 0:
+        raise _failed(
+            tag,
+            f"checkpoint {name} in {wt}: `git commit` failed (exit "
+            f"{commit.returncode}): {_git_said(commit)}",
+        )
+
+    # No push. See the module docstring (#2339): the local commit IS the
+    # recovery artifact, and the push that used to follow could only ever
+    # fail loudly or succeed silently.
+    return True
 
 
 # =============================================================================
@@ -142,16 +190,18 @@ def commit_checkpoint(worktree_path: str | Path | None,
 # checkpoint N4 just cut -- under `refs/notes/az-measure`. A note is keyed by
 # the commit, so it survives the #2310 rename to `graveyard/` and any later
 # branch that carries the commit, and it is local for the same reasons the
-# checkpoint is. Best-effort like the checkpoint: a failed note is printed and
-# the run goes on, because a measurement that cannot be recorded is not a
-# reason to stop measuring.
+# checkpoint is. A note that cannot be written, and a note that cannot be
+# read, raise ``CheckpointError`` like a failed checkpoint (#3810). They used
+# to be best-effort: a failed write cost the next resume its choice without
+# telling anyone, and a failed or corrupt read looked exactly like a commit
+# never measured.
 
 #: The notes ref carrying N5's measurement of a checkpoint commit.
 MEASURE_NOTES_REF = "az-measure"
 
-_MEASUREMENT_RE = re.compile(
-    r"passed=(\d+)\s+total=(\d+)\s+coverage=([0-9]+(?:\.[0-9]+)?)"
-)
+#: The note's fields, in the order ``record_measurement`` writes them:
+#: ``passed=<int> total=<int> coverage=<float>``.
+_MEASUREMENT_FIELDS = ("passed", "total", "coverage")
 
 
 class Measurement(NamedTuple):
@@ -172,10 +222,15 @@ class Measurement(NamedTuple):
 
 def record_measurement(worktree_path: str | Path | None,
                        passed: int, total: int, coverage: float) -> bool:
-    """Note N5's result on HEAD of `worktree_path`. Local only, best-effort.
+    """Note N5's result on HEAD of `worktree_path`. Local only.
 
-    Returns True when the note was written. False on a missing worktree or
-    any git failure -- warned to stdout, never raised.
+    Returns True when the note was written. False only when no worktree was
+    named or the path is not a directory (unchanged; not a ledger site).
+
+    Raises:
+        CheckpointError: `git notes add` failed, timed out or could not run
+            (#3810). The message names the worktree, the note and git's
+            stderr, and an ERROR line has already gone to stderr.
     """
     if not worktree_path:
         return False
@@ -183,6 +238,7 @@ def record_measurement(worktree_path: str | Path | None,
     if not wt.is_dir():
         return False
     note = f"passed={int(passed)} total={int(total)} coverage={float(coverage):.1f}"
+    what = f"measurement note {note!r} on HEAD of {wt}"
     try:
         result = _run(
             ["git", "-C", str(wt), "notes", f"--ref={MEASURE_NOTES_REF}",
@@ -190,56 +246,89 @@ def record_measurement(worktree_path: str | Path | None,
             timeout=_GIT_TIMEOUT_S,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
-        # fail-open: the note is a hint for a LATER resume, not this run's
-        # verdict -- N5 has already measured and printed. A note that cannot
-        # be written costs the next resume its preference (it takes the
-        # newest attempt, #2845's behaviour), and the miss is printed here.
-        print(f"    [N5] measurement note failed (non-fatal): {e}")
-        return False
+        raise _failed(
+            "N5", f"{what}: `git notes add` could not run: {type(e).__name__}: {e}",
+        ) from e
     if result.returncode != 0:
-        print(f"    [N5] measurement note failed (non-fatal): "
-              f"{(result.stderr or result.stdout).strip()[:200]}")
-        return False
+        raise _failed(
+            "N5",
+            f"{what}: `git notes add` failed (exit {result.returncode}): "
+            f"{_git_said(result)}",
+        )
     return True
 
 
 def read_measurement(repo_path: str | Path, commit: str) -> Measurement | None:
     """The measurement noted on `commit`, or None when there is none.
 
-    None also for a repo git cannot read and for a note that does not parse:
-    an unreadable measurement is no measurement, and the caller's fallback
-    (newest attempt, #2845) is the behaviour that existed before notes did.
+    None means git said the commit carries no note (`git notes show` exits 1,
+    "no note found"): the commit was never measured, and the caller takes the
+    newest attempt instead (#2845). None also when no repository or no commit
+    was named, since nothing was asked.
+
+    Raises:
+        CheckpointError: git could not run or failed any other way (no
+            repository, an unknown commit), or the note is not
+            ``passed=<int> total=<int> coverage=<float>`` (#3810). An
+            unreadable measurement is not an unmeasured commit: reading it as
+            one let a resume start from a worse attempt without a word. The
+            message names the repository, the commit and the note's text.
     """
     if not repo_path or not commit:
         return None
+    where = f"the measurement note on {commit} in {repo_path}"
     try:
         result = _run(
             ["git", "-C", str(repo_path), "notes", f"--ref={MEASURE_NOTES_REF}",
              "show", commit],
             timeout=_GIT_TIMEOUT_S,
         )
-    except (subprocess.TimeoutExpired, OSError):
-        # fail-open: None is "no measurement", and no measurement is what
-        # every checkpoint had before #2867. The caller then takes the newest
-        # attempt, which is the pre-existing behaviour, not an invented one;
-        # halting a resume because a note could not be read would cost the
-        # whole preserved attempt to protect a preference.
+    except (subprocess.TimeoutExpired, OSError) as e:
+        raise _failed(
+            "resume", f"{where}: `git notes show` could not run: {type(e).__name__}: {e}",
+        ) from e
+    if result.returncode == 1 and not (result.stdout or "").strip():
+        # git's "no note found for object": exit 1 is that and only that;
+        # a missing repository or an unknown commit dies with 128.
         return None
     if result.returncode != 0:
-        return None
-    match = _MEASUREMENT_RE.search(result.stdout or "")
-    if not match:
-        return None
+        raise _failed(
+            "resume",
+            f"{where}: `git notes show` failed (exit {result.returncode}): "
+            f"{_git_said(result)}",
+        )
+    return _parse_measurement(result.stdout or "", where)
+
+
+def _parse_measurement(text: str, where: str) -> Measurement:
+    """``passed=<int> total=<int> coverage=<float>``, or CheckpointError naming
+    ``where`` and the text."""
+    fields: dict[str, str] = {}
+    for token in text.split():
+        key, sep, value = token.partition("=")
+        if not sep or key not in _MEASUREMENT_FIELDS or key in fields:
+            raise _failed(
+                "resume",
+                f"{where} is corrupt: {token!r} is not one of the fields "
+                f"{', '.join(_MEASUREMENT_FIELDS)} (note text {text.strip()!r})",
+            )
+        fields[key] = value
+    missing = [key for key in _MEASUREMENT_FIELDS if key not in fields]
+    if missing:
+        raise _failed(
+            "resume",
+            f"{where} is corrupt: it has no {', '.join(missing)} "
+            f"(note text {text.strip()!r})",
+        )
     try:
         return Measurement(
-            int(match.group(1)), int(match.group(2)), float(match.group(3)),
+            int(fields["passed"]), int(fields["total"]), float(fields["coverage"]),
         )
-    except ValueError:
-        # fail-open: same direction as the handler above -- a note that does
-        # not parse is no measurement, and an unmeasured checkpoint is simply
-        # not preferred. The regex admits only digits, so this is belt and
-        # braces rather than a live path.
-        return None
+    except ValueError as e:
+        raise _failed(
+            "resume",
+            f"{where}: its numbers do not convert ({e}; note text {text.strip()!r})",
+        ) from e
 
 
 def _run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:

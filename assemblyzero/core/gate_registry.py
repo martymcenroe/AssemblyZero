@@ -679,6 +679,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
               "pytest gate used to read a whole suite that collected nothing as "
               "'0 tests passed, no regressions' and validate it",
     ),
+    Gate(
+        "impl.measurement_not_noted", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
+        "[N5] the measurement (",
+        _s(f"{_TS}/nodes/verify_phases.py::_note_measurement::return", 0),
+        decided_in=f"{_TS}/checkpoints.py::record_measurement",
+        created_by="#3810 (operator ruling 2026-10-06: ADR 0236 accepted, every failure stops)",
+        notes="git cannot write N5's measurement note (#2867) on the checkpoint it "
+              "measured. It used to print '(non-fatal)' to stdout and go on, so a "
+              "later resume took the newest attempt instead of the best with "
+              "nothing said",
+    ),
     # #2753: `impl.test_file_validation` and `impl.test_execution_failed`
     # stood here until 2026-09-04. Every site either row named lived in
     # `testing/nodes/run_tests.py`, a node no graph ever declared. `git log`

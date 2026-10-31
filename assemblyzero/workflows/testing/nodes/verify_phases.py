@@ -29,7 +29,7 @@ from assemblyzero.workflows.testing.audit import (
     parse_pytest_output,
     save_audit_file,
 )
-from assemblyzero.workflows.testing.checkpoints import record_measurement
+from assemblyzero.workflows.testing.checkpoints import CheckpointError, record_measurement
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
 from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
@@ -2738,10 +2738,12 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
     # preserved attempt over the newest.
     _n5_passed = int(parsed.get("passed", 0) or 0)
     _n5_failed = int(parsed.get("failed", 0) or 0)
-    record_measurement(
+    noted = _note_measurement(
         repo_root, _n5_passed, _n5_passed + _n5_failed,
         float(parsed.get("coverage", 0) or 0.0),
     )
+    if noted is not None:
+        return noted
 
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")
@@ -3419,6 +3421,33 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
 
 
 
+def _note_measurement(
+    repo_root: Path | str | None, passed: int, total: int, coverage: float,
+) -> dict[str, Any] | None:
+    """Note N5's result on the checkpoint it measured (#2867), or N5's halt.
+
+    None when the note was written. When git cannot write it,
+    ``record_measurement`` has already said so at ERROR and raised
+    ``CheckpointError`` (#3810); this returns the halt, routed to HALT by
+    ``route_after_green``, which alerts. The note is what a later resume reads
+    to start from the best attempt, so a run that cannot leave it stops
+    rather than leaving a resume to pick the newest attempt unawares.
+    """
+    try:
+        record_measurement(repo_root, passed, total, coverage)
+    except CheckpointError as error:
+        return {
+            "next_node": "end",
+            "error_message": (
+                f"[N5] the measurement ({passed} passing of {total}, "
+                f"{coverage:.1f}% coverage) could not be noted on the "
+                f"checkpoint it measured, so a later resume could not choose "
+                f"the best attempt: {error}"
+            ),
+        }
+    return None
+
+
 def _halt_coverage_unreadable(label: str, error: Exception) -> dict[str, Any]:
     """The green phase's halt when a Jest or Vitest run whose tests all
     passed has no coverage report it can read (#4246). Never 0% in its
@@ -4015,10 +4044,12 @@ def _verify_green_non_pytest(
           f"Coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
 
     # #2867: same as the pytest path -- the measurement rides the checkpoint.
-    record_measurement(
+    noted = _note_measurement(
         repo_root, int(passed or 0), int(passed or 0) + int(failed or 0),
         float(coverage_achieved or 0.0),
     )
+    if noted is not None:
+        return noted
 
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")
