@@ -376,3 +376,16 @@ None for `checkpoints.py`. Two defects found and not fixed (not ledger sites): `
 | A checkpoint commit fails (any git step, timeout, missing worktree) | ERROR line on stderr | `logger.error` and the exception message: worktree, command, exit code, stderr | `CheckpointError` raised | By the caller: the standalone finish's entry-point handler; the graph's checkpoint wrapper is batch C's row `graph.py:128` |
 | N5's measurement note cannot be written | ERROR line on stderr | as above, plus the note | N5 returns `error_message`, routed to HALT | HALT alerts |
 | A measurement note cannot be read or is corrupt | ERROR line on stderr | commit, repository, note text | `CheckpointError` raised out of the impl stage | The orchestrator entry point's handler |
+
+---
+
+# Joining the batches
+
+The five branches were merged on `21e32f12` in the order C, A, B, D, E. Merge conflicts were the two report files (each batch's report kept whole), `gate_registry_baseline.json` (regenerated from the tree, never merged by hand) and `test_spec_stage_pair.py` (batch D's assertions, which the joined code needs, with batch C's sentence in the docstring). Four places where one batch's change met another's were fixed:
+
+- **An unknown framework.** Batch E made the runner registry raise `UnknownFrameworkError` where it answered None, so batch A's N3 check never saw None and crashed. `run_frameworks` now wraps it in `TestFileOwnershipError`, which N2 to N5 already halt on, naming the framework (#4311).
+- **N8 and its templates.** Batch E's templates refuse to invent a section the LLD lacks; batch D's N8 raises naming the artifact. Both stand. They disagreed on a wiki with no `_Sidebar.md`: E raised, D kept it as a legitimate absence (row 289; `generate_wiki_page` makes the wiki directory itself, and most repositories have no sidebar). `update_wiki_sidebar` now returns None for no sidebar and False for already linked, so the two answers E wanted told apart are told apart, D's absence stays quiet, and N8 names each.
+- **Checkpoints on a target that ignores `data/`.** Batch A made a failed `git add` raise and batch C made the checkpoint wrapper raise instead of swallowing. Joined, every checkpoint in a repository that ignores `data/` halted: the exclusion pathspecs `:!data/lineage` and `:!data/hourglass` name ignored paths, and `git add` exits 1 for that although `-A` never stages an ignored file. Only the excluded paths a repository does not ignore are now excluded (`git check-ignore`; a check that fails raises).
+- **Tests built on the old silences.** Seven N8 tests gained LLDs with the sections the templates need; three loop-cap rolls gained a real git worktree; one staging test's fake git now says the internal dirs are not ignored.
+
+Left as follow-ups, each already loud, stopping and alerting through the entry point: N8 and N9 halting through HALT rather than by raising (#4308), `RunnerError` in N3, N5 and the full-suite gate (#4309), `PhaseStepError` and `SymbolCheckError` in N4c (#4310). Ledger row `audit.py:320` stays open behind a strict xfail (#4312).

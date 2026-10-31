@@ -486,3 +486,12 @@ For each module the new test file was written first and run against the unchange
 | The three audits after the last commit | loud-failure 0 new (13 stale); fail-open no new; halt sites PASS, 164 sites |
 
 For `checkpoints.py` (section 3): before the conftest stand-in, 92 unit tests in 23 files halted at N5: they stub the test run and point `repo_root` at a plain directory, so the measurement note git cannot write became their halt.
+
+---
+
+# Joining the batches
+
+- **The full unit tier on the merged branch** (`64c051bc`, after the three baselines were regenerated): 14 failed, 5 errors, 12323 passed. Each batch had passed alone; every failure was where two met.
+- **Fixed, each with its test:** `test_framework_ownership_unknown.py` (4 tests; 3 fail without the wrap); `test_checkpoint_ignored_exclusions.py` (2 tests; the first fails before the fix); `test_wiki_page_template_loud_failure.py::test_169` now pins None for a wiki with no sidebar. The N8 tests (25), the checkpoint and mock-run tests (40) and the loop-cap rolls (27) pass.
+- **The full unit tier again** (`9899db9f`): 1 failed, 12347 passed. The one, `test_tdd_checkpoints.py::test_excludes_workflow_internal_dirs_from_staging`, had a fake git that answered `check-ignore` as "ignored"; corrected in `8e800226`, and the three checkpoint test files pass (44). The full tier runs once more when the package lands, after `origin/main` is merged.
+- **Audits after the last code change:** loud-failure PASS (208 sites); fail-open PASS --strict (10116 sites); halt sites PASS --strict (182 sites, 113 gates, impl rows 50).
