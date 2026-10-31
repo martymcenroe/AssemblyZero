@@ -243,6 +243,14 @@ class TestCredentialBackoffEdgeCases:
         coordinator.release(key, rate_limited=True, backoff_seconds=0.3)
 
         acquired = []
+        waits = []
+        real_wait = coordinator._condition.wait
+
+        def recording_wait(timeout=None):
+            waits.append(timeout)
+            return real_wait(timeout=timeout)
+
+        coordinator._condition.wait = recording_wait
 
         def waiting_thread():
             # This thread should wait for the credential to become available
@@ -252,13 +260,15 @@ class TestCredentialBackoffEdgeCases:
 
         # Act
         t = threading.Thread(target=waiting_thread)
-        start = time.time()
         t.start()
         t.join(timeout=2.0)
-        duration = time.time() - start
 
         # Assert
         assert len(acquired) == 1, "Thread should eventually acquire the credential"
         assert acquired[0] == "key1"
-        # Should complete in roughly the backoff time, not the full timeout
-        assert duration < 1.0, f"Should complete in ~0.3s, took {duration:.2f}s"
+        # The waiter sleeps until the cooldown ends, not for its whole timeout.
+        # A waiter that slept the full 1.0s would still get the key on waking,
+        # so the sleep it asked for is what shows it (#3731: no wall-clock
+        # bound; the request is computed by the code, whatever the load).
+        assert waits, "the waiter never waited"
+        assert waits[0] <= 0.3, f"first wait asked for {waits[0]}s, past the 0.3s cooldown"
