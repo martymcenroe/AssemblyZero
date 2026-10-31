@@ -31,3 +31,9 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-runners`, is 
 - **A run nobody can read raises.** No JSON report (91), a report that does not parse (104), or a report whose suites are not the shape Playwright writes raises `RunnerError` after an ERROR line, naming the project, the exit code and the head of both streams.
 - **The fallback is gone.** It read zero failures and zero errors at exit 0.
 - **Where the raise goes.** As for the Jest runner: N3, N5 and the full-suite gate do not catch it, so the run ends through the entry point's handler, which alerts.
+
+### runner_registry.py (1 ledger row: fixed)
+
+- **An unknown framework raises (117).** `resolve_framework` raises `UnknownFrameworkError`, a ValueError, after an ERROR line, naming the value and the four frameworks. It returned None, the same answer as no framework, and `framework_ownership.run_frameworks` reads None on a one-framework run as pytest.
+- **No framework named is still None, quietly.** No config, no `framework` key, or a key holding None is the pytest default every caller documents.
+- **Where the raise goes.** `run_frameworks` does not catch it, and its four callers catch only `TestFileOwnershipError`, so the run ends through the entry point's handler, which alerts. Wrapping it in `TestFileOwnershipError` in `run_frameworks` would end it at HALT instead; that file belongs to another batch.

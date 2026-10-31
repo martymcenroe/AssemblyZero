@@ -49,3 +49,17 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** 52 passed across the 5 files that use the Playwright runner.
 
 **Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issue as at HEAD.
+
+## runner_registry.py
+
+**New: `tests/unit/test_runner_registry_loud_failure.py` (10).**
+
+**Before the fix, measured:** 3 failed, 7 passed. The three site tests failed: an unknown string, a value of another type, and a one-framework run read as pytest. The seven that passed pin three ways of naming no framework and the four frameworks resolving from enum and string.
+
+**Changed tests:**
+- `test_scaffold_resolves_framework_string.py`: the "nonsense" case leaves the None test, and a new test expects the raise.
+- `test_framework_integration.py`: `test_invalid_string_returns_none` is now `test_invalid_string_raises`.
+
+**Neighbouring suites:** 197 passed across 18 files that resolve a framework, scaffold, or run several frameworks.
+
+**Audits:** 0 new loud-failure sites; no new fail-open; halt sites pass. Ruff finds the same issues as at HEAD.

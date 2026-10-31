@@ -7,6 +7,7 @@ Issue #381: Tests that framework detection is wired into the workflow nodes
 import tempfile
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
@@ -107,8 +108,11 @@ class TestResolveFrameworkEnum:
     def test_string_value_converted(self):
         assert _resolve_framework_enum({"framework": "playwright"}) == TestFramework.PLAYWRIGHT
 
-    def test_invalid_string_returns_none(self):
-        assert _resolve_framework_enum({"framework": "unknown_framework"}) is None
+    def test_invalid_string_raises(self):
+        """ADR 0236: an unknown framework raises, naming it; it used to be
+        None, which a one-framework run reads as pytest."""
+        with pytest.raises(ValueError, match="unknown_framework"):
+            _resolve_framework_enum({"framework": "unknown_framework"})
 
     def test_missing_key_returns_none(self):
         assert _resolve_framework_enum({}) is None
