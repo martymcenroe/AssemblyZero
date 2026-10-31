@@ -1032,7 +1032,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_OR}/stages.py::_make_stage_result::stage_result", 0)
         + _s(f"{_OR}/stages.py::run_lld_stage::stage_result", 2)
         + _s(f"{_OR}/stages.py::run_spec_stage::stage_result", 0)
-        + _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 1)
+        + _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 0)
         + _s(f"{_OR}/stages.py::run_cleanup_stage::stage_result", 0),
         created_by="#2677",
         notes="relays a halt a sub-workflow already decided; not a second death",
@@ -1062,7 +1062,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "orchestrator.impl_stage_exception", "orchestrator", JUDGES_INFRASTRUCTURE,
         ACTION_HALT, "Implementation stage error",
-        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 3),
+        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 2),
     ),
     Gate(
         "orchestrator.pr_stage_exception", "orchestrator", JUDGES_INFRASTRUCTURE,
@@ -1094,13 +1094,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     ),
     Gate(
         "impl.worktree_env_provisioning", "orchestrator", JUDGES_INFRASTRUCTURE,
-        ACTION_HALT, "Worktree environment provisioning failed",
-        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 0),
+        ACTION_HALT, "worktree provisioning failed",
+        _s(f"{_OR}/stages.py::_provisioning_failed::stage_result", 0),
+        decided_in="assemblyzero/workflows/provisioning.py::ProvisioningError",
+        notes="#4238: the install moved into provisioning.py, whose "
+        "ProvisioningError messages carry this head; _provisioning_failed "
+        "relays them",
     ),
     Gate(
         "infra.worktree", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Git worktree error",
-        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 2),
+        _s(f"{_OR}/stages.py::run_impl_stage::stage_result", 1),
     ),
     Gate(
         "orchestrator.pr.no_worktree", "orchestrator", JUDGES_INFRASTRUCTURE, ACTION_HALT,
