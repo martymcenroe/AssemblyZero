@@ -51,12 +51,13 @@ class PlaywrightRunner(BaseTestRunner):
         extra_args: list[str] | None = None,
         *,
         measure_coverage: bool = False,
+        coverage_include: list[str] | None = None,
     ) -> TestRunResult:
         """Run 'npx playwright test' with --reporter=json.
 
-        `measure_coverage` is accepted and ignored (#4246): Playwright's
-        coverage is scenario coverage, computed from the result by the green
-        phase, not measured by the run."""
+        `measure_coverage` and `coverage_include` are accepted and ignored
+        (#4246, #4436): Playwright's coverage is scenario coverage, computed
+        from the result by the green phase, not measured by the run."""
         command = ["npx", "playwright", "test", "--reporter=json"]
 
         if extra_args:
