@@ -246,3 +246,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** `test_speedrun_roll_attempts.py` (`_main` and `test_default_is_a_single_attempt`) and `test_speedrun_roll_detach.py` (`test_the_rebuilt_argv_actually_parses`, `test_a_roll_records_its_pid_so_it_can_be_stopped`, `test_a_finished_roll_leaves_no_pid_behind`) drive `main()` on a fake `.git` directory with the git-touching checks patched; they now also patch the baseline `untracked_files` read, which raises on a status that fails.
 
 **Neighbouring suites:** across `test_archive_bundles_graveyard.py`, `test_healing_ledger.py`, `test_input_rebuild_from_refs.py`, `test_interaction_matrix.py`, `test_leavings_janitor.py`, `test_mock_roll.py`, `test_pass_criteria_carry_values.py`, `test_restore_from_graveyard.py`, `test_restore_loud_failure.py`, `test_restore_prefers_durable_and_base.py`, `test_resume_after_ceiling_halt.py`, `test_spec_handoff_survives_janitor.py`, `test_speedrun_new_attempt.py`, `test_zero_requirements_denominator.py`, the new file and the twelve launcher suites: before the test changes, 442 passed, 8 failed (exactly the eight above) and 3 skipped; after, 450 passed and 3 skipped.
+
+## telemetry/cascade_events.py
+
+**New: `tests/unit/test_cascade_events_loud_failure.py` (9).** Site tests for 72, 152 (two), 161 (two: an unparseable and a naive timestamp) and 170, plus tests that pin kept behaviour: with no window no timestamp is read, an absent log is zero stats, and a clean log counts every event in the window.
+
+**Before the fix, measured** against the unchanged module: 6 failed, 3 passed (the three kept-behaviour tests).
+
+**Changed tests:** `test_cascade_events.py::TestGetCascadeStats::test_corrupt_lines_skipped` is now `test_a_corrupt_line_stops_the_count`.
+
+**Neighbouring suites:** before the test change, 129 passed and 1 failed (exactly that test) across `test_cascade_events.py`, `test_cascade_action.py`, `test_cascade_detector.py`, `test_circular_imports.py`, `tests/integration/test_cascade_hook_integration.py` and the new file; after, 130 passed.

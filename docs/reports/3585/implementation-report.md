@@ -275,3 +275,15 @@ The file janitor preserves pipeline-authored untracked files on a pushed graveya
 Callers: in `tools/speedrun_roll.py`, the launch janitor catches `Exception` and writes JANITOR FAILED (continuing), after the alert; the baseline `untracked_files` read before the first roll does not catch, so a status that fails stops the launch; `restore_repo` (in the roll's `finally`) does not catch either. `tools/speedrun_new_attempt.py` (`check_preconditions`, and `main` under `--apply`) lets the raise out.
 
 Compliance: each failure path alerts with what, where, repository, cause and consequence; a status failure stops what reads it, a preservation failure clears nothing, and a removal failure leaves that file. Baseline: no loud-baseline entries existed for this module.
+
+### telemetry/cascade_events.py (4 sites)
+
+The cascade detector's event log, for measuring its accuracy. Every run imports it (`telemetry/__init__`), but nothing in `assemblyzero/` or `tools/` calls `get_cascade_stats`, and `log_cascade_event` is called only by `hooks/cascade_action.py`.
+
+- **An event that cannot be written logs at ERROR and raises** `OSError` naming the log (72). It was a plain print and the event was lost. Its one caller alerts with the session id (next section).
+- **A log line that is not JSON or not an object raises** `ValueError` naming `path:line` (152). It was skipped, so the stats undercounted.
+- **With a window, a timestamp that is not a timezone-aware ISO-8601 instant raises** naming the line (161), including a naive one, whose comparison used to raise a `TypeError` that was swallowed with the rest.
+- **A log that cannot be read logs at ERROR and re-raises** (170). It returned partial or zero stats with a WARNING.
+- An absent log is still zero stats, and with no window no timestamp is read.
+
+Compliance: each failure is an ERROR log line or a raise naming the log and line; the write's caller alerts. No alert at the reader, as the ledger's fixes ask: it has no caller in the codebase to route one through.

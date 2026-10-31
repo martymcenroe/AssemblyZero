@@ -319,7 +319,8 @@ class TestGetCascadeStats:
         stats = get_cascade_stats(log_path=tmp_path / "nonexistent.jsonl")
         assert stats == {"total_checks": 0, "detections": 0, "blocks": 0, "allowed": 0}
 
-    def test_corrupt_lines_skipped(self, tmp_path: Path) -> None:
+    def test_a_corrupt_line_stops_the_count(self, tmp_path: Path) -> None:
+        """ADR 0236 (#3585): a skipped line made the stats undercount."""
         log_file = tmp_path / "cascade-events.jsonl"
         now = datetime.now(timezone.utc)
 
@@ -328,8 +329,8 @@ class TestGetCascadeStats:
             f.write("THIS IS NOT JSON\n")
             f.write(json.dumps({"timestamp": (now - timedelta(hours=2)).isoformat(), "event_type": "cascade_risk", "risk_level": "none", "action_taken": "allowed", "matched_patterns": [], "model_output_snippet": "clean", "session_id": "s1", "auto_approve_blocked": False}) + "\n")
 
-        stats = get_cascade_stats(log_path=log_file, since_hours=24)
-        assert stats["total_checks"] == 2  # Corrupt line skipped
+        with pytest.raises(ValueError, match=r":2 is not JSON"):
+            get_cascade_stats(log_path=log_file, since_hours=24)
 
     def test_empty_file(self, tmp_path: Path) -> None:
         log_file = tmp_path / "cascade-events.jsonl"
