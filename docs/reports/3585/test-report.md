@@ -97,3 +97,15 @@ Each fixed site has a test that fails before its fix and passes after, run first
 **Neighbouring suites:** `test_adversarial_validator.py`, `test_adversarial_review_halts.py`, `test_adversarial_node.py` and the new file: 115 passed.
 
 **Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff is clean, as at HEAD.
+
+## nodes/completeness_gate.py
+
+**New: `tests/unit/test_completeness_gate_loud_failure.py` (2).** Both drive N4b with an empty requirement set and route the result through `route_after_completeness_gate`.
+
+**Before the change, measured** against HEAD's `completeness_gate.py`: 1 failed, 1 passed. The first test failed only on the new stderr line, since the halt held; the second, with no recorded reason, passed.
+
+**Changed tests:** none.
+
+**Neighbouring suites:** the seven files that import the module, with `test_gate_registry.py`: 169 passed.
+
+**Audits:** `audit_loud_failure.py --check` reports 0 new. `audit_fail_open.py --check` reports no new fail-open. `audit_halt_sites.py --check` passes. Ruff is clean, as at HEAD.

@@ -60,6 +60,10 @@ The rule is ADR 0236 and standard 0034. This branch, `3585-testing-nodes`, is ba
 
 - **Pinned (114, 227, 251).** A file that does not compile is an error and makes the result invalid. The mock and assertion scans answer "nothing found" for source that does not parse because their only caller runs them after `compile` accepted the file; their docstrings now say so. Lines 63 and 79 were fixed in #3725.
 
+### nodes/completeness_gate.py (1 open ledger row: compliant and pinned)
+
+- **Pinned (119).** Zero requirements is a BLOCK whose `error_message` routes to HALT. The refusal is now an ERROR line on stderr instead of a stdout print. The gate's other rows were fixed in #3811.
+
 ## Compliance
 
 Every failure path above meets the four properties of standard 0034: it writes an ERROR line on stderr naming what failed and its subject, it stops what depends on it (a HALT route, or a raise the entry point owns), and it alerts the operator, through HALT, through the entry point's handler, or from the node when nothing stops.
