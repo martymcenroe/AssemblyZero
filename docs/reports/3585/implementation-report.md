@@ -24,6 +24,13 @@ Callers: `assemblyzero/workflows/orchestrator/stages.py` turns any exception fro
 
 Callers: N4 lets the raises reach the runner, which alerts. N5's `_align_plan_files_with_the_spec` (verify_phases.py, another batch) does not pass the paths, so its ERROR line names the side but not the file.
 
+### parsers.py (6 rows)
+
+- **The conftest option check (#2547) no longer passes when it cannot compare** (142, 197, 212). An ancestor conftest that does not parse or cannot be read, or a directory on the walk that cannot be resolved, is an ERROR line naming it, and the exception propagates. Each used to end the comparison and pass.
+- The three `# fail-open:` tags are gone (143, 198, 213).
+
+Callers: `validate_code_response` is called by N4's retry loop and batch path; neither catches, so the runner alerts.
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |

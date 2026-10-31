@@ -16,3 +16,10 @@ Each module's new test file was run against the unchanged module first; every si
 - Changed existing tests in `test_n4_keeps_passing_tests.py`: five tests that asserted a quiet pass-through now assert the raise; two source-text tests search for the keep and release calls without their closing parenthesis, since the calls now pass the path.
 - Neighbouring suites (the module's importers, the orchestrator's, and the green-phase contract tests): 114 passed and 2 failed, the two source-text tests; after the change, 80 passed in the three files they touch.
 - Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
+
+## parsers.py
+
+- New: `tests/unit/test_parsers_loud_failure.py`, 7 tests. Before the fix: 4 failed, 3 passed. After: 7 passed.
+- Changed existing test: `test_zero_needs_denominator.py::TestConftestOptionValidation::test_unparseable_new_code_abstains_here` becomes `test_unparseable_new_code_stops_here` and asserts the SyntaxError.
+- Neighbouring suites (the ten unit files that import the parsers): 150 passed and 1 failed, the test above; after the change, 20 passed in the two files it touches.
+- Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.

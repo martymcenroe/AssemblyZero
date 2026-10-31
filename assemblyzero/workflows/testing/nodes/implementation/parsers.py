@@ -5,6 +5,7 @@ Mechanical validation — no LLM judgment.
 
 import ast
 import re
+import sys
 
 from assemblyzero.telemetry import emit
 from assemblyzero.utils.file_type import get_language_tag
@@ -135,15 +136,24 @@ def validate_code_response(
     return True, ""
 
 
-def _addoption_flags(code: str) -> set[str]:
-    """String-literal option names registered via ``parser.addoption(...)``."""
+def _addoption_flags(code: str, source: str = "a conftest") -> set[str]:
+    """String-literal option names registered via ``parser.addoption(...)``.
+
+    Code that does not parse has no readable options, and a comparison
+    against it cannot be made: an ERROR line names ``source``, then the
+    SyntaxError propagates (#3585; it used to be "no options", a pass). The
+    generated conftest itself never reaches here unparsed --
+    ``validate_code_response`` checks its syntax first.
+    """
     try:
         tree = ast.parse(code)
-    except SyntaxError:
-        # fail-open: syntax is the syntax check's finding, two lines above
-        # this check's call site — judging options in code that does not
-        # parse would double-report one defect. No flags means no verdict.
-        return set()
+    except SyntaxError as exc:
+        print(
+            f"ERROR [N4] {source} does not parse (line {exc.lineno}: {exc.msg}); "
+            f"its pytest options cannot be compared (#2547), so the check stops",
+            file=sys.stderr, flush=True,
+        )
+        raise
     flags: set[str] = set()
     for node in ast.walk(tree):
         if (
@@ -171,6 +181,11 @@ def validate_conftest_options(
     load time and collection dies with zero tests. The check walks the
     ancestor directories the same way pytest will, comparing string-literal
     ``parser.addoption`` names.
+
+    A comparison that cannot be made is a failure, not a pass (#3585): an
+    ancestor conftest that cannot be read or does not parse, or a directory
+    on the walk that cannot be resolved, is an ERROR line naming it, and the
+    exception propagates.
     """
     from pathlib import Path
 
@@ -191,16 +206,15 @@ def validate_conftest_options(
         ancestor = current / "conftest.py"
         if ancestor.is_file():
             try:
-                ancestor_flags = _addoption_flags(
-                    ancestor.read_text(encoding="utf-8-sig")
+                ancestor_source = ancestor.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError) as exc:
+                print(
+                    f"ERROR [N4] could not read {ancestor} to compare its pytest "
+                    f"options (#2547): {type(exc).__name__}: {exc}",
+                    file=sys.stderr, flush=True,
                 )
-            except OSError:
-                # fail-open: an unreadable ancestor conftest cannot be
-                # compared — the check reports what it CAN see rather than
-                # failing the file on a filesystem hiccup, and pytest itself
-                # will name any duplicate this misses at collection time,
-                # which the green gate now surfaces (#2546).
-                ancestor_flags = set()
+                raise
+            ancestor_flags = _addoption_flags(ancestor_source, str(ancestor))
             duplicated = sorted(new_flags & ancestor_flags)
             if duplicated:
                 conflicts.append(
@@ -209,12 +223,13 @@ def validate_conftest_options(
                 )
         try:
             at_root = current.resolve() == root
-        except OSError:
-            # fail-open: a directory that cannot resolve ends the ancestor
-            # walk early — the check reports what it already compared, and
-            # pytest itself names any duplicate this misses at collection
-            # time, which the green gate now surfaces (#2546).
-            at_root = True
+        except OSError as exc:
+            print(
+                f"ERROR [N4] could not resolve {current} while walking the "
+                f"ancestor conftests (#2547): {type(exc).__name__}: {exc}",
+                file=sys.stderr, flush=True,
+            )
+            raise
         if at_root or current.parent == current:
             break
         current = current.parent
