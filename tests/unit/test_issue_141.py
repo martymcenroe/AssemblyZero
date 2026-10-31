@@ -47,6 +47,7 @@ def sample_metadata() -> TestReportMetadata:
         "implementation_files": ["assemblyzero/foo.py", "assemblyzero/bar.py"],
         "coverage_achieved": 92.5,
         "coverage_target": 90,
+        "coverage_scope": "changed lines",
         "total_iterations": 3,
         "test_count": 15,
         "passed_count": 15,
