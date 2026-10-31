@@ -127,8 +127,13 @@ class ReviewAuditLog:
             raise RuntimeError(
                 "git not found. Install git or provide repo_root explicitly."
             )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("git rev-parse timed out")
+        except subprocess.TimeoutExpired as exc:
+            # #3771: the cause is chained, and the message names the command,
+            # the limit and where it ran.
+            raise RuntimeError(
+                f"git rev-parse --show-toplevel timed out after {exc.timeout}s in "
+                f"{Path.cwd()}; provide repo_root explicitly"
+            ) from exc
 
         if result.returncode != 0:
             raise RuntimeError(
@@ -170,7 +175,10 @@ class ReviewAuditLog:
         """Return last N entries from history + active shards.
 
         Merges entries from review_history.jsonl and all active shards,
-        sorted by timestamp. Gracefully skips locked or inaccessible shards.
+        sorted by timestamp. A file that cannot be read raises its
+        ``OSError``, and a line that is not a JSON object raises
+        ``ValueError`` naming the file and the line (#3771). Both used to be
+        skipped, so the log came back shorter and read as the whole of it.
 
         Optimization: History file is assumed sorted (guaranteed by consolidator),
         so we read only the last K lines instead of the entire file.
@@ -196,12 +204,17 @@ class ReviewAuditLog:
             entries.extend(self._read_jsonl_tail(self.history_file, buffer_size))
         else:
             # n=0 means read all
-            entries.extend(self._read_jsonl_safe(self.history_file))
+            entries.extend(self._read_jsonl(self.history_file))
 
-        # Read from all active shards (always read fully - they're small)
+        # Read from all active shards (always read fully - they're small).
+        # Listed a moment ago, so no existence check (#3771): a shard the
+        # consolidator removed since then raises FileNotFoundError instead of
+        # reading as empty, since its entries are now in a history this call
+        # has already read.
         if self.active_dir.exists():
             for shard in self.active_dir.glob("*.jsonl"):
-                entries.extend(self._read_jsonl_safe(shard))
+                with open(shard, encoding="utf-8") as f:
+                    entries.extend(_entries(shard, f.readlines(), first=1))
 
         # Sort by timestamp (shards may interleave with history tail)
         entries.sort(key=lambda e: e.get("timestamp", ""))
@@ -210,68 +223,46 @@ class ReviewAuditLog:
         return entries[-n:] if n > 0 else entries
 
     def _read_jsonl_tail(self, path: Path, n: int) -> list[ReviewLogEntry]:
-        """Read last N lines from JSONL file, gracefully handling errors.
+        """The entries on the last N lines of a JSONL file.
 
         Optimized for large files - only reads the tail portion.
+
+        An absent file has no entries, which is an answer: nothing has been
+        logged, or every shard has been consolidated. A file that cannot be
+        read raises its ``OSError``, which names it; a line that is not a
+        JSON object raises ``ValueError`` naming the file and its line
+        (#3771). Both used to be skipped.
 
         Args:
             path: Path to JSONL file.
             n: Maximum number of lines to read from end.
 
         Returns:
-            List of entries, or empty list if file inaccessible.
+            List of entries.
         """
         if not path.exists():
             return []
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        start = max(len(lines) - n, 0) if n > 0 else 0
+        return _entries(path, lines[start:], first=start + 1)
 
-        try:
-            with open(path, encoding="utf-8") as f:
-                lines = f.readlines()
-
-            entries: list[ReviewLogEntry] = []
-            # Get last N lines
-            for line in lines[-n:]:
-                line = line.strip()
-                if line:
-                    try:
-                        entries.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        # Skip malformed lines
-                        continue
-            return entries
-        except (OSError, IOError):
-            # Skip locked or inaccessible files (graceful degradation)
-            return []
-
-    def _read_jsonl_safe(self, path: Path) -> list[ReviewLogEntry]:
-        """Read JSONL file, gracefully handling errors.
+    def _read_jsonl(self, path: Path) -> list[ReviewLogEntry]:
+        """Every entry in a JSONL file, under the same rules as
+        ``_read_jsonl_tail``: absent is no entries, and anything that cannot
+        be read raises (#3771).
 
         Args:
             path: Path to JSONL file.
 
         Returns:
-            List of entries, or empty list if file inaccessible.
+            List of entries.
         """
-        entries: list[ReviewLogEntry] = []
-
         if not path.exists():
-            return entries
-
-        try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            entries.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            # Skip malformed lines
-                            continue
-        except (OSError, IOError):
-            # Skip locked or inaccessible files (graceful degradation)
-            pass
-
-        return entries
+            return []
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        return _entries(path, lines, first=1)
 
     def __iter__(self) -> Iterator[ReviewLogEntry]:
         """Iterate over all entries from history + active shards.
@@ -290,6 +281,35 @@ class ReviewAuditLog:
             Count of log entries.
         """
         return len(self.tail(n=0))
+
+
+def _entries(path: Path, lines: list[str], first: int) -> list[ReviewLogEntry]:
+    """The entries on ``lines``, which start at line ``first`` of ``path``.
+
+    A blank line is not an entry. A line that is not a JSON object raises
+    ``ValueError`` naming the file and its line number in the file (#3771).
+    """
+    entries: list[ReviewLogEntry] = []
+    for number, line in enumerate(lines, start=first):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"the review audit log {path} line {number} is not JSON ({exc}): "
+                f"{line[:80]!r}"
+            ) from exc
+        if not isinstance(entry, dict):
+            # ValueError, as for a line that is not JSON: both are a bad line
+            # in the file, and a caller catches one type for either.
+            raise ValueError(  # noqa: TRY004
+                f"the review audit log {path} line {number} is not an entry "
+                f"(a JSON object): {line[:80]!r}"
+            )
+        entries.append(entry)
+    return entries
 
 
 def create_log_entry(

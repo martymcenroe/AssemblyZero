@@ -41,9 +41,12 @@ class TestDetectOpenQuestionsScan:
         assert result["question_count"] == 0
 
     def test_empty_content(self):
-        result = _detect_open_questions("")
-        assert result["has_open_questions"] is False
-        assert result["questions"] == []
+        """#3802: an empty document raises; "no open questions" was the
+        verdict finalize needs to pass, for a document never written."""
+        import pytest
+
+        with pytest.raises(ValueError, match="is empty"):
+            _detect_open_questions("")
 
     def test_short_question_mark_not_detected(self):
         result = _detect_open_questions("Why?\nAll settled.\n")

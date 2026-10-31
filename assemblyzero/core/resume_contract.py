@@ -47,14 +47,20 @@ _COUNTED_LIST_KEYS = (
 )
 
 
+class ResumeContractUnreadable(RuntimeError):
+    """The halt's contract exists but cannot be read or parsed (#3788)."""
+
+
 def _sha256_file(path: Path) -> str | None:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        # fail-open: None IS the signal -- an unreadable file hashes as
-        # absent, which the verifier reports as a named mismatch rather
-        # than crashing the halt or the resume check.
+    """The file's sha256, or None when it does not exist.
+
+    #3788: only absence is None. A file that exists but cannot be read
+    raises with its cause; it used to hash as absent, so the verifier
+    reported "now missing" for a permissions problem.
+    """
+    if not path.exists():
         return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def contract_path(workflow: str, issue: int, directory: Path | None = None) -> Path:
@@ -121,15 +127,16 @@ def load_resume_contract(
     path = contract_path(workflow, issue, directory)
     if not path.exists():
         return None
+    # #3788: an unreadable or corrupt contract raises. It used to read as no
+    # contract, so the resume went ahead unverified against a world nobody
+    # checked, which is the one thing the contract exists to prevent.
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        # fail-open: an unreadable or corrupt contract reads as no
-        # contract, which is the pre-#2570 world -- the resume proceeds
-        # unverified rather than being blocked by a broken manifest the
-        # halt half-wrote. The contract protects the resume; it must
-        # never be able to brick it.
-        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ResumeContractUnreadable(
+            f"the resume contract {path} exists but cannot be read: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def verify_resume_contract(contract: dict) -> list[str]:
@@ -137,6 +144,10 @@ def verify_resume_contract(contract: dict) -> list[str]:
 
     An input that did not exist at halt and exists now is not a mismatch —
     the world gaining an input breaks nothing a resume depends on.
+
+    #3788: an input or snapshot that exists but cannot be read raises
+    ``OSError`` with its cause, and ``check_and_consume`` refuses the resume
+    with an alert. It used to hash as absent, reported as "now missing".
     """
     mismatches: list[str] = []
     for entry in contract.get("inputs", []):
@@ -188,11 +199,39 @@ def check_and_consume(
     verified or explicitly-accepted contract is deleted: it described the
     halt it came from, and the next halt writes its own.
     """
-    contract = load_resume_contract(workflow, issue, directory)
+    from assemblyzero.core import alert
+
+    path = contract_path(workflow, issue, directory)
+    try:
+        contract = load_resume_contract(workflow, issue, directory)
+    except ResumeContractUnreadable as exc:
+        # #3788: refused, by name, with an alert; it used to resume unverified.
+        alert.alert_operator(
+            what="the resume contract cannot be read, so the resume cannot be verified",
+            where=f"assemblyzero.core.resume_contract.check_and_consume ({workflow})",
+            cause=str(exc),
+            consequence=(
+                "the resume is refused before any token is spent; inspect the "
+                f"contract at {path}, or move it aside to run without verification"
+            ),
+            issue=issue or None,
+        )
+        return False
     if contract is None:
         return True
-    mismatches = verify_resume_contract(contract)
-    path = contract_path(workflow, issue, directory)
+    try:
+        mismatches = verify_resume_contract(contract)
+    except OSError as exc:
+        # #3788: an input that exists but cannot be read is refused by name,
+        # with its cause; it used to be reported as missing.
+        alert.alert_operator(
+            what="an input the resume needs cannot be read, so it cannot be verified",
+            where=f"assemblyzero.core.resume_contract.check_and_consume ({workflow})",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="the resume is refused before any token is spent",
+            issue=issue or None,
+        )
+        return False
     if mismatches and not accept_changed:
         log(
             "RESUME CONTRACT: the world changed since the halt -- refusing "
@@ -204,6 +243,17 @@ def check_and_consume(
             "  Rerun with --accept-changed-inputs to proceed against the "
             "changed world; the acceptance is printed and logged, never "
             "silent."
+        )
+        # #3788: the refusal reaches the operator, not only the console.
+        alert.alert_operator(
+            what="the resume was refused: the world changed since the halt",
+            where=f"assemblyzero.core.resume_contract.check_and_consume ({workflow})",
+            cause="; ".join(mismatches),
+            consequence=(
+                "the resume did not start; rerun with --accept-changed-inputs "
+                "to proceed against the changed world"
+            ),
+            issue=issue or None,
         )
         return False
     if mismatches:
@@ -220,10 +270,19 @@ def check_and_consume(
         )
     try:
         path.unlink()
-    except OSError:
-        # fail-open: a verified contract that could not be deleted only
-        # costs a redundant re-verification on the next launch, and the
-        # WARN names it; refusing the run over a leftover file would
-        # invert the cost.
-        log(f"  [WARN] verified contract could not be consumed: {path}")
+    except OSError as exc:
+        # #3788: the resume does not depend on the deletion, so it goes
+        # ahead; but a contract left behind is checked again by the next
+        # launch for this issue, against a halt that is over. The operator
+        # is told, where it used to be a WARN on stdout.
+        alert.alert_operator(
+            what=f"the verified resume contract {path} could not be deleted",
+            where=f"assemblyzero.core.resume_contract.check_and_consume ({workflow})",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence=(
+                "the resume proceeds; the leftover contract will be checked "
+                "again by the next launch for this issue until it is removed"
+            ),
+            issue=issue or None,
+        )
     return True

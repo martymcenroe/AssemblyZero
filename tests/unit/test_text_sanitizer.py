@@ -135,8 +135,12 @@ class TestEdgeCases:
         result = strip_emoji("\U0001F600\U0001F601\U0001F602")
         assert result == ""
 
-    def test_non_string_input(self):
-        assert strip_emoji(42) == "42"
+    def test_non_string_input_raises(self):
+        """#3799: str() of a non-string was passed on as the answer."""
+        import pytest
+
+        with pytest.raises(TypeError, match="int"):
+            strip_emoji(42)
 
     def test_mixed_semantic_and_strip(self):
         result = strip_emoji("\u2705 Test passed \U0001F680 deploying")

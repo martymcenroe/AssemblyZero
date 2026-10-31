@@ -132,11 +132,12 @@ def extract_requirements(lld_content: str) -> list[Requirement]:
         drafter_authored(lld_content), _SECTION_3_TITLE_RE
     )
     if section_content is None:
-        import logging
-        logging.getLogger(__name__).warning(
-            "Section 3 (Requirements) heading not found in LLD content "
-            "(%d chars). Expected: ## 3. Requirements",
-            len(lld_content),
+        # #3801: loud. The empty list is the contract (the coverage check
+        # turns it into the "No requirements found in Section 3" error), but
+        # the cause was a WARNING nobody saw.
+        _loud(
+            f"Section 3 (Requirements) heading not found in the LLD "
+            f"({len(lld_content)} chars). Expected: ## 3. Requirements"
         )
         return []
 
@@ -183,19 +184,32 @@ def extract_requirements(lld_content: str) -> list[Requirement]:
     return requirements
 
 
-def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
+def extract_test_scenarios(
+    lld_content: str, problems: list[str] | None = None,
+) -> list[LLDTestScenario]:
     """Extract test scenarios from LLD Section 10 (any subsection with tables).
 
     Searches Section 10.1 first, then falls back to the entire Section 10
     (including 10.0 Test Plan tables). Parses markdown tables with columns:
     | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 
+    #3801: what cannot be read is said. A missing Section 10, a section with
+    no scenario rows, and, inside a scenario table (one whose header starts
+    ``ID``, ``Test ID`` or ``#``), a row with too few cells or an unreadable
+    ID are each appended to ``problems`` when the caller passes a list.
+    ``validate_test_plan`` makes each one an error. They used to be dropped,
+    which shrank the test plan without a word. Other tables in Section 10
+    (coverage targets and the like) are not scenarios and are not read as
+    such.
+
     Args:
         lld_content: Full LLD markdown content.
+        problems: Optional list the unreadable parts are appended to.
 
     Returns:
         List of TestScenario objects.
     """
+    found = problems if problems is not None else []
     # Try Section 10.1 first (preferred location for test scenarios)
     section_pattern = re.compile(
         r"#{2,4}\s*10\.1\b.*?\n(.*?)(?=#{2,4}\s*10\.\d|\Z)",
@@ -213,20 +227,32 @@ def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
     # the same edge Section 3 did. Converted while the lesson is in hand, with
     # that 13-scenario measurement as the control.
     section_10_body = None
+    section_10_heading_found = match is not None
     if not match or "|" not in match.group(1):
         from assemblyzero.core.section_utils import section_body
 
         section_10_body = section_body(lld_content, _SECTION_10_TITLE_RE)
-        if section_10_body is not None and "|" not in section_10_body:
-            section_10_body = None
+        if section_10_body is not None:
+            section_10_heading_found = True
+            if "|" not in section_10_body:
+                section_10_body = None
 
     if match is None and section_10_body is None:
-        import logging
-        logging.getLogger(__name__).warning(
-            "Section 10 / 10.1 (Test Scenarios) not found in LLD content "
-            "(%d chars). Expected: ## 10. Verification & Testing or ### 10.1 Test Scenarios",
-            len(lld_content),
-        )
+        if section_10_heading_found:
+            # #3801: the heading is there and holds no table at all, which
+            # used to be reported as the section being missing.
+            message = (
+                "Section 10 has no test-scenario table rows (| ID | Scenario | "
+                "Type | ...): it holds no table at all"
+            )
+        else:
+            message = (
+                f"Section 10 / 10.1 (Test Scenarios) not found in the LLD "
+                f"({len(lld_content)} chars). Expected: ## 10. Verification & "
+                f"Testing or ### 10.1 Test Scenarios"
+            )
+        _loud(message)
+        found.append(message)
         return []
 
     # The 10.1 match wins when it carried a table; otherwise the whole of
@@ -236,30 +262,43 @@ def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
     else:
         section_content = section_10_body or match.group(1)
     scenarios: list[LLDTestScenario] = []
+    in_scenario_table = False
 
     for line in section_content.splitlines():
         line = line.strip()
         if not line.startswith("|"):
+            in_scenario_table = False
             continue
 
         cells = [c.strip() for c in line.split("|")]
         cells = [c for c in cells if c]
 
-        if len(cells) < 3:
+        # Skip header and separator rows
+        if cells and all(set(c) <= set("-: ") for c in cells):
+            continue
+        if cells and cells[0].lower() in ("id", "test id", "#"):
+            in_scenario_table = True
             continue
 
-        # Skip header and separator rows
-        if all(set(c) <= set("-: ") for c in cells):
-            continue
-        if cells[0].lower() in ("id", "test id", "#"):
+        if len(cells) < 3:
+            if in_scenario_table:
+                found.append(
+                    f"scenario row has {len(cells)} cell(s), at least 3 needed "
+                    f"(ID, scenario, type): {line[:120]!r}"
+                )
             continue
 
         scenario_id = cells[0].strip()
         description = cells[1].strip() if len(cells) > 1 else ""
         test_type = cells[2].strip().lower() if len(cells) > 2 else "unit"
 
-        # Skip non-numeric IDs (likely header)
+        # Non-numeric IDs: outside a scenario table, another table's row
         if not re.match(r"\d+|T\d+", scenario_id, re.IGNORECASE):
+            if in_scenario_table:
+                found.append(
+                    f"scenario row's ID {scenario_id!r} is not a number or "
+                    f"T-number, so the row cannot be traced: {line[:120]!r}"
+                )
             continue
 
         # Normalize ID to T-prefixed format
@@ -279,7 +318,22 @@ def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
             "requirement_refs": requirement_refs,
         })
 
+    if not scenarios:
+        # #3801: a Section 10 with no scenario rows is a test plan of nothing,
+        # said aloud; it used to return [] with no word.
+        message = "Section 10 has no test-scenario table rows (| ID | Scenario | Type | ...)"
+        _loud(message)
+        found.append(message)
     return scenarios
+
+
+def _loud(message: str) -> None:
+    """An ERROR line on stderr, and the log (ADR 0236 property 1, #3801)."""
+    import logging
+    import sys
+
+    logging.getLogger(__name__).error("[test plan] %s", message)
+    print(f"ERROR [test plan] {message}", file=sys.stderr, flush=True)
 
 
 def _extract_requirement_refs(text: str) -> list[str]:
@@ -567,9 +621,22 @@ def validate_test_plan(
     start = time.perf_counter()
 
     requirements = extract_requirements(lld_content)
-    tests = extract_test_scenarios(lld_content)
+    unreadable: list[str] = []
+    tests = extract_test_scenarios(lld_content, unreadable)
 
-    all_violations: list[ValidationViolation] = []
+    # #3801: every part of Section 10 that could not be read is an error,
+    # where it used to drop out of the plan without a word.
+    all_violations: list[ValidationViolation] = [
+        {
+            "check_type": "parse",
+            "severity": "error",
+            "requirement_id": None,
+            "test_id": None,
+            "message": problem,
+            "line_number": None,
+        }
+        for problem in unreadable
+    ]
 
     # Run coverage check
     cov_passed, cov_pct, cov_violations = check_requirement_coverage(

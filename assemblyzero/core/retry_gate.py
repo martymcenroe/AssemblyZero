@@ -177,7 +177,17 @@ def should_retry(
         attempts_made: how many attempts have already been paid for (>= 1).
         max_attempts: the caller's own total-attempt budget.
         fail_fast: override the environment, for tests.
+
+    Raises:
+        ValueError: ``failure_class`` is not one of the four (#3790). It used
+            to get the caller's whole budget, the same answer as a transient
+            failure; checked before fail-fast, so that mode does not hide it.
     """
+    if failure_class not in _ATTEMPT_CEILING:
+        raise ValueError(
+            f"unknown failure class {failure_class!r}; the retry gate knows "
+            f"{', '.join(_ATTEMPT_CEILING)}"
+        )
     if fail_fast is None:
         fail_fast = fail_fast_enabled()
 
@@ -206,7 +216,7 @@ def should_retry(
             "malformed request). Fix the cause and relaunch.",
         )
 
-    ceiling = _ATTEMPT_CEILING.get(failure_class)
+    ceiling = _ATTEMPT_CEILING[failure_class]
     budget = max_attempts if ceiling is None else min(max_attempts, ceiling)
 
     if attempts_made >= budget:

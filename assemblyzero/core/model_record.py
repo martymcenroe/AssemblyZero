@@ -15,12 +15,18 @@ This module is the metadata half, armed for every run that has a record open:
   ``model`` event (``run_record.RunRecord.model``). ``calls.jsonl`` carries
   the same fields beside its bodies (``call_recording.RecordingProvider``).
 
-Like every recorder here, nothing in it ever raises into the run.
+A spec the seat registry refuses raises (#3782): a call recorded with an
+empty model id is attributed to nothing, which is the one thing this module
+exists to prevent. A run record that cannot take a call's line alerts the
+operator and the call's result is returned untouched, since nothing the run
+produces reads that line.
 """
 
 from __future__ import annotations
 
 from typing import Any, Protocol
+
+from assemblyzero.core import alert
 
 
 class _Sink(Protocol):
@@ -61,16 +67,21 @@ def model_record_is_armed() -> bool:
 
 
 def _resolved_id(spec: str) -> str:
+    """The model id the seat registry resolves ``spec`` to.
+
+    An empty spec has none: a provider wrapped without one, which is an
+    answer. A spec ``check_spec`` refuses raises its ``ProfileError``
+    (#3782): one with no provider, or one that resolves to a forbidden
+    model. The old handler recorded it with an empty id, on the belief that
+    scripted and test-only specs end there; they do not (``mock:`` and
+    ``scripted:`` resolve to their model), so what it caught was a call on a
+    model no seat may use, recorded as answered by nothing.
+    """
     if not spec:
         return ""
-    try:
-        from assemblyzero.core.seats import check_spec
+    from assemblyzero.core.seats import check_spec
 
-        return check_spec(spec, "record")[1]
-    except Exception:  # noqa: BLE001 - a record never costs a call
-        # fail-open: a spec the registry cannot resolve (a scripted or
-        # test-only one) is recorded with an empty id rather than guessed.
-        return ""
+    return check_spec(spec, "record")[1]
 
 
 def call_fields(
@@ -113,15 +124,33 @@ def call_fields(
 
 
 def record_call(fields: dict[str, Any]) -> bool:
-    """Write one call's fields to the open run record. Never raises."""
+    """Write one call's fields to the open run record; whether it was written.
+
+    No open record is no write, and False: outside a run there is nothing
+    to write to. A record that cannot take the line alerts the operator
+    with the cause and returns False (#3782); the call already happened and
+    its result is returned untouched, since nothing the run produces reads
+    this line. An alert the record itself could not deliver is raised as it
+    came, not alerted a second time.
+    """
     sink = _sink
     if sink is None:
         return False
     try:
         sink.model(fields)
-        return True
-    except Exception:  # noqa: BLE001 - a record never costs a call
-        # fail-open: the call already happened and its result is returned
-        # untouched; a run record that cannot take the line is reported by
-        # the record itself (it warns on stderr when a write fails).
+    except alert.AlertDeliveryError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - every cause alerts, and the call is kept
+        alert.alert_operator(
+            what="write a model call's line to the run record",
+            where="assemblyzero.core.model_record.record_call",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence=(
+                "the call's result is returned; the run record has no model "
+                f"line for this call (seat {fields.get('seat') or '(none)'}, "
+                f"spec {fields.get('spec') or '(none)'})"
+            ),
+            spec=str(fields.get("spec") or ""),
+        )
         return False
+    return True

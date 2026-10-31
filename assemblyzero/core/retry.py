@@ -9,12 +9,17 @@ Key behaviours:
 - ``TimeoutError_`` gets at most 1 retry regardless of ``max_retries``.
 - ``RateLimitError`` with ``retry_after`` overrides computed backoff.
 - Exponential backoff with jitter: ``min(base * 2^attempt * (1 +/- jitter), max_delay)``.
-- Every attempt is logged to stdout for observability.
+- Every retry is logged to stdout for observability.
+- Every giving up is an ERROR line on stderr and the log, naming the call, the
+  error and the attempts, and the error is raised (#3789, ADR 0236). The
+  caller owns what stops, and the alert.
 """
 
 from __future__ import annotations
 
+import logging
 import random
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable, TypeVar
@@ -22,6 +27,19 @@ from typing import Callable, TypeVar
 from assemblyzero.core.errors import APIError, RateLimitError, TimeoutError_
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
+
+
+def _gave_up(fn: Callable[[], object], exc: APIError, why: str) -> None:
+    """The loud line for a call ``with_retry`` will not try again (#3789)."""
+    name = getattr(fn, "__qualname__", None) or repr(fn)
+    message = (
+        f"{name} failed: {exc.__class__.__name__}: {exc}; {why}, so the error "
+        f"is raised to the caller"
+    )
+    logger.error("[RETRY] %s", message)
+    print(f"ERROR [RETRY] {message}", file=sys.stderr, flush=True)
 
 
 @dataclass
@@ -62,19 +80,15 @@ def with_retry(
         except APIError as exc:
             last_error = exc
 
-            # Non-retryable → raise immediately
+            # Non-retryable → raise immediately. #3789: on stderr, where it
+            # used to be a stdout line.
             if not exc.retryable:
-                print(
-                    f"    [RETRY] non-retryable {exc.__class__.__name__}: {exc}"
-                )
+                _gave_up(fn, exc, "it is not retryable")
                 raise
 
             # TimeoutError_ → max 1 retry
             if isinstance(exc, TimeoutError_) and attempt >= 1:
-                print(
-                    f"    [RETRY] {exc.__class__.__name__} already retried once, "
-                    f"giving up"
-                )
+                _gave_up(fn, exc, "it is a timeout already retried once")
                 raise
 
             # Last attempt — don't sleep, just raise
@@ -90,8 +104,9 @@ def with_retry(
             )
             time.sleep(delay)
 
-    # All retries exhausted
+    # All retries exhausted. #3789: said, where it used to raise in silence.
     assert last_error is not None
+    _gave_up(fn, last_error, f"all {config.max_retries + 1} attempts failed")
     raise last_error
 
 

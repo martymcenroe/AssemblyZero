@@ -36,11 +36,18 @@ derived blocks stopped applying" into "the prompt at call 6 differs, here is the
 diff". That is the difference between a replay that cannot reach the wall and
 one that reports what changed on the way.
 
-**A recording never costs a run.** Every write here returns False rather than
-raising, exactly as `record_heal` and the convergence record do. The absence is
-visible at the other end: `read_calls` reports what it could not read, and the
-replay says which source it used, so a run with no recording reads as a run with
-no recording and never as a run that replayed clean.
+**A recording holds every call the run consumed, or the run stops** (ADR 0236,
+#3772). A call the run used and the recording lacks makes every replay diverge
+at it, as if the code had changed, which is the false finding this module exists
+to replace. So a write that fails raises before the run consumes the call's
+result, and a resume makes the call again and records it. A line that is not a
+call record raises when the recording is read, naming the file and the line.
+Writes here used to return False, which nothing read, and unreadable lines were
+counted and dropped. One kind of line is still counted rather than read: a
+final line with no newline, the write of a process that died in it, whose call
+never reached the run. The replay says which source it used, so a run with no
+recording reads as a run with no recording and never as a run that replayed
+clean.
 
 **The drafts and verdicts stay where they are.** They are what a human reads
 when diagnosing a halt, and a raw call log is not a substitute for them.
@@ -50,13 +57,17 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from assemblyzero.core.llm_provider import LLMCallResult, LLMProvider
+
+logger = logging.getLogger(__name__)
 
 #: The recording, beside the lineage the run already writes. One per run,
 #: because the lineage directory is run-scoped (#1467).
@@ -77,6 +88,15 @@ SOURCE_RECONSTRUCTION = "reconstruction"
 #: 60,000-character prompt in an error message is unreadable; the first lines
 #: that differ are the finding.
 DIFF_LINES = 24
+
+
+class RecordingError(RuntimeError):
+    """The recording cannot be written, or read as a recording: the file, the
+    line where there is one, and the cause (#3772).
+
+    Not an ``OSError``, so no provider's transport handler reads it as a
+    model call that could not be made.
+    """
 
 
 @dataclass
@@ -143,51 +163,69 @@ def current_run_tag() -> str:
     return os.environ.get(RUN_TAG_ENV, "").strip()
 
 
-def _append(audit_dir: str, record: dict) -> bool:
+def _append(audit_dir: str, record: dict) -> None:
+    """Append one call to the recording, or raise ``RecordingError`` (#3772).
+
+    It used to return False, which nothing read: the run went on consuming a
+    call the recording did not hold, and every replay of it diverged there.
+    """
+    path = calls_path(audit_dir)
+    line = json.dumps(record, ensure_ascii=False) + "\n"
     try:
-        path = calls_path(audit_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-        return True
-    except Exception:  # noqa: BLE001 - a recording must never cost a roll
-        # fail-open: a run that cannot write its recording still has to finish.
-        # The absence is visible downstream -- `read_calls` returns nothing and
-        # the replay reports that it fell back to reconstruction -- so nothing
-        # here can be mistaken for a run that replayed clean.
-        return False
+            fh.write(line)
+    except OSError as exc:
+        raise RecordingError(
+            f"cannot append call {record.get('seq')} to the recording {path}: "
+            f"{type(exc).__name__}: {exc}; the call's result is not used, so the "
+            f"recording still holds every call the run consumed"
+        ) from exc
 
 
 def read_calls(audit_dir: Path | str) -> tuple[list[dict], int]:
-    """Every readable call, in sequence order, and how many lines were not.
+    """Every call in the recording, in sequence order, and whether it ends in
+    a write that did not complete (0 or 1).
 
-    The unreadable count is returned rather than logged, for the reason
-    `convergence.read_records` gives: a caller that reports "11 calls" while
-    silently dropping two corrupt lines is stating a number it did not count.
+    An absent recording is ``([], 0)``: a run that predates the recorder, or
+    one with no audit directory, which is an answer.
+
+    A final line with no newline is a write its process died in (a roll
+    killed mid-write). The newline is part of every write, so the call it
+    held never reached the run. It is not read and it is counted, so a
+    caller can say the recording ends in one, and ``_next_seq`` refuses to
+    append after it. It is not a failure of the recording, and is quiet.
+
+    Every complete line must be a call record. One that is not JSON, or not
+    an object with a ``seq``, raises ``RecordingError`` naming the file and
+    the line (#3772). Such lines used to be counted and dropped: a replay of
+    a recording with a call missing diverges at the gap as if the code had
+    changed, and ``_next_seq`` numbered the next call into it.
     """
     path = calls_path(audit_dir)
     if not path.exists():
         return [], 0
+    text = path.read_text(encoding="utf-8", errors="replace")
+    complete, _, partial = text.rpartition("\n")
     calls: list[dict] = []
-    unreadable = 0
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for number, line in enumerate(complete.split("\n"), start=1):
         line = line.strip()
         if not line:
             continue
         try:
             parsed = json.loads(line)
-        except ValueError:
-            # fail-open: one truncated line -- a roll killed mid-write -- must
-            # not make the whole recording unreadable. It is COUNTED rather
-            # than dropped, so no caller reports a call count it did not count.
-            unreadable += 1
-            continue
-        if isinstance(parsed, dict) and "seq" in parsed:
-            calls.append(parsed)
-        else:
-            unreadable += 1
+        except ValueError as exc:
+            raise RecordingError(
+                f"the recording {path} line {number} is not JSON ({exc}): {line[:80]!r}"
+            ) from exc
+        if not isinstance(parsed, dict) or "seq" not in parsed:
+            raise RecordingError(
+                f"the recording {path} line {number} is not a call record "
+                f"(an object with a seq): {line[:80]!r}"
+            )
+        calls.append(parsed)
     calls.sort(key=lambda c: int(c.get("seq", 0) or 0))
-    return calls, unreadable
+    return calls, 1 if partial.strip() else 0
 
 
 class RecordingProvider(LLMProvider):
@@ -195,7 +233,9 @@ class RecordingProvider(LLMProvider):
 
     Wraps rather than replaces: the inner provider does the work and every
     field of its result is passed through untouched. This class only writes a
-    line, and only when the graph has told it where.
+    line, and only when the graph has told it where. A line it cannot write
+    raises ``RecordingError`` and the call's result is not returned (#3772):
+    the run never consumes a call its recording does not hold.
     """
 
     def __init__(
@@ -280,8 +320,21 @@ def _next_seq(audit_dir: str) -> int:
     Counted from the file rather than from a counter in memory, so a resumed
     run appends after the calls the first process wrote instead of restarting
     at 1 and producing two call number 1s in one recording.
+
+    A recording that ends in a write that did not complete raises
+    ``RecordingError`` (#3772). The new call would be written onto the end
+    of that partial line, and the two would read as one line that is not a
+    call record. The count used to be discarded here, and that call was lost
+    from the recording without a word.
     """
-    calls, _ = read_calls(audit_dir)
+    calls, truncated = read_calls(audit_dir)
+    if truncated:
+        raise RecordingError(
+            f"the recording {calls_path(audit_dir)} ends in a line whose write did "
+            f"not complete (a process died in it), and a call appended now would be "
+            f"joined to it; remove that partial last line, whose call never reached "
+            f"the run, and resume"
+        )
     return (max((int(c.get("seq", 0) or 0) for c in calls), default=0)) + 1
 
 
@@ -294,8 +347,17 @@ class Divergence:
     recorded_head: str
     actual_head: str
     diff: str
+    #: Set when the recording itself cannot answer the call, rather than the
+    #: prompt having changed: what is missing from the recorded call.
+    why: str = ""
 
     def describe(self) -> str:
+        if self.why:
+            return (
+                f"ReplayProvider: call {self.seq} cannot be answered from the "
+                f"recording: {self.why}. Replay stops here rather than guess "
+                f"(#3772).\n{self.diff}"
+            )
         return (
             f"ReplayProvider: the {self.field} at call {self.seq} differs from "
             f"the recording, so the recorded response is no longer the response "
@@ -378,6 +440,19 @@ class ReplayProvider(LLMProvider):
                     diff=_diff(recorded, actual),
                 ))
 
+        if "success" not in call:
+            # #3772: this read a missing outcome as a success, so a failed
+            # call recorded without one would replay as an answer.
+            return self._refuse(Divergence(
+                seq=seq, field="success",
+                recorded_head="", actual_head="",
+                diff=(
+                    f"recorded call {seq} matches the prompt but carries no "
+                    f"success field; the recorder writes one on every call"
+                ),
+                why="its record does not say whether the call succeeded",
+            ))
+
         self._index += 1
         self.path.append((
             str(call.get("stage", "")),
@@ -385,7 +460,7 @@ class ReplayProvider(LLMProvider):
             int(call.get("round", 0) or 0),
         ))
         return LLMCallResult(
-            success=bool(call.get("success", True)),
+            success=bool(call["success"]),
             response=str(call.get("response", "") or ""),
             raw_response=None,
             error_message=str(call.get("error_message", "") or "") or None,
@@ -396,12 +471,22 @@ class ReplayProvider(LLMProvider):
         )
 
     def _refuse(self, divergence: Divergence) -> LLMCallResult:
+        """A failed call naming where the replay stopped, loud where it stops.
+
+        Returned, not raised: a failed ``LLMCallResult`` is every provider's
+        contract, the node that asked reports it as its error, and the replay
+        runner reads ``divergence``. What was missing is the ERROR line on
+        stderr at the point of refusal (#3772).
+        """
         self.divergence = divergence
+        message = divergence.describe()
+        logger.error("[REPLAY] %s", message)
+        print(f"ERROR [REPLAY] {message}", file=sys.stderr, flush=True)
         return LLMCallResult(
             success=False,
             response=None,
             raw_response=None,
-            error_message=divergence.describe(),
+            error_message=message,
             provider="replay",
             model_used=self._model,
             duration_ms=0,
@@ -428,6 +513,8 @@ class RecordingSummary:
     """What a recording holds, counted for the report."""
 
     calls: int = 0
+    #: 1 when the recording ends in a write that did not complete (see
+    #: ``read_calls``); any other line that is not a call record raises.
     unreadable: int = 0
     stages: list[str] = field(default_factory=list)
     run_tags: list[str] = field(default_factory=list)

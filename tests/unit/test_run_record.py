@@ -161,10 +161,13 @@ class TestLeftInPlace:
         items = left_in_place(target_repo, 42)
         assert not any("420" in item for item in items)
 
-    def test_never_raises_outside_a_git_repo(self, tmp_path):
-        items = left_in_place(tmp_path / "nowhere", 42)
-        assert items
-        assert all("unknown" in item or "unavailable" in item for item in items)
+    def test_outside_a_git_repo_it_raises(self, tmp_path):
+        """#3791: a list with an "unknown" line in place of each question git
+        could not answer read as a shorter list; it raises, naming the query."""
+        from assemblyzero.core.run_record import GitQueryError
+
+        with pytest.raises(GitQueryError, match="git worktree list"):
+            left_in_place(tmp_path / "nowhere", 42)
 
     def test_finish_prints_the_list_to_the_console(self, target_repo, capsys, restore_streams):
         _git(target_repo, "branch", "42-lld")

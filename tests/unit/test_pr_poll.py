@@ -93,9 +93,12 @@ class TestTheOtherVerdicts:
             {"mergeable_state": "blocked", "merged": False, "state": "open"}
         ) == VERDICT_WAIT
 
-    def test_an_empty_payload_waits_rather_than_deciding(self):
-        """A transient API failure must cost one interval, not a verdict."""
-        assert poll_verdict({}) == VERDICT_WAIT
+    def test_an_empty_payload_raises_rather_than_waiting(self):
+        """#3785: an empty payload is an answer the poll never had. Read as
+        wait, it sat out the whole bound and ended as a timeout with the
+        cause gone."""
+        with pytest.raises(ValueError, match="not a pull request's state"):
+            poll_verdict({})
 
 
 class TestTheLoopTerminates:
@@ -186,7 +189,9 @@ class TestTheExitCodesAreTheVerdict:
 
 
 class TestFetchIsForgiving:
-    def test_a_failed_gh_call_reads_as_wait(self, monkeypatch):
+    def test_a_failed_gh_call_is_not_read_as_wait(self, monkeypatch):
+        """fetch still answers {} (its own ledger rows); #3785: the verdict
+        on it raises instead of waiting."""
         class _Result:
             returncode = 1
             stdout = ""
@@ -195,7 +200,8 @@ class TestFetchIsForgiving:
             wait_for_pr.subprocess, "run", lambda *a, **k: _Result()
         )
         assert wait_for_pr.fetch("o/r", 1) == {}
-        assert poll_verdict(wait_for_pr.fetch("o/r", 1)) == VERDICT_WAIT
+        with pytest.raises(ValueError, match="not a pull request's state"):
+            poll_verdict(wait_for_pr.fetch("o/r", 1))
 
     def test_unparseable_output_reads_as_wait(self, monkeypatch):
         class _Result:

@@ -123,10 +123,18 @@ def other_side_claude_home() -> Path | None:
     name = Path.home().name
     if sys.platform == "win32":
         return Path(f"//wsl.localhost/Ubuntu/home/{name}/.claude")
+    if not sys.platform.startswith("linux"):
+        return None  # macOS and the rest: no WSL, so no other side
+    # #3793: on Linux /proc/version always exists. One that cannot be read is
+    # a failure, not proof this is not WSL; reading it as "no other side"
+    # dropped the Windows spend lock from the check.
     try:
         version = Path("/proc/version").read_text(encoding="utf-8").lower()
-    except OSError:  # fail-open: no /proc/version means not Linux, so not WSL: there is no other side
-        return None
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot read /proc/version to tell whether this is WSL, so the other "
+            f"side's spend lock cannot be found: {type(exc).__name__}: {exc}"
+        ) from exc
     return Path("/mnt/c/Users") / name / ".claude" if "microsoft" in version else None
 
 
@@ -146,7 +154,18 @@ def claude_homes() -> list[Path]:
 def _present(path: Path) -> bool:
     try:
         return path.is_dir()
-    except OSError:  # fail-open: unreadable is not proof of absence; kept, and the lock check fails closed on it
+    except OSError as exc:
+        # #3793: unreadable is not proof of absence. The home is kept and the
+        # lock check fails closed on it (no Anthropic seat runs); the operator
+        # is told why.
+        from assemblyzero.core import alert
+
+        alert.alert_operator(
+            what=f"cannot tell whether {path} exists",
+            where="assemblyzero.core.seats._present",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="it is kept, so the spend-lock check treats its lock as on",
+        )
         return True
 
 
@@ -170,7 +189,17 @@ def _lock_on(path: Path) -> bool:
         if not path.is_file():
             return False
         text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:  # fail-open: this is the closed side; an unreadable lock counts as on, so seats stop
+    except OSError as exc:
+        # #3793: an unreadable lock counts as on, so Anthropic seats stop; the
+        # operator is told why, where they used to stop with no reason given.
+        from assemblyzero.core import alert
+
+        alert.alert_operator(
+            what=f"cannot read the spend lock {path}",
+            where="assemblyzero.core.seats._lock_on",
+            cause=f"{type(exc).__name__}: {exc}",
+            consequence="it counts as on, so no seat runs on an Anthropic model",
+        )
         return True
     until = lock_until(text)
     return until is None or datetime.now(timezone.utc) < until
@@ -188,7 +217,17 @@ def lock_until(text: str) -> datetime | None:
         if line.startswith(UNTIL_PREFIX):
             try:
                 when = datetime.fromisoformat(line[len(UNTIL_PREFIX):].strip())
-            except ValueError:  # fail-open: None means no lift time, so the lock binds; this is the closed side
+            except ValueError as exc:
+                # #3793: an unreadable promise to lift is not a lift, so the
+                # lock binds; the operator is told the line was unreadable.
+                from assemblyzero.core import alert
+
+                alert.alert_operator(
+                    what=f"the spend lock's {line.strip()!r} is not an ISO time",
+                    where="assemblyzero.core.seats.lock_until",
+                    cause=f"{type(exc).__name__}: {exc}",
+                    consequence="the lock binds until it is lifted by hand",
+                )
                 return None
             return when if when.tzinfo else when.astimezone()
     return None
@@ -770,13 +809,13 @@ def set_run_profile(profile: dict | None) -> None:
 
 
 def current_profile_name() -> str:
-    """The run's profile name, for telemetry rows: never empty."""
-    try:
-        return str(active_profile().get("name", "")) or DEFAULT_PROFILE
-    except Exception:  # noqa: BLE001 - a telemetry row never costs a run
-        # fail-open: a profile that cannot be read here was already reported
-        # at run start; the row still says which default applies.
-        return DEFAULT_PROFILE
+    """The run's profile name, for telemetry rows: never empty.
+
+    #3793: no handler. A profile that cannot be read here raised, and the
+    row was written naming the default profile as the one that ran, which is
+    a telemetry record that is false. The failure propagates instead.
+    """
+    return str(active_profile().get("name", "")) or DEFAULT_PROFILE
 
 
 def _remember(seat: Seat) -> Seat:

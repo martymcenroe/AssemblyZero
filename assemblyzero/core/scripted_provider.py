@@ -44,11 +44,15 @@ that killed a run.
 
 from __future__ import annotations
 
+import logging
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from assemblyzero.core.llm_provider import LLMCallResult, LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -131,10 +135,21 @@ class ScriptedProvider(LLMProvider):
         return [call.stage for call in self.calls]
 
     def _load(self, rule: ScriptedRule) -> str:
+        """The rule's scripted answer.
+
+        A rule with no response, no fixture and no ``fail_with`` raises,
+        naming its stage (#3792): it used to answer "" as a success, a quiet
+        default for a call the script never wrote down. An explicit
+        ``response=""`` is an answer the script wrote and is returned.
+        """
         if rule.response is not None:
             return rule.response
         if rule.fixture is None:
-            return ""
+            raise ValueError(
+                f"rule for stage {rule.stage!r} has no response, no fixture and "
+                f"no fail_with, so it cannot answer the call it matched; a script "
+                f"that cannot answer is a failed run, never an empty success"
+            )
         if self._fixture_root is None:
             raise ValueError(
                 f"rule for stage {rule.stage!r} names fixture "
@@ -238,6 +253,10 @@ class ScriptedProvider(LLMProvider):
                     f"is exercising a path the fixture set does not cover — "
                     f"add a rule rather than a default (#2567)."
                 )
+            # #3792: the failed result is the caller's contract, and its HALT
+            # alerts; this line makes the miss loud where it happens.
+            logger.error("[SCRIPTED] %s", problem)
+            print(f"ERROR [SCRIPTED] {problem}", file=sys.stderr, flush=True)
             return LLMCallResult(
                 success=False,
                 response=None,

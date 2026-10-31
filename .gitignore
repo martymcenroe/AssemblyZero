@@ -33,6 +33,10 @@ audit_tracked_log_writers_results.tsv
 audit_fleet_auto_merge_readiness_results.tsv
 audit_fleet_branch_protection_results.tsv
 
+# #4163: call recordings a test with a relative audit_dir wrote at the root;
+# audit/calls.jsonl was committed by accident in #3573 and is removed
+/audit/
+
 # #1196: pickup-decide hot state (10K+ lines, regenerable per session)
 data/.pickup-surface.json
 

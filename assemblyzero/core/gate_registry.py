@@ -1150,11 +1150,21 @@ class HaltSite:
         return f"{self.path}::{self.qualname}::{self.kind}::{self.index}"
 
 
+class HaltScanError(RuntimeError):
+    """A file in the walker's scope cannot be read or parsed (#3776).
+
+    Raised, never recorded: a walk that skipped it would report the halt
+    sites of less than the tree it was asked to cover.
+    """
+
+
 @dataclass
 class WalkCoverage:
     """What the walker examined. Counted, never estimated."""
 
     files_scanned: int = 0
+    #: Always empty since #3776: a file that cannot be read or parsed raises
+    #: HaltScanError. Kept only because ``tools/audit_halt_sites.py`` prints it.
     files_unparseable: list[str] = field(default_factory=list)
     functions_scanned: int = 0
 
@@ -1355,7 +1365,12 @@ def _sites_in_function(func: ast.AST, rel: str, module=None) -> list[tuple[str, 
 def scan_halt_sites(
     root: Path, subdir: Path = WALK_SUBDIR
 ) -> tuple[list[HaltSite], WalkCoverage]:
-    """Every halt site under ``root/subdir``, keyed, in path order."""
+    """Every halt site under ``root/subdir``, keyed, in path order.
+
+    A file that cannot be read or parsed raises HaltScanError naming it
+    (#3776). It used to be listed in ``files_unparseable`` and skipped, so the
+    walk reported on a tree it had not fully read.
+    """
     coverage = WalkCoverage()
     sites: list[HaltSite] = []
     base = root / subdir
@@ -1367,14 +1382,11 @@ def scan_halt_sites(
             # utf-8-sig: two files in this tree carry a BOM (see the fail-open
             # audit, which found the same).
             tree = ast.parse(path.read_text(encoding="utf-8-sig"))
-        except (SyntaxError, ValueError, OSError):
-            # fail-open: a file that will not parse is recorded in
-            # coverage.files_unparseable, which the report prints and the
-            # test asserts empty, so the shortfall is carried in the data
-            # rather than hidden; the sweep continues so one bad file does
-            # not blank the other hundred and eighty-three.
-            coverage.files_unparseable.append(rel)
-            continue
+        except (SyntaxError, ValueError, OSError) as exc:
+            raise HaltScanError(
+                f"the halt-site walker cannot scan {rel}: {type(exc).__name__}: "
+                f"{exc}; it stops rather than report the sites of less than the tree"
+            ) from exc
         coverage.files_scanned += 1
         # #2814: the module's own string constants and top-level functions,
         # so a head held in a constant or composed by a helper reads as text
@@ -1580,14 +1592,14 @@ def renumberings(
     for gate_key, named in sorted(ghosts, key=lambda g: g[1]):
         try:
             path, qualname, kind = _site_parts(named)
-        except ValueError:
-            # fail-open: a row naming something that is not a site key at all
-            # is a real defect, and it is REPORTED rather than raised -- this
-            # entry stays in the returned phantom list, where the audit prints
-            # it and the CI gate fails on it. Raising here would replace a
-            # named finding with a traceback and would stop the other rows
-            # being examined at all.
-            continue
+        except ValueError as exc:
+            # #3776: a row naming something that is not a site key is a defect
+            # in the registry, and the renumbering report cannot be trusted
+            # while it stands, so it raises naming the row.
+            raise ValueError(
+                f"registry row {gate_key!r} names {named!r}, which is not a site "
+                f"key (path::qualname::kind::index)"
+            ) from exc
         # The head the registry row expects is not stored on the row -- only
         # `emits` is, and that is prose for humans. So the head comes from the
         # candidates themselves, and a group is claimable only if exactly one
