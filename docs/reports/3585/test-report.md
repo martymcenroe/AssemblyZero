@@ -1230,3 +1230,15 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** `test_cascade_detector.py::TestCorruptConfigFallback::test_corrupt_config_fallback` is now `test_corrupt_config_raises_naming_it`.
 
 **Neighbouring suites:** before the test change, 145 passed and 1 failed (exactly that test) across `test_cascade_events.py`, `test_cascade_action.py`, `test_cascade_detector.py`, `test_circular_imports.py`, `tests/integration/test_cascade_hook_integration.py`, the cascade-events loud-failure file and the three new files; after, 146 passed.
+
+## Where this package met the other three
+
+Each package passed alone. Stacking this one on the requirements, implementation_spec and testing packages found three places where they meet, none visible to any of them on its own:
+
+- **N0b and the codebase reader.** Requirements' N0b judged an unreadable file by what the reader left out; this package's reader raises `CodebaseReadError` instead, and nothing caught it. N0b now catches it at both reads and at the project metadata, and halts naming the file. `tests/unit/test_analyze_codebase_loud_failure.py`: `test_191_a_key_file_that_cannot_be_read_halts_naming_it`, `test_268_a_related_file_that_cannot_be_read_halts_naming_it` and the new `TestProjectMetadata::test_a_project_config_that_will_not_parse_halts_naming_it` fail on the source before it and pass after. The new return joins the `lld.arc_unreadable` gate.
+- **The spec manifest and the visual-gate config.** `test_compile_manifest_loud_failure.py`'s two contract tests declared a gate with no `renderer_cmd` or `separation_floor`, which the config now refuses at load. The code is right, so the tests declare a whole gate.
+- **N1b and prompt telemetry.** `test_validate_test_plan_node.py::TestNodeRoutesToDraftOnFail::test_node_routes_to_draft_on_fail` pointed at a repository that does not exist, and telemetry now raises on a write it cannot make. N1b alerts and stops, which is right, so the test takes a real `target_repo`.
+
+## The landing tier
+
+Run on 2026-10-31 on the merge of `main` at `91bcd78b` (requirements, implementation_spec and testing landed): 13,190 passed, 66 skipped, 7 deselected and 7 xfailed in 630 s, with no failures. Loud-failure PASS (124 sites); fail-open PASS --strict (10,218 sites); halt sites PASS --strict (215 sites, 114 gates).
