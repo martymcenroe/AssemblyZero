@@ -41,9 +41,17 @@ load_lld_module = importlib.import_module("assemblyzero.workflows.testing.nodes.
 VERIFY = "assemblyzero.workflows.testing.nodes.verify_phases"
 
 #: A spec that names no framework, so the project's own files decide.
+#: #3585: N0 halts on a spec that names no files to implement, so it names one
+#: source file, which places no test runner.
 NEUTRAL_SPEC = """# 7 - Engine replay
 
 **Status:** APPROVED
+
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `src/engine.py` | Add | The replay engine |
 
 ## 3. Requirements
 
@@ -198,7 +206,12 @@ class TestEveryLoadSiteWritesEveryFramework:
 
     def test_the_issue_only_load_site(self, tmp_path):
         root = _mixed_target(tmp_path)
-        issue = json.dumps({"title": "Engine replay", "body": "Replay a session."})
+        # #3585: issue-only mode halts on a body with no test plan or no files
+        # to implement; the spec's sections serve as the body.
+        body = NEUTRAL_SPEC.split("## 2. Files to Implement", 1)[1]
+        issue = json.dumps({
+            "title": "Engine replay", "body": "## 2. Files to Implement" + body,
+        })
         with patch.object(load_lld_module, "run_command",
                           return_value=_Proc(issue, 0)):
             result = _load_from_issue({}, 7, root)

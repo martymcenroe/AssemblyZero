@@ -633,9 +633,10 @@ class TestNodeFunctions:
         """
         from assemblyzero.workflows.testing.graph import route_after_review
 
+        # #3585: strict halts (and says so on stderr) rather than ending.
         for policy, expected_route in (
             ("revise", "N1_5_revise_test_plan"),
-            ("strict", "end"),
+            ("strict", "HALT"),
         ):
             ascii_state: TestingWorkflowState = {
                 "issue_number": 42,
@@ -649,7 +650,8 @@ class TestNodeFunctions:
             capsys.readouterr()  # clear
             result = route_after_review(ascii_state)
             assert result == expected_route
-            out = capsys.readouterr().out
+            captured = capsys.readouterr()
+            out = captured.out + captured.err
             try:
                 out.encode("cp1252")
             except UnicodeEncodeError as e:
@@ -683,25 +685,30 @@ class TestNodeFunctions:
             f"revise node; got {result!r}"
         )
 
-    def test_route_after_review_auto_mode_continues_on_blocked(self, tmp_path):
-        """route_after_review continues to scaffold in auto mode even when BLOCKED."""
+    def test_route_after_review_auto_mode_revises_on_blocked(self, tmp_path):
+        """#3585 (ADR 0236): auto mode no longer walks past a BLOCKED plan.
+
+        It continued to scaffold, which treated a failed gate as a pass; it
+        now revises, as the default policy does.
+        """
         from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
             "issue_number": 42,
             "repo_root": str(tmp_path),
-            "auto_mode": True,  # Auto mode - should continue despite BLOCKED
+            "auto_mode": True,
             "test_plan_status": "BLOCKED",
             "error_message": "",
         }
 
         result = route_after_review(state)
 
-        # Auto mode should continue to scaffold even when BLOCKED
-        assert result == "N2_scaffold_tests"
+        assert result == "N1_5_revise_test_plan"
 
     def test_route_after_review_stops_on_blocked_without_auto(self, tmp_path):
-        """route_after_review stops at end when BLOCKED under strict policy.
+        """route_after_review halts when BLOCKED under strict policy.
+
+        #3585: it halts at HALT, which alerts, where it ended at END.
 
         Issue #1072 changed the default `test_plan_policy` from "strict"
         (END on BLOCKED) to "revise" (try revisions before ending). The
@@ -724,8 +731,8 @@ class TestNodeFunctions:
 
         result = route_after_review(state)
 
-        # strict policy: BLOCKED ends the workflow
-        assert result == "end"
+        # strict policy: BLOCKED halts the workflow (#3585)
+        assert result == "HALT"
 
     def test_scaffold_tests_creates_files(self, tmp_path):
         """scaffold_tests creates test files."""
@@ -2297,13 +2304,18 @@ class TestLoadLLDModule:
         assert result[2]["change_type"] == "Modify"
 
     def test_extract_files_to_modify_no_table(self):
-        """extract_files_to_modify returns empty when no table."""
-        from assemblyzero.workflows.testing.nodes.load_lld import extract_files_to_modify
+        """extract_files_to_modify raises when there is no table (#3585).
+
+        It returned [], and the run went on until N4 found nothing to write.
+        """
+        from assemblyzero.workflows.testing.nodes.load_lld import (
+            WorkflowParsingError,
+            extract_files_to_modify,
+        )
 
         lld_content = "# LLD\n\n## 2. Scope\n\nNo files changed."
-        result = extract_files_to_modify(lld_content)
-
-        assert result == []
+        with pytest.raises(WorkflowParsingError, match="no Files to Implement table"):
+            extract_files_to_modify(lld_content)
 
     def test_load_lld_non_mock(self, tmp_path):
         """load_lld loads actual implementation spec file."""
@@ -2312,10 +2324,17 @@ class TestLoadLLDModule:
         # Issue #384: load_lld now requires an impl spec, not a raw LLD
         spec_dir = tmp_path / "docs" / "lld" / "drafts"
         spec_dir.mkdir(parents=True)
+        # #3585: a spec that names no files to implement halts N0.
         (spec_dir / "spec-0042.md").write_text("""# Implementation Spec
 
 ## 1. Overview
 * **Status:** Approved (Gemini Review, 2026-01-30)
+
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `src/login.py` | Add | Login |
 
 ## 3. Requirements
 1. REQ-1: User login
@@ -2439,7 +2458,7 @@ class TestGraphRoutingFunctions:
         assert result == "N4_implement_code"
 
     def test_route_after_red_no_next_node(self, tmp_path):
-        """route_after_red returns end when no next_node."""
+        """route_after_red halts when no next_node (#3585; it ended at END)."""
         from assemblyzero.workflows.testing.graph import route_after_red
 
         state: TestingWorkflowState = {
@@ -2447,7 +2466,7 @@ class TestGraphRoutingFunctions:
             "next_node": "",
         }
         result = route_after_red(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_implement_error(self, tmp_path):
         """route_after_implement returns HALT on a recorded reason (#2756)."""
@@ -2460,7 +2479,7 @@ class TestGraphRoutingFunctions:
         assert result == "HALT"
 
     def test_route_after_green_iteration_max(self, tmp_path):
-        """route_after_green returns end at max iterations."""
+        """route_after_green halts at max iterations (#3585; it ended at END)."""
         from assemblyzero.workflows.testing.graph import route_after_green
 
         state: TestingWorkflowState = {
@@ -2470,7 +2489,7 @@ class TestGraphRoutingFunctions:
             "max_iterations": 10,
         }
         result = route_after_green(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_green_to_e2e(self, tmp_path):
         """route_after_green routes to E2E validation."""
@@ -2508,7 +2527,7 @@ class TestGraphRoutingFunctions:
         assert result == "N4_implement_code"
 
     def test_route_after_e2e_max_iterations(self, tmp_path):
-        """route_after_e2e returns end at max iterations."""
+        """route_after_e2e halts at max iterations (#3585; it ended at END)."""
         from assemblyzero.workflows.testing.graph import route_after_e2e
 
         state: TestingWorkflowState = {
@@ -2518,7 +2537,7 @@ class TestGraphRoutingFunctions:
             "max_iterations": 10,
         }
         result = route_after_e2e(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_finalize_skip_docs(self, tmp_path):
         """route_after_finalize returns end when skip_docs."""
@@ -2780,45 +2799,53 @@ class TestE2EValidationModule:
             assert "pytest" in call_args
 
     def test_run_e2e_tests_timeout(self, tmp_path):
-        """run_e2e_tests handles timeout."""
-        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        """run_e2e_tests raises on a timeout, naming the ceiling (#3585).
+
+        It returned code -1 with a fixed string.
+        """
+        from assemblyzero.workflows.testing.nodes.e2e_validation import (
+            E2ERunFailed,
+            run_e2e_tests,
+        )
 
         with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("pytest", 600)
 
-            result = run_e2e_tests([], None, tmp_path)
-
-        assert result["returncode"] == -1
-        assert "timed out" in result["stderr"]
+            with pytest.raises(E2ERunFailed, match="timed out after"):
+                run_e2e_tests([], None, tmp_path)
 
     def test_run_e2e_tests_not_found(self, tmp_path):
-        """run_e2e_tests handles missing pytest."""
-        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        """run_e2e_tests raises when the runner is missing (#3585)."""
+        from assemblyzero.workflows.testing.nodes.e2e_validation import (
+            E2ERunFailed,
+            run_e2e_tests,
+        )
 
         with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError()
 
-            result = run_e2e_tests([], None, tmp_path)
-
-        assert result["returncode"] == -1
+            with pytest.raises(E2ERunFailed, match="could not start"):
+                run_e2e_tests([], None, tmp_path)
 
     def test_cleanup_sandbox(self):
-        """cleanup_sandbox returns success."""
+        """cleanup_sandbox is not implemented and says so (#3585).
+
+        It returned success without doing anything.
+        """
         from assemblyzero.workflows.testing.nodes.e2e_validation import cleanup_sandbox
 
-        success, error = cleanup_sandbox("some/repo")
-
-        assert success is True
-        assert error == ""
+        with pytest.raises(NotImplementedError):
+            cleanup_sandbox("some/repo")
 
     def test_verify_safety_limits(self):
-        """verify_safety_limits returns safe."""
+        """verify_safety_limits is not implemented and says so (#3585).
+
+        It reported "safe" without checking.
+        """
         from assemblyzero.workflows.testing.nodes.e2e_validation import verify_safety_limits
 
-        safe, error = verify_safety_limits("repo", 5, 3)
-
-        assert safe is True
-        assert error == ""
+        with pytest.raises(NotImplementedError):
+            verify_safety_limits("repo", 5, 3)
 
     def test_e2e_validation_success(self, tmp_path):
         """e2e_validation succeeds on all tests passing."""
@@ -3240,7 +3267,11 @@ class TestE2EValidationFullCoverage:
     """Additional tests for e2e_validation.py."""
 
     def test_e2e_validation_with_sandbox(self, tmp_path):
-        """e2e_validation handles sandbox repo."""
+        """e2e_validation with a sandbox repo halts before any test runs (#3585).
+
+        The safety check is not implemented. It used to report "safe", and
+        the run went on against the sandbox unchecked.
+        """
         from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
@@ -3269,7 +3300,9 @@ class TestE2EValidationFullCoverage:
 
             result = e2e_validation(state)
 
-        assert result.get("error_message") == ""
+        assert "path/to/sandbox" in result.get("error_message", "")
+        assert "not implemented" in result["error_message"]
+        mock_run.assert_not_called()
 
     def test_e2e_validation_internal_error(self, tmp_path):
         """e2e_validation handles internal error (code 3)."""
@@ -3421,7 +3454,7 @@ class TestGraphRoutingEdgeCases:
         assert result == "HALT"
 
     def test_route_after_green_no_next_node(self):
-        """route_after_green returns end when no next_node."""
+        """route_after_green halts when no next_node (#3585; it ended at END)."""
         from assemblyzero.workflows.testing.graph import route_after_green
 
         state: TestingWorkflowState = {
@@ -3429,7 +3462,7 @@ class TestGraphRoutingEdgeCases:
             "next_node": "",
         }
         result = route_after_green(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_e2e_error(self):
         """route_after_e2e returns HALT on a recorded reason (#2756)."""
@@ -3954,10 +3987,17 @@ class TestLoadLLDEdgeCases:
         # Create LLD file at custom path
         custom_path = tmp_path / "custom" / "lld.md"
         custom_path.parent.mkdir(parents=True)
+        # #3585: an LLD that names no files to implement halts N0.
         custom_path.write_text("""# Custom LLD
 
 ## 1. Context
 * **Status:** APPROVED
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `src/custom.py` | Add | Custom feature |
 
 ## 3. Requirements
 1. REQ-1: Test requirement
@@ -4366,7 +4406,10 @@ class TestGraphAdditional:
     """More tests for graph.py edge cases."""
 
     def test_route_after_review_with_auto_mode_and_error(self):
-        """route_after_review with auto mode and error still returns end."""
+        """route_after_review with auto mode and an error halts (#3585).
+
+        Auto mode used to ignore N1's error and continue to N2.
+        """
         from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
@@ -4375,10 +4418,7 @@ class TestGraphAdditional:
             "test_plan_status": "",
         }
 
-        # With error, should return end even in auto mode
-        result = route_after_review(state)
-        # Error in non-auto mode returns end
-        assert result == "end" or result == "N2_scaffold_tests"
+        assert route_after_review(state) == "HALT"
 
 
 class TestLoadLLDMockPath:

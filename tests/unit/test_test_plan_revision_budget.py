@@ -340,12 +340,15 @@ class TestTheLoopRunsAndTheCapEndsIt:
             "the loop was not cut short on the first revision -- it ran the "
             "full allowance and the reason was simply erased each time"
         )
-        assert final.get("error_message") == "", (
-            "N1 cleared the reason N1.5 recorded, so nothing downstream "
-            "could see it"
-        )
-        assert not final.get("recovery_plan_path"), (
-            "and the run ended with no bundle at all"
+        # #3585: the fall-out to `end` is gone as well. With #2775's two
+        # changes reverted, N1 still clears N1.5's reason, but the plan is
+        # still BLOCKED with the revisions spent, so N1's stop wrapper records
+        # that and the run halts with a bundle instead of ending with none.
+        assert final.get("error_message", "").startswith(
+            "Test plan revision budget spent"
+        ), final.get("error_message")
+        assert final.get("recovery_plan_path"), (
+            "the run ended with no bundle at all, which is the #3585 defect"
         )
 
     def test_the_cap_leaves_a_bundle(self, roll):
