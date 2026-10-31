@@ -91,7 +91,7 @@ class TestVerificationRuns:
         finish. Verification must still be able to SAY so."""
         _git(repo, "branch", "issue-19")
 
-        with patch.object(reset, "delete_local_branches", lambda *a: 0):
+        with patch.object(reset, "dispose_pipeline_branches", lambda *a: []):
             code = _main(repo)
 
         out = capsys.readouterr().out

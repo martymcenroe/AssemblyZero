@@ -680,7 +680,14 @@ def ensure_base(
         log.write(f"RESET could not determine owner/repo: {err}")
         return None
     preserve = settled_artifact_names(repo_root, issue, log)
-    reset.reset_one_issue(repo_root, repo_slug, issue, preserve)
+    try:
+        reset.reset_one_issue(repo_root, repo_slug, issue, preserve, base=base)
+    except reset.ResetPreservationError as err:
+        # #4215: a branch whose tip could not be preserved was not removed.
+        # The operator was alerted where it failed; the roll does not go on
+        # to build on a half-reset issue.
+        log.write(f"RESET stopped, a branch could not be preserved: {err}")
+        return None
 
     findings = gate.check_repo(repo_root, [issue], base)
     debris = [f for f in findings if not f.startswith("ERROR:")]

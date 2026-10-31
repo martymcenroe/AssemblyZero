@@ -178,6 +178,206 @@ class TestCheckpointSearch:
 
 
 # ---------------------------------------------------------------------------
+# #4215: no branch is deleted before its tip is recoverable
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def alerts(monkeypatch) -> list[dict]:
+    """Record `alert_operator` calls instead of emailing the operator."""
+    from assemblyzero.core import alert
+
+    seen: list[dict] = []
+    monkeypatch.setattr(alert, "alert_operator", lambda **kw: seen.append(kw) or kw)
+    return seen
+
+
+def graveyard_heads(origin: Path) -> dict[str, str]:
+    return {n: s for n, s in remote_heads(origin).items() if n.startswith("graveyard/")}
+
+
+def reject_graveyard_pushes(origin: Path) -> None:
+    """Make origin refuse any push to refs/heads/graveyard/*."""
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "while read old new ref; do\n"
+        '  case "$ref" in refs/heads/graveyard/*) echo "graveyard refused" >&2; exit 1;; esac\n'
+        "done\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+
+class TestNoBranchIsDeletedBeforeItsTipIsRecoverable:
+    def test_a_pushed_branch_with_unlanded_commits_survives_on_origin_after_the_reset(
+        self, repo: Path, origin: Path, gh: Gh
+    ):
+        """T1 (R1): commits on no other branch, pushed, no PR. Before #4215 the
+        reset deleted the local and the remote copy and nothing held the tip."""
+        tip = commit_on(repo, "issue-7", "unlanded work")
+        push_branch(repo, "issue-7")
+        assert tip not in remote_heads(origin).get("main", "")
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        heads = remote_heads(origin)
+        assert "issue-7" not in heads, "the branch name is freed on origin"
+        parked = graveyard_heads(origin)
+        assert list(parked.values()) == [tip], f"the tip must be on a graveyard ref: {heads}"
+        # The proof a reviewer can run: the tip is reachable from a ref on origin.
+        contains = subprocess.run(
+            ["git", "-C", str(origin), "branch", "--contains", tip, "--list", "graveyard/*"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "graveyard/issue-7-" in contains
+        # And locally the branch was parked, not deleted.
+        assert [b for b in local_branches(repo) if b.startswith("graveyard/issue-7-")]
+
+    def test_the_graveyard_ref_is_on_origin_before_the_delete_goes_out(
+        self, repo: Path, origin: Path, gh: Gh
+    ):
+        commit_on(repo, "issue-7", "unlanded work")
+        push_branch(repo, "issue-7")
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        pushes = [c for c in gh.commands if c[:3] == ["git", "push", "origin"]]
+        graveyard_at = next(i for i, c in enumerate(pushes) if "graveyard/" in c[3])
+        delete_at = next(i for i, c in enumerate(pushes) if c[3] == "--delete")
+        assert graveyard_at < delete_at
+
+    def test_a_branch_whose_commits_are_all_on_the_base_is_removed_with_no_graveyard_ref(
+        self, repo: Path, origin: Path, gh: Gh
+    ):
+        """T2 (R2)."""
+        commit_on(repo, "issue-7", "landed work")
+        push_branch(repo, "issue-7")
+        _must(git(repo, "merge", "--ff-only", "issue-7"))
+        _must(git(repo, "push", "origin", "main"))
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        assert "issue-7" not in remote_heads(origin)
+        assert graveyard_heads(origin) == {}
+        assert not [b for b in local_branches(repo) if "7" in b]
+
+    def test_a_per_stage_branch_is_secured_the_same_way(
+        self, repo: Path, origin: Path, gh: Gh
+    ):
+        tip = commit_on(repo, "7-lld", "design draft")
+        push_branch(repo, "7-lld")
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        assert "7-lld" not in remote_heads(origin)
+        assert list(graveyard_heads(origin).values()) == [tip]
+
+    def test_a_local_only_branch_is_parked_locally_and_pushes_nothing(
+        self, repo: Path, origin: Path, gh: Gh
+    ):
+        """Unpushed work is not published by a reset; it keeps a local ref."""
+        tip = commit_on(repo, "issue-7", "never pushed")
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        parked = [b for b in local_branches(repo) if b.startswith("graveyard/issue-7-")]
+        assert len(parked) == 1
+        assert _must(git(repo, "rev-parse", parked[0])) == tip
+        assert graveyard_heads(origin) == {}
+
+    def test_a_tip_that_exists_only_on_origin_is_fetched_and_preserved(
+        self, repo: Path, origin: Path, gh: Gh, tmp_path: Path
+    ):
+        """Pushed from another clone: this repo has no copy of the commit."""
+        other = tmp_path / "other"
+        _must(subprocess.run(
+            ["git", "clone", "-q", str(origin), str(other)], capture_output=True, text=True,
+        ))
+        git(other, "config", "user.email", "o@example.com")
+        git(other, "config", "user.name", "O")
+        _must(git(other, "switch", "-c", "issue-7"))
+        (other / "theirs.txt").write_text("theirs\n", encoding="utf-8")
+        git(other, "add", "-A")
+        _must(git(other, "commit", "-m", "work from another clone"))
+        tip = _must(git(other, "rev-parse", "HEAD"))
+        _must(git(other, "push", "origin", "issue-7"))
+        assert git(repo, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        assert "issue-7" not in remote_heads(origin)
+        assert list(graveyard_heads(origin).values()) == [tip]
+
+    def test_origin_refusing_the_graveyard_push_keeps_the_branch_and_stops_the_reset(
+        self, repo: Path, origin: Path, gh: Gh, alerts: list[dict]
+    ):
+        tip = commit_on(repo, "issue-7", "unlanded work")
+        push_branch(repo, "issue-7")
+        reject_graveyard_pushes(origin)
+
+        with pytest.raises(reset.ResetPreservationError):
+            reset.reset_one_issue(repo, "owner/repo", 7)
+
+        assert remote_heads(origin).get("issue-7") == tip, "the branch must still be on origin"
+        assert graveyard_heads(origin) == {}
+        assert not [c for c in gh.commands if c[:4] == ["git", "push", "origin", "--delete"]]
+        assert len(alerts) == 1 and "issue-7" in alerts[0]["what"]
+        assert alerts[0]["issue"] == 7
+
+    def test_an_unlistable_origin_stops_the_reset_instead_of_skipping_the_sweep(
+        self, repo: Path, gh: Gh, alerts: list[dict], tmp_path: Path
+    ):
+        _must(git(repo, "remote", "set-url", "origin", str(tmp_path / "nowhere.git")))
+
+        with pytest.raises(reset.ResetPreservationError):
+            reset.delete_remote_branches(repo, 7)
+
+        assert len(alerts) == 1 and "listing origin" in alerts[0]["what"]
+
+    def test_the_checked_out_branch_and_an_attempt_branch_are_never_touched(
+        self, repo: Path, origin: Path, gh: Gh
+    ):
+        commit_on(repo, "hardening-run-1", "attempt work")
+        push_branch(repo, "hardening-run-1")
+        commit_on(repo, "issue-7", "standing here")
+        push_branch(repo, "issue-7")
+        _must(git(repo, "switch", "issue-7"))
+
+        reset.delete_remote_branches(repo, 7)
+
+        heads = remote_heads(origin)
+        assert "hardening-run-1" in heads and "issue-7" in heads
+        assert graveyard_heads(origin) == {}
+
+    def test_the_reset_never_hands_git_a_force_delete(self, repo: Path, origin: Path, gh: Gh):
+        commit_on(repo, "issue-7", "unlanded work")
+        push_branch(repo, "issue-7")
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        branch_cmds = [c for c in gh.commands if c[:2] == ["git", "branch"]]
+        assert not [c for c in branch_cmds if "-D" in c or "-M" in c]
+
+    def test_the_checkpoint_is_pinned_before_any_branch_leaves_origin(
+        self, repo: Path, origin: Path, gh: Gh
+    ):
+        """#4216 T1, end to end: the only checkpoint commit is on `issue-7`."""
+        sha = commit_on(repo, "issue-7", "[CP:post-impl] issue #7: workflow checkpoint")
+        push_branch(repo, "issue-7")
+
+        reset.reset_one_issue(repo, "owner/repo", 7)
+
+        rescue = _must(git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/rescue/"))
+        assert rescue.endswith(sha) and "refs/rescue/issue-7-" in rescue
+        pinned_at = next(i for i, c in enumerate(gh.commands) if c[:2] == ["git", "update-ref"])
+        deleted_at = next(
+            i for i, c in enumerate(gh.commands) if c[:4] == ["git", "push", "origin", "--delete"]
+        )
+        assert pinned_at < deleted_at
+
+
+# ---------------------------------------------------------------------------
 # #4217: the live-orchestrator refusal reads the lock where the writer puts it
 # ---------------------------------------------------------------------------
 

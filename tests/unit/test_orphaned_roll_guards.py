@@ -338,7 +338,7 @@ class TestTheRefusalComesBeforeAnyWrite:
         touched: list[str] = []
         for name in (
             "pin_checkpoint", "close_open_prs", "remove_worktree",
-            "delete_local_branches", "delete_remote_branches",
+            "dispose_pipeline_branches", "delete_remote_branches",
             "archive_lineage_dirs", "relocate_lld_artifacts", "reopen_issue",
         ):
             monkeypatch.setattr(
