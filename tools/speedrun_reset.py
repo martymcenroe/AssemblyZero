@@ -50,6 +50,10 @@ from pathlib import Path
 # as debris.
 GRAVEYARD_PREFIX = "graveyard/"
 
+# The AssemblyZero checkout this tool sits in. The orchestrator runs with it as
+# its working directory (`speedrun_roll.py` Popen cwd), so it holds the locks (#4217).
+AZ_ROOT = Path(__file__).resolve().parents[1]
+
 
 def _rmtree_clearing_readonly(path: Path) -> None:
     """rmtree that survives the ReadOnly attribute (#2162).
@@ -711,7 +715,9 @@ class LiveOrchestratorError(RuntimeError):
     """Raised when a reset is asked to run under a live orchestrator (#2510)."""
 
 
-def refuse_if_orchestrator_is_live(repo_root: Path, issue: int) -> None:
+def refuse_if_orchestrator_is_live(
+    repo_root: Path, issue: int, az_root: Path | None = None,
+) -> None:
     """Refuse -- not warn -- while this issue's lock names a live process.
 
     On 2026-09-02 at 19:20 the follower announced `The roll is done: FAILED`
@@ -726,23 +732,30 @@ def refuse_if_orchestrator_is_live(repo_root: Path, issue: int) -> None:
     `git clean` in someone else's checkout, so this raises rather than printing.
     The lock has carried the pid the whole time -- nothing needed to be recorded
     that was not already there, only read.
-    """
-    from assemblyzero.workflows.orchestrator.resume import live_orchestrator_pid
 
-    previous = Path.cwd()
-    try:
-        # The lock directory is repo-relative, so it is read from the repo the
-        # reset is about rather than from wherever the operator invoked this.
-        os.chdir(repo_root)
-        pid = live_orchestrator_pid(issue)
-    finally:
-        os.chdir(previous)
+    #4217: the lock is read where the orchestrator WRITES it. Its lock
+    directory is relative to its working directory, and `speedrun_roll.py`
+    starts it with the AssemblyZero root as that directory, so the lock lives
+    under the AssemblyZero root and not in the target repository, which may
+    have no `.assemblyzero` directory at all. This used to read the target
+    repo's copy, which nothing writes, so the refusal could not see a roll
+    started by `speedrun_roll.py`. The path comes from the orchestrator's own
+    `orchestration_lock_path`, the function its writer calls.
+    """
+    from assemblyzero.workflows.orchestrator.resume import (
+        live_orchestrator_pid,
+        orchestration_lock_path,
+    )
+
+    az_root = AZ_ROOT if az_root is None else Path(az_root)
+    pid = live_orchestrator_pid(issue, az_root)
     if pid is None:
         return
     raise LiveOrchestratorError(
         f"issue #{issue} has a live orchestrator: the lock at "
-        f"{repo_root / '.assemblyzero' / 'orchestrator' / 'locks' / f'{issue}.lock'} "
-        f"names pid {pid}, and that process is running. Refusing to reset.\n"
+        f"{orchestration_lock_path(issue, az_root)} "
+        f"names pid {pid}, and that process is running. Refusing to reset "
+        f"{repo_root}.\n"
         f"A reset here closes the run's PRs, deletes its branches locally and "
         f"on origin, and archives the lineage the run is still writing (#2510).\n"
         f"The wrapper's own pid file can name a DEAD process while the "

@@ -7,6 +7,8 @@ test has no GitHub remote.
 """
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -45,8 +47,6 @@ class Gh:
         self.commands.append(list(cmd))
         if cmd[0] != "gh":
             return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=check)
-        import json
-
         def done(out=""):
             return subprocess.CompletedProcess(cmd, 0, out, "")
 
@@ -175,3 +175,62 @@ class TestCheckpointSearch:
         rescue = reset.pin_checkpoint(repo, 7)
         assert rescue is not None and _must(git(repo, "rev-parse", rescue)) == sha
         assert roll.find_checkpoint(repo, 7) == _must(git(repo, "rev-parse", "--short", sha))
+
+
+# ---------------------------------------------------------------------------
+# #4217: the live-orchestrator refusal reads the lock where the writer puts it
+# ---------------------------------------------------------------------------
+
+
+class TestLockLayoutIsShared:
+    @pytest.fixture
+    def az(self, tmp_path: Path, monkeypatch) -> Path:
+        """An AssemblyZero root the orchestrator is started in: its cwd."""
+        root = tmp_path / "assemblyzero"
+        root.mkdir()
+        monkeypatch.chdir(root)
+        monkeypatch.setattr(reset, "AZ_ROOT", root)
+        return root
+
+    def test_a_lock_written_by_the_orchestrators_own_code_stops_the_reset_before_any_write(
+        self, repo: Path, az: Path, gh: Gh
+    ):
+        """T1 (R1, R2): the lock comes from `acquire_orchestration_lock`, run as
+        the orchestrator runs it (cwd = the AssemblyZero root), and the target
+        repo has no `.assemblyzero` directory at all."""
+        from assemblyzero.workflows.orchestrator import resume
+
+        commit_on(repo, "issue-7", "[CP:post-impl] issue #7: workflow checkpoint")
+        before_refs = _must(git(repo, "for-each-ref"))
+        assert not (repo / ".assemblyzero").exists()
+        assert resume.acquire_orchestration_lock(7) is True
+        try:
+            with pytest.raises(reset.LiveOrchestratorError) as caught:
+                reset.reset_one_issue(repo, "owner/repo", 7)
+        finally:
+            resume.release_orchestration_lock(7)
+
+        assert str(az / ".assemblyzero" / "orchestrator" / "locks" / "7.lock") in str(
+            caught.value
+        )
+        assert _must(git(repo, "for-each-ref")) == before_refs, "no pin, no deletion"
+        assert [c for c in gh.commands if c[0] == "gh"] == [], "no PR closed, no issue touched"
+
+    def test_the_reader_and_the_writer_share_one_path(self, az: Path):
+        from assemblyzero.workflows.orchestrator import resume
+
+        assert resume.acquire_orchestration_lock(7) is True
+        try:
+            written = [p.resolve() for p in az.rglob("7.lock")]
+            assert written == [resume.orchestration_lock_path(7, az).resolve()]
+            assert resume.live_orchestrator_pid(7, az) == os.getpid()
+        finally:
+            resume.release_orchestration_lock(7)
+
+    def test_a_lock_in_the_target_repo_is_not_where_the_orchestrator_writes(
+        self, repo: Path, az: Path, gh: Gh
+    ):
+        stray = repo / ".assemblyzero" / "orchestrator" / "locks"
+        stray.mkdir(parents=True)
+        (stray / "7.lock").write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+        reset.refuse_if_orchestrator_is_live(repo, 7)

@@ -241,61 +241,73 @@ class TestTheFollowerDoesNotCallAnOrphanDone:
 
 
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
-    """A repo whose lock directory is where the orchestrator would write it."""
+def repo(tmp_path):
+    """The target repository. It carries no `.assemblyzero` directory at all:
+    the orchestrator never writes its lock there (#4217)."""
     root = tmp_path / "target"
-    (root / ".assemblyzero" / "orchestrator" / "locks").mkdir(parents=True)
-    monkeypatch.setattr(resume, "LOCK_DIR", Path(".assemblyzero/orchestrator/locks"))
+    root.mkdir()
     return root
 
 
-def _lock(repo: Path, issue: int, pid: int) -> Path:
-    path = repo / ".assemblyzero" / "orchestrator" / "locks" / f"{issue}.lock"
+@pytest.fixture
+def az(tmp_path, monkeypatch):
+    """The AssemblyZero root: the orchestrator's working directory, so the
+    directory its lock is written under (#4217)."""
+    root = tmp_path / "assemblyzero"
+    (root / ".assemblyzero" / "orchestrator" / "locks").mkdir(parents=True)
+    monkeypatch.setattr(resume, "LOCK_DIR", Path(".assemblyzero/orchestrator/locks"))
+    monkeypatch.setattr(speedrun_reset, "AZ_ROOT", root)
+    return root
+
+
+def _lock(az: Path, issue: int, pid: int) -> Path:
+    path = az / ".assemblyzero" / "orchestrator" / "locks" / f"{issue}.lock"
     path.write_text(json.dumps({"pid": pid, "hostname": "h"}), encoding="utf-8")
     return path
 
 
 class TestTheResetRefusesUnderALiveOrchestrator:
-    def test_a_live_lock_raises_rather_than_warning(self, repo, monkeypatch):
+    def test_a_live_lock_raises_rather_than_warning(self, repo, az, monkeypatch):
         """`raise`, not `print`. A warning is what the operator read past on
         2026-09-02; a reset that can run under a live orchestrator is the same
         class as a `git clean` in someone else's checkout."""
-        _lock(repo, 4, 36848)
+        _lock(az, 4, 36848)
         monkeypatch.setattr(resume, "_is_pid_alive", lambda pid: pid == 36848)
         with pytest.raises(speedrun_reset.LiveOrchestratorError) as caught:
             speedrun_reset.refuse_if_orchestrator_is_live(repo, 4)
         assert "36848" in str(caught.value)
         assert "#4" in str(caught.value)
 
-    def test_a_dead_pid_does_not_block_a_legitimate_reset(self, repo, monkeypatch):
+    def test_a_dead_pid_does_not_block_a_legitimate_reset(self, repo, az, monkeypatch):
         """A stale lock is the ordinary case after any crash, and refusing on
         one would make the tool useless exactly when it is needed."""
-        _lock(repo, 4, 26780)
+        _lock(az, 4, 26780)
         monkeypatch.setattr(resume, "_is_pid_alive", lambda pid: False)
         speedrun_reset.refuse_if_orchestrator_is_live(repo, 4)
 
-    def test_no_lock_at_all_does_not_block(self, repo):
+    def test_no_lock_at_all_does_not_block(self, repo, az):
         speedrun_reset.refuse_if_orchestrator_is_live(repo, 4)
 
-    def test_a_corrupt_lock_does_not_block(self, repo):
-        path = repo / ".assemblyzero" / "orchestrator" / "locks" / "4.lock"
+    def test_a_corrupt_lock_does_not_block(self, repo, az):
+        path = az / ".assemblyzero" / "orchestrator" / "locks" / "4.lock"
         path.write_text("{not json", encoding="utf-8")
         speedrun_reset.refuse_if_orchestrator_is_live(repo, 4)
 
     def test_another_issues_live_lock_does_not_block_this_one(
-        self, repo, monkeypatch
+        self, repo, az, monkeypatch
     ):
-        _lock(repo, 331, 36848)
+        _lock(az, 331, 36848)
         monkeypatch.setattr(resume, "_is_pid_alive", lambda pid: True)
         speedrun_reset.refuse_if_orchestrator_is_live(repo, 4)
 
-    def test_the_lock_is_read_from_the_target_repo_not_the_cwd(
-        self, repo, monkeypatch, tmp_path
+    def test_the_lock_is_read_from_the_assemblyzero_root_not_the_cwd(
+        self, repo, az, monkeypatch, tmp_path
     ):
-        """`LOCK_DIR` is repo-relative, and the reset is invoked from wherever
-        the operator happens to be. Reading it from the cwd would look in
-        AssemblyZero's own lock directory and find nothing, every time."""
-        _lock(repo, 4, 36848)
+        """`LOCK_DIR` is relative to the orchestrator's working directory, which
+        a roll sets to the AssemblyZero root (#4217), and the reset is invoked
+        from wherever the operator happens to be. The target repo is not the
+        place to look, and neither is the cwd."""
+        _lock(az, 4, 36848)
         monkeypatch.setattr(resume, "_is_pid_alive", lambda pid: True)
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
@@ -304,9 +316,9 @@ class TestTheResetRefusesUnderALiveOrchestrator:
             speedrun_reset.refuse_if_orchestrator_is_live(repo, 4)
 
     def test_the_working_directory_is_restored_after_a_refusal(
-        self, repo, monkeypatch, tmp_path
+        self, repo, az, monkeypatch, tmp_path
     ):
-        _lock(repo, 4, 36848)
+        _lock(az, 4, 36848)
         monkeypatch.setattr(resume, "_is_pid_alive", lambda pid: True)
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
@@ -317,11 +329,11 @@ class TestTheResetRefusesUnderALiveOrchestrator:
 
 
 class TestTheRefusalComesBeforeAnyWrite:
-    def test_reset_one_issue_checks_before_it_pins(self, repo, monkeypatch):
+    def test_reset_one_issue_checks_before_it_pins(self, repo, az, monkeypatch):
         """The checkpoint pin is itself a write and everything after it is
         destructive, so the refusal has to precede the first step and not sit
         among them."""
-        _lock(repo, 4, 36848)
+        _lock(az, 4, 36848)
         monkeypatch.setattr(resume, "_is_pid_alive", lambda pid: True)
         touched: list[str] = []
         for name in (
@@ -342,14 +354,14 @@ class TestTheRefusalComesBeforeAnyWrite:
 
 
 class TestLiveOrchestratorPid:
-    def test_it_reads_the_pid_the_lock_already_carried(self, repo, monkeypatch):
-        _lock(repo, 4, 36848)
+    def test_it_reads_the_pid_the_lock_already_carried(self, repo, az, monkeypatch):
+        _lock(az, 4, 36848)
         monkeypatch.setattr(resume, "_is_pid_alive", lambda pid: True)
-        monkeypatch.chdir(repo)
+        monkeypatch.chdir(az)
         assert resume.live_orchestrator_pid(4) == 36848
 
-    def test_a_lock_with_no_pid_field_is_not_a_live_run(self, repo, monkeypatch):
-        path = repo / ".assemblyzero" / "orchestrator" / "locks" / "4.lock"
+    def test_a_lock_with_no_pid_field_is_not_a_live_run(self, repo, az, monkeypatch):
+        path = az / ".assemblyzero" / "orchestrator" / "locks" / "4.lock"
         path.write_text(json.dumps({"hostname": "h"}), encoding="utf-8")
-        monkeypatch.chdir(repo)
+        monkeypatch.chdir(az)
         assert resume.live_orchestrator_pid(4) is None
