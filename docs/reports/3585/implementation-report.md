@@ -52,6 +52,13 @@ No run calls these batch-mode helpers; they keep the standard while they exist.
 - **250: won't do.** Compliant: a model that is not a provider spec is a non-retryable error the retry loop raises on. Pinned.
 - `ImplementationError` writes its ERROR line at construction (see orchestrator.py above).
 
+### import_validator.py (3 rows)
+
+- **The import gate (#842) does not judge on what it could not read** (85, 119). Installed-package metadata that cannot be read, or a `pyproject.toml` that cannot be read or does not parse, is an ERROR line naming it, and the exception propagates. Reading the second as "no dependencies" had flagged every third-party import. No `pyproject.toml` still declares nothing.
+- **Code that does not parse does not pass** (229): it is a failed verdict carrying the syntax error, with an ERROR line. In a run, `validate_code_response` checks syntax first.
+
+Callers: N4's validation and, for the pyproject reader, `scaffold_tests.py` (another batch); neither catches.
+
 ## Compliance (standard 0034)
 
 | Failure path | Loud | Logged | Stops | Alerts |

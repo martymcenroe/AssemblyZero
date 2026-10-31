@@ -44,3 +44,10 @@ Each module's new test file was run against the unchanged module first; every si
 - Changed existing test: `test_llm_idle_timeout.py::test_a_bad_override_falls_back_rather_than_failing_the_call` becomes `test_a_bad_override_raises_naming_the_variable`, and an empty value is pinned as the default in `test_an_empty_override_is_the_default`.
 - Neighbouring suites (the 21 unit files that import the module or its functions): 578 passed and 3 failed, the three parametrised cases above; after the change, 27 passed in the two files.
 - Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.
+
+## import_validator.py
+
+- New: `tests/unit/test_import_validator_loud_failure.py`, 7 tests. Before the fix: 4 failed, 3 passed. After: 7 passed.
+- Changed existing tests: none.
+- Neighbouring suites (the unit files that import the module, and `test_validate_code_short.py`): 60 passed.
+- Audits: 0 new loud-failure sites; no new fail-open; halt sites PASS.

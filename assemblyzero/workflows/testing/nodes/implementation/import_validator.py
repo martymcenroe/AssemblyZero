@@ -60,8 +60,13 @@ def _import_names_for_pypi(pypi_name_normalized: str) -> set[str]:
        == PyPI name, the common case).
 
     Returns a set that always contains the normalized PyPI name plus any
-    additional import names discovered.
+    additional import names discovered. A dist that is not installed is
+    simply not found. Metadata that cannot be enumerated or read is an ERROR
+    line naming the dist, and the exception propagates (#3585): it used to
+    fall back to the map without a word, flagging real imports.
     """
+    import importlib.metadata as md
+
     names: set[str] = {pypi_name_normalized}
 
     hardcoded = _PYPI_TO_IMPORT_NAMES.get(pypi_name_normalized)
@@ -69,7 +74,6 @@ def _import_names_for_pypi(pypi_name_normalized: str) -> set[str]:
         names.update(hardcoded)
 
     try:
-        import importlib.metadata as md
         for dist in md.distributions():
             dist_name = dist.metadata.get("Name", "")
             if not dist_name:
@@ -82,10 +86,14 @@ def _import_names_for_pypi(pypi_name_normalized: str) -> set[str]:
                 if module:
                     names.add(module)
             break
-    except Exception:
-        # importlib.metadata may not work in every env (e.g. fresh worktree
-        # before poetry install); fall back to the hardcoded map.
-        pass
+    except Exception as exc:
+        print(
+            f"ERROR [N4] the installed-package metadata could not be read while "
+            f"resolving the import names of {pypi_name_normalized}: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        raise
 
     return names
 
@@ -104,20 +112,24 @@ def _read_third_party_packages(repo_root: Path) -> set[str]:
     external repo using PEP 621 lost its declared dependencies and every
     third-party import got misclassified as "unresolvable internal."
     """
+    # No pyproject.toml declares nothing. One that cannot be read or does not
+    # parse is an ERROR line naming it, and the exception propagates (#3585):
+    # reading it as "no dependencies" flagged every third-party import.
+    import tomllib
+
     pyproject = repo_root / "pyproject.toml"
     if not pyproject.exists():
         return set()
 
     try:
-        # Use tomllib (Python 3.11+) or tomli
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore[no-redef]
-
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except Exception:
-        return set()
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        print(
+            f"ERROR [N4] could not read the declared dependencies in {pyproject}: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        raise
 
     packages: set[str] = set()
 
@@ -222,13 +234,17 @@ def validate_imports(
 
     Returns:
         Tuple of (valid, list_of_unresolvable_imports).
-        valid is True when there are no unresolvable imports.
+        valid is True when there are no unresolvable imports. Code that does
+        not parse cannot be checked, so it is (False, [the syntax error]) with
+        an ERROR line (#3585); it used to pass. validate_code_response checks
+        syntax first, so a run never sends unparsed code here.
     """
     try:
         tree = ast.parse(code)
-    except SyntaxError:
-        # Syntax errors are caught by the earlier ast.parse() check
-        return True, []
+    except SyntaxError as exc:
+        problem = f"code does not parse, imports not checked (line {exc.lineno}: {exc.msg})"
+        print(f"ERROR [N4] {filepath}: {problem}", file=sys.stderr, flush=True)
+        return False, [problem]
 
     # Collect all imported module top-level names
     imports: list[tuple[str, int]] = []  # (full_module_path, line_number)
