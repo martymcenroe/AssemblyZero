@@ -161,7 +161,7 @@ N1.5 sits in `nodes/`, but it was assigned to the support half.
 - **A telemetry record that cannot be written alerts and raises** (1825).
 - **Compliant, pinned** (1775): a blocked draft goes back to the drafter, and to HALT at the cap.
 - **What the graph now receives.** N1.5 can raise where it returned. Nothing in the graph catches it; `tools/run_requirements_workflow.py` prints `ERROR:` and exits 1, without an alert.
-- **The mock drafter.** Its canned LLD (`assemblyzero/core/llm_provider.py`, `MockProvider.DEFAULT_RESPONSES["lld"]`) was titled `# Mock Feature: rehearsal LLD`, with no issue number, so a `--mock` LLD run was blocked at N1.5. On the landing branch it is titled `# 42 - Feature: Mock rehearsal LLD`, issue 42 being the rehearsal's documented issue (`--type lld --issue 42 --mock`). The mock cannot see the run's issue, so a rehearsal with any other issue number is still blocked at N1.5 on the title mismatch.
+- **The mock drafter.** Its canned LLD (`assemblyzero/core/llm_provider.py`, `MockProvider.DEFAULT_RESPONSES["lld"]`) was titled `# Mock Feature: rehearsal LLD`, with no issue number, so a `--mock` LLD run was blocked at N1.5. On the landing branch it is titled `# 42 - Feature: Mock rehearsal LLD`, and `MockProvider.invoke` replaces the 42 with the issue the drafter's prompt names (the fixed `This LLD is for GitHub Issue #N` marker, or the skeleton's `unchanged from iteration 1. Issue #N` from the third draft on), so a `--mock` rehearsal of any issue clears N1.5. A prompt without either marker keeps the canned title, which N1.5 blocks on its mismatch. Pinned by `tests/unit/test_mock_lld_title.py` (4 tests; on the previous commit the two title tests fail).
 
 ### audit.py (14 ledger rows: 13 fixed, 1 compliant)
 

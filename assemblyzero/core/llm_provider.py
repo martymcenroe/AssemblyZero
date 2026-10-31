@@ -1984,10 +1984,11 @@ class MockProvider(LLMProvider):
         # rehearses the whole LLD workflow -- review and finalize included --
         # instead of looping on "Section 2.1 missing" to the draft cap. One
         # new file at the repo root, so path validation has nothing to find.
-        # #3585: N1.5 blocks a title with no issue number, so the title names
-        # issue 42, the mock rehearsal's issue (`--type lld --issue 42
-        # --mock`). The mock cannot see the run's issue: a rehearsal run with
-        # any other number is blocked at N1.5 on the title mismatch.
+        # #3585: N1.5 blocks a title with no issue number. The canned title
+        # names issue 42, the rehearsal's documented issue; `invoke` puts the
+        # run's own issue there, read from the marker the drafter writes into
+        # every LLD prompt (`_issue_in`), so a rehearsal of any issue clears
+        # N1.5.
         "lld": [
             "# 42 - Feature: Mock rehearsal LLD\n\n"
             "## 1. Context & Goal\n\n"
@@ -2060,6 +2061,34 @@ class MockProvider(LLMProvider):
     def model(self) -> str:
         return self._model
 
+    #: The fixed markers the LLD drafter writes into its prompt
+    #: (`requirements/nodes/generate_draft.py`): the full prompt's, then the
+    #: skeleton's from the third draft on.
+    _ISSUE_MARKERS = (
+        "This LLD is for GitHub Issue #",
+        "unchanged from iteration 1. Issue #",
+    )
+
+    @classmethod
+    def _issue_in(cls, content: str) -> str | None:
+        """The issue number the drafter's prompt names, or None.
+
+        None leaves the canned title, which N1.5 then blocks on its mismatch:
+        a prompt without the marker did not come from the LLD drafter.
+        """
+        for marker in cls._ISSUE_MARKERS:
+            at = content.find(marker)
+            if at < 0:
+                continue
+            digits = ""
+            for ch in content[at + len(marker):]:
+                if not ch.isdigit():
+                    break
+                digits += ch
+            if digits:
+                return digits
+        return None
+
     def invoke(
         self,
         system_prompt: str,
@@ -2097,6 +2126,10 @@ class MockProvider(LLMProvider):
         # Cycle through responses
         response_idx = (self._call_count - 1) % len(self._responses)
         response = self._responses[response_idx]
+        if response is self.DEFAULT_RESPONSES["lld"][0]:
+            issue = self._issue_in(content or "")
+            if issue:
+                response = response.replace("# 42 - Feature:", f"# {issue} - Feature:", 1)
 
         return LLMCallResult(
             success=True,
