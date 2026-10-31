@@ -208,11 +208,21 @@ class Finding:
         )
 
 
+class ScanError(RuntimeError):
+    """A file or directory in the audit's scope cannot be covered (#3775).
+
+    Raised, never recorded: an audit that skipped it would report less than it
+    was asked to examine, under the same headline.
+    """
+
+
 @dataclass
 class Coverage:
     """What was actually examined. Counted, never estimated."""
 
     files_scanned: int = 0
+    #: Always empty since #3775: a file that cannot be read or parsed raises
+    #: ScanError. Kept only because ``tools/audit_fail_open.py`` prints it.
     files_unparseable: list[str] = field(default_factory=list)
     functions_scanned: int = 0
     handlers_examined: int = 0
@@ -602,16 +612,14 @@ class _Scanner(ast.NodeVisitor):
         return "execution continues past the try"
 
     def _exception_text(self, node: ast.ExceptHandler) -> str:
+        """The handler's exception type, as written.
+
+        A type ``ast.unparse`` cannot render raises (#3775): it used to be
+        labelled "an exception", a finding that named nothing.
+        """
         if node.type is None:
             return "any exception (bare except)"
-        try:
-            return ast.unparse(node.type)
-        except Exception:  # noqa: BLE001
-            # fail-open: this only names the exception type for the report. An
-            # unparseable type expression costs a label, not a finding -- the
-            # site is still counted, classified and ranked. Halting the whole
-            # audit over a cosmetic string would be the worse trade.
-            return "an exception"
+        return ast.unparse(node.type)
 
 
 def _warned_returns(tree: ast.AST, path: str, spends_after: str,
@@ -700,7 +708,13 @@ def _spends_after(path: Path) -> str:
 
 
 def scan_file(path: Path, root: Path, coverage: Coverage) -> list[Finding]:
-    """Every fail-open site in one module."""
+    """Every fail-open site in one module.
+
+    A file that cannot be read or parsed raises ScanError naming it (#3775).
+    It used to be listed in ``files_unparseable`` and skipped, and the audit
+    went on reporting a tree it had not fully read.
+    """
+    rel = str(path.relative_to(root)).replace("\\", "/")
     try:
         # utf-8-sig, not utf-8: two files in this tree carry a UTF-8 BOM, and
         # plain utf-8 keeps it as a leading ﻿ that ast.parse rejects as a
@@ -710,18 +724,14 @@ def scan_file(path: Path, root: Path, coverage: Coverage) -> list[Finding]:
         # valid. utf-8-sig is identical to utf-8 when no BOM is present.
         source = path.read_text(encoding="utf-8-sig", errors="replace")
         tree = ast.parse(source)
-    except (OSError, SyntaxError, ValueError):
-        # fail-open: one unreadable file must not cost the whole sweep. This is
-        # only defensible because it is NOT silent -- the file is named in
-        # `files_unparseable` and the report prints that count on its coverage
-        # line, so an audit that examined less than it claims says so. That
-        # line is what caught the UTF-8 BOM handled above.
-        coverage.files_unparseable.append(str(path.relative_to(root)).replace("\\", "/"))
-        return []
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise ScanError(
+            f"the fail-open audit cannot scan {rel}: {type(exc).__name__}: {exc}; "
+            f"it stops rather than report less than it was asked to examine"
+        ) from exc
 
     coverage.files_scanned += 1
     lines = source.splitlines()
-    rel = str(path.relative_to(root)).replace("\\", "/")
     spends = _spends_after(path)
 
     scanner = _Scanner(rel, lines, spends, coverage)
@@ -745,13 +755,20 @@ def scan_file(path: Path, root: Path, coverage: Coverage) -> list[Finding]:
 
 
 def scan(root: Path, subdirs: tuple[str, ...]) -> tuple[list[Finding], Coverage]:
-    """Scan the pipeline. Returns findings ranked most-untrustworthy first."""
+    """Scan the pipeline. Returns findings ranked most-untrustworthy first.
+
+    A scope directory that does not exist raises ScanError naming it (#3775);
+    it used to be skipped, and the audit reported on less than it was given.
+    """
     coverage = Coverage()
     findings: list[Finding] = []
     for subdir in subdirs:
         base = root / subdir
-        if not base.exists():
-            continue
+        if not base.is_dir():
+            raise ScanError(
+                f"the fail-open audit's scope names {base}, which does not exist "
+                f"as a directory; it stops rather than report on less than it was given"
+            )
         for path in sorted(base.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue

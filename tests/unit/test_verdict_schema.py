@@ -368,9 +368,11 @@ class TestScanResidualQuestions:
         assert result["question_count"] == 0
 
     def test_empty_text(self):
-        result = scan_residual_questions("")
-        assert result["has_open_questions"] is False
-        assert result["source"] == "document_scan"
+        """#3802: an empty document raises rather than reporting none."""
+        with pytest.raises(ValueError, match="is empty"):
+            scan_residual_questions("")
+        with pytest.raises(ValueError, match="is empty"):
+            scan_residual_questions("  \n ")
 
     def test_question_count_matches_list(self):
         text = "Is this right?\nWhat about that other thing?\nTODO: check"

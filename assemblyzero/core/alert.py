@@ -12,7 +12,10 @@ fourth. ``alert_operator`` does four things, in order:
 
 A failure to deliver the alert is itself a failure. Every step is attempted;
 if any did not work, the undelivered record and every reason go to standard
-error and ``AlertDeliveryError`` is raised. Nothing here returns a reason
+error and ``AlertDeliveryError`` is raised. Writing to standard error is one
+of the steps (#4247): a broken stderr (a closed pipe, a detached console)
+used to raise before the email and the log were tried, so the alert reached
+no one at the moment the process's own output was gone. Nothing here returns a reason
 string for a caller to discard, which is what ``operator_notify`` does for the
 waits it decorates.
 
@@ -178,30 +181,53 @@ def alert_operator(
         "issue": issue,
         "spec": spec,
     }
-    sys.stderr.write(f"ERROR [ALERT] {what} -- {where}: {cause}\n")
-    sys.stderr.write(_body(record))
-    sys.stderr.flush()
-
+    loud = f"ERROR [ALERT] {what} -- {where}: {cause}\n" + _body(record)
+    # Every step is attempted, in order: a broken stderr still emails, a
+    # failed email still toasts, and the record reaches the log even when no
+    # message was delivered (#4247, #3724).
+    steps = [lambda: _write_stderr(loud), lambda: _send_email(record)]
+    if sys.platform == "win32":
+        steps.append(lambda: _show_toast(record))
+    steps.append(lambda: _append_log(record))
     try:
-        try:
-            try:
-                _send_email(record)
-            finally:
-                # Every channel is attempted: a failed email still toasts.
-                if sys.platform == "win32":
-                    _show_toast(record)
-        finally:
-            # The record reaches the log even when no message was delivered.
-            _append_log(record)
+        _attempt_every(steps)
     except AlertDeliveryError as exc:
-        sys.stderr.write(f"ERROR [ALERT] NOT DELIVERED to the operator: {exc}\n")
+        lines = [f"ERROR [ALERT] NOT DELIVERED to the operator: {exc}\n"]
         earlier = exc.__context__
         while earlier is not None:
-            sys.stderr.write(f"  and before it: {earlier}\n")
+            lines.append(f"  and before it: {earlier}\n")
             earlier = earlier.__context__
-        sys.stderr.flush()
+        # Through the same step: when stderr is the broken part, this raises
+        # its own AlertDeliveryError, carrying the others in its context.
+        _write_stderr("".join(lines))
         raise
     return record
+
+
+def _attempt_every(steps: list) -> None:
+    """Run each step, the rest still running after one fails.
+
+    The failures are raised together: the last one propagates, and each
+    earlier one is its ``__context__``, which ``alert_operator`` prints.
+    """
+    if not steps:
+        return
+    try:
+        steps[0]()
+    finally:
+        _attempt_every(steps[1:])
+
+
+def _write_stderr(text: str) -> None:
+    """The loud line, or AlertDeliveryError naming why stderr took none."""
+    stream = sys.stderr
+    if stream is None:
+        raise AlertDeliveryError("stderr: there is none (sys.stderr is None)")
+    try:
+        stream.write(text)
+        stream.flush()
+    except (OSError, ValueError) as exc:
+        raise AlertDeliveryError(f"stderr: {type(exc).__name__}: {exc}") from exc
 
 
 def _send_email(record: dict) -> None:

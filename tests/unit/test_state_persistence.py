@@ -89,14 +89,14 @@ class TestLoadStateSnapshot:
             result = load_state_snapshot("requirements", 999)
         assert result is None
 
-    def test_load_corrupt_json_returns_none(self, state_dir: Path) -> None:
-        """Loading corrupt JSON returns None (graceful degradation)."""
+    def test_load_corrupt_json_raises(self, state_dir: Path) -> None:
+        """#3797: corrupt JSON is not "no snapshot"; it raises, naming the file."""
         state_dir.mkdir(parents=True, exist_ok=True)
         corrupt_path = state_dir / "implementation_spec-42.json"
         corrupt_path.write_text("NOT VALID JSON {{{", encoding="utf-8")
-        with patch("assemblyzero.core.state_persistence.STATE_DIR", state_dir):
-            result = load_state_snapshot("implementation_spec", 42)
-        assert result is None
+        with patch("assemblyzero.core.state_persistence.STATE_DIR", state_dir), \
+                pytest.raises(RuntimeError, match="implementation_spec-42.json"):
+            load_state_snapshot("implementation_spec", 42)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -22,19 +22,28 @@ So the wait asks louder over time, and never decides:
 * **Never a timeout.** Nothing in this module ends a wait. Escalation is
   louder asking, not deciding.
 
-Every failure in this module is non-fatal by construction: each entry point
-returns "" on success or a one-line reason string the caller logs and moves
-past. A notification must never damage the wait it decorates.
+These are also the transports under the operator alert path
+(``assemblyzero.core.alert``, ADR 0236). #3783 retired this module's "non-fatal
+by construction": a notification that does not reach the operator raises
+``AlertDeliveryError`` with the channel and the cause, and never returns a
+reason string for a caller to drop. ``alert_operator`` then prints the
+undelivered record and raises, so the process exits non-zero. A toast asked
+for on a host that is not Windows is an ERROR line instead: the host has no
+toast, and the email is its channel. What a waiting gate does with a raise is
+the gate's decision; the wait itself is never ended by this module.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
 from xml.sax.saxutils import escape as _xml_escape
+
+logger = logging.getLogger(__name__)
 
 #: The operator's contact inbox (fleet identity). NEVER an account-login
 #: address — the CloudFlare/AWS account emails are not contact addresses.
@@ -61,8 +70,9 @@ class NotifyConfig:
     #: Seconds of idle before the single backstop email.
     email_after_seconds: float = DEFAULT_EMAIL_AFTER
     email_to: str = OPERATOR_CONTACT
-    #: SES-verified sender identity. Empty means the email backstop is
-    #: disabled (and says so, once); the environment override wins.
+    #: SES-verified sender identity; the environment override wins. Empty
+    #: means no sender, and ``send_email`` raises when the backstop comes
+    #: due (#3783).
     email_from: str = ""
 
     @classmethod
@@ -170,18 +180,42 @@ def toast_script(title: str, body: str, url: str = "") -> str:
     )
 
 
+def _undelivered(message: str) -> Exception:
+    """The alert path's own error for a notification that did not arrive.
+
+    Imported here, not at the top: ``alert`` imports this module.
+    """
+    from assemblyzero.core.alert import AlertDeliveryError
+
+    return AlertDeliveryError(message)
+
+
 def show_toast(
     title: str, body: str, url: str = "", *,
     runner=subprocess.run, platform: str | None = None,
-) -> str:
-    """Show a Windows toast. Returns "" on success, a reason string otherwise.
+) -> None:
+    """Show a Windows toast, or raise ``AlertDeliveryError`` (#3783).
+
+    A toast that cannot be spawned, or whose PowerShell exits non-zero,
+    raises with the cause. On a host that is not Windows there is no toast to
+    show: that is an ERROR line naming the title, and nothing is spawned. It
+    does not raise, because a wait that toasts on a schedule must not end over
+    a channel its host does not have; the email is the channel there, and the
+    alert path calls this only on Windows.
 
     ``platform`` is a test seam (defaults to the real ``sys.platform``) so the
     composition and spawn wiring stay testable on the Linux CI runner, where
     the real guard below would otherwise short-circuit them.
     """
-    if (platform or sys.platform) != "win32":
-        return "toast skipped: not a Windows host"
+    host = platform or sys.platform
+    if host != "win32":
+        message = (
+            f"no toast shown: this host is {host}, not Windows, so the operator "
+            f"is not shown {title!r}; email is the channel on this host"
+        )
+        logger.error("[NOTIFY] %s", message)
+        print(f"ERROR [NOTIFY] {message}", file=sys.stderr, flush=True)
+        return
     try:
         result = runner(
             [
@@ -196,16 +230,17 @@ def show_toast(
             timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-    except Exception as exc:  # noqa: BLE001
-        # fail-open: #2529 — a notification must never damage the wait it
-        # decorates. The failure is returned as a reason string the caller
-        # logs, so it is visible, and the wait (the thing that matters)
-        # continues.
-        return f"toast failed: {exc}"
+    except Exception as exc:  # every spawn failure is raised
+        raise _undelivered(
+            f"toast {title!r} not shown: powershell could not be run: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
-        return f"toast failed (exit {result.returncode}): {detail[:200]}"
-    return ""
+        raise _undelivered(
+            f"toast {title!r} not shown: powershell exit {result.returncode}: "
+            f"{detail[:200]}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -221,16 +256,17 @@ def send_email(
     text_body: str,
     region: str = "us-east-1",
     client: Any = None,
-) -> str:
-    """One plain-text email via SES v2. Returns "" on success, else a reason.
+) -> None:
+    """One plain-text email via SES v2, or raise ``AlertDeliveryError`` (#3783).
 
-    ``sender`` must be an SES-verified identity; empty disables with a reason
-    the caller logs once. ``client`` is the test seam — production builds a
-    real boto3 client from the default credential chain.
+    ``sender`` must be an SES-verified identity; an empty one raises, naming
+    where to set it, and a failed send raises with its cause. Neither returns
+    a reason for the caller to drop. ``client`` is the test seam — production
+    builds a real boto3 client from the default credential chain.
     """
     if not sender:
-        return (
-            f"email backstop disabled: no sender identity configured "
+        raise _undelivered(
+            f"email {subject!r} to {to} not sent: no sender identity configured "
             f"(set {EMAIL_FROM_ENV} or the gate declaration's "
             f"notify.email_from to an SES-verified address)"
         )
@@ -251,10 +287,8 @@ def send_email(
                 }
             },
         )
-        return ""
-    except Exception as exc:  # noqa: BLE001
-        # fail-open: #2529 — same ruling as the toast: the backstop email is
-        # a courtesy, the wait is the contract. The reason string is logged
-        # by the caller, and a failed send does not claim the once-ever
-        # sentinel, so a resumed wait can still deliver the backstop.
-        return f"email send failed: {exc}"
+    except Exception as exc:  # every send failure is raised
+        raise _undelivered(
+            f"email {subject!r} to {to} from {sender} not sent: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc

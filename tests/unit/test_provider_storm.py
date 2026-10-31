@@ -81,7 +81,10 @@ def test_non_timeout_errors_do_not_trip_the_storm_counter(monkeypatch, tmp_path)
     from assemblyzero.core import llm_provider
 
     source = inspect.getsource(llm_provider)
-    timeout_block = source[source.index("except subprocess.TimeoutExpired"):]
+    # #3780: anchored on the timeout branch itself. The old anchor, the first
+    # `except subprocess.TimeoutExpired`, is the storm probe's; the slice only
+    # reached this branch while nothing between them said `return call_result`.
+    timeout_block = source[source.index("if outcome.timed_out:"):]
     timeout_block = timeout_block[: timeout_block.index("return call_result")]
 
     assert "record_timeout" in timeout_block, "the timeout path must count"

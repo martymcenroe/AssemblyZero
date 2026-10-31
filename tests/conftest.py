@@ -41,39 +41,60 @@ def pytest_configure(config):
 
 
 def pytest_sessionstart(session):
-    """Remember the operator's home state before any test runs (#3531)."""
+    """Remember the operator's home state (#3531) and the checkout's telemetry
+    logs (#4161) before any test runs."""
+    from tests.checkout_telemetry_guard import GUARDED_FILES
     from tests.home_state_guard import snapshot
 
     session.config._home_state_before = snapshot()
+    session.config._checkout_telemetry_before = snapshot(GUARDED_FILES)
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Fail the session if any test wrote into the operator's home state (#3531).
+    """Fail the session if any test wrote into the operator's home state
+    (#3531) or the checkout's telemetry logs (#4161).
 
-    The autouse fixture below redirects every writer this repository knows
+    The autouse fixtures below redirect every writer this repository knows
     about. This is the check on that knowledge: a new writer, or a test that
     reaches the real paths some other way, fails the run it first appears in,
-    with the paths named, rather than filling the operator's resume directory
-    and audit log until someone opens them.
+    with the paths named, rather than filling the operator's resume directory,
+    audit log and telemetry until someone opens them.
     """
+    from tests.checkout_telemetry_guard import GUARDED_FILES
     from tests.home_state_guard import changes, snapshot
 
-    before = getattr(session.config, "_home_state_before", None)
-    if before is None:
-        return
-    lines = changes(before, snapshot())
-    if not lines:
-        return
+    guards = (
+        (
+            "_home_state_before",
+            (),
+            (
+                "FAIL: the suite wrote into the operator's home state (#3531). "
+                "Redirect the writer through tests/home_state_guard.redirect:"
+            ),
+        ),
+        (
+            "_checkout_telemetry_before",
+            (GUARDED_FILES,),
+            (
+                "FAIL: the suite wrote into the checkout's telemetry logs (#4161). "
+                "Redirect the writer through tests/checkout_telemetry_guard.redirect:"
+            ),
+        ),
+    )
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-    if reporter is not None:
-        reporter.write_line("")
-        reporter.write_line(
-            "FAIL: the suite wrote into the operator's home state (#3531). "
-            "Redirect the writer through tests/home_state_guard.redirect:"
-        )
-        for line in lines:
-            reporter.write_line("  " + line)
-    session.exitstatus = 1
+    for attribute, paths, headline in guards:
+        before = getattr(session.config, attribute, None)
+        if before is None:
+            continue
+        lines = changes(before, snapshot(*paths))
+        if not lines:
+            continue
+        if reporter is not None:
+            reporter.write_line("")
+            reporter.write_line(headline)
+            for line in lines:
+                reporter.write_line("  " + line)
+        session.exitstatus = 1
 
 
 _MODULE_SNAPSHOT_KEYS = [
@@ -167,6 +188,21 @@ def home_state_stays_out_of_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def checkout_telemetry_stays_out_of_the_checkout(tmp_path, monkeypatch):
+    """Every test's stage records, prompt failures and hallucination checks
+    land under its own tmp_path, never in the checkout's data/ (#4161).
+
+    Autouse and unconditional, for the reason `home_state_stays_out_of_home`
+    gives. Only a write aimed at the checkout moves; a test that sends one to
+    its own tmp_path still finds it there.
+    """
+    from tests.checkout_telemetry_guard import redirect
+
+    redirect(monkeypatch, tmp_path / "checkout-telemetry")
+
+
+
+@pytest.fixture(autouse=True)
 def no_model_profile_from_the_machine(monkeypatch):
     """A test's model profile comes from the test (#3563).
 
@@ -248,6 +284,23 @@ def no_az_environment_from_the_machine(monkeypatch):
     """
     for name in AZ_ENVIRONMENT:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def call_recording_disarmed():
+    """No test inherits an armed call recorder (#4163).
+
+    ``call_recording`` keeps the current node and its ``audit_dir`` in a
+    module global. A test that ran a graph with a relative ``audit_dir`` left
+    it armed, and every later model call in the process was recorded into
+    ``audit/calls.jsonl`` under pytest's working directory, which is the
+    checkout. Reset before and after every test, in every tier.
+    """
+    from assemblyzero.core import call_recording
+
+    call_recording.reset_context()
+    yield
+    call_recording.reset_context()
 
 
 STAND_IN_SENDER = "tests@example.invalid"

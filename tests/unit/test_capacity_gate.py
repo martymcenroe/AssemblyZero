@@ -123,10 +123,12 @@ class TestClaudeCapacityWindow:
         )["claude"]
         assert status.available is True
 
-    def test_corrupt_state_file_does_not_block_work(self, state_file):
+    def test_corrupt_state_file_raises(self, state_file):
+        """#3773: a corrupt file is not "nothing recorded"; reading it as that
+        ignored a recorded exhaustion."""
         state_file.write_text("{ not json", encoding="utf-8")
-        status = check_capacity(["claude"], state_file=state_file, now=NOW)["claude"]
-        assert status.available is True
+        with pytest.raises(capacity.CapacityStateError, match="cannot read"):
+            check_capacity(["claude"], state_file=state_file, now=NOW)
 
 
 class TestCapacityMessageDetection:

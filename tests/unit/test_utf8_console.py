@@ -120,7 +120,7 @@ class TestTheFallbackTier:
         stream.flush()
         assert stream.buffer.getvalue() == b"?"
 
-    def test_a_stream_that_refuses_everything_reports_failure_quietly(self):
+    def test_a_stream_that_refuses_everything_reports_failure_loudly(self, capsys):
         stream = cp1252_stream()
 
         def refuse(**kwargs):
@@ -128,8 +128,9 @@ class TestTheFallbackTier:
 
         stream.reconfigure = refuse
         # No exception escapes -- the report tool must not die in its own
-        # defensive code either.
+        # defensive code either -- but #3800: the refusal is an ERROR line.
         assert utf8_console.widen(stream) is False
+        assert "ERROR [CONSOLE]" in capsys.readouterr().err
 
 
 class TestInstall:

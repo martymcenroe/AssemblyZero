@@ -138,16 +138,15 @@ def drafter_authored(markdown: str) -> str:
     `__init__` imports the spec graph. A module-level import here would build a
     cycle for a three-line call. Same reasoning, and the same shape, as
     `generate_spec._spec_injection` (#2611).
+
+    A stripper that cannot be imported raises (#3794). It used to hand the
+    document back unstripped, and the extractor then read the injected table
+    as the text of whichever requirement sat above it.
     """
-    try:
-        from assemblyzero.workflows.requirements.table_injection import (
-            strip_injection,
-        )
-    except ImportError:
-        # fail-open: only in shape -- with no stripper available the caller
-        # parses the document as it stands, which is the pre-#2628 behaviour.
-        # A missing import must never make a valid LLD unreadable.
-        return markdown or ""
+    from assemblyzero.workflows.requirements.table_injection import (
+        strip_injection,
+    )
+
     return strip_injection(markdown or "")
 
 

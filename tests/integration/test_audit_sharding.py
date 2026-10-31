@@ -10,7 +10,7 @@ Test scenarios from LLD section 10.1:
 - 050: Log to shard
 - 060: Fail-closed on unwritable
 - 070: Tail merges history + shards
-- 080: Tail skips locked shards
+- 080: Tail raises on a shard it cannot read (was: skips it; #3771)
 - 090: Consolidation atomic write
 - 100: Consolidation deletes shards
 - 110: Consolidation idempotent
@@ -329,10 +329,13 @@ class TestTailMerges:
 
 
 class TestTailSkipsLocked:
-    """Test 080: Tail skips locked shards."""
+    """Test 080, revised by #3771: a shard tail cannot read raises.
 
-    def test_graceful_degradation_on_unreadable(self, temp_repo: Path) -> None:
-        """Should return partial results when some shards are unreadable."""
+    It used to be skipped, and the partial result read as the whole log.
+    """
+
+    def test_a_shard_that_is_not_json_raises(self, temp_repo: Path) -> None:
+        """A garbage shard raises, naming the shard, instead of being skipped."""
         log = ReviewAuditLog(repo_root=temp_repo)
 
         # Log an entry to create the shard
@@ -357,9 +360,8 @@ class TestTailSkipsLocked:
         with open(bad_shard, "w", encoding="utf-8") as f:
             f.write("not valid json\n")
 
-        # Should not crash, should return the good entry
-        entries = log.tail(n=10)
-        assert len(entries) >= 1
+        with pytest.raises(ValueError, match="bad_shard.jsonl line 1"):
+            log.tail(n=10)
 
 
 class TestConsolidation:

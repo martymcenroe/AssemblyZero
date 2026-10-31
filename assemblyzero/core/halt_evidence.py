@@ -15,17 +15,33 @@ the operator's filing step starts at "verify and sharpen" instead of
 the process writing the log and cannot portably read its own transcript;
 the wrapper-side death detection (#2510) owns that half, and this module's
 formats are what it will share.
+
+#3778 (ADR 0236): evidence the bundle cannot read is a failure of its own.
+The HALT node builds the bundle after the halt has alerted and its state and
+plan are saved, so the bundle is written, and every piece it could not read is
+named in ``unread_evidence`` and in the markdown, never left out as if it were
+not there. An unreadable lineage artifact, an unreadable preservation record
+and a corrupt record in its tail each alert the operator with the cause. A
+lineage directory the state names and that is not there is an ERROR line: the
+HALT node's copy into that directory raises on it and alerts. An alert that
+cannot be delivered raises out of the bundle, and so out of the HALT node.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core import alert
 from assemblyzero.core.recovery_plan import build_resume_command
+
+logger = logging.getLogger(__name__)
 
 #: How many trailing preserved-branch records travel in the bundle. The
 #: record has no reliable run-id linkage (leavings refs carry run="" by
@@ -37,32 +53,68 @@ PRESERVED_TAIL = 8
 MD_EVENT_CAP = 20
 
 
-def _sha256(path: Path) -> str | None:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        # fail-open: an unreadable artifact is reported as unreadable in
-        # the bundle rather than crashing the halt that is trying to
-        # describe it.
-        return None
+@dataclass
+class _Gathering:
+    """Whose halt the bundle describes, and what it could not read (#3778).
+
+    ``unread`` names every piece of evidence the bundle could not gather, each
+    already alerted (or, for a missing lineage dir, an ERROR line), so the
+    bundle says what it is missing instead of reading as complete.
+    """
+
+    workflow: str
+    repo: str
+    issue: int
+    unread: list[str] = field(default_factory=list)
+
+    def where(self, function: str) -> str:
+        return f"assemblyzero.core.halt_evidence.{function} ({self.workflow} HALT)"
 
 
-def _artifact_inventory(audit_dir: Path) -> dict[str, Any]:
+def _sha256(path: Path) -> str:
+    """The file's content hash. A file that cannot be read raises (#3778)."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _artifact_inventory(audit_dir: Path, gathering: _Gathering) -> dict[str, Any]:
     """Every top-level lineage file: name, size, hash — and the identical
     groups, because four byte-identical drafts was the fact a manual dig
-    took an md5 loop to establish."""
+    took an md5 loop to establish.
+
+    A file that cannot be read alerts the operator with its cause (#3778). Its
+    row stays, with no hash and the cause under ``unreadable``, and the groups
+    are over the readable files only, which the markdown says. The bundle is
+    still written: it is the halt's evidence, and raising would cost the
+    operator every other artifact and event for one file.
+    """
     files: list[dict[str, Any]] = []
     by_hash: dict[str, list[str]] = {}
     for path in sorted(audit_dir.iterdir()):
         if not path.is_file():
             continue
-        digest = _sha256(path)
-        files.append({
-            "name": path.name,
-            "bytes": path.stat().st_size if digest is not None else None,
-            "sha256": digest[:12] if digest else None,
-        })
-        if digest:
+        try:
+            digest = _sha256(path)
+        except OSError as exc:
+            cause = f"{type(exc).__name__}: {exc}"
+            gathering.unread.append(f"lineage artifact {path}: {cause}")
+            files.append({"name": path.name, "bytes": None, "sha256": None, "unreadable": cause})
+            alert.alert_operator(
+                what=f"cannot read the lineage artifact {path} for the halt's evidence bundle",
+                where=gathering.where("_artifact_inventory"),
+                cause=cause,
+                consequence=(
+                    "the bundle lists the file as unreadable and leaves it out of the "
+                    "byte-identical groups; the halt's own alert, state and plan stand"
+                ),
+                repo=gathering.repo,
+                issue=gathering.issue or None,
+            )
+        else:
+            files.append({
+                "name": path.name,
+                "bytes": path.stat().st_size,
+                "sha256": digest[:12],
+            })
             by_hash.setdefault(digest, []).append(path.name)
     identical = sorted(
         names for names in by_hash.values() if len(names) >= 2
@@ -70,41 +122,95 @@ def _artifact_inventory(audit_dir: Path) -> dict[str, Any]:
     return {"files": files, "identical_groups": identical}
 
 
-def _preserved_tail(repo_root: Path) -> list[dict[str, Any]]:
+def _parse_record(line: str) -> dict[str, Any]:
+    """One preservation record. A line that is not a JSON object raises."""
+    entry = json.loads(line)
+    if not isinstance(entry, dict):
+        raise TypeError(f"the line holds a JSON {type(entry).__name__}, not a record")
+    return entry
+
+
+def _preserved_tail(repo_root: Path, gathering: _Gathering) -> list[dict[str, Any]]:
+    """The last ``PRESERVED_TAIL`` records of the repo's preservation log.
+
+    No log is an answer: no branch was ever preserved in this repo, so the
+    bundle has none to list. Only the tail is read, because only the tail is
+    carried; a line before it shapes nothing in the bundle.
+
+    A log that exists and cannot be read, and a record in the tail that is not
+    a JSON object, each alert the operator with the cause (#3778). A corrupt
+    record keeps its place in the tail as ``{"corrupt_line": n, "cause": ...}``
+    so the tail is never short, and both are named in ``unread_evidence``.
+    """
     record = repo_root / "data" / "speedrun" / "runs" / "preserved-branches.jsonl"
     if not record.is_file():
         return []
-    entries: list[dict[str, Any]] = []
     try:
-        for line in record.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                # fail-open: one corrupt record in the preservation log
-                # drops that record from the bundle's tail, never the
-                # bundle -- the evidence is a best-effort slice of a file
-                # this process does not own.
-                continue
-    except OSError:
-        # fail-open: the preservation record is evidence ABOUT the run,
-        # not of it -- a bundle without it still carries the events and
-        # artifacts, and says nothing false.
+        text = record.read_text(encoding="utf-8")
+    except OSError as exc:
+        cause = f"{type(exc).__name__}: {exc}"
+        gathering.unread.append(f"preservation record {record}: {cause}")
+        alert.alert_operator(
+            what=f"cannot read the preservation record {record} for the halt's evidence bundle",
+            where=gathering.where("_preserved_tail"),
+            cause=cause,
+            consequence=(
+                "the bundle names the record as unreadable and lists no preserved "
+                "refs; the halt's own alert, state and plan stand"
+            ),
+            repo=gathering.repo,
+            issue=gathering.issue or None,
+        )
         return []
-    return entries[-PRESERVED_TAIL:]
+    numbered = [
+        (number, line.strip())
+        for number, line in enumerate(text.splitlines(), start=1)
+        if line.strip()
+    ]
+    entries: list[dict[str, Any]] = []
+    for number, line in numbered[-PRESERVED_TAIL:]:
+        try:
+            entries.append(_parse_record(line))
+        except (ValueError, TypeError) as exc:  # JSONDecodeError is a ValueError
+            cause = f"{type(exc).__name__}: {exc}"
+            gathering.unread.append(f"preservation record {record} line {number}: {cause}")
+            entries.append({"corrupt_line": number, "cause": cause})
+            alert.alert_operator(
+                what=(
+                    f"line {number} of the preservation record {record} is not a "
+                    f"record, in the halt's evidence bundle"
+                ),
+                where=gathering.where("_preserved_tail"),
+                cause=cause,
+                consequence=(
+                    "the bundle's tail shows the line as a corrupt record; the "
+                    "halt's own alert, state and plan stand"
+                ),
+                repo=gathering.repo,
+                issue=gathering.issue or None,
+            )
+    return entries
 
 
 def build_halt_evidence(
     state: dict, workflow: str, *, stage: str, error_message: str
 ) -> dict[str, Any]:
-    """The state-side evidence a forensic reader needs, as one document."""
+    """The state-side evidence a forensic reader needs, as one document.
+
+    ``unread_evidence`` lists what could not be gathered (#3778); see
+    ``_artifact_inventory`` and ``_preserved_tail``. A state that names no
+    audit dir or no repo has nothing of that kind to read, which is quiet.
+    An audit dir it names that is not a directory is an ERROR line and is
+    listed; the HALT node's copy into that dir raises on it and alerts, so a
+    second alert here would only repeat that one.
+    """
     audit_dir_str = str(state.get("audit_dir", "") or "")
     audit_dir = Path(audit_dir_str) if audit_dir_str else None
     repo_root_str = str(
         state.get("repo_root", "") or state.get("target_repo", "") or ""
     )
+    issue_number = int(state.get("issue_number", 0) or 0)
+    gathering = _Gathering(workflow=workflow, repo=repo_root_str, issue=issue_number)
 
     events: dict[str, list[str]] = {
         "pinning_events": [str(e) for e in state.get("pinning_events") or []],
@@ -117,14 +223,22 @@ def build_halt_evidence(
     }
 
     artifacts: dict[str, Any] = {"files": [], "identical_groups": []}
-    if audit_dir is not None and audit_dir.is_dir():
-        artifacts = _artifact_inventory(audit_dir)
+    if audit_dir is not None:
+        if audit_dir.is_dir():
+            artifacts = _artifact_inventory(audit_dir, gathering)
+        else:
+            message = (
+                f"the state names audit_dir {audit_dir}, which is not a directory, "
+                f"so the {workflow} halt's evidence bundle has no lineage artifacts"
+            )
+            gathering.unread.append(f"lineage dir {audit_dir}: not a directory")
+            logger.error("[HALT EVIDENCE] %s", message)
+            print(f"ERROR [HALT EVIDENCE] {message}", file=sys.stderr, flush=True)
 
     preserved: list[dict[str, Any]] = []
     if repo_root_str:
-        preserved = _preserved_tail(Path(repo_root_str))
+        preserved = _preserved_tail(Path(repo_root_str), gathering)
 
-    issue_number = int(state.get("issue_number", 0) or 0)
     return {
         "bundle_version": 2,
         "workflow": workflow,
@@ -147,6 +261,7 @@ def build_halt_evidence(
         "audit_dir": audit_dir_str,
         "artifacts": artifacts,
         "preserved_refs_tail": preserved,
+        "unread_evidence": gathering.unread,
     }
 
 
@@ -248,6 +363,12 @@ def render_halt_evidence_md(evidence: dict[str, Any]) -> str:
         lines.append("")
     if evidence.get("resume_command"):
         lines += ["## Resume", "", f"```\n{evidence['resume_command']}\n```", ""]
+    # #3778: what the bundle could not read is said, never left out.
+    unread = evidence["unread_evidence"]
+    if unread:
+        lines += [f"## Evidence that could not be read ({len(unread)})", ""]
+        lines += [f"- {item}" for item in unread]
+        lines.append("")
     events = evidence["events"]
     lines += _md_events("Pinning events", events["pinning_events"])
     lines += _md_events("Completeness issues", events["completeness_issues"])
@@ -257,12 +378,23 @@ def render_halt_evidence_md(evidence: dict[str, Any]) -> str:
     if artifacts["files"]:
         lines += ["## Lineage artifacts", ""]
         lines += ["| file | bytes | sha256 |", "|---|---|---|"]
+        unreadable = 0
         for entry in artifacts["files"]:
             size = entry["bytes"] if entry["bytes"] is not None else "?"
-            lines.append(
-                f"| {entry['name']} | {size} | {entry['sha256'] or 'unreadable'} |"
-            )
+            digest = entry["sha256"]
+            if digest is None:
+                unreadable += 1
+                digest = f"unreadable ({entry['unreadable']})"
+            lines.append(f"| {entry['name']} | {size} | {digest} |")
         lines.append("")
+        if unreadable:
+            lines += [
+                (
+                    f"Byte-identical groups are over the readable files only; "
+                    f"{unreadable} file(s) could not be read."
+                ),
+                "",
+            ]
         for group in artifacts["identical_groups"]:
             lines.append(
                 f"**Byte-identical group:** {', '.join(group)} — "
@@ -278,6 +410,11 @@ def render_halt_evidence_md(evidence: dict[str, Any]) -> str:
             "",
         ]
         for entry in evidence["preserved_refs_tail"]:
+            if "corrupt_line" in entry:
+                lines.append(
+                    f"- line {entry['corrupt_line']}: corrupt record ({entry['cause']})"
+                )
+                continue
             lines.append(
                 f"- {entry.get('at', '?')} `{entry.get('branch', '?')}` "
                 f"({entry.get('source', '?')}: {entry.get('detail', '')})"
@@ -308,6 +445,13 @@ def render_halt_evidence_md(evidence: dict[str, Any]) -> str:
         f"quoted in halt-evidence.md beside this draft",
         f"- {len(artifacts['identical_groups'])} byte-identical artifact "
         f"group(s)",
+    ]
+    if unread:
+        lines.append(
+            f"- {len(unread)} piece(s) of evidence could not be read — listed "
+            f"in halt-evidence.md beside this draft"
+        )
+    lines += [
         "",
         "## Repro state",
         "",

@@ -533,10 +533,13 @@ def f():
         assert len(findings) == 1
 
     def test_an_unreadable_file_is_named_not_swallowed(self, tmp_path):
+        """#3775: it stops the scan, naming the file, instead of being listed
+        and skipped while the audit went on reporting."""
+        from assemblyzero.core.fail_open_audit import ScanError
+
         (tmp_path / "broken.py").write_text("def f(:\n", encoding="utf-8")
-        _, coverage = scan(tmp_path, (".",))
-        assert coverage.files_unparseable == ["broken.py"]
-        assert coverage.files_scanned == 0
+        with pytest.raises(ScanError, match="broken.py"):
+            scan(tmp_path, (".",))
 
     def test_a_utf8_bom_does_not_hide_a_file(self, tmp_path):
         """Two files in this tree carry a BOM. Plain utf-8 leaves it in the
