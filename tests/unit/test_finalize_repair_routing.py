@@ -115,10 +115,10 @@ class _Recorder:
 @pytest.fixture
 def approved_state(tmp_path, blocked_draft):
     """An APPROVED LLD sitting at finalize with a blocking open question."""
-    audit = tmp_path / "audit"
-    audit.mkdir()
     repo = tmp_path / "repo"
     repo.mkdir()
+    audit = repo / "docs" / "lineage" / "active" / "run"
+    audit.mkdir(parents=True)
     return {
         "workflow_type": "lld",
         "assemblyzero_root": str(ROOT),

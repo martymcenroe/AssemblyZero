@@ -979,7 +979,7 @@ class TestFinalizeNode:
         )
         state["current_draft"] = "# Issue Title\n\nDescription"
         state["slug"] = "my-feature"
-        state["audit_dir"] = str(tmp_path / "audit")
+        state["audit_dir"] = str(Path(state["target_repo"]) / "docs" / "lineage" / "active" / "run")
         Path(state["audit_dir"]).mkdir(parents=True)
 
         result = finalize(state)
@@ -1002,7 +1002,7 @@ class TestFinalizeNode:
         state["current_draft"] = "# LLD Content"
         state["issue_title"] = "Add Feature"
         state["lld_status"] = "APPROVED"
-        state["audit_dir"] = str(tmp_path / "repo" / "audit")
+        state["audit_dir"] = str(Path(state["target_repo"]) / "docs" / "lineage" / "active" / "run")
         Path(state["audit_dir"]).mkdir(parents=True)
 
         result = finalize(state)
@@ -1033,7 +1033,7 @@ class TestFinalizeNode:
         state["issue_title"] = "Feature"
         state["lld_status"] = "APPROVED"
         state["verdict_count"] = 2
-        state["audit_dir"] = str(target_repo / "audit")
+        state["audit_dir"] = str(Path(state["target_repo"]) / "docs" / "lineage" / "active" / "run")
         Path(state["audit_dir"]).mkdir(parents=True)
 
         finalize(state)
@@ -1567,9 +1567,9 @@ class TestFinalizeLineageFiles:
         state["current_draft"] = "# LLD Content"
         state["issue_title"] = "Add Feature"
         state["lld_status"] = "APPROVED"
-        state["audit_dir"] = str(target_repo / "audit")
+        state["audit_dir"] = str(Path(state["target_repo"]) / "docs" / "lineage" / "active" / "run")
         # #3585: finalize halts without the run's audit_dir.
-        Path(state["audit_dir"]).mkdir()
+        Path(state["audit_dir"]).mkdir(parents=True)
 
         finalize(state)
 
@@ -2594,7 +2594,7 @@ class TestIdeasCleanup:
         )
         state["current_draft"] = "# My Feature\n\nDescription here."
         state["slug"] = "my-feature"
-        state["audit_dir"] = str(tmp_path / "audit")
+        state["audit_dir"] = str(Path(state["target_repo"]) / "docs" / "lineage" / "active" / "run")
         Path(state["audit_dir"]).mkdir(parents=True)
 
         finalize(state)
