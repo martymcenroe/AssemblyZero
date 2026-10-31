@@ -231,3 +231,15 @@ The factory report replaces "whichever kill happened most recently" with counts,
 Callers: `tools/factory_report.py` `main` and `tools/replay_run.py` do not catch, so a short count now ends either tool with a traceback after the alert. Neither is on a run path.
 
 Compliance: each failure path alerts with what, where, cause and consequence (the report stops rather than print a short count) and raises, except 928, which alerts and keeps its declared count. Baseline: eight tag entries leave.
+
+### speedrun/preserved.py (4 sites)
+
+The archiver bundles every branch this ledger names. Committed before `worktrees.py` and `leavings.py`, because their ledger rows (295, 312) turn on this module raising.
+
+- **A record that cannot be written raises naming the ledger** (97). `record_preserved` returned False, which both writers ignored, so a branch could be preserved and never reach the archive's record. It now raises `OSError` naming the branch and the ledger, and `ValueError` for an empty branch. The two writers alert: the raise-and-let-the-caller-alert shape, since each caller has already put the work on the branch and alerts with the worktree or the files it was preserving.
+- **A ledger that exists but cannot be read alerts and re-raises** (115). It read as no preservations. Absence (no file) is still the quiet `[]`, by an existence check, so a directory where the file must be is no longer read as absence.
+- **A line that is not JSON, not an object, or names no branch alerts and raises** `ValueError` naming `path:line` (124, 127). Such a line used to be skipped.
+
+Callers: `assemblyzero/speedrun/archive.py` (`recorded_for`, `claimed_by_other_run`) and `factory_report.build_report` read the ledger and do not catch. The two writers are the next two sections.
+
+Compliance: the reader alerts with what, where, cause and consequence and raises; the writer raises with the path and cause to callers that alert.

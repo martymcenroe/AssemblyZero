@@ -197,14 +197,18 @@ class TestTheLedger:
             "graveyard/a", "graveyard/b",
         ]
 
-    def test_recording_never_raises_on_a_caller_saving_work(self, tmp_path):
-        """A bookkeeping failure must never become lost evidence."""
+    def test_a_record_that_cannot_be_written_raises_naming_the_ledger(self, tmp_path):
+        """ADR 0236 (#3585): a lost record is a branch the archive can miss.
+        The writers catch the raise after the branch holds the work, alert,
+        and report the entry failed, so no evidence is lost to it."""
         blocked = tmp_path / "file-not-dir"
         blocked.write_text("x", encoding="utf-8")
 
-        assert record_preserved(blocked, "graveyard/x") is False
+        with pytest.raises(OSError, match="preserved-branch ledger"):
+            record_preserved(blocked, "graveyard/x")
 
-    def test_a_malformed_line_does_not_hide_the_others(self, tmp_path):
+    def test_a_malformed_line_alerts_and_stops_the_read(self, tmp_path, operator_alerts):
+        """ADR 0236 (#3585): a skipped line is an attribution the archive loses."""
         record_preserved(tmp_path, "graveyard/good-1", run=RUN)
         from assemblyzero.speedrun.preserved import ledger_path
 
@@ -212,12 +216,13 @@ class TestTheLedger:
             handle.write("{not json\n")
         record_preserved(tmp_path, "graveyard/good-2", run=RUN)
 
-        assert [r.branch for r in read_ledger(tmp_path)] == [
-            "graveyard/good-1", "graveyard/good-2",
-        ]
+        with pytest.raises(ValueError, match=":2 is not JSON"):
+            read_ledger(tmp_path)
+        assert len(operator_alerts) == 1
 
-    def test_a_record_without_a_branch_is_not_a_record(self, tmp_path):
-        assert record_preserved(tmp_path, "") is False
+    def test_a_record_without_a_branch_is_refused(self, tmp_path):
+        with pytest.raises(ValueError):
+            record_preserved(tmp_path, "")
         assert read_ledger(tmp_path) == []
 
     def test_no_ledger_reads_as_empty_not_as_an_error(self, tmp_path):

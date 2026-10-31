@@ -216,3 +216,13 @@ Each fixed site has a test that fails before its fix and passes after, measured 
 **Changed tests:** `test_factory_report.py::TestHaltBundles::test_reads_bundles_and_skips_corrupt_ones` is now `test_reads_bundles_and_a_corrupt_one_stops_the_read`; `::test_stray_bytes_do_not_suppress_events` no longer reads the deleted `unreadable` field.
 
 **Neighbouring suites:** before the test changes, 250 passed and 2 failed (exactly those two) across `test_cap_bundles.py`, `test_convergence_loud_failure.py`, `test_convergence_record.py`, `test_factory_report.py`, `test_gate_registry.py`, `test_non_pytest_red_is_deterministic.py`, `test_survived_infrastructure.py`, `test_alert_channel_at_start.py`, `test_github_writes_inert.py`, `test_halt_evidence.py` and the new file; after, 252 passed.
+
+## speedrun/preserved.py
+
+**New: `tests/unit/test_preserved_loud_failure.py` (9).** Site tests for 97 (two), 115, 124 (two) and 127, plus tests that pin kept behaviour: a written record returns True and reads back, an absent ledger is a quiet `[]`, and a clean ledger with a blank line reads with no alert.
+
+**Before the fix, measured** against the unchanged module: 6 failed, 3 passed (the three kept-behaviour tests).
+
+**Changed tests:** in `test_archive_bundles_graveyard.py::TestTheLedger`, `test_recording_never_raises_on_a_caller_saving_work` is now `test_a_record_that_cannot_be_written_raises_naming_the_ledger`, `test_a_malformed_line_does_not_hide_the_others` is now `test_a_malformed_line_alerts_and_stops_the_read`, and `test_a_record_without_a_branch_is_not_a_record` is now `test_a_record_without_a_branch_is_refused`.
+
+**Neighbouring suites:** before the test changes, 308 passed, 3 failed (exactly those three) and 6 skipped across `test_archive_bundles_graveyard.py`, `test_factory_report.py`, `test_healing_ledger.py`, `test_input_rebuild_from_refs.py`, `test_interaction_matrix.py`, `test_leavings_janitor.py`, `test_mock_roll.py`, `test_spec_handoff_survives_janitor.py`, `test_speedrun_worktrees.py`, `test_worktree_readonly_retry.py`, `test_archive_readonly.py`, `test_archive_verify_completeness.py`, `test_rmtree_sites_are_gated.py`, `test_roll_archives_itself.py`, `test_runbook_0952_flags.py`, `test_solo_runbook.py`, `test_speedrun_archive.py` and the new file; after, 311 passed and 6 skipped.
