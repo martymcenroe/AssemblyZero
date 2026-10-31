@@ -47,6 +47,16 @@ Python-side equivalent of `grep -a` and is not optional here.
 Identical input produces byte-identical output, so two reports can be
 diffed across days to see what changed rather than re-read in full. Every
 ordering has an explicit tie-break on a stable key.
+
+## A short count is never printed (ADR 0236, #3585)
+
+A record that cannot be placed in the requested window, a run log that
+cannot be stat'd or read, a halt bundle that is not a readable JSON object,
+and a path that cannot be resolved each alert the operator and raise. The
+report used to keep or drop such an item quietly, and so printed counts that
+were wrong in a direction nobody could see. An absent store is still a real
+answer (a repo that was never rolled has no runs directory), and a bundle
+whose stamp cannot be read is still counted as unplaced, with an alert.
 """
 
 from __future__ import annotations
@@ -58,6 +68,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from assemblyzero.core import alert
 from assemblyzero.core.gate_registry import JUDGES_BUDGET
 from assemblyzero.speedrun.convergence import (
     SOURCE_BANNER,
@@ -68,6 +79,16 @@ from assemblyzero.speedrun.convergence import (
 )
 
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
+_WHERE = "assemblyzero/speedrun/factory_report.py"
+_NO_REPORT = (
+    "the report stops rather than print counts that leave this record out"
+)
+
+
+def _alert(what: str, where: str, cause: str, consequence: str = _NO_REPORT) -> None:
+    alert.alert_operator(
+        what=what, where=f"{_WHERE} {where}", cause=cause, consequence=consequence
+    )
 
 #: Every (stage, check) pair a `record_failure`/`record_failures` call site
 #: can write, as declared by the workflow sources. This is the DENOMINATOR
@@ -489,44 +510,40 @@ def parse_since(spec: str, *, now: datetime | None = None) -> datetime | None:
             "w": timedelta(weeks=count),
         }[unit]
         return now - delta
-    for fmt in (_TS_FMT, "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, fmt)
-        except ValueError:
-            # fail-open: trying the next format is the point of the loop, not
-            # a swallowed failure -- when every format misses, the function
-            # RAISES two lines below rather than returning a default window.
-            continue
-    raise ValueError(
-        f"unparseable --since {spec!r}: use 7d, 24h, 2w, YYYY-MM-DD, "
-        f"or 'YYYY-MM-DD HH:MM:SS'"
-    )
+    try:
+        return _parse_ts(text)
+    except ValueError as exc:
+        raise ValueError(
+            f"unparseable --since {spec!r}: use 7d, 24h, 2w, YYYY-MM-DD, "
+            f"or 'YYYY-MM-DD HH:MM:SS'"
+        ) from exc
 
 
-def _parse_ts(raw: str) -> datetime | None:
-    for fmt in (_TS_FMT, "%Y-%m-%d"):
-        try:
-            return datetime.strptime(str(raw).strip(), fmt)
-        except (ValueError, TypeError):
-            # fail-open: try the next format. None is returned only when all
-            # of them miss, and every caller treats None as "cannot place this
-            # record in time" and KEEPS the record -- see _in_window, where
-            # dropping it would silently shrink a printed denominator.
-            continue
-    return None
+def _parse_ts(raw: str) -> datetime:
+    """`YYYY-MM-DD HH:MM:SS` or `YYYY-MM-DD`; raises ValueError for anything else.
+
+    The format is chosen by the space, which the first has and the second
+    cannot, so one parse decides and its own error names the input.
+    """
+    text = str(raw).strip()
+    return datetime.strptime(text, _TS_FMT if " " in text else "%Y-%m-%d")
 
 
-def _in_window(raw: str, since: datetime | None) -> bool:
-    """A record with an unparseable timestamp is KEPT, and counted as such.
+def _in_window(raw: str, since: datetime | None, *, source: str) -> bool:
+    """Is this record at or after `since`? With no window, every record is.
 
-    Dropping it would silently shrink a denominator the report is about to
-    print, which is the failure this module exists to prevent.
+    A record whose timestamp cannot be read cannot be placed in a window: it
+    used to be kept in every window and counted nowhere. It now alerts the
+    operator and raises ValueError naming `source` and the stamp.
     """
     if since is None:
         return True
-    parsed = _parse_ts(raw)
-    if parsed is None:
-        return True
+    try:
+        parsed = _parse_ts(raw)
+    except ValueError as exc:
+        cause = f"{source} has the timestamp {raw!r}, which is not a date ({exc})"
+        _alert(f"place a record in the window since {since:{_TS_FMT}}", "_in_window", cause)
+        raise ValueError(cause) from exc
     return parsed >= since
 
 
@@ -561,7 +578,6 @@ class RunLogFacts:
     #: not the true duration -- the stage ends between watchdog ticks --
     #: and the report says so rather than presenting it as a measurement.
     stage_elapsed: dict[str, tuple[int, int]] = field(default_factory=dict)
-    unreadable: bool = False
     # -- how the run ended (#2717) and how far it got (#2718) --------------
     #: `passed` (the all-stages banner), `failed` (a failure banner), or
     #: `killed` (neither: the process died mid-call and the log just stops).
@@ -582,8 +598,9 @@ class RunLogFacts:
     #: stage -> verdict from the closing table, in table order.
     stage_verdicts: dict[str, str] = field(default_factory=dict)
     #: The run's window in UTC, from the log file's creation and last write.
-    #: Used to join halt bundles to runs (#2725); None when the log could not
-    #: be stat'd, in which case the run takes part in no join.
+    #: Used to join halt bundles to runs (#2725). `scan_run_log` always sets
+    #: both (a log it cannot stat raises); None only on facts built by hand,
+    #: and such a run takes part in no join.
     started: datetime | None = None
     ended: datetime | None = None
     #: Where `outcome`, `furthest_stage` and `cause` came from (#2721):
@@ -610,29 +627,37 @@ class RunLogFacts:
 
 
 def scan_run_log(path: Path) -> RunLogFacts:
-    """Count every marker in one run log. Never raises."""
+    """Count every marker in one run log.
+
+    A log that cannot be stat'd (so cannot be dated or joined to its halt
+    bundles) or cannot be read alerts the operator and re-raises the
+    `OSError`. Such a log used to be kept in every window and filed undated,
+    or counted as a killed run, because its default outcome is `killed`.
+    """
     name = path.name
     match = _RE_RUN_NAME.match(name)
     issue = int(match.group("issue")) if match else None
     run_id = name[:-4] if name.endswith(".log") else name
+    consequence = (
+        "the run log is not counted, so the report or replay reading it stops "
+        "rather than misdate the run or count it as killed"
+    )
 
-    started: datetime | None = None
-    ended: datetime | None = None
     try:
         stat = path.stat()
-        mtime = datetime.fromtimestamp(stat.st_mtime).strftime(_TS_FMT)
-        # #2725: the run's window, in UTC, for joining halt bundles to runs. A
-        # bundle names no run tag, so the instant it was written is the only
-        # join the data supports. `st_ctime` is creation time on Windows, which
-        # is where every recorded run in the corpus was produced.
-        started = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)
-        ended = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-    except OSError:
-        # fail-open: an unstattable log keeps an empty mtime, and scan_run_logs
-        # INCLUDES a log it cannot date rather than filtering it out. Excluding
-        # it would drop real events from a window silently; including it can
-        # only ever widen the count, which is visible in the printed total.
-        mtime = ""
+    except OSError as exc:
+        _alert(
+            "stat a speedrun run log", "scan_run_log",
+            f"{type(exc).__name__}: {exc} ({path})", consequence,
+        )
+        raise
+    mtime = datetime.fromtimestamp(stat.st_mtime).strftime(_TS_FMT)
+    # #2725: the run's window, in UTC, for joining halt bundles to runs. A
+    # bundle names no run tag, so the instant it was written is the only
+    # join the data supports. `st_ctime` is creation time on Windows, which
+    # is where every recorded run in the corpus was produced.
+    started = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)
+    ended = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
 
     facts = RunLogFacts(
         run_id=run_id, issue=issue, path=str(path), mtime=mtime,
@@ -643,13 +668,12 @@ def scan_run_log(path: Path) -> RunLogFacts:
         # errors="replace": see the module docstring. Model output leaves
         # stray bytes in these logs and a strict decode drops real events.
         text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        # fail-open: one unreadable log must not kill a report over the other
-        # four hundred. The substitution is not silent -- `unreadable` is set
-        # on the record, so the shortfall is carried in the data rather than
-        # disguised as a run in which nothing happened.
-        facts.unreadable = True
-        return facts
+    except OSError as exc:
+        _alert(
+            "read a speedrun run log", "scan_run_log",
+            f"{type(exc).__name__}: {exc} ({path})", consequence,
+        )
+        raise
 
     last_stage_running = ""
     last_nonblank = ""
@@ -758,25 +782,23 @@ def scan_run_logs(
     The window is applied on the file's mtime: run logs carry no header
     timestamp, and the stamp in the name has no date component, so mtime is
     the only date the filesystem actually knows.
+
+    A repo with no runs directory has never been rolled: no runs is the real
+    answer, not an error. It is not reported as "zero runs" either:
+    build_report records the directory's absence, and render_report prints
+    `| NO |` for the store, so an absent store never reads as an empty one.
+    A log that cannot be stat'd or read raises out of `scan_run_log`.
     """
     directory = runs_dir(repo_root)
-    if not directory.is_dir():
-        # fail-open: a repo with no runs directory has never been rolled, which
-        # is a real answer and not an error. It is NOT reported as "zero runs":
-        # build_report records the directory's absence, and render_report
-        # prints `| NO |` for the store so an absent store never reads as an
-        # empty one.
-        return []
+    paths = sorted(directory.glob("run-issue*.log")) if directory.is_dir() else []
     facts: list[RunLogFacts] = []
-    for path in sorted(directory.glob("run-issue*.log")):
+    for path in paths:
         if path.name.endswith("-events.log") or path.name.endswith(
             "-heartbeat.log"
         ):
             continue
         scanned = scan_run_log(path)
-        if since is not None and scanned.mtime and not _in_window(
-            scanned.mtime, since
-        ):
+        if not _in_window(scanned.mtime, since, source=f"run log {path}"):
             continue
         facts.append(scanned)
     facts = apply_records(facts, repo_root)
@@ -847,17 +869,22 @@ def source_counts(facts: list[RunLogFacts]) -> dict[str, int]:
 
 
 def _under(path: Path, root: Path) -> bool:
+    """Is this halt attributable to the repo being reported on (#2588)?
+
+    False means the resolved path is outside the resolved root. A path that
+    cannot be resolved is not an answer either way: it used to read as
+    "outside" and drop the halt from the count, so it now alerts the operator
+    and re-raises the `OSError`.
+    """
     try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except (ValueError, OSError):
-        # fail-open: deliberately toward EXCLUSION. This answers "is this
-        # halt attributable to the repo being reported on". A path that cannot
-        # be resolved or compared is not proof of containment, and the safe
-        # direction is to omit a halt rather than credit this repo with
-        # another repo's. Undercounting is visible in the total; misattribution
-        # is not (see #2588).
-        return False
+        resolved, resolved_root = path.resolve(), root.resolve()
+    except OSError as exc:
+        _alert(
+            "decide whether a halt bundle belongs to the repo being reported on",
+            "_under", f"{type(exc).__name__}: {exc} (path {path}, repo {root})",
+        )
+        raise
+    return resolved.is_relative_to(resolved_root)
 
 
 #: Every place inside a target repo a halt bundle can come to rest. `docs/lineage`
@@ -904,7 +931,22 @@ def attribute_bundles(
     per_run: dict[str, int] = defaultdict(int)
     unplaced = 0
     for bundle in bundles:
-        when = _parse_halted_at(str(bundle.get("halted_at", "")))
+        raw = str(bundle.get("halted_at", ""))
+        try:
+            when = _parse_halted_at(raw)
+        except ValueError as exc:
+            # Counted as unplaced and printed in the coverage figure, which is
+            # its declared place; the alert says which bundle is corrupt.
+            alert.alert_operator(
+                what="place a halt bundle against the run it halted",
+                where=f"{_WHERE} attribute_bundles",
+                cause=(
+                    f"{bundle.get('_path', '(no path)')}: halted_at {raw!r} is "
+                    f"not an ISO-8601 instant ({exc})"
+                ),
+                consequence="the bundle is counted as unplaced in the cap coverage figure",
+            )
+            when = None
         issue = bundle.get("issue")
         if when is None or not isinstance(issue, int):
             unplaced += 1
@@ -921,17 +963,40 @@ def attribute_bundles(
 
 
 def _parse_halted_at(raw: str) -> datetime | None:
+    """The bundle's halt instant in UTC; None when it carries no stamp.
+
+    A stamp that is present but not ISO-8601 raises ValueError; the caller
+    counts that bundle as unplaced and alerts.
+    """
     if not raw:
         return None
     text = raw.strip().replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        # fail-open: a bundle with an unreadable stamp cannot be placed against
-        # a run. It is COUNTED as unplaced by the caller and reported, never
-        # silently folded into the coverage figure.
-        return None
+    parsed = datetime.fromisoformat(text)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _read_bundle(path: Path) -> dict:
+    """One halt bundle as a dict; alerts and raises for anything else."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        _alert("read a halt-evidence bundle", "read_halt_bundles",
+               f"{type(exc).__name__}: {exc} ({path})")
+        raise
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise _corrupt_bundle(path, f"is not JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise _corrupt_bundle(path, f"is JSON but not an object: {type(data).__name__}")
+    return data
+
+
+def _corrupt_bundle(path: Path, why: str) -> ValueError:
+    """Alert about one bundle that is not a record; the error to raise."""
+    cause = f"{path} {why}"
+    _alert("read a halt-evidence bundle", "read_halt_bundles", cause)
+    return ValueError(cause)
 
 
 def read_halt_bundles(
@@ -957,6 +1022,11 @@ def read_halt_bundles(
     outside the target repo is therefore kept only when its own `audit_dir`
     points back inside it; a bundle with no `audit_dir` cannot be attributed
     to any repo and is dropped rather than guessed at.
+
+    A bundle that cannot be read, is not JSON, or is not a JSON object alerts
+    the operator and raises: it used to drop that halt from the count, and
+    the halt count printed no denominator for it. So does a bundle whose
+    stamp cannot be dated when a window is asked for.
     """
     bundles: list[dict] = []
     seen: set[str] = set()
@@ -968,15 +1038,7 @@ def read_halt_bundles(
             if key in seen:
                 continue
             seen.add(key)
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                # fail-open: one corrupt bundle drops that halt from the
-                # count and never the report. The count is reported with
-                # its own denominator so a reader can see the shortfall.
-                continue
-            if not isinstance(data, dict):
-                continue
+            data = _read_bundle(path)
             if scope_repo is not None and not _under(path, Path(scope_repo)):
                 audit_dir = str(data.get("audit_dir", "") or "")
                 if not audit_dir or not _under(
@@ -988,8 +1050,16 @@ def read_halt_bundles(
                 # Bundles stamp UTC ISO-8601; compare on the date portion
                 # only, because the window bound is local and converting
                 # would claim a precision the comparison does not have.
-                parsed = _parse_ts(halted[:10])
-                if parsed is not None and parsed.date() < since.date():
+                try:
+                    parsed = _parse_ts(halted[:10])
+                except ValueError as exc:
+                    cause = (
+                        f"{path}: halted_at {halted!r} has no YYYY-MM-DD date "
+                        f"to place against the window ({exc})"
+                    )
+                    _alert("date a halt bundle", "read_halt_bundles", cause)
+                    raise ValueError(cause) from exc
+                if parsed.date() < since.date():
                     continue
             data["_path"] = str(path)
             bundles.append(data)
@@ -1035,13 +1105,21 @@ def build_report(
     failures = [
         row
         for row in read_failures(repo)
-        if _in_window(row.get("ts_local", ""), since)
+        if _in_window(
+            row.get("ts_local", ""), since,
+            source=f"prompt-failure record {row.get('fingerprint', '?')}",
+        )
     ]
     heals = [
-        row for row in read_heals(repo) if _in_window(row.get("ts", ""), since)
+        row for row in read_heals(repo)
+        if _in_window(
+            row.get("ts", ""), since,
+            source=f"healing-ledger row {row.get('category', '?')}:{row.get('target', '?')}",
+        )
     ]
     preserved = [
-        rec for rec in read_ledger(repo) if _in_window(rec.at, since)
+        rec for rec in read_ledger(repo)
+        if _in_window(rec.at, since, source=f"preserved-branch record {rec.source}")
     ]
     runs = scan_run_logs(repo, since)
 

@@ -180,7 +180,6 @@ class TestScanRunLog:
         facts = scan_run_log(path)
         assert facts.pinning_refusals == 2
         assert facts.pinning_regressions == 1
-        assert not facts.unreadable
 
     def test_unmatched_filename_is_unlinked_not_misattributed(self, tmp_path):
         log = _write_run_log(tmp_path, "run-issueXYZ.log", "[CAP] x")
@@ -202,7 +201,9 @@ class TestScanRunLog:
 
 
 class TestHaltBundles:
-    def test_reads_bundles_and_skips_corrupt_ones(self, tmp_path):
+    def test_reads_bundles_and_a_corrupt_one_stops_the_read(self, tmp_path, operator_alerts):
+        """ADR 0236 (#3585): a corrupt bundle used to drop that halt from the
+        count with no denominator for it. It now alerts and raises."""
         good = tmp_path / "lineage" / "a"
         good.mkdir(parents=True)
         (good / "halt-evidence.json").write_text(
@@ -219,6 +220,11 @@ class TestHaltBundles:
         bad.mkdir(parents=True)
         (bad / "halt-evidence.json").write_text("{not json", encoding="utf-8")
 
+        with pytest.raises(ValueError, match="is not JSON"):
+            read_halt_bundles([tmp_path])
+        assert len(operator_alerts) == 1
+
+        (bad / "halt-evidence.json").unlink()
         bundles = read_halt_bundles([tmp_path])
         assert len(bundles) == 1
         assert bundles[0]["stage"] == "spec"

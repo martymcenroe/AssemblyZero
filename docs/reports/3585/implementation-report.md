@@ -215,3 +215,19 @@ Callers that still swallow: `workflows/requirements/nodes/analyze_requirements.p
 Unit isolation: `tests/unit/conftest.py` gains `_must_resolve_gate_answers_offline`, which rebinds `speedrun_roll.open_must_resolve_issues` to "GitHub answered, nothing open". Twenty-three tests drive `speedrun_roll.main()` on a repository with no GitHub remote and relied on the gate warning and launching. The fixture follows the existing box-health bypass beside it.
 
 Compliance: every failure path writes an ERROR line through `alert_operator` with what, where, identity, cause and consequence; the filer's halt is unchanged by contract, and the launch gate stops the launch. Baseline: the `file_all_conflicts` handler entry leaves.
+
+### speedrun/factory_report.py (14 sites)
+
+The factory report replaces "whichever kill happened most recently" with counts, and several of its readers made those counts wrong in a direction nobody could see. A run only reaches `classify_cause`, which is unchanged; the rest is `tools/factory_report.py`, and `scan_run_log` is also used by `tools/replay_run.py`.
+
+- **The withdrawn tags are gone** from `parse_since` (496), `_parse_ts` (511), `scan_run_log` (631, 647), `scan_run_logs` (764), `_under` (852), `_parse_halted_at` (928) and `read_halt_bundles` (972). Where a tag excused a loop that tried two formats, the format is now chosen by the space that only the timestamp form has, so one parse decides and its own error names the input; `parse_since` still raises for an unparseable window.
+- **A record that cannot be placed in the window alerts and raises** (529). `_in_window` takes a `source` naming the store and record, and with a window asked for, a timestamp that is not a date raises `ValueError` naming both. It used to keep the record in every window and count it nowhere. With no window, nothing is dated.
+- **A run log that cannot be stat'd or read alerts and re-raises** (630, 646). An unstattable log was kept in every window and filed undated; an unreadable one carried `unreadable=True`, which nothing printed, and counted as a killed run. The `unreadable` field is deleted.
+- **A path that cannot be resolved alerts and re-raises** (851). It read as "outside this repo" and dropped the halt. Containment is now `is_relative_to`, so "outside" is only ever an answer.
+- **A halt bundle that cannot be read, is not JSON, or is not an object alerts and raises** (971, 976), naming the file. A bundle whose date cannot be read under a window does the same.
+- **A bundle whose stamp is not ISO-8601 is still counted as unplaced, and now alerts** (928). `_parse_halted_at` raises; `attribute_bundles` counts the bundle unplaced, its declared place in the coverage figure, and calls `alert_operator` with the bundle's path.
+- A repo with no runs directory still has no runs, documented and pinned: `build_report` records the absence and the report prints NO for that store.
+
+Callers: `tools/factory_report.py` `main` and `tools/replay_run.py` do not catch, so a short count now ends either tool with a traceback after the alert. Neither is on a run path.
+
+Compliance: each failure path alerts with what, where, cause and consequence (the report stops rather than print a short count) and raises, except 928, which alerts and keeps its declared count. Baseline: eight tag entries leave.
