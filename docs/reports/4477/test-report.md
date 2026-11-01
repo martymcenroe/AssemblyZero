@@ -10,3 +10,4 @@
 
 - The new tests against the old text and the old message, set aside with a named stash and restored after: 15 failed, 108 passed.
 - On the fix: 122 passed.
+- Full `tests/unit` suite through `tools/test-gate.py`, on this branch merged with `main` at `cb7ab317`: 13473 passed, 66 skipped, 7 deselected, 7 xfailed in 18m 41s.
