@@ -25,6 +25,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, TypedDict
 
 from assemblyzero.workflows.testing.audit import (
@@ -1451,10 +1452,13 @@ def _halt_scaffold_framework(label: str, cause: str) -> dict[str, Any]:
 
 
 def _scaffold_every_framework(
-    state: TestingWorkflowState, frameworks: list[RunFramework],
+    state: TestingWorkflowState,
+    frameworks: list[RunFramework],
+    scaffold_python: Callable[[TestingWorkflowState], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """N2 for a run with more than one framework (#4244): each framework's
     scaffold, by its own scaffolder, in the order N0 wrote them.
+    `scaffold_python` is the pytest scaffolder, which a mock run replaces.
 
     `generated_tests` stays the Python scaffold when pytest is one of them,
     because the pytest validator reads that key (#789); every other
@@ -1467,7 +1471,7 @@ def _scaffold_every_framework(
     for run in frameworks:
         try:
             if run.framework == TestFramework.PYTEST:
-                result = _scaffold_python_tests(state)
+                result = (scaffold_python or _scaffold_python_tests)(state)
             else:
                 result = _scaffold_non_python_tests(
                     state, {**run.config, "framework": run.framework}
@@ -1658,7 +1662,20 @@ def _scaffold_python_tests(state: TestingWorkflowState) -> dict[str, Any]:
 
 
 def _mock_scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
-    """Mock implementation for testing."""
+    """N2 under --mock: every framework of the run, as a real run scaffolds it
+    (#4438). The mock used to write one pytest file whatever the run was, so a
+    mock on a two-framework target could not pass N2.5, and that path had never
+    run end to end, not even here. Only the pytest scaffolder is the mock's.
+    """
+    try:
+        frameworks = run_frameworks(state)
+    except TestFileOwnershipError as e:
+        return _halt_scaffold_framework("run's", str(e))
+    return _scaffold_every_framework(state, frameworks, _mock_scaffold_python)
+
+
+def _mock_scaffold_python(state: TestingWorkflowState) -> dict[str, Any]:
+    """The pytest scaffold of a mock run, written without a model."""
     issue_number = state.get("issue_number", 42)
     test_scenarios = state.get("test_scenarios", [])
     repo_root_str = state.get("repo_root", "")
