@@ -365,6 +365,30 @@ class TestBriefRunsHaveKeysOfTheirOwn:
         assert "recovery-0-" not in result["recovery_plan_path"]
         assert "recovery-brief-alpha-" in result["recovery_plan_path"]
 
+    def test_the_halted_plan_resumes_the_brief_not_issue_zero(self, tmp_path, capsys):
+        """#4443, T1: both the saved plan and the printed block name the brief."""
+        repo = _repo(tmp_path, "one")
+        result = _halt("requirements", self._brief_state(repo, "ideas/active/alpha.md"))
+
+        plan = json.loads(Path(result["recovery_plan_path"]).read_text(encoding="utf-8"))
+        assert "--resume ideas/active/alpha.md" in plan["resume_command"]
+        assert "--issue" not in plan["resume_command"]
+
+        printed = capsys.readouterr().out
+        assert f"Brief:     {plan['run_key']}" in printed
+        assert "#0" not in printed
+        assert "--issue 0" not in printed
+
+    def test_a_halted_issue_run_still_resumes_its_issue(self, tmp_path, capsys):
+        """#4443, T2."""
+        repo = _repo(tmp_path, "one")
+        result = _halt("testing", _state(repo))
+
+        plan = json.loads(Path(result["recovery_plan_path"]).read_text(encoding="utf-8"))
+        assert "--issue 42" in plan["resume_command"]
+        assert "--resume" not in plan["resume_command"]
+        assert "Issue:     #42" in capsys.readouterr().out
+
 
 class TestAMocksHaltNeverReachesARealRun:
     """The comment on #4292: a --mock run's halt must not be a real run's."""

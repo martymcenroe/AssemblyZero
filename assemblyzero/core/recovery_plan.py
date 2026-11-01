@@ -12,6 +12,7 @@ budget exceeded), this module generates a structured recovery plan that:
 
 import json
 import re
+import shlex
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -67,6 +68,9 @@ def build_resume_command(workflow: str, issue_number: int, state: dict) -> str:
     one this map does not know -- says so plainly. The old fallback invented
     `tools/run_<workflow>_workflow.py` for any unknown name, which is the same
     defect generalised: a guess that reads exactly like a fact.
+
+    A brief run has no issue number (#4443). It resumes by its brief, through
+    the one tool that takes one; `--issue 0` names nothing that can be resumed.
     """
     tool = RESUME_COMMANDS.get(workflow)
     if not tool:
@@ -75,7 +79,20 @@ def build_resume_command(workflow: str, issue_number: int, state: dict) -> str:
             f"see AssemblyZero RESUME_COMMANDS)"
         )
 
-    parts = [f"poetry run python {tool}", f"--issue {issue_number}"]
+    brief = str(state.get("brief_file") or "")
+    if issue_number:
+        parts = [f"poetry run python {tool}", f"--issue {issue_number}"]
+    elif brief and workflow == "requirements":
+        parts = [
+            f"poetry run python {tool}",
+            "--type issue",
+            f"--resume {shlex.quote(brief)}",
+        ]
+    else:
+        return (
+            f"(no resume command for this {workflow} run: it has neither an "
+            f"issue number nor a brief)"
+        )
     repo = next(
         (str(state.get(key)) for key in _REPO_KEYS if state.get(key)), ""
     )
@@ -146,7 +163,10 @@ class RecoveryPlan:
         print(f"\n{border}")
         print("  HALT — Workflow stopped")
         print(f"{border}")
-        print(f"  Issue:     #{self.issue_number}")
+        if self.issue_number:
+            print(f"  Issue:     #{self.issue_number}")
+        else:
+            print(f"  Brief:     {self.run_key}")
         print(f"  Workflow:  {self.workflow}")
         print(f"  Stage:     {self.stage}")
         # #2299: this line printed `error_type` -- the CLASSIFIER's bucket --

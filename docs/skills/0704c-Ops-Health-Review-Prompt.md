@@ -269,7 +269,7 @@ System is in CRITICAL state due to friction spike. Average prompts per session h
 
 ## Tier 3: SUGGESTIONS
 - Add `Bash(git -C * status)` pattern to allow-list (appeared 23 times in friction log)
-- Consider increasing gemini-retry max attempts from 5 to 10 (3 quota exhaustion events this week)
+- Consider raising the Gemini retry limit from 5 to 10 (3 quota exhaustion events this week)
 
 ## Recommended Actions
 1. **IMMEDIATE:** Run security audit suite (`/audit --security`)

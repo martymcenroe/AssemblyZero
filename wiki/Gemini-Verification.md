@@ -128,10 +128,8 @@ Security teams can query: "Show me all implementations that passed security revi
 **Goal:** Catch design issues before they become code
 
 ```bash
-# Submission
-poetry run python tools/gemini-retry.py \
-  --model gemini-3-pro-preview \
-  --prompt-file /path/to/lld-review-prompt.txt
+# Submission: the workflow drafts the LLD and sends it to Gemini over agy
+poetry run python tools/run_requirements_workflow.py --type lld --issue 42
 
 # Prompt includes:
 # - Full LLD content
@@ -227,62 +225,25 @@ These models are **explicitly forbidden** for reviews:
 
 ### Model Verification
 
-The `gemini-retry.py` tool verifies the model used:
+`GeminiClient` (`assemblyzero/core/gemini_client.py`) refuses a forbidden model before it calls `agy`:
 
 ```python
-# Extract model from response
-response_model = response.get("stats", {}).get("models", [None])[0]
-
-# Verify it's approved
-approved = ["gemini-3-pro-preview"]
-if response_model not in approved:
-    raise ValueError(f"Review invalid: used {response_model}, not approved model")
+lowered = model.lower()
+if any(entry.lower() in lowered for entry in FORBIDDEN_MODELS):
+    raise ValueError(f"Model '{model}' is forbidden.")
 ```
-
-This catches "silent downgrades" where the API returns a different model than requested.
 
 ---
 
 ## Credential Management
 
-### The Problem
+There are no credentials to manage. The pipeline reaches Gemini through the `agy` CLI on the subscription, so there is no key to rotate and no second account to fall back on.
 
-API quotas exhaust, especially with intensive review workloads:
-- Anthropic: Per-minute and per-day limits
-- Google: Per-account capacity limits
-
-### The Solution: gemini-retry.py
-
-Automatic retry with credential rotation:
-
-```python
-# Attempt order:
-# 1. Primary credential → try with exponential backoff
-# 2. If quota exhausted → rotate to secondary credential
-# 3. If all exhausted → report and stop (don't proceed without review)
-
-def gemini_review(prompt: str, model: str = "gemini-3-pro-preview") -> dict:
-    for attempt in range(MAX_ATTEMPTS):
-        for credential in credential_pool:
-            try:
-                result = call_gemini_api(prompt, model, credential)
-                verify_model(result, model)
-                return result
-            except QuotaExhaustedError:
-                logger.warning(f"Quota exhausted for {credential.name}")
-                continue
-            except RateLimitError:
-                backoff = exponential_backoff(attempt)
-                time.sleep(backoff)
-                continue
-
-    # All credentials exhausted
-    raise AllCredentialsExhaustedError("Cannot proceed - review required")
-```
+`GeminiClient` retries transient capacity errors with exponential backoff, within the call's time budget. It does not retry exhausted quota: the call fails, and the workflow halts with a recovery plan.
 
 ### Quota Exhaustion Protocol
 
-When ALL credentials are exhausted:
+When the subscription's quota is exhausted:
 
 1. **STOP** - Do not proceed without review
 2. **Report** - Inform user of quota status

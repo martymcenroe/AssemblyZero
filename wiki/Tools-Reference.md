@@ -8,7 +8,7 @@
 
 AssemblyZero provides a suite of Python tools that enable enterprise-grade AI agent orchestration. These tools handle:
 
-- **Gemini Integration** - Credential rotation, retry logic, model validation
+- **Gemini Integration** - The `agy` transport, retry logic, model validation
 - **Permission Management** - Friction tracking, permission propagation
 - **Configuration** - Project setup, template generation
 - **Cross-Project Operations** - Pattern harvesting, credential management
@@ -17,78 +17,7 @@ AssemblyZero provides a suite of Python tools that enable enterprise-grade AI ag
 
 ## Gemini Tools
 
-### gemini-retry.py
-
-**Purpose:** Ensures Gemini 3 Pro reviews succeed even under load.
-
-**Key Features:**
-- Credential rotation when account quota exhausted
-- Exponential backoff for temporary capacity issues
-- Model validation (rejects silent downgrades to Flash)
-- Auto-switches to stdin for large prompts (>10KB)
-- Logs all attempts to `logs/gemini-retry-*.jsonl`
-
-**Usage:**
-```bash
-# With inline prompt
-poetry run python tools/gemini-retry.py --prompt "Review this LLD" --model gemini-3-pro-preview
-
-# With prompt file (recommended for large prompts)
-poetry run python tools/gemini-retry.py --prompt-file /path/to/prompt.txt --model gemini-3-pro-preview
-```
-
-**Exit Codes:**
-| Code | Meaning |
-|------|---------|
-| 0 | Success - response printed to stdout |
-| 1 | Permanent failure - all credentials exhausted |
-| 2 | Invalid arguments |
-
-**Environment Variables:**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_RETRY_MAX` | 20 | Max retry attempts |
-| `GEMINI_RETRY_BASE_DELAY` | 30 | Initial delay (seconds) |
-| `GEMINI_RETRY_MAX_DELAY` | 600 | Max delay cap (seconds) |
-
-**Why This Exists:**
-- `QUOTA_EXHAUSTED` (account limit) needs credential rotation, not backoff
-- `CAPACITY_EXHAUSTED` (Google servers) benefits from exponential backoff
-- Direct CLI calls fail permanently on quota - this tool handles both scenarios
-
----
-
-### gemini-rotate.py
-
-**Purpose:** Gemini CLI wrapper with automatic credential rotation across multiple Google accounts.
-
-**Key Features:**
-- Rotates through API keys and OAuth credentials
-- Maximizes available quota across accounts
-- Tracks credential status and exhaustion times
-
-**Usage:**
-```bash
-# Direct usage (like gemini CLI)
-poetry run python tools/gemini-rotate.py --prompt "Review this code" --model gemini-3-pro-preview
-
-# Check credential status
-poetry run python tools/gemini-rotate.py --status
-```
-
-**Configuration:**
-Credentials stored in: `~/.assemblyzero/gemini-credentials.json`
-
----
-
-### gemini-test-credentials.py
-
-**Purpose:** Test Gemini credentials to verify they're working.
-
-**Usage:**
-```bash
-poetry run python tools/gemini-test-credentials.py
-```
+There is no Gemini command-line tool in `tools/`. The workflows call Gemini themselves, through the Antigravity CLI (`agy`) on the subscription, and `assemblyzero/core/gemini_client.py` is that transport. It retries transient capacity errors with exponential backoff and refuses a forbidden model. There are no credentials to rotate.
 
 ---
 
@@ -271,14 +200,10 @@ poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwi
 
 ### Gemini Reviews
 
-**ALWAYS use gemini-retry.py, NEVER call gemini CLI directly:**
+**Run a Gemini review through a workflow, which calls `agy`. The `gemini` CLI is retired:**
 
 ```bash
-# WRONG - will fail permanently on quota
-gemini --prompt "..." --model gemini-3-pro-preview
-
-# RIGHT - handles quota and retries
-poetry run python tools/gemini-retry.py --prompt "..." --model gemini-3-pro-preview
+poetry run python tools/run_requirements_workflow.py --type lld --issue 42
 ```
 
 ---

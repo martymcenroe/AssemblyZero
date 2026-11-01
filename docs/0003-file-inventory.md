@@ -102,7 +102,6 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0600-command-index.md` | Stable | All commands documented |
 | `0601-gemini-dual-review.md` | Stable | AI-to-AI review |
 | `0602-gemini-lld-review.md` | Stable | Design review |
-| `0604-gemini-retry.md` | Stable | Exponential backoff for Gemini |
 | `0699-skill-instructions-index.md` | Stable | Skill index |
 | `0620c-sync-permissions-cli.md` | Stable | CLI: Permission sync |
 | `0620p-sync-permissions-prompt.md` | Stable | Prompt: Permission sync |
@@ -114,8 +113,6 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0623p-friction-prompt.md` | Stable | Prompt: Permission friction |
 | `0625c-code-review-cli.md` | Stable | CLI: Code review |
 | `0625p-code-review-prompt.md` | Stable | Prompt: Code review |
-| `0625c-gemini-retry-cli.md` | Stable | CLI: Gemini retry |
-| `0625p-gemini-retry-prompt.md` | Stable | Prompt: Gemini retry |
 | `0626c-commit-push-pr-cli.md` | Stable | CLI: Git workflow |
 | `0626p-commit-push-pr-prompt.md` | Stable | Prompt: Git workflow |
 | `0626c-gemini-rotate-cli.md` | Stable | CLI: Gemini rotation |
@@ -252,12 +249,6 @@ These tools use `tools/_pat_session.classic_pat_session()` so the classic PAT ne
 | `tools/rebuild_knowledge_base.py` | Stable | Rebuild ChromaDB vector store from source docs |
 | `tools/mine_verdict_patterns.py` | Stable | Analyze Gemini verdicts for template improvement |
 | `tools/modernize_dependencies.py` | Stable | Dependency modernization tool |
-
-### Gemini Integration
-
-| File | Status | Description |
-|------|--------|-------------|
-| `tools/gemini-retry.py` | Stable | Exponential backoff for MODEL_CAPACITY_EXHAUSTED |
 
 ### Analysis & Reporting
 
@@ -4895,7 +4886,6 @@ These tools live outside AZ but operate fleet-wide. The user invokes them from t
 | docs/skills/0600-command-index.md | 0600-command-index.md | Skills | Active |
 | docs/skills/0601-gemini-dual-review.md | 0601-gemini-dual-review.md | Skills | Active |
 | docs/skills/0602-gemini-lld-review.md | 0602-gemini-lld-review.md | Skills | Active |
-| docs/skills/0604-gemini-retry.md | 0604-gemini-retry.md | Skills | Active |
 | docs/skills/0620c-sync-permissions-cli.md | 0620c-sync-permissions-cli.md | Skills | Active |
 | docs/skills/0620p-sync-permissions-prompt.md | 0620p-sync-permissions-prompt.md | Skills | Active |
 | docs/skills/0621c-cleanup-cli.md | 0621c-cleanup-cli.md | Skills | Active |
@@ -4910,8 +4900,6 @@ These tools live outside AZ but operate fleet-wide. The user invokes them from t
 | docs/skills/0626p-commit-push-pr-prompt.md | 0626p-commit-push-pr-prompt.md | Skills | Active |
 | docs/skills/0627c-test-gaps-cli.md | 0627c-test-gaps-cli.md | Skills | Active |
 | docs/skills/0627p-test-gaps-prompt.md | 0627p-test-gaps-prompt.md | Skills | Active |
-| docs/skills/0628c-gemini-retry-cli.md | 0628c-gemini-retry-cli.md | Skills | Active |
-| docs/skills/0628p-gemini-retry-prompt.md | 0628p-gemini-retry-prompt.md | Skills | Active |
 | docs/skills/0629c-gemini-rotate-cli.md | 0629c-gemini-rotate-cli.md | Skills | Active |
 | docs/skills/0629p-gemini-rotate-prompt.md | 0629p-gemini-rotate-prompt.md | Skills | Active |
 | docs/skills/0630c-assemblyzero-harvest-cli.md | 0630c-assemblyzero-harvest-cli.md | Skills | Active |

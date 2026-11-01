@@ -162,7 +162,6 @@ Projects use **5-digit numbers** (prefix `1` + AssemblyZero number) for implemen
 | [0600](skills/0600-command-reference.md) | Command Reference | All 8 AssemblyZero commands |
 | [0601](skills/0601-gemini-dual-review.md) | Gemini Dual Review | AI-to-AI review |
 | [0602](skills/0602-gemini-lld-review.md) | Gemini LLD Review | Design review |
-| [0604](skills/0604-gemini-retry.md) | Gemini Retry | Exponential backoff for Gemini |
 | [0699](skills/0699-skill-instructions-index.md) | Skill Index | All skills listed |
 
 ### Audits (08xx)
@@ -224,7 +223,6 @@ See [0600-command-reference.md](skills/0600-command-reference.md) for full detai
 | .claude/project.json.example | Template for project configuration |
 | tools/assemblyzero-generate.py | Generate configs from templates |
 | tools/assemblyzero-permissions.py | Manage permission settings |
-| tools/gemini-retry.py | Gemini CLI wrapper with exponential backoff |
 | tools/claude-usage-scraper.py | Usage quota extraction via TUI automation |
 
 ---

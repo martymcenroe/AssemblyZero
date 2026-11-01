@@ -27,8 +27,8 @@ The value is quoted because a YAML 1.1 parser reads a bare `off` as the boolean 
 
 ## To repeat it
 
-In bash, from the AssemblyZero checkout, with the probe files under `data/scratch-2026-09-25-run-report-design/agy-agent-probe/` (the agent under `cwd/.agents/agents/assemblyzero-text/agent.md`, the prompt in `prompt.txt`):
+In bash, from `data/scratch-2026-09-25-run-report-design/agy-agent-probe/cwd` in the AssemblyZero checkout, which holds the agent at `.agents/agents/assemblyzero-text/agent.md` and nothing else, with the prompt one level up in `prompt.txt`:
 
-    poetry run python tools/gemini-retry.py --prompt-file data/scratch-2026-09-25-run-report-design/agy-agent-probe/prompt.txt
+    agy --agent assemblyzero-text --model gemini-3.8-flash-high --output-format json < ../prompt.txt
 
 Expected: the same answer, no dialog, no `probe.txt`. If the answer reports that a command ran or a file was written, the agent was not honored; stop, and record the exact output on #3603.
