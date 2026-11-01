@@ -27,6 +27,7 @@ from typing import Any
 from assemblyzero.core.interface_surface import (
     build_interface_map_for_paths,
     format_interface_map_section,
+    has_extractor,
 )
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.core.seats import resolve
@@ -848,14 +849,14 @@ def build_revision_context(state: RequirementsWorkflowState) -> str:
             else:
                 revision_context += "**CRITICAL:** Check that all file paths in Section 2.1 are correct:\n"
                 revision_context += "- 'Modify' files MUST exist in the repository\n"
-                revision_context += "- 'Add' files must have existing parent directories\n"
+                revision_context += "- 'Add' files must not exist yet, and must have existing parent directories\n"
                 revision_context += "- Use actual file names from the codebase, not generic names\n\n"
 
     # Tiphys (#1688): revision feedback loop — the draft's own Files
     # Changed table declares the change's actual blast radius; refresh
     # signatures for exactly those files (plus one-hop imports). Any
     # draft-one selection miss becomes a one-iteration transient. Falls
-    # back to the N0b-computed map when the table names no Python file.
+    # back to the N0b-computed map when the table names no file it can read.
     #
     # #3585: a refresh that fails raises InterfaceRefreshError, which
     # generate_draft turns into the halt. It used to be logged as a warning
@@ -867,7 +868,7 @@ def build_revision_context(state: RequirementsWorkflowState) -> str:
         entries, _parse_errors = parse_files_changed_table(current_draft)
         draft_paths = [
             e.get("path", "") for e in entries
-            if e.get("path", "").endswith(".py")
+            if has_extractor(e.get("path", ""))
         ]
         if draft_paths:
             try:

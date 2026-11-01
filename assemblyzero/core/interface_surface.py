@@ -29,17 +29,29 @@ Failure contract (#3779, ADR 0236): a failure raises, naming the file and
 the cause. It used to degrade to an empty map with a logged warning, and an
 empty map is the drafter working blind, inventing the functions this module
 exists to stop it inventing. Two outcomes are not failures: a repo with no
-Python files has an empty surface (logged), and files dropped to fit the
+source files has an empty surface (logged), and files dropped to fit the
 character budget are named in the log.
+
+#4500: TypeScript is read too, through tree-sitter, which needs nothing from
+the target: no Node, and no compiler in its node_modules. This module read
+Python alone, so on a target whose logic is in TypeScript the drafter designed
+a change to a file it had never seen, and nothing said so. A file the issue
+names in a language no extractor reads is now said aloud, in the log and in the
+drafter's prompt.
 """
 
 from __future__ import annotations
 
 import ast
+import functools
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Callable
+
+import tree_sitter_typescript
+from tree_sitter import Language, Node, Parser
 
 from assemblyzero.utils.codebase_reader import is_sensitive_file
 
@@ -57,7 +69,7 @@ PER_FILE_CHAR_CAP = 4_000
 TOTAL_CHAR_CAP = 24_000
 
 # Whole-surface mode is considered only when the repo has at most this many
-# candidate Python files; above it, selection mode runs without reading
+# candidate source files; above it, selection mode runs without reading
 # everything first.
 WHOLE_SURFACE_MAX_FILES = 48
 
@@ -226,14 +238,202 @@ def summarize_class(node: ast.ClassDef, source: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The language seam: extractor dispatch by file extension. Python is the
-# only registered language; other extensions contribute nothing until an
-# extractor is registered here. This table IS the multi-language seam.
+# TypeScript summarizer (#4500). The same shape as the Python one: the file's
+# heading, its imports, and what it exports, with no function bodies. What is
+# not exported is left out, as a private helper is not part of the interface.
+# ---------------------------------------------------------------------------
+
+#: The file's opening comment is its docstring; keep this much of it.
+_TS_HEADER_CAP = 1_000
+
+#: A constant longer than this is a data structure, so it is shown by its name
+#: and type alone, matching the Python summarizer's rule for assignments.
+_TS_SHORT_CONSTANT = 200
+
+#: How a summary opens when the parser could not read part of the file.
+_TS_PARTIAL = "// parser could not read"
+
+_TS_SIGNATURE_ONLY = frozenset({
+    "function_declaration", "generator_function_declaration",
+    "function_signature",
+})
+_TS_CLASSES = frozenset({"class_declaration", "abstract_class_declaration"})
+_TS_FUNCTION_VALUES = frozenset({"arrow_function", "function_expression"})
+
+
+@functools.cache
+def _ts_parser(tsx: bool) -> Parser:
+    language = (
+        tree_sitter_typescript.language_tsx()
+        if tsx else tree_sitter_typescript.language_typescript()
+    )
+    return Parser(Language(language))
+
+
+def _ts_text(source: bytes, start: int, end: int) -> str:
+    return source[start:end].decode("utf-8").rstrip()
+
+
+def _ts_doc_comment(node: Node, source: bytes) -> str:
+    """The comment sitting directly on a declaration, first three lines."""
+    before = node.prev_named_sibling
+    if (
+        before is None
+        or before.type != "comment"
+        or before.end_point[0] + 1 != node.start_point[0]
+    ):
+        return ""
+    return "\n".join(_ts_text(source, before.start_byte, before.end_byte).splitlines()[:3])
+
+
+def _ts_class(export: Node, declaration: Node, source: bytes) -> str:
+    """A class's heading and the signatures of its public members."""
+    body = declaration.child_by_field_name("body")
+    if body is None:
+        return _ts_text(source, export.start_byte, export.end_byte)
+    lines = [_ts_text(source, export.start_byte, body.start_byte) + " {"]
+    for member in body.named_children:
+        if member.type == "comment":
+            continue
+        name = member.child_by_field_name("name")
+        private = any(
+            child.type == "accessibility_modifier"
+            and _ts_text(source, child.start_byte, child.end_byte) == "private"
+            for child in member.children
+        ) or (name is not None and name.type == "private_property_identifier")
+        if private:
+            continue
+        end = member.child_by_field_name("body") or member.child_by_field_name("value")
+        stop = end.start_byte if end is not None else member.end_byte
+        lines.append("  " + _ts_text(source, member.start_byte, stop).rstrip(" =;"))
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _ts_constant(export: Node, declaration: Node, source: bytes) -> str:
+    """An exported constant: a function's signature, or a short value whole."""
+    text = _ts_text(source, export.start_byte, export.end_byte)
+    declarators = [
+        child for child in declaration.named_children
+        if child.type == "variable_declarator"
+    ]
+    value = declarators[0].child_by_field_name("value") if len(declarators) == 1 else None
+    if value is not None and value.type in _TS_FUNCTION_VALUES:
+        body = value.child_by_field_name("body")
+        if body is not None:
+            return _ts_text(source, export.start_byte, body.start_byte)
+    if len(text) <= _TS_SHORT_CONSTANT or value is None:
+        return text
+    return _ts_text(source, export.start_byte, value.start_byte).rstrip(" =") + " = ..."
+
+
+def _ts_export(export: Node, source: bytes) -> str:
+    """One exported declaration, without function bodies."""
+    declaration = export.child_by_field_name("declaration")
+    text = _ts_text(source, export.start_byte, export.end_byte)
+    if declaration is None:
+        # `export { a } from`, `export * from`, `export default <value>`.
+        return text if len(text) <= _TS_SHORT_CONSTANT else text[:_TS_SHORT_CONSTANT] + " ..."
+    if declaration.type in _TS_SIGNATURE_ONLY:
+        body = declaration.child_by_field_name("body")
+        return text if body is None else _ts_text(source, export.start_byte, body.start_byte)
+    if declaration.type in _TS_CLASSES:
+        return _ts_class(export, declaration, source)
+    if declaration.type == "lexical_declaration":
+        return _ts_constant(export, declaration, source)
+    return text  # An interface, a type alias or an enum IS its own signature.
+
+
+def _ts_unread_lines(node: Node) -> list[int]:
+    """The 1-based lines the parser could not read, in order."""
+    if node.type == "ERROR" or node.is_missing:
+        return [node.start_point[0] + 1]
+    if not node.has_error:
+        return []
+    return sorted({line for child in node.children for line in _ts_unread_lines(child)})
+
+
+def _summarize_ts(content: str, *, tsx: bool) -> str:
+    """Extract imports and exported signatures from TypeScript source.
+
+    The parser reads through what it cannot parse, so a gap in the grammar
+    costs a line of a body and not the file. tree-sitter is behind the language
+    on inline `import()` types, on code that compiles, so a gap must not stop a
+    run. It is said in the summary's first line, and `extract_interface_map`
+    logs it with the file's name.
+    """
+    source = content.encode("utf-8")
+    root = _ts_parser(tsx).parse(source).root_node
+    parts: list[str] = []
+
+    unread = _ts_unread_lines(root)
+    if unread:
+        parts.append(
+            f"{_TS_PARTIAL} line(s) {', '.join(map(str, unread))}, so this "
+            "surface may be incomplete"
+        )
+
+    children = root.named_children
+    if children and children[0].type == "comment":
+        parts.append(_ts_text(source, children[0].start_byte, children[0].end_byte)[:_TS_HEADER_CAP])
+
+    for node in children:
+        if node.type == "import_statement":
+            parts.append(_ts_text(source, node.start_byte, node.end_byte))
+
+    for node in children:
+        if node.type == "export_statement":
+            doc = _ts_doc_comment(node, source)
+            summary = _ts_export(node, source)
+            parts.append(f"{doc}\n{summary}" if doc else summary)
+
+    return "\n\n".join(parts)
+
+
+def summarize_typescript_file(content: str) -> str:
+    """The interface of a ``.ts`` file: see `_summarize_ts`."""
+    return _summarize_ts(content, tsx=False)
+
+
+def summarize_tsx_file(content: str) -> str:
+    """The interface of a ``.tsx`` file: see `_summarize_ts`."""
+    return _summarize_ts(content, tsx=True)
+
+
+# ---------------------------------------------------------------------------
+# The language seam: extractor dispatch by file extension. Other extensions
+# contribute nothing until an extractor is registered here. This table IS the
+# multi-language seam.
 # ---------------------------------------------------------------------------
 
 _EXTRACTORS: dict[str, Callable[[str], str]] = {
     ".py": summarize_python_file,
+    ".ts": summarize_typescript_file,
+    ".tsx": summarize_tsx_file,
 }
+
+#: Code in a language no extractor reads. A closed list, because a named file
+#: that is a document or data has no signatures to miss; this is the set whose
+#: absence from the surface the drafter has to be told about (#4500).
+_CODE_WITHOUT_EXTRACTOR = frozenset({
+    ".c", ".cc", ".cjs", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js",
+    ".jsx", ".kt", ".mjs", ".php", ".rb", ".rs", ".sh", ".sql", ".swift",
+})
+
+#: What the drafter reads in place of a named file's signatures.
+_NOT_SUMMARISED = (
+    "No signatures: the issue names this file, and nothing here reads its "
+    "language. Read nothing into its absence, and say so in the design if you "
+    "depend on its interface."
+)
+
+#: The code fence each language renders in.
+_FENCES = {".py": "python", ".ts": "typescript", ".tsx": "tsx"}
+
+
+def has_extractor(path: str | Path) -> bool:
+    """Can the surface read this file?"""
+    return Path(path).suffix in _EXTRACTORS
 
 
 # ---------------------------------------------------------------------------
@@ -241,40 +441,49 @@ _EXTRACTORS: dict[str, Callable[[str], str]] = {
 # ---------------------------------------------------------------------------
 
 
-def list_repo_python_files(repo_root: Path) -> list[Path]:
-    """Walk the repo for candidate Python files (whole-surface mode input).
+def _raise(error: OSError) -> None:
+    raise error
 
-    Excludes hidden directories, test trees, caches, build/venv dirs, and
-    sensitive files. Sorted for determinism.
+
+def list_repo_source_files(repo_root: Path) -> list[Path]:
+    """Walk the repo for candidate source files (whole-surface mode input).
+
+    Excludes hidden directories, test trees, caches, build/venv dirs,
+    generated TypeScript declarations and sensitive files. An excluded
+    directory is not descended into: a target's node_modules can hold more
+    files than the rest of the repo together. Sorted for determinism.
 
     Args:
         repo_root: Resolved absolute repository root.
 
     Returns:
-        Sorted list of candidate .py paths. A walk that fails raises
-        ``OSError`` (#3779); it used to return [], which read as "no files".
+        Sorted list of candidate paths. A walk that fails raises ``OSError``
+        (#3779); it used to return [], which read as "no files".
     """
     results: list[Path] = []
-    for path in sorted(repo_root.rglob("*.py")):
-        if not path.is_file():
-            continue
-        rel_parts = path.relative_to(repo_root).parts
-        if any(
-            part.startswith(".") or part in _EXCLUDED_DIR_NAMES
-            for part in rel_parts[:-1]
-        ):
-            continue
-        if is_sensitive_file(path):
-            continue
-        results.append(path)
-    return results
+    for folder, subdirs, names in os.walk(repo_root, onerror=_raise):
+        subdirs[:] = [
+            name for name in subdirs
+            if not name.startswith(".") and name not in _EXCLUDED_DIR_NAMES
+        ]
+        for name in names:
+            path = Path(folder) / name
+            if (
+                has_extractor(path)
+                and not name.endswith(".d.ts")
+                and path.is_file()
+                and not is_sensitive_file(path)
+            ):
+                results.append(path)
+    return sorted(results)
 
 
 def extract_explicit_paths(issue_text: str, repo_root: Path) -> list[Path]:
-    """Resolve path-shaped ``.py`` tokens from issue text to real repo files.
+    """Resolve path-shaped tokens from issue text to real repo files.
 
     An issue that names ``assemblyzero/workflows/requirements/graph.py`` is
     declaring its blast radius — the highest-precision selector available.
+    Any extension counts (#4500): the caller decides what it can do with each.
 
     Args:
         issue_text: The GitHub issue body.
@@ -288,7 +497,7 @@ def extract_explicit_paths(issue_text: str, repo_root: Path) -> list[Path]:
 
     found: list[Path] = []
     seen: set[Path] = set()
-    for token in re.findall(r"[\w./\\-]+\.py\b", issue_text):
+    for token in re.findall(r"[\w./\\-]+\.[A-Za-z][A-Za-z0-9]*\b", issue_text):
         candidate = (repo_root / token.replace("\\", "/").lstrip("./")).resolve()
         try:
             candidate.relative_to(repo_root)
@@ -300,22 +509,67 @@ def extract_explicit_paths(issue_text: str, repo_root: Path) -> list[Path]:
     return found
 
 
+def _ts_import_candidates(base: Path) -> list[Path]:
+    """Where a relative TypeScript import can land, in resolution order.
+
+    ESM source writes `./x.js` for a file that is `./x.ts` on disk.
+    """
+    named = [base.with_name(base.name + suffix) for suffix in (".ts", ".tsx")]
+    index = [base / name for name in ("index.ts", "index.tsx")]
+    compiled = (
+        [base.with_suffix(".ts"), base.with_suffix(".tsx")] if base.suffix == ".js" else []
+    )
+    return [base, *named, *index, *compiled]
+
+
+def _resolve_ts_imports(path: Path, repo_root: Path) -> list[Path]:
+    """The in-repo files a TypeScript file imports or re-exports (#4500).
+
+    Only relative specifiers: a bare one is a package, which is no more part
+    of the repo than a Python third-party import.
+    """
+    source = path.read_bytes()
+    root = _ts_parser(path.suffix == ".tsx").parse(source).root_node
+
+    targets: list[Path] = []
+    seen: set[Path] = set()
+    for node in root.named_children:
+        specifier = node.child_by_field_name("source")
+        if specifier is None or node.type not in ("import_statement", "export_statement"):
+            continue
+        text = _ts_text(source, specifier.start_byte, specifier.end_byte).strip("\"'`")
+        if not text.startswith("."):
+            continue
+        for candidate in _ts_import_candidates(path.parent / text):
+            if candidate.is_file() and has_extractor(candidate):
+                resolved = candidate.resolve()
+                if resolved.is_relative_to(repo_root) and resolved not in seen:
+                    seen.add(resolved)
+                    targets.append(resolved)
+                break
+    return targets
+
+
 def resolve_import_targets(path: Path, repo_root: Path) -> list[Path]:
     """One-hop import expansion: intra-repo modules imported by ``path``.
 
     Resolves ``import a.b.c`` / ``from a.b import x`` / relative imports to
     files under the repo root. Stdlib and third-party imports resolve to
-    nothing (no matching in-repo file) and are silently skipped.
+    nothing (no matching in-repo file) and are silently skipped. A TypeScript
+    file goes to `_resolve_ts_imports`.
 
     Args:
-        path: Python file whose imports to resolve.
+        path: File whose imports to resolve.
         repo_root: Resolved absolute repository root.
 
     Returns:
-        Deduplicated list of existing in-repo .py paths. A file that cannot be
+        Deduplicated list of existing in-repo paths. A file that cannot be
         read or parsed raises (#3779); it used to return [], which read as
         "imports nothing" and dropped its collaborators from the surface.
     """
+    if path.suffix != ".py":
+        return _resolve_ts_imports(path, repo_root)
+
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     targets: list[Path] = []
@@ -397,8 +651,11 @@ def extract_interface_map(
         rel = path.resolve().relative_to(repo_root).as_posix()
 
         summary = extractor(content)
+        if summary.startswith(_TS_PARTIAL):
+            logger.warning("Interface surface: %s: %s", rel, summary.splitlines()[0])
         if len(summary) > per_file_char_cap:
-            summary = summary[:per_file_char_cap] + "\n# ... (truncated for budget)"
+            comment = "#" if path.suffix == ".py" else "//"
+            summary = summary[:per_file_char_cap] + f"\n{comment} ... (truncated for budget)"
 
         if total + len(summary) > total_char_cap:
             dropped.append(rel)
@@ -430,7 +687,7 @@ def build_interface_map(
     explicit paths, keyword-related files, one-hop import expansion.
 
     #3779: a failure raises, naming its cause. It used to return ``{}`` with
-    a warning, which the drafter could not tell from a repo with no Python.
+    a warning, which the drafter could not tell from a repo with no source.
 
     Args:
         repo_root: Repository root (resolved inside).
@@ -439,44 +696,72 @@ def build_interface_map(
 
     Returns:
         Repo-relative path -> signature summary; ``{}`` only for a repo with
-        no Python files, which is logged.
+        no source files, which is logged. A file the issue names in a language
+        no extractor reads is in the map with a note in place of signatures.
 
     Raises:
         NotADirectoryError: ``repo_root`` is not a directory.
     """
     repo_root = _existing_root(repo_root)
 
-    all_py = list_repo_python_files(repo_root)
-    if not all_py:
-        logger.info("Interface surface: no Python files under %s, so no surface", repo_root)
+    named = extract_explicit_paths(issue_text, repo_root)
+    surface = _select_surface(repo_root, named, related_paths or [])
+    for path in named:
+        if path.suffix in _CODE_WITHOUT_EXTRACTOR:
+            rel = path.relative_to(repo_root).as_posix()
+            logger.warning(
+                "Interface surface: the issue names %s, and nothing here reads "
+                "%s files, so the drafter has no signatures for it",
+                rel, path.suffix,
+            )
+            surface[rel] = _NOT_SUMMARISED
+    return surface
+
+
+def _select_surface(
+    repo_root: Path, named: list[Path], related_paths: list[Path]
+) -> dict[str, str]:
+    """The whole surface when it fits, otherwise the selection composite."""
+    all_files = list_repo_source_files(repo_root)
+    if not all_files:
+        logger.info("Interface surface: no source files under %s, so no surface", repo_root)
         return {}
 
     # Mode 1: whole surface, when it fits.
-    if len(all_py) <= WHOLE_SURFACE_MAX_FILES:
-        whole = extract_interface_map(all_py, repo_root)
-        if len(whole) == len(
-            [p for p in all_py if p.suffix in _EXTRACTORS]
-        ):
+    if len(all_files) <= WHOLE_SURFACE_MAX_FILES:
+        whole = extract_interface_map(all_files, repo_root)
+        if len(whole) == len(all_files):
             logger.info(
                 "Interface surface: whole-repo mode (%d files)", len(whole)
             )
             return whole
         # Didn't fit — fall through to selection.
 
-    # Mode 2: selection composite.
+    # Mode 2: selection composite. #4500: a keyword match is found by a search
+    # of the whole tree, which reaches node_modules; a path the issue itself
+    # names is taken wherever it is.
     primary: list[Path] = []
     seen: set[Path] = set()
-    for p in extract_explicit_paths(issue_text, repo_root) + [
-        Path(rp) for rp in (related_paths or [])
-    ]:
+    for p in named + [Path(rp) for rp in related_paths if _is_walked(Path(rp), repo_root)]:
         rp = Path(p).resolve()  # #3779: an OSError here raises; it was skipped
-        if rp.is_file() and rp.suffix == ".py" and rp not in seen:
+        if rp.is_file() and has_extractor(rp) and rp not in seen:
             seen.add(rp)
             primary.append(rp)
         if len(primary) >= PRIMARY_SELECTION_CAP:
             break
 
     return extract_interface_map(primary + _expand(primary, seen, repo_root), repo_root)
+
+
+def _is_walked(path: Path, repo_root: Path) -> bool:
+    """Is this file somewhere `list_repo_source_files` would descend to?"""
+    resolved = path.resolve()
+    if not resolved.is_relative_to(repo_root):
+        return False
+    return not any(
+        part.startswith(".") or part in _EXCLUDED_DIR_NAMES
+        for part in resolved.relative_to(repo_root).parts[:-1]
+    )
 
 
 def _existing_root(repo_root: Path | str) -> Path:
@@ -539,7 +824,7 @@ def build_interface_map_for_paths(
             continue
         if (
             candidate.is_file()
-            and candidate.suffix == ".py"
+            and has_extractor(candidate)
             and candidate not in seen
             and not is_sensitive_file(candidate)
         ):
@@ -575,5 +860,6 @@ def format_interface_map_section(interface_map: dict[str, str]) -> str:
 
     parts = [INTERFACE_SECTION_TITLE, "", _SECTION_PREAMBLE, ""]
     for rel_path, summary in interface_map.items():
-        parts.append(f"**{rel_path}**:\n```python\n{summary}\n```")
+        fence = _FENCES.get(Path(rel_path).suffix, "")
+        parts.append(f"**{rel_path}**:\n```{fence}\n{summary}\n```")
     return "\n".join(parts)

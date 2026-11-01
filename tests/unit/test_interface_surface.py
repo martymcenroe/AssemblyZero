@@ -29,7 +29,7 @@ from assemblyzero.core.interface_surface import (
     extract_explicit_paths,
     extract_interface_map,
     format_interface_map_section,
-    list_repo_python_files,
+    list_repo_source_files,
     resolve_import_targets,
     summarize_python_file,
 )
@@ -167,10 +167,10 @@ class TestSummarizers:
 # =============================================================================
 
 
-class TestListRepoPythonFiles:
+class TestListRepoSourceFiles:
 
     def test_walk_includes_source_excludes_tests_and_hidden(self, repo):
-        rels = {p.relative_to(repo).as_posix() for p in list_repo_python_files(repo)}
+        rels = {p.relative_to(repo).as_posix() for p in list_repo_source_files(repo)}
         assert "pkg/models.py" in rels
         assert "pkg/util.py" in rels
         assert not any(r.startswith("tests/") for r in rels)

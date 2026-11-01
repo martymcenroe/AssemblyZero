@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.interface_surface import format_interface_map_section
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.verdict_schema import (
@@ -293,6 +294,12 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
             f"Reviewer not called: the target repository's structure cannot be "
             f"listed for the reviewer ({type(e).__name__}: {e})"
         )}
+    # #4500: the reviewer reads the design against the same real interfaces the
+    # drafter had. It approved one in 15 s that listed the target's core module
+    # as a new file, with no way to see that it was not.
+    interface_section = format_interface_map_section(state.get("interface_map") or {})
+    if interface_section:
+        target_repo_context = f"{target_repo_context}{interface_section}\n\n"
     review_content = _build_review_content(
         current_draft=current_draft,
         review_prompt=review_prompt,
@@ -306,8 +313,7 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
 
     # Issue #775: Use structured schema-passing helper (REQ-2).
     # _invoke_reviewer_with_feedback_schema passes FEEDBACK_SCHEMA to the
-    # provider via response_schema (Gemini) or json_schema (Claude CLI),
-    # then parses the response through parse_structured_feedback.
+    # provider, then parses the response through parse_structured_feedback.
     # Standard 0028: a response that violates the contract is rejected —
     # the error return below hands it to the stage retry machinery, which
     # is the bounded re-ask. No degraded parse exists.
