@@ -81,7 +81,11 @@ def build_resume_command(workflow: str, issue_number: int, state: dict) -> str:
 
     brief = str(state.get("brief_file") or "")
     if issue_number:
-        parts = [f"poetry run python {tool}", f"--issue {issue_number}"]
+        parts = [f"poetry run python {tool}"]
+        # #4475: the requirements tool refuses any line without --type.
+        if workflow == "requirements":
+            parts.append("--type lld")
+        parts.append(f"--issue {issue_number}")
     elif brief and workflow == "requirements":
         parts = [
             f"poetry run python {tool}",
