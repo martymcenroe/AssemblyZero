@@ -32,7 +32,9 @@ dependencies = [
     # project's floor instead. Named explicitly to keep the floor that broke
     # installs from silently reappearing through a transitive path.
     "numpy (>=2.5.3,<3.0.0)",
-    "pillow (>=13.0.0)"
+    "pillow (>=13.0.0)",
+    "tree-sitter (>=0.25)",
+    "tree-sitter-typescript (>=0.23)"
 ]
 
 [tool.pytest.ini_options]

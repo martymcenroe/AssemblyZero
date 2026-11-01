@@ -120,9 +120,10 @@ class TestNoDependencyCreep:
 
         # Check that no spelunking-specific packages were added.
         # These are packages that would only be needed for spelunking
-        # (not existing project dependencies like langchain).
+        # (not existing project dependencies like langchain). tree-sitter left
+        # this list in #4500 as a dependency of the interface surface; T360's
+        # AST check is what keeps it out of the spelunking package.
         spelunking_specific_deps = [
-            "tree-sitter",
             "ast-grep",
             "docparser",
             "markdownify",

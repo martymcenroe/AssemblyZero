@@ -45,12 +45,12 @@ class TestNoLessThanTheTruth:
             isurf.summarize_python_file("def broken(:\n")
 
     def test_267_a_walk_that_fails_raises(self, repo, monkeypatch):
-        def rglob(self, pattern):
+        def scandir(path):
             raise PermissionError("cannot list")
 
-        monkeypatch.setattr(Path, "rglob", rglob)
+        monkeypatch.setattr(isurf.os, "scandir", scandir)
         with pytest.raises(PermissionError):
-            isurf.list_repo_python_files(repo)
+            isurf.list_repo_source_files(repo)
 
     def test_319_an_import_target_that_cannot_be_read_raises(self, repo, monkeypatch):
         service = repo / "pkg" / "service.py"
@@ -82,11 +82,11 @@ class TestNoLessThanTheTruth:
         with pytest.raises(NotADirectoryError):
             isurf.build_interface_map(tmp_path / "gone")
 
-    def test_449_a_repo_with_no_python_is_empty_and_said(self, tmp_path, caplog):
+    def test_449_a_repo_with_no_source_is_empty_and_said(self, tmp_path, caplog):
         (tmp_path / "index.js").write_text("export const x = 1;\n", encoding="utf-8")
         with caplog.at_level(logging.INFO, logger="assemblyzero.core.interface_surface"):
             assert isurf.build_interface_map(tmp_path) == {}
-        assert any("no Python files" in r.getMessage() for r in caplog.records)
+        assert any("no source files" in r.getMessage() for r in caplog.records)
 
     def test_472_a_related_path_that_cannot_be_resolved_raises(self, repo, monkeypatch):
         """Mode 2 runs when the whole repo does not fit; force it."""

@@ -37,6 +37,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
+from assemblyzero.workflows.target_env import hook_environment
 from assemblyzero.workflows.implementation_spec.state import (
     CompletenessCheck,
     FileToModify,
@@ -4624,11 +4625,16 @@ def _target_env_python(repo_root: Path) -> str:
     (its stderr is quoted), or names an env that holds no python (#3585). Each
     used to return None, which the probe read as "cannot validate" and every
     caller passed over.
+
+    #4495: asked with the workflow's own virtualenv shed. Inherited, it made
+    poetry answer with AssemblyZero's environment on every real run, and this
+    docstring's "WRONG environment" was what came back.
     """
     try:
         proc = subprocess.run(
             ["poetry", "env", "info", "--path"],
             cwd=str(repo_root),
+            env=hook_environment(),
             capture_output=True,
             text=True,
             timeout=30,
@@ -4681,6 +4687,7 @@ def _probe_target_env(repo_root: Path, tops: list[str]) -> dict[str, bool]:
         proc = subprocess.run(
             [python, "-c", script, *tops],
             cwd=str(repo_root),
+            env=hook_environment(),
             capture_output=True,
             text=True,
             timeout=60,

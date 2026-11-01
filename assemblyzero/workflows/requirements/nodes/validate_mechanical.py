@@ -1136,10 +1136,13 @@ def validate_file_paths(
     repo_root: Path,
     base_branch: str = "",
 ) -> list[ValidationError]:
-    """Check that Modify/Delete files exist, Add files have valid parents.
+    """Check that Modify/Delete files exist, Add files are new and have parents.
 
     Issue #300: Include file path suggestions when files don't exist.
     Issue #334: Track directories that will be created for parent validation.
+    Issue #4501: An Add on a path that exists, here or on the base, is refused.
+    The spec and implementation stages coerce one to a Modify, so nothing is
+    overwritten, but that comes after the wrong document has landed.
 
     Args:
         files: List of file dicts with path, change_type, and is_directory.
@@ -1222,6 +1225,20 @@ def validate_file_paths(
                     )
                 )
         elif change_type == "Add":
+            if full_path.exists() or _exists_on_base(repo_root, base_branch, path):
+                remedy = (
+                    "Remove the row: only a new directory is listed."
+                    if is_directory else "Use Modify."
+                )
+                errors.append(
+                    ValidationError(
+                        severity=ValidationSeverity.ERROR,
+                        section="2.1",
+                        message=f"Marked Add but already exists: {path}. {remedy}",
+                        file_path=path,
+                    )
+                )
+                continue
             # Issue #334: For directories, check parent of directory
             # For files, check parent directory exists or will be created
             if is_directory:
@@ -1747,8 +1764,11 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Step 4: Issue #322 - Validate file paths with explicit repo_root check
     # This replaces the old silent skip behavior
+    # #4501: a mock has no remote to ask, by design (#3512); every Add now asks
+    # the base, so a mock declares none and is judged on its checkout alone.
     path_errors, path_validation_ran = validate_file_paths_with_repo_check(
-        files, repo_root, state.get("base_branch", "")
+        files, repo_root,
+        "" if state.get("config_mock_mode") else state.get("base_branch", ""),
     )
     all_errors.extend(path_errors)
 
