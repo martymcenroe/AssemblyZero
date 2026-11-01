@@ -1503,6 +1503,24 @@ def _framework_legs(state: TestingWorkflowState) -> list[_Leg]:
     ]
 
 
+def _gate_only_legs(state: TestingWorkflowState) -> list[_Leg]:
+    """The frameworks the project has beyond the run's own (#4437), for N5.
+
+    Each is a leg with no test file of this run, which N5 already knows how to
+    treat: its whole suite runs at the gate, and it is judged on that suite
+    when the run changed its source (#3087, #4436). A checkpoint from before
+    #4437 has none.
+    """
+    configs = state.get("gate_only_framework_configs")
+    if not configs:
+        return []
+    try:
+        described = run_frameworks({"framework_configs": configs})
+    except TestFileOwnershipError as e:
+        raise FrameworkLegError(str(e)) from e
+    return [_Leg(run.config, run.framework, run.directory, ()) for run in described]
+
+
 def _preflight_legs(state: TestingWorkflowState, legs: list[_Leg]) -> None:
     """Every JavaScript framework of a multi-framework run can start: its
     runner exists and its project's packages are installed (#4236). Raises
@@ -3975,7 +3993,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     passes. A framework no test file of this run belongs to still runs its
     whole suite at the full-suite gate (#3087). One that cannot run, or a
     test file no framework owns, halts the phase. #3585: so does any step
-    under it that raises PhaseStepError.
+    under it that raises PhaseStepError. #4437: the gate runs every framework
+    the project has, whichever ones the LLD named.
     """
     gate_log("[N5] Verifying green phase (all tests should pass)...")
 
@@ -3983,7 +4002,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         return _mock_verify_green_phase(state)
 
     try:
-        legs = _framework_legs(state)
+        legs = _framework_legs(state) + _gate_only_legs(state)
         multi = len(legs) > 1
         if multi:
             _preflight_legs(state, legs)

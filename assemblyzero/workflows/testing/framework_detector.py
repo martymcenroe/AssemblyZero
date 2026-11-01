@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 from enum import Enum
 from typing import Optional, TypedDict
 
@@ -156,13 +157,12 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
 ]
 
 
-def named_js_test_paths(lld_content: str) -> list[str]:
-    """Every JavaScript or TypeScript test file the LLD names, in order (#4237).
+def _named_test_paths(lld_content: str, is_test_file: Callable[[str], bool]) -> list[str]:
+    """Every token of the LLD that `is_test_file` calls a test file, in order.
 
-    A token is a path when it ends in one of JS_TEST_SUFFIXES once markdown
-    delimiters and sentence punctuation are taken off. A token holding a glob
-    character (`*.test.ts`) describes files and names none, so it is not a
-    path. Paths come back with forward slashes and no leading `./`.
+    Markdown delimiters and sentence punctuation come off first. A token
+    holding a glob character (`*.test.ts`) describes files and names none, so
+    it is not a path. Paths come back with forward slashes and no leading `./`.
     """
     text = lld_content or ""
     for character in _PATH_DELIMITERS:
@@ -170,7 +170,7 @@ def named_js_test_paths(lld_content: str) -> list[str]:
     found: list[str] = []
     for token in text.split():
         token = token.rstrip(".:").replace("\\", "/")
-        if not token.endswith(JS_TEST_SUFFIXES):
+        if not is_test_file(token):
             continue
         if any(character in token for character in _GLOB_CHARACTERS):
             continue
@@ -179,6 +179,20 @@ def named_js_test_paths(lld_content: str) -> list[str]:
         if token and token not in found:
             found.append(token)
     return found
+
+
+def named_js_test_paths(lld_content: str) -> list[str]:
+    """Every JavaScript or TypeScript test file the LLD names, in order (#4237)."""
+    return _named_test_paths(lld_content, lambda token: token.endswith(JS_TEST_SUFFIXES))
+
+
+def named_test_files(lld_content: str) -> list[str]:
+    """Every test file the LLD names, of any language, in order (#4437)."""
+    return _named_test_paths(
+        lld_content,
+        lambda token: token.endswith(JS_TEST_SUFFIXES)
+        or _is_python_test_file(token.rsplit("/", 1)[-1]),
+    )
 
 
 def frameworks_named_by_lld(
@@ -232,22 +246,34 @@ def frameworks_named_by_lld(
             logger.info("Detected framework from file pattern: %s", framework.value)
             named[framework] = None
 
+    # #4437: the test files decide. `*_test.py` is pytest's too, and the
+    # pattern above reads only `test_*.py`.
+    file_paths = named_test_files(lld_content) if project_root is not None else []
+    if TestFramework.PYTEST not in named and any(p.endswith(".py") for p in file_paths):
+        logger.info("Detected framework from test file: pytest")
+        named[TestFramework.PYTEST] = None
+
     # A keyword is the weakest signal. With a project to read, it names a
     # JavaScript runner only when no declaration and no test path has: prose
     # such as "Jest-compatible" beside a Vitest path must not add a runner
-    # the project does not have and halt the run for it (#4237).
+    # the project does not have and halt the run for it (#4237). #4437: nor
+    # does prose such as "the Vitest suite still passes" beside a Python test.
     js_named = any(framework != TestFramework.PYTEST for framework in named)
     for pattern, framework in _KEYWORD_PATTERNS:
         if framework != TestFramework.PYTEST and pattern.search(lld_content) and framework not in named:
-            if project_root is not None and js_named:
+            if project_root is not None and (js_named or file_paths):
                 logger.info("Keyword %s not taken: the LLD already names its "
-                            "JavaScript runner", framework.value)
+                            "test files or its runner", framework.value)
                 continue
             logger.info("Detected framework from keyword: %s", framework.value)
             named[framework] = None
 
     # Include PYTEST if there are pytest keywords but only if we didn't find it yet
-    if TestFramework.PYTEST not in named and re.search(r"\bpytest\b", lld_content, re.IGNORECASE):
+    if (
+        TestFramework.PYTEST not in named
+        and not file_paths
+        and re.search(r"\bpytest\b", lld_content, re.IGNORECASE)
+    ):
         logger.info("Detected framework from keyword: pytest")
         named[TestFramework.PYTEST] = None
 
@@ -632,9 +658,28 @@ def place_frameworks(
     return placed
 
 
-def _lld_decides(named: dict[TestFramework, str | None] | list[TestFramework]) -> bool:
-    """The LLD outranks the project when it names anything but pytest."""
-    return any(framework != TestFramework.PYTEST for framework in named)
+def _lld_decides(
+    named: dict[TestFramework, str | None] | list[TestFramework], lld_content: str,
+) -> bool:
+    """The LLD outranks the project when it names a test file, or a runner
+    other than pytest (#4437). It used to take a Python test file for no
+    answer at all, so a run that named only `test_x.py` got every framework
+    the project has, and had to write a Vitest test for a Python change.
+    Naming no test file leaves the choice to the project.
+    """
+    return bool(named_test_files(lld_content)) or any(
+        framework != TestFramework.PYTEST for framework in named
+    )
+
+
+def framework_source(lld_content: str, project_root: str) -> str:
+    """Why a run's new tests use the frameworks they do, in words (#4437)."""
+    files = named_test_files(lld_content)
+    if files:
+        return f"the LLD names its test files: {', '.join(files)}"
+    if _lld_decides(frameworks_named_by_lld(lld_content, project_root), lld_content):
+        return "the LLD names the runner"
+    return "the LLD names no test file, so every framework the project has"
 
 
 def resolve_framework(lld_content: str, project_root: str) -> list[TestFramework]:
@@ -647,8 +692,8 @@ def resolve_framework(lld_content: str, project_root: str) -> list[TestFramework
     """
     named = frameworks_named_by_lld(lld_content, project_root)
 
-    # If LLD is explicitly something other than just PYTEST default, use it.
-    if _lld_decides(named):
+    # If the LLD names its test files or its runner, use it.
+    if _lld_decides(named, lld_content):
         logger.info("Frameworks resolved from LLD: %s", [f.value for f in named])
         return list(named)
 
@@ -670,7 +715,7 @@ def resolve_framework_dirs(lld_content: str, project_root: str) -> dict[TestFram
     cannot be placed.
     """
     named = frameworks_named_by_lld(lld_content, project_root)
-    if _lld_decides(named):
+    if _lld_decides(named, lld_content):
         return place_frameworks(named, project_root)
     detected = detect_framework_dirs(project_root)
     if detected:
