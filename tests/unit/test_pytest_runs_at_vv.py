@@ -23,8 +23,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from assemblyzero.workflows.testing.nodes import verify_phases
 from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
+
+pytestmark = pytest.mark.usefixtures("target_can_run_pytest")  # #4490: argv, not the environment
 
 
 class TestTheRunnersArgv:

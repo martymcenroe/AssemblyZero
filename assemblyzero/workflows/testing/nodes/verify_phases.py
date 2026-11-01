@@ -23,6 +23,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.workflows.target_env import (
+    TargetEnvironmentError,
+    hook_environment,
+    require_pytest,
+)
 from assemblyzero.workflows.testing.audit import (
     gate_log,
     get_repo_root,
@@ -794,12 +799,12 @@ def _pytest_env() -> dict[str, str]:
     receives test names with no reasons, and the #2058 root-cause grouping
     cannot fire because its regex needs the reason it never receives.
 
-    Inherits the rest of the environment unchanged -- the venv, PATH and any
-    repo-specific variables the run needs are all still required.
+    The target's environment, never the workflow's (#4490): `hook_environment`
+    drops AssemblyZero's virtualenv, which poetry would otherwise take as
+    already active, so the run tested in AssemblyZero's dependencies. The rest
+    is inherited, for the repo-specific variables a run needs.
     """
-    import os
-
-    env = os.environ.copy()
+    env = hook_environment()
     env["COLUMNS"] = PYTEST_OUTPUT_COLUMNS
     return env
 
@@ -851,12 +856,22 @@ def run_pytest(
         Dict with returncode, stdout, stderr, and parsed results.
 
     Raises:
-        PhaseStepError: coverage was asked for and pytest-cov is not
-            installed, or pytest timed out, or poetry or pytest could not
-            start (#3585, ledger 0908 lines 767, 791 and 798). Each used to
-            come back as a run: without --cov, or as a synthetic -1 read as
-            test errors that sent the loop back to N4.
+        PhaseStepError: the target's own environment cannot run this
+            (`require_pytest`, #4490: no project of its own, no environment,
+            no pytest, or no pytest-cov when coverage was asked for), or
+            pytest timed out, or poetry or pytest could not start (#3585,
+            ledger 0908 lines 767, 791 and 798). Each used to come back as a
+            run: without --cov, or as a synthetic -1 read as test errors that
+            sent the loop back to N4.
     """
+    # #4490: asked of the target's interpreter before anything runs. Importing
+    # pytest_cov here only proved AssemblyZero has it, and a target with no
+    # pytest would run the next one on PATH.
+    try:
+        require_pytest(repo_root or Path.cwd(), coverage=bool(coverage_module))
+    except TargetEnvironmentError as exc:
+        raise _step_failed("pytest", str(exc)) from exc
+
     # Issue #268: Use poetry run to ensure correct virtualenv with dependencies
     # #2924: -vv, not -v. At verbosity 1 pytest truncates the reprs in an
     # assertion's comparison -- run-issue4-145211 handed N4
@@ -868,23 +883,14 @@ def run_pytest(
         cmd.append("--continue-on-collection-errors")
     cmd.extend(test_files)
 
-    # Issue #789: Only add --cov flags if pytest-cov is installed.
-    # Without it, pytest returns exit code 4 ("unrecognized arguments")
-    # which the workflow misclassifies as "collection/syntax error" and loops.
+    # Issue #789: --cov without pytest-cov is pytest's exit 4 ("unrecognized
+    # arguments"), which the workflow misclassifies as "collection/syntax
+    # error" and loops, so `require_pytest` has already refused that above.
     if coverage_module:
         targets = (
             [coverage_module] if isinstance(coverage_module, str)
             else [t for t in coverage_module if t]
         )
-        try:
-            import pytest_cov  # noqa: F401
-        except ImportError as exc:
-            raise _step_failed(
-                "pytest",
-                f"pytest-cov is not installed, so coverage of "
-                f"{', '.join(targets)} cannot be measured and the coverage "
-                f"gate cannot run",
-            ) from exc
         cmd.extend(f"--cov={target}" for target in targets)
         cmd.append("--cov-report=term-missing")
         if coverage_report:

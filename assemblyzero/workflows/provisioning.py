@@ -44,19 +44,18 @@ import os
 import shutil
 import subprocess
 import sys
-import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from assemblyzero.utils.shell import run_command
+from assemblyzero.workflows.target_env import declares_project, hook_environment
 from assemblyzero.workflows.testing.framework_detector import (
     MAX_DETECT_DEPTH,
     SKIPPED_DIRS,
     TestFramework,
     detect_framework_dirs,
 )
-from assemblyzero.workflows.testing.nodes.mechanical_hooks import hook_environment
 
 POETRY_INSTALL = ("poetry", "install")
 POETRY_INSTALL_NO_ROOT = ("poetry", "install", "--no-root")
@@ -137,14 +136,13 @@ def _declares_project(pyproject: Path) -> bool:
     A file that cannot be read as TOML is a broken project, not a missing one,
     so it raises."""
     try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        return declares_project(pyproject)
     except (OSError, ValueError) as exc:
         raise ProvisioningError(
             f"worktree provisioning failed: {pyproject} could not be read as "
             f"TOML: {type(exc).__name__}: {exc}",
             directory=pyproject.parent,
         ) from exc
-    return "project" in data or "poetry" in (data.get("tool") or {})
 
 
 def _inside(worktree: Path, relative: str) -> Path:

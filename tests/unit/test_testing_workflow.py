@@ -42,7 +42,10 @@ from assemblyzero.workflows.testing.nodes.scaffold_tests import (
 )
 from assemblyzero.workflows.testing.state import TestScenario
 
-pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+pytestmark = pytest.mark.usefixtures(
+    "coverage_as_reported",  # #4436: routing, not measuring
+    "target_can_run_pytest",  # #4490: the pytest runs here are faked
+)
 
 
 class TestAuditUtilities:

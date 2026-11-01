@@ -16,33 +16,14 @@ that did not build, and every failure is loud and stops what depends on it
 """
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.workflows.target_env import hook_environment
 from assemblyzero.workflows.testing.audit import gate_log, get_repo_root
 from assemblyzero.workflows.testing.state import TestingWorkflowState
-
-
-def hook_environment(environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The hook's environment: the workflow's, minus its own poetry activation.
-
-    VIRTUAL_ENV and POETRY_ACTIVE make poetry treat the workflow's virtualenv
-    as already active and skip per-directory resolution (#1415); that
-    virtualenv's bin directory at the front of PATH makes a bare `python`
-    resolve to the workflow's interpreter. All three go (#3705).
-    """
-    env = dict(os.environ if environ is None else environ)
-    venv = env.pop("VIRTUAL_ENV", None)
-    env.pop("POETRY_ACTIVE", None)
-    if venv:
-        venv_bin = {str(Path(venv) / "bin"), str(Path(venv) / "Scripts")}
-        env["PATH"] = os.pathsep.join(
-            p for p in env.get("PATH", "").split(os.pathsep) if p and p not in venv_bin
-        )
-    return env
 
 
 def _halt(reason: str) -> dict[str, Any]:

@@ -34,6 +34,22 @@ def coverage_as_reported(monkeypatch):
     monkeypatch.setattr(verify_phases, "_judge_coverage", judged)
 
 
+@pytest.fixture
+def target_can_run_pytest(monkeypatch):
+    """Stands in for the question put to the target's environment (#4490), for
+    a test that fakes its pytest run, so has no environment to ask. A test of
+    the question itself does not use this; see
+    `test_pytest_runs_in_the_target.py`, which asks a real interpreter."""
+    import importlib
+
+    from assemblyzero.workflows.testing.nodes import verify_phases
+
+    # The package re-exports the node FUNCTION under the module's name.
+    e2e = importlib.import_module("assemblyzero.workflows.testing.nodes.e2e_validation")
+    monkeypatch.setattr(verify_phases, "require_pytest", lambda *_a, **_k: None)
+    monkeypatch.setattr(e2e, "require_pytest", lambda *_a, **_k: None)
+
+
 @dataclass
 class _FakePreflightResult:
     passed: bool = True

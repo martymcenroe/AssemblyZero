@@ -24,6 +24,8 @@ import pytest
 # The package re-exports the node FUNCTION under the module's name.
 mod = importlib.import_module("assemblyzero.workflows.testing.nodes.e2e_validation")
 
+pytestmark = pytest.mark.usefixtures("target_can_run_pytest")  # #4490: the runs here are faked
+
 
 def _proc(returncode: int, stdout: str = "", stderr: str = ""):
     return subprocess.CompletedProcess(["poetry"], returncode, stdout, stderr)
