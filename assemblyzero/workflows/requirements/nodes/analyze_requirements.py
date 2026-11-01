@@ -58,6 +58,13 @@ out. An empty issue body and a bad escalation seat halt the same way, a
 finding that is not an object makes the answer unparseable, and a failed
 telemetry record or must-resolve filing beside a conflict halt alerts the
 operator, since the halt itself does not name it.
+
+#4484 closed the last way a finding could turn into a clean verdict. A finding
+was a conflict or it was a note, so one written in keys the gate has no name for
+became a note, and the answer read as consistent, even when the model had said
+it was not. A finding the gate cannot read now means no verdict, and so does a
+model that says inconsistent and names no conflict: both retry, then halt
+unverified with the reason named. Only an answer with no conflict in it is clean.
 """
 
 from __future__ import annotations
@@ -307,7 +314,24 @@ def _normalise_finding(item: dict) -> dict:
     return out
 
 
-def _parse_analysis(raw: str) -> dict | None:
+def _is_readable(finding: dict) -> bool:
+    """Can the gate say what this normalised finding is? (#4484)
+
+    A criterion it can quote, a category or a term gives it something to show
+    the operator. Anything else is a finding in words it has no key for, and
+    reading that as a note is how a reported conflict became a clean verdict. A
+    category that says conflict does not rescue one with no criterion in it:
+    that is the conflict the gate cannot read.
+    """
+    if finding["criterion_a"] or finding["criterion_b"]:
+        return True
+    category = _first_str(finding, _CATEGORY_KEYS)
+    if "conflict" in category.lower():
+        return False
+    return bool(category or _first_str(finding, ("term",)))
+
+
+def _parse_analysis(raw: str, unreadable: list[dict] | None = None) -> dict | None:
     """Parse the analysis JSON, tolerating fenced or prefixed output and, since
     #2830, a response that carries the findings under another key or at the
     root, with the two criteria and the diverging situation under other names.
@@ -319,8 +343,10 @@ def _parse_analysis(raw: str) -> dict | None:
     otherwise. None when there is no findings list anywhere -- the gate
     does not invent a verdict -- and, since #3585, when a finding is not an
     object: it used to be dropped, which could turn a findings list into
-    "consistent". Every caller treats None as no verdict and retries, then
-    halts unverified.
+    "consistent". Since #4484, also when a finding is one the gate cannot read
+    (`_is_readable`): it used to become a note, with the same result, and it
+    goes into ``unreadable`` as the model wrote it, for the halt to quote. Every
+    caller treats None as no verdict and retries, then halts unverified.
     """
     if not raw:
         return None
@@ -339,8 +365,12 @@ def _parse_analysis(raw: str) -> dict | None:
         finding = _normalise_finding(item)
         if finding["criterion_a"] and finding["criterion_b"]:
             conflicts.append(finding)
-        else:
+        elif _is_readable(finding):
             notes.append(finding)
+        else:
+            if unreadable is not None:
+                unreadable.append(item)
+            return None
     out: dict = dict(parsed) if isinstance(parsed, dict) else {}
     out["conflicts"] = conflicts
     out["notes"] = notes
@@ -409,7 +439,12 @@ def _verdict_of(result: Any) -> dict | None:
     """
     if not getattr(result, "success", False) or not getattr(result, "response", ""):
         return None
-    return _parse_analysis(result.response)
+    parsed = _parse_analysis(result.response)
+    # #4484: the model said the requirements disagree and gave nothing to rule
+    # on. That is not the clean check "no conflicts" used to make of it.
+    if parsed is not None and parsed.get("is_consistent") is False and not parsed.get("conflicts"):
+        return None
+    return parsed
 
 
 def _no_verdict_reason(result: Any) -> str:
@@ -420,6 +455,15 @@ def _no_verdict_reason(result: Any) -> str:
     """
     if not getattr(result, "success", False) or not getattr(result, "response", ""):
         return getattr(result, "error_message", "") or "empty response"
+    unreadable: list[dict] = []
+    parsed = _parse_analysis(result.response, unreadable)
+    if unreadable:
+        return (
+            "the analysis reported a finding the gate cannot read: "
+            f"{json.dumps(unreadable[0])[:400]}"
+        )
+    if parsed is not None:
+        return "the analysis said the requirements are inconsistent and named no conflict"
     return "the analysis response was unparseable"
 
 
@@ -486,11 +530,10 @@ def _same_quote(a: str, b: str) -> bool:
 
 def _articulated_conflicts(parsed: dict) -> list[dict]:
     """The conflicts a verdict reports that the gate would file (#2462 rules
-    out the rest); none when the verdict says the text is consistent."""
+    out the rest). #4484: conflicts alone decide, as on the clean path; a model
+    saying consistent does not unsay a conflict it quoted."""
     from assemblyzero.speedrun.must_resolve import unanswerable_reason
 
-    if parsed.get("is_consistent", True):
-        return []
     return [c for c in parsed.get("conflicts") or [] if not unanswerable_reason(c)]
 
 
@@ -564,7 +607,7 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
 
     print("  [N0c] Requirements-ambiguity analysis (#1899)...")
 
-    from assemblyzero.core.llm_provider import GeminiProvider, get_provider
+    from assemblyzero.core.llm_provider import get_provider
     from assemblyzero.core.seats import resolve
 
     # #3563: the run profile's `requirements.analyze` seat, and its
@@ -598,16 +641,11 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
     content = f"# Issue: {issue_title}\n\n{judged}"
 
     def _invoke(active_provider):
-        schema_kwargs: dict[str, Any] = {}
-        if isinstance(active_provider, GeminiProvider):
-            schema_kwargs["response_schema"] = ANALYSIS_SCHEMA
-        else:
-            schema_kwargs["json_schema"] = ANALYSIS_SCHEMA
         return active_provider.invoke(
             system_prompt=ANALYSIS_SYSTEM_PROMPT,
             content=content,
             timeout_seconds=REQUIREMENTS_GATE_TIMEOUT_SECONDS,
-            **schema_kwargs,
+            json_schema=ANALYSIS_SCHEMA,
         )
 
     answered_by = drafter_spec
@@ -692,7 +730,11 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
         label = note.get("category") or "note"
         text = note.get("diverging_situation") or note.get("term") or ""
         print(f"  [N0c] noted, not a conflict ({label}): {text[:240]}")
-    if parsed.get("is_consistent", True) or not conflicts:
+    # #4484: clean takes both. This was `is_consistent or not conflicts`, so a
+    # model's "true" waved through a conflict it had just quoted in full, and a
+    # "false" with nothing named read as clean. Anything else falls through to a
+    # halt below.
+    if parsed.get("is_consistent") is True and not conflicts:
         # CLEAN_MARKER is asserted verbatim by the pre-check's tests, so the
         # drafter goes on its own line rather than into that sentence.
         print("  [N0c] Requirements internally consistent.")

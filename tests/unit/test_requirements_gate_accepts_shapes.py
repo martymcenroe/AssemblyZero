@@ -98,9 +98,9 @@ class TestTheCanonicalShapeIsUnchanged:
         assert parsed["is_consistent"] is True
 
     def test_the_models_own_is_consistent_wins_over_the_derived_one(self):
-        # It said inconsistent and listed nothing usable: the consumer already
-        # treats "no conflicts" as clean, so the flag is kept as stated and the
-        # consumer decides -- exactly as before #2830.
+        # It said inconsistent and listed nothing usable: the flag is kept as
+        # stated and the consumer decides. Since #4484 that is no verdict, not
+        # the clean check it used to read as.
         parsed = _parse_analysis(json.dumps({"is_consistent": False, "conflicts": []}))
         assert parsed is not None
         assert parsed["is_consistent"] is False

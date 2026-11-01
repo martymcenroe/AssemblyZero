@@ -287,6 +287,16 @@ class LLMProvider(ABC):
     Implementations must provide the invoke() method for making API calls.
     """
 
+    #: Whether invoke() puts a schema it is given in front of the model (#4483).
+    #: `GeminiProvider` took `json_schema` and dropped it, every gate inside a
+    #: run lost its schema that way, and the call record said it had been used.
+    #: A real transport sets this True, or a run that hands it a schema stops.
+    delivers_schema: bool = False
+
+    #: True on a double that answers from a script: there is no model to give a
+    #: schema to, so ignoring one is correct rather than a dropped argument.
+    answers_from_script: bool = False
+
     @property
     @abstractmethod
     def provider_name(self) -> str:
@@ -314,8 +324,10 @@ class LLMProvider(ABC):
             system_prompt: Instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait for response.
-            response_schema: Optional JSON schema for structured output.
-            json_schema: JSON schema dict for structured output via --json-schema (Claude CLI).
+            response_schema: The older name for `json_schema`, used when
+                `json_schema` is not given.
+            json_schema: JSON schema for structured output. Gates pass this one
+                (#4483); a real transport honours both names.
 
         Returns:
             LLMCallResult with response or error information.
@@ -631,6 +643,8 @@ class ClaudeCLIProvider(LLMProvider):
     - haiku (claude-haiku-4-5)
     """
 
+    delivers_schema = True
+
     # Issue #787: Windows CreateProcessW limit is 32,767 chars for the entire
     # command line. Large system prompts (LLD + tests + repo structure) blow
     # this. When exceeded, write to temp dir CLAUDE.md instead of --system-prompt.
@@ -827,7 +841,8 @@ class ClaudeCLIProvider(LLMProvider):
             system_prompt: System instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait (default 5 minutes).
-            response_schema: Ignored for Claude CLI (use json_schema instead).
+            response_schema: The older name for `json_schema`, used when
+                `json_schema` is not given.
             json_schema: JSON schema dict for structured output.
                 When provided, appends --json-schema '<json>' to CLI args.
 
@@ -1287,6 +1302,8 @@ class GeminiProvider(LLMProvider):
     No alias resolves to Argon; config.FORBIDDEN_MODELS refuses it (#4178).
     """
 
+    delivers_schema = True
+
     # Model mapping from friendly names to actual model IDs
     # Issue #605: Gemini 3.1 (REQ-1) â€” removed deprecated 3.0 entries
     # Issue #1764: agy retired the -preview IDs (catalog verified 2026-07-14
@@ -1363,9 +1380,11 @@ class GeminiProvider(LLMProvider):
             system_prompt: System instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait (not directly used - client has own timeout).
-            response_schema: Optional JSON schema for structured output (Issue #492).
-            json_schema: JSON schema dict (accepted for interface compatibility
-                but not used by Gemini â€” use response_schema instead).
+            response_schema: The older name for `json_schema`, used when
+                `json_schema` is not given (Issue #492).
+            json_schema: JSON schema dict for structured output. agy has no
+                flag for one, so GeminiClient writes it into the prompt; it has
+                to get that far (#4483).
 
         Returns:
             LLMCallResult with response or error.
@@ -1375,7 +1394,7 @@ class GeminiProvider(LLMProvider):
             result = client.invoke(
                 system_instruction=system_prompt,
                 content=content,
-                response_schema=response_schema,
+                response_schema=json_schema if json_schema is not None else response_schema,
             )
 
             # Issue #399: detect 429 from error type. #3780: read directly;
@@ -1456,6 +1475,8 @@ class MockProvider(LLMProvider):
 
     Returns configurable responses for testing workflows.
     """
+
+    answers_from_script = True
 
     # Default responses based on model name
     DEFAULT_RESPONSES = {

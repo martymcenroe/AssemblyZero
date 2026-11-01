@@ -91,8 +91,8 @@ class TestInvokeReviewerWithFeedbackSchema:
         assert call_kwargs["json_schema"] == FEEDBACK_SCHEMA
         assert "response_schema" not in call_kwargs
 
-    def test_passes_response_schema_to_gemini_provider(self):
-        """T170: GeminiProvider receives response_schema kwarg instead of json_schema."""
+    def test_a_gemini_provider_gets_the_same_argument(self):
+        """#4483: one way to pass a schema, whatever the provider."""
         from assemblyzero.workflows.requirements.nodes.review import (
             _invoke_reviewer_with_feedback_schema,
         )
@@ -116,9 +116,8 @@ class TestInvokeReviewerWithFeedbackSchema:
 
         gemini_provider.invoke.assert_called_once()
         call_kwargs = gemini_provider.invoke.call_args[1]
-        assert "response_schema" in call_kwargs
-        assert call_kwargs["response_schema"] == FEEDBACK_SCHEMA
-        assert "json_schema" not in call_kwargs
+        assert call_kwargs["json_schema"] == FEEDBACK_SCHEMA
+        assert "response_schema" not in call_kwargs
 
     def test_markdown_response_rejects(self):
         """Standard 0028: non-JSON markdown is a contract violation — it

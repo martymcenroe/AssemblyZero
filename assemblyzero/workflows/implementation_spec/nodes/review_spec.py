@@ -172,15 +172,7 @@ def _invoke_reviewer_with_spec_schema(
     Returns:
         (parsed result, "") on success; (None, error description) on failure.
     """
-    from assemblyzero.core.llm_provider import GeminiProvider
-
-    schema_kwargs = {}
-    if isinstance(provider, GeminiProvider):
-        schema_kwargs["response_schema"] = REVIEW_SPEC_SCHEMA
-    else:
-        schema_kwargs["json_schema"] = REVIEW_SPEC_SCHEMA
-
-    result = provider.invoke(system, prompt, **schema_kwargs)
+    result = provider.invoke(system, prompt, json_schema=REVIEW_SPEC_SCHEMA)
     if not getattr(result, "success", False):
         detail = getattr(result, "error_message", None) or "LLM call failed with no error detail"
         return _reviewer_failed(str(detail))
@@ -198,7 +190,9 @@ def _invoke_reviewer_with_spec_schema(
             "    [N5] reviewer answered in neither the JSON contract nor the "
             "output template; asking once more for the JSON object (#2837)."
         )
-        retry = provider.invoke(system + _REASK_FOR_JSON, prompt, **schema_kwargs)
+        retry = provider.invoke(
+            system + _REASK_FOR_JSON, prompt, json_schema=REVIEW_SPEC_SCHEMA
+        )
         if not getattr(retry, "success", False):
             detail = getattr(retry, "error_message", None) or "LLM call failed with no error detail"
             return _reviewer_failed(str(detail))

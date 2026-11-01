@@ -103,7 +103,7 @@ class TestClaudeCLIProviderJsonSchema:
         mock_popen.return_value = self._mock_popen(stdout)
 
         provider = self._make_provider()
-        # response_schema is ignored for Claude CLI, json_schema is used
+        # Given both, json_schema is the one used
         provider.invoke(
             "system", "prompt",
             response_schema={"type": "object"},
@@ -119,7 +119,7 @@ class TestOtherProvidersJsonSchema:
     """Tests that other providers accept json_schema kwarg without error."""
 
     def test_gemini_provider_accepts_json_schema(self):
-        """GeminiProvider.invoke() accepts json_schema kwarg (ignores it, uses response_schema)."""
+        """GeminiProvider.invoke() accepts json_schema kwarg (delivered, #4483)."""
         from assemblyzero.core.llm_provider import GeminiProvider
         import inspect
 
