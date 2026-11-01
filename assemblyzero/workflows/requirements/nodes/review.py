@@ -148,15 +148,7 @@ def _invoke_reviewer_with_feedback_schema(
         ReviewerCallError: the first call or the re-ask failed (#3585).
         StructuredContractError: both answers were unreadable.
     """
-    from assemblyzero.core.llm_provider import GeminiProvider
-
-    schema_kwargs = {}
-    if isinstance(provider, GeminiProvider):
-        schema_kwargs["response_schema"] = FEEDBACK_SCHEMA
-    else:
-        schema_kwargs["json_schema"] = FEEDBACK_SCHEMA
-
-    result = provider.invoke(system, prompt, **schema_kwargs)
+    result = provider.invoke(system, prompt, json_schema=FEEDBACK_SCHEMA)
     _require_success(result, "reviewer call")
     # Issue #1843: the payload lives on .response — `.content` never existed,
     # so parses ran against the stringified dataclass and always fell back.
@@ -180,7 +172,9 @@ def _invoke_reviewer_with_feedback_schema(
             "    [N3] reviewer answered in neither the JSON contract nor the "
             "review template; asking once more for the JSON object (#2835)."
         )
-        retry = provider.invoke(system + _REASK_FOR_JSON, prompt, **schema_kwargs)
+        retry = provider.invoke(
+            system + _REASK_FOR_JSON, prompt, json_schema=FEEDBACK_SCHEMA
+        )
         _require_success(retry, "reviewer re-ask")
         raw_retry = getattr(retry, "response", None) or ""
         try:

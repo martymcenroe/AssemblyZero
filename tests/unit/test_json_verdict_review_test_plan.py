@@ -247,10 +247,9 @@ class TestStructuredContentReadOverResponse:
         mock_prompt.return_value = "review prompt"
         mock_cost.return_value = 0.0
 
-        # Mock provider: must be a GeminiProvider so response_schema is set
         mock_provider.return_value = MagicMock(spec=GeminiProvider)
 
-        # The result Gemini would return with response_schema=VERDICT_SCHEMA:
+        # The result Gemini would return with json_schema=VERDICT_SCHEMA:
         # structured JSON in .content, .response empty
         llm_result = MagicMock()
         llm_result.success = True

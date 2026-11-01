@@ -457,15 +457,6 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
 
     cost_before = get_cumulative_cost()
     try:
-        # Issue #775: Pass VERDICT_SCHEMA to provider for structured output (REQ-2)
-        from assemblyzero.core.llm_provider import GeminiProvider
-
-        schema_kwargs: dict[str, Any] = {}
-        if isinstance(reviewer, GeminiProvider):
-            schema_kwargs["response_schema"] = VERDICT_SCHEMA
-        else:
-            schema_kwargs["json_schema"] = VERDICT_SCHEMA
-
         # Issue #1071: Centralized retry. Replaces the previous inline
         # 2-attempt loop. Policy comes from workflow state (set by the
         # entry-point script's --retry-policy flag); default = 5
@@ -482,7 +473,8 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                     "for coverage and quality."
                 ),
                 content=full_prompt,
-                **schema_kwargs,
+                # Issue #775: structured output (REQ-2).
+                json_schema=VERDICT_SCHEMA,
             ),
             policy=retry_policy,
             description="N1 testing reviewer",

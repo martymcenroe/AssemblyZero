@@ -1055,7 +1055,7 @@ def review_fidelity(
         review.reason = brief.error or brief.disclosure()
         return review
 
-    from assemblyzero.core.llm_provider import GeminiProvider, get_provider
+    from assemblyzero.core.llm_provider import get_provider
     from assemblyzero.core.seats import resolve_active
 
     try:
@@ -1070,17 +1070,11 @@ def review_fidelity(
             f"cannot be resolved: {exc}"
         ) from exc
 
-    schema_kwargs: dict = {}
-    if isinstance(provider, GeminiProvider):
-        schema_kwargs["response_schema"] = FIDELITY_SCHEMA
-    else:
-        schema_kwargs["json_schema"] = FIDELITY_SCHEMA
-
     result = provider.invoke(
         system_prompt=FIDELITY_SYSTEM_PROMPT,
         content=brief.as_prompt(),
         timeout_seconds=timeout_seconds,
-        **schema_kwargs,
+        json_schema=FIDELITY_SCHEMA,
     )
 
     review.answered_by = drafter_spec

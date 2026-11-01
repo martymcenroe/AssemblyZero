@@ -107,6 +107,8 @@ class ScriptedCall:
 class ScriptedProvider(LLMProvider):
     """An LLM made of fixtures, routed by what the caller asked."""
 
+    answers_from_script = True
+
     def __init__(
         self,
         rules: list[ScriptedRule],

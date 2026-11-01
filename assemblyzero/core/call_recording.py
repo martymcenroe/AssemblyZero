@@ -99,6 +99,15 @@ class RecordingError(RuntimeError):
     """
 
 
+class SchemaNotDelivered(RuntimeError):
+    """A run handed a schema to a transport that would not deliver it (#4483).
+
+    Raised before the call, so the run does not pay for an answer in a shape
+    nobody asked the model for, and the halt names the transport. Not an
+    ``OSError``, for the reason ``RecordingError`` is not one.
+    """
+
+
 @dataclass
 class CallContext:
     """Where the next model call is coming from, as the graph knows it.
@@ -263,6 +272,14 @@ class RecordingProvider(LLMProvider):
     def model(self) -> str:
         return self.inner.model
 
+    @property
+    def delivers_schema(self) -> bool:
+        return self.inner.delivers_schema
+
+    @property
+    def answers_from_script(self) -> bool:
+        return self.inner.answers_from_script
+
     def invoke(
         self,
         system_prompt: str,
@@ -271,6 +288,14 @@ class RecordingProvider(LLMProvider):
         response_schema: dict | None = None,
         json_schema: dict | None = None,
     ) -> LLMCallResult:
+        # #4483: every run passes through here, so this is where a schema that
+        # would be dropped stops the run instead of reaching a model unasked.
+        offered = bool(response_schema or json_schema)
+        if offered and not self.delivers_schema and not self.answers_from_script:
+            raise SchemaNotDelivered(
+                f"{type(self.inner).__name__} ({self.inner.provider_name}) was "
+                "handed a schema and does not deliver one to its model"
+            )
         started = time.monotonic()
         result = self.inner.invoke(
             system_prompt, content, timeout_seconds, response_schema, json_schema
@@ -306,7 +331,9 @@ class RecordingProvider(LLMProvider):
                 "success": bool(result.success),
                 "error_message": result.error_message or "",
                 "duration_ms": duration_ms,
-                "has_schema": bool(response_schema or json_schema),
+                # #4483: what the model was given, not what a caller offered.
+                # This read true on every call that lost its schema.
+                "has_schema": offered and self.delivers_schema,
                 # #3565: which seat and spec, and which model answered.
                 # `provider` and `model` above stay as the replay reads them.
                 **{k: v for k, v in fields.items() if k not in ("duration_ms", "success")},
@@ -376,6 +403,8 @@ class ReplayProvider(LLMProvider):
     diff, which is a finding a reader can act on, rather than a rule that
     quietly stopped applying.
     """
+
+    answers_from_script = True
 
     def __init__(self, calls: list[dict], *, model: str = "replay") -> None:
         self._calls = sorted(calls, key=lambda c: int(c.get("seq", 0) or 0))
