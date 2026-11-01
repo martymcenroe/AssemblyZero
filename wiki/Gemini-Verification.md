@@ -15,7 +15,7 @@ This is like letting a student grade their own exam.
 
 AssemblyZero uses **multi-model verification**:
 - **Claude** (Opus/Sonnet) generates designs and code
-- **Gemini 3 Pro** reviews the work before it proceeds
+- **Gemini**, through `agy`, reviews the work before it proceeds
 - **Different model families** catch different mistakes
 
 This separation provides adversarial verification that neither model alone can achieve.
@@ -33,7 +33,7 @@ graph TD
         C4["Generate reports"]
     end
 
-    subgraph Gemini["GEMINI 3 PRO (Review)"]
+    subgraph Gemini["GEMINI (Review)"]
         GI["Issue Review<br/>Requirements clarity"]
         GL["LLD Review Gate<br/>Design completeness"]
         GC["Implementation Review<br/>Code quality, tests"]
@@ -104,7 +104,7 @@ Every Gemini review creates an auditable record:
   "review_type": "implementation_review",
   "issue_id": "47",
   "timestamp": "2026-01-21T14:32:00Z",
-  "model": "gemini-3-pro-preview",
+  "model": "gemini-3.8-flash-high",
   "verdict": "APPROVE",
   "files_reviewed": ["src/export.py", "tests/test_export.py"],
   "findings": [
@@ -201,27 +201,31 @@ poetry run python tools/run_requirements_workflow.py --type lld --issue 42
 
 ### Acceptable Models
 
-Only these models are approved for verification:
+`config/fleet-models.toml` chooses the model for every role. A review runs on the `reviewer` role:
 
 | Model | Purpose | Status |
 |-------|---------|--------|
-| `gemini-3-pro-preview` | Primary review model | Approved |
+| `gemini-3.8-flash-high` | Reviews, and every seat of a workflow run | Approved |
+| `gemini-3.8-flash-low` | Preflight, and sorting a large input before a judge reads it | Approved |
 
 ### Forbidden Models
 
-These models are **explicitly forbidden** for reviews:
+The `[policy]` table in `config/fleet-models.toml` lists these. An entry refuses every model id that contains it, so no role can use one:
 
-| Model | Reason | Risk |
-|-------|--------|------|
-| `gemini-2.0-flash` | Lower capability tier | Misses critical issues |
-| `gemini-2.5-flash` | Lower capability tier | Misses critical issues |
-| `gemini-*-lite` | Lowest capability tier | Unreliable reviews |
+| Model |
+|-------|
+| `gemini-2.0-flash` |
+| `gemini-2.5-flash` |
+| `gemini-flash` |
+| `gemini-2.5-lite` |
+| `gemini-lite` |
+| `gemini-3-pro-preview` |
+| `gemini-3-pro` |
+| `gemini-4-argon` |
 
-**Why the restriction?**
-- Flash models trade capability for speed
-- Review quality degrades significantly
-- A "passed" review from Flash is unreliable
-- Security teams can't trust inconsistent review quality
+Argon's budget is weekly, and one run once spent a whole week of it.
+
+A role on a model that is not live stops its tool, naming the role and the model. Nothing falls back to another model.
 
 ### Model Verification
 
@@ -261,7 +265,7 @@ This ensures reviews are never skipped due to quota issues.
 ```
 1. Gemini (agy) drafts LLD
    ↓
-2. LLD Review Gate ←── Gemini 3 Pro
+2. LLD Review Gate ←── Gemini
    │
    ├── [APPROVE] → Continue to step 3
    └── [BLOCK] → Return to step 1 with feedback
@@ -270,7 +274,7 @@ This ensures reviews are never skipped due to quota issues.
    ↓
 4. Claude runs tests, generates reports
    ↓
-5. Implementation Review Gate ←── Gemini 3 Pro
+5. Implementation Review Gate ←── Gemini
    │
    ├── [APPROVE] → Continue to step 6
    └── [BLOCK] → Return to step 3 with feedback
