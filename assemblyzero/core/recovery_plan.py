@@ -347,7 +347,7 @@ def _build_recommendation(
     elif error_type == "auth":
         return (
             "Non-transient: Authentication failed. "
-            "Check your Gemini credentials in ~/.assemblyzero/gemini-credentials.json."
+            "Check that agy is signed in to the subscription."
         )
     elif error_type == "requirements_unverified":
         # #2474: deliberately not filed as transient even though the usual

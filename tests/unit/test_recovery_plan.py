@@ -149,6 +149,20 @@ class TestSerialization:
 class TestGenerateRecoveryPlan:
     """Tests for the generate_recovery_plan() factory function."""
 
+    def test_an_auth_halt_points_at_agy_not_a_retired_file(self) -> None:
+        """#4482: it sent the operator to the retired rotation's credentials."""
+        plan = generate_recovery_plan(
+            issue_number=1,
+            workflow="requirements",
+            stage="N3_review",
+            error_type="auth",
+            error_message="401",
+            state={},
+        )
+
+        assert "agy" in plan.recommendation
+        assert "gemini-credentials.json" not in plan.recommendation
+
     def test_generate_plan_transient(self) -> None:
         """Transient error types produce is_transient=True."""
         for error_type in ("capacity_exhausted", "quota_exhausted"):

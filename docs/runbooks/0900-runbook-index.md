@@ -23,7 +23,7 @@ Quick reference for the user (Marty) on how to run tools, commands, agents, audi
 | 0902 | [Nightly AssemblyZero Audit](0902-nightly-assemblyzero-audit.md) | PowerShell | Nightly | Opus + ultrathink |
 | 0903 | [Windows Scheduled Tasks](0903-windows-scheduled-tasks.md) | Reference | - | Sonnet |
 | 0904 | [Issue Governance Workflow](0904-issue-governance-workflow.md) | Manual | Per issue | Claude + Gemini |
-| 0905 | [Gemini Credentials](0905-gemini-credentials.md) | Manual | On credential issues | - |
+| 0905 | [Gemini Credentials (retired)](0905-gemini-credentials.md) | Manual | Retired: no credentials to manage | - |
 | 0906 | [LLD Governance Workflow](0906-lld-governance-workflow.md) | Manual | Per LLD | Claude + Gemini |
 | 0907 | [Unified Requirements Workflow](0907-unified-requirements-workflow.md) | Manual | Per issue/LLD | Pluggable |
 | 0908 | [The Scout](0908-the-scout-external-intelligence-gathering-workflow.md) | Manual | Research | Sonnet |
