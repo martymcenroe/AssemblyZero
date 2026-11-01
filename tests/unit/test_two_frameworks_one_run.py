@@ -336,9 +336,9 @@ class TestEachPhaseRunsEveryFramework:
         assert [] in recorder.pytest_calls, "pytest's whole suite ran"
         assert recorder.vitest_calls, "Vitest's whole suite ran"
         command, cwd = recorder.vitest_calls[-1]
-        assert command == ["npx", "vitest", "run", "--reporter=json"], (
-            "the whole suite: no test paths"
-        )
+        assert command[:4] == ["npx", "vitest", "run", "--reporter=json"]
+        assert command[4].startswith("--outputFile=")
+        assert len(command) == 5, "the whole suite: no test paths"
         assert Path(cwd) == root / "web"
 
     def test_a_vitest_regression_outside_the_run_fails_the_gate(self, tmp_path):

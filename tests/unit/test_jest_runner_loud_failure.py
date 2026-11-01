@@ -113,7 +113,8 @@ class TestPackageJson:
 
         result = runner.run_tests()
 
-        assert calls == [["npx", "vitest", "run", "--reporter=json"]]
+        assert len(calls) == 1
+        assert calls[0][:4] == ["npx", "vitest", "run", "--reporter=json"]
         assert (result["passed"], result["failed"]) == (2, 1)
         assert operator_alerts == []
         assert "ERROR" not in capsys.readouterr().err

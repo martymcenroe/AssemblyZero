@@ -31,7 +31,7 @@ def test_vitest_typecheck_with_package_json(temp_project_dir):
             args1, _ = mock_sub.call_args_list[0]
             assert args1[0] == ["npm", "run", "typecheck"]
             args2, _ = mock_sub.call_args_list[1]
-            assert args2[0] == ["npx", "vitest", "run", "--reporter=json"]
+            assert args2[0][:4] == ["npx", "vitest", "run", "--reporter=json"]
 
 def test_vitest_typecheck_with_tsconfig(temp_project_dir):
     with patch("shutil.which", return_value="/usr/bin/npx"):
@@ -53,7 +53,7 @@ def test_vitest_typecheck_with_tsconfig(temp_project_dir):
             args1, _ = mock_sub.call_args_list[0]
             assert args1[0] == ["npx", "tsc", "--noEmit"]
             args2, _ = mock_sub.call_args_list[1]
-            assert args2[0] == ["npx", "vitest", "run", "--reporter=json"]
+            assert args2[0][:4] == ["npx", "vitest", "run", "--reporter=json"]
 
 def test_vitest_typecheck_failure(temp_project_dir):
     with patch("shutil.which", return_value="/usr/bin/npx"):
