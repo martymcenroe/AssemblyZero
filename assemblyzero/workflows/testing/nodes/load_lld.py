@@ -33,6 +33,8 @@ from assemblyzero.workflows.testing.audit import (
 )
 from assemblyzero.workflows.testing.framework_detector import (
     TestFramework,
+    detect_framework_dirs,
+    framework_source,
     place_frameworks,
     resolve_framework_dirs,
 )
@@ -76,10 +78,57 @@ def _framework_configs(
     package.json or .unleashed.json -- when the frameworks cannot be resolved.
     """
     configs = _configs_with_directories(resolve_framework_dirs(lld_content, repo_root), repo_root)
+    return _with_declared_target(configs, declared_target)
+
+
+def _with_declared_target(configs: list[dict], declared_target: int | None) -> list[dict]:
     if declared_target is not None:
         for config in configs:
             config["coverage_target_percent"] = int(declared_target)
     return configs
+
+
+def _gate_only_configs(
+    run_configs: list[dict], repo_root: str, declared_target: int | None = None,
+) -> list[dict]:
+    """The frameworks the project has beyond the run's own (#4437).
+
+    The test files an LLD names decide what scaffold, red and green use. They
+    say nothing about what the change can break, so N5's full-suite gate runs
+    these as well: a Vitest-only LLD on a target with pytest at its root used
+    to land without pytest ever running.
+
+    Raises ValueError, as `_framework_configs` does.
+    """
+    project = _configs_with_directories(detect_framework_dirs(repo_root), repo_root)
+    used = {
+        (_framework_name(config), config.get("working_directory")) for config in run_configs
+    }
+    extra = [
+        config for config in project
+        if (_framework_name(config), config.get("working_directory")) not in used
+    ]
+    return _with_declared_target(extra, declared_target)
+
+
+def _framework_name(config: dict) -> str:
+    return str(getattr(config["framework"], "value", config["framework"]))
+
+
+def _log_frameworks(
+    lld_content: str, repo_root: str, run_configs: list[dict], gate_only: list[dict],
+) -> None:
+    """Which frameworks each phase uses, and why, out loud and in the run log (#4437)."""
+    gate_log(
+        f"    Frameworks for scaffold, red and green: "
+        f"{_frameworks_with_directories(run_configs)} "
+        f"({framework_source(lld_content, repo_root)})"
+    )
+    gate_log(
+        f"    Frameworks for the full-suite gate: "
+        f"{_frameworks_with_directories(run_configs + gate_only)} "
+        f"(every framework the project has, whichever the LLD names)"
+    )
 
 
 def resolve_coverage_target(
@@ -1233,10 +1282,11 @@ def _load_from_issue(  # pragma: no cover
     # declared one) governs every framework; with neither, each keeps its own.
     try:
         fw_configs = _framework_configs(lld_content, str(repo_root), governing_target)  # #3707
+        gate_only = _gate_only_configs(fw_configs, str(repo_root), governing_target)  # #4437
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
     frameworks = [config["framework"] for config in fw_configs]
-    gate_log(f"    Frameworks: {_frameworks_with_directories(fw_configs)}")
+    _log_frameworks(lld_content, str(repo_root), fw_configs, gate_only)
 
     # Log workflow start
     log_workflow_execution(
@@ -1269,6 +1319,7 @@ def _load_from_issue(  # pragma: no cover
         "file_counter": next_file_number(audit_dir),
         "framework_config": checkpoint_safe(fw_configs[0]),  # #3708: strings, not enums
         "framework_configs": [checkpoint_safe(c) for c in fw_configs],  # #4236
+        "gate_only_framework_configs": [checkpoint_safe(c) for c in gate_only],  # #4437
         "total_scenarios": len(test_scenarios),
     }
 
@@ -1531,10 +1582,11 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         fw_configs = _framework_configs(  # #3707
             lld_content, str(repo_root), governing_target,
         )
+        gate_only = _gate_only_configs(fw_configs, str(repo_root), governing_target)  # #4437
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
     frameworks = [config["framework"] for config in fw_configs]
-    print(f"    Frameworks: {_frameworks_with_directories(fw_configs)}")
+    _log_frameworks(lld_content, str(repo_root), fw_configs, gate_only)
 
     # Log workflow start
     log_workflow_execution(
@@ -1578,6 +1630,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         "error_message": "",
         "framework_config": checkpoint_safe(fw_configs[0]),  # #3708: strings, not enums
         "framework_configs": [checkpoint_safe(c) for c in fw_configs],  # #4236
+        "gate_only_framework_configs": [checkpoint_safe(c) for c in gate_only],  # #4437
         "total_scenarios": len(test_scenarios),
     }
 
@@ -1666,10 +1719,12 @@ Requirement: REQ-2
     # Issue #381: Detect test framework (even in mock mode). #4236: every one.
     try:
         fw_configs = _framework_configs(mock_lld, str(repo_root), mock_target)  # #3707
+        gate_only = _gate_only_configs(fw_configs, str(repo_root), mock_target)  # #4437
     except ValueError as e:
         return _framework_resolution_failed(issue_number, e)
 
     print(f"    [MOCK] Loaded mock LLD for issue #{issue_number}")
+    _log_frameworks(mock_lld, str(repo_root), fw_configs, gate_only)
 
     return {
         # #3811: the mock LLD is the file just written, so a reader of this path
@@ -1689,5 +1744,6 @@ Requirement: REQ-2
         "error_message": "",
         "framework_config": checkpoint_safe(fw_configs[0]),  # #3708: strings, not enums
         "framework_configs": [checkpoint_safe(c) for c in fw_configs],  # #4236
+        "gate_only_framework_configs": [checkpoint_safe(c) for c in gate_only],  # #4437
         "total_scenarios": len(mock_scenarios),
     }
