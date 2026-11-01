@@ -23,4 +23,4 @@ It found #4490: `run_pytest` inherits the workflow's `VIRTUAL_ENV`, so a run's p
 
 ## Left behind
 
-`data/scratch-2026-11-01-4438/mock1` and `provision1` in the primary checkout are the first two rehearsals' work directories, kept because scratch goes file by file and a tree cannot be removed by rule. They hold throwaway git trees and, in `provision1`, `node_modules`. They are listed on #4438. Later rehearsals ran under this worktree's `data/`, which its removal takes.
+`data/scratch-2026-11-01-4438/mock1` (831 KB) and `provision1` (226 KB) in the primary checkout are the first two rehearsals' work directories: throwaway git trees and logs, in a gitignored folder. They stay because scratch goes file by file and a tree cannot be removed by rule, and they are listed on #4438. Later rehearsals ran under this worktree's `data/`, which its removal takes.

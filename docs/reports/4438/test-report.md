@@ -13,3 +13,8 @@
 ## Runs, 2026-11-01
 
 - With `scaffold_tests.py` and `validate_tests_mechanical.py` set aside by a named stash and restored after: 6 of the new unit tests failed, and so did the integration test.
+- `tools/rehearse_two_frameworks.py mock`, 3:07 AM Central: both workflows exit 0, both scaffolds written, snapshots byte-identical by `cmp`, and `alerts.jsonl` unchanged at 15 lines.
+- `tools/rehearse_two_frameworks.py provision`, 3:07 AM Central: `poetry install` and `npm ci` done in a run's worktree; pytest 1 passed and Vitest 1 passed, each exit 0, with pytest in the fixture's own environment; worktree and environment removed.
+- Earlier passes of `provision` found a fixture defect (no `pythonpath`), a cleanup defect (`poetry.lock` untracked), and #4490. The logs are posted on #3585 and #4438.
+- All four tiers on this branch merged with `main` at `b5d1690b`: integration 65 passed and 7 skipped; e2e 19 passed; adversarial 1 skipped; unit 13510 passed, 66 skipped, 7 deselected, 7 xfailed in 8m 38s, after the last edit, an import reorder.
+- `ruff check` on the three new Python files: all checks passed.

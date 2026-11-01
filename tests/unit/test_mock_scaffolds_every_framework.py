@@ -12,14 +12,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from assemblyzero.workflows.testing.framework_detector import TestFramework
 from assemblyzero.workflows.testing.nodes.load_lld import _mock_load_lld
 from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     validate_tests_mechanical_node,
 )
-from assemblyzero.workflows.testing.runner_registry import checkpoint_safe, get_framework_config
-from assemblyzero.workflows.testing.framework_detector import TestFramework
+from assemblyzero.workflows.testing.runner_registry import (
+    checkpoint_safe,
+    get_framework_config,
+)
 from tools import rehearse_two_frameworks as rehearsal
+
+PYTHON_OK = {"stdout": "1 passed", "returncode": 0, "parsed": {"passed": 1}}
+VITEST_OK = {"raw_output": "1 passed", "passed": 1, "exit_code": 0}
 
 
 def _loaded(root: Path, tmp_path: Path) -> dict:
@@ -168,11 +174,8 @@ class TestTheProvisionStepCannotPassOnNothing:
         ):
             return rehearsal.step_provision(tmp_path), runner
 
-    PYTHON_OK = {"stdout": "1 passed", "returncode": 0, "parsed": {"passed": 1}}
-    VITEST_OK = {"raw_output": "1 passed", "passed": 1, "exit_code": 0}
-
     def test_both_suites_passing_passes(self, tmp_path):
-        code, runner = self._step(tmp_path, python=self.PYTHON_OK, vitest=self.VITEST_OK)
+        code, runner = self._step(tmp_path, python=PYTHON_OK, vitest=VITEST_OK)
 
         assert code == 0
         assert runner.run_tests.call_args.kwargs["test_paths"] is None
@@ -180,7 +183,7 @@ class TestTheProvisionStepCannotPassOnNothing:
     def test_a_suite_that_ran_nothing_fails(self, tmp_path):
         vitest = {"raw_output": "no tests", "passed": 0, "exit_code": 0}
 
-        code, _ = self._step(tmp_path, python=self.PYTHON_OK, vitest=vitest)
+        code, _ = self._step(tmp_path, python=PYTHON_OK, vitest=vitest)
 
         assert code == 1
 
@@ -197,6 +200,6 @@ class TestTheProvisionStepCannotPassOnNothing:
     def test_a_failing_suite_fails(self, tmp_path):
         python = {"stdout": "1 failed", "returncode": 1, "parsed": {"passed": 3}}
 
-        code, _ = self._step(tmp_path, python=python, vitest=self.VITEST_OK)
+        code, _ = self._step(tmp_path, python=python, vitest=VITEST_OK)
 
         assert code == 1

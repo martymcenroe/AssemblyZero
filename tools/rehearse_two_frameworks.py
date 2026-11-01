@@ -149,6 +149,7 @@ def _run_tool(argv: list[str], log: Path) -> int:
         return subprocess.run(
             [sys.executable, *argv], cwd=ROOT, stdout=handle, stderr=subprocess.STDOUT,
             env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONUNBUFFERED": "1"},
+            check=False,
         ).returncode
 
 
@@ -233,7 +234,7 @@ def _pytest_in_the_target(worktree: Path) -> dict:
 
     done = subprocess.run(
         ["poetry", "run", "pytest", "-vv", "--tb=short"], cwd=worktree,
-        env=hook_environment(), capture_output=True, text=True,
+        env=hook_environment(), capture_output=True, text=True, check=False,
     )
     return {
         "stdout": done.stdout + done.stderr,
