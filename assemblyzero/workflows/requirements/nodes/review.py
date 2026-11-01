@@ -140,7 +140,7 @@ def _invoke_reviewer_with_feedback_schema(
     """Call reviewer with FEEDBACK_SCHEMA and parse structured response.
 
     Issue #775: Uses response_schema for Gemini, json_schema for all other
-    providers (including FallbackProvider which wraps ClaudeCLIProvider).
+    providers (the Claude CLI among them).
     An answer in neither the JSON contract nor the review template is
     re-asked once, then rejected.
 

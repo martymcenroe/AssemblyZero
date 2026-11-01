@@ -971,13 +971,6 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS,  # Hidden deprecated alias
     )
-    # Issue #773: API policy
-    parser.add_argument(
-        "--allow-api",
-        action="store_true",
-        dest="allow_api",
-        help="Allow paid Anthropic API calls (default: blocked, uses claude -p via Max subscription)",
-    )
     parser.add_argument(
         "--mock",
         action="store_true",
@@ -1342,10 +1335,6 @@ def _main(args: argparse.Namespace):
     """Everything ``main`` guards. Raises on every failure it does not
     report where it happens."""
     from assemblyzero.core import alert
-
-    # Issue #773: Set API policy before any providers are created
-    from assemblyzero.core.llm_provider import set_api_policy
-    set_api_policy(args.allow_api)
 
     # Apply review configuration
     apply_review_config(args)

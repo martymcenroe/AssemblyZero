@@ -161,7 +161,7 @@ def _invoke_reviewer_with_spec_schema(
     """Call spec reviewer with REVIEW_SPEC_SCHEMA and parse structured response.
 
     Issue #775: Uses response_schema for Gemini, json_schema for all other
-    providers (including FallbackProvider which wraps ClaudeCLIProvider).
+    providers (the Claude CLI among them).
 
     Issue #1868 / #1843: the payload lives on LLMCallResult.response — the
     old `result.content` read a field that never existed, so every parse ran

@@ -4,12 +4,12 @@ A comparison between profiles is a guess unless each call can be attributed
 to a seat, a spec, and the model that actually answered. ``calls.jsonl``
 (#2731) held the prompt and response bodies, but only where an audit
 directory was armed, and it recorded the alias (``3.1-pro``) and the
-primary of a ``FallbackProvider`` even when the fallback answered.
+transport's alias rather than the model that answered.
 
 This module is the metadata half, armed for every run that has a record open:
 
 - :func:`call_fields` builds one call's fields: seat, spec, resolved model
-  id, provider class, whether a fallback answered, effort, duration, token
+  id, provider class, effort, duration, token
   counts where the provider reports them, and whether it succeeded.
 - :func:`record_call` hands them to the open run record, which writes a
   ``model`` event (``run_record.RunRecord.model``). ``calls.jsonl`` carries
@@ -95,15 +95,10 @@ def call_fields(
 ) -> dict[str, Any]:
     """The per-call fields for one answered call.
 
-    ``inner`` is the transport ``get_provider`` built; for a
-    ``FallbackProvider`` the answering provider's class and model are
-    recorded and ``fallback`` says the fallback answered.
+    ``inner`` is the transport ``get_provider`` built. No transport has a
+    fallback (#2864), so the one that was asked is the one that answered.
     """
-    answering = getattr(inner, "answered", inner)
-    fallback = bool(getattr(inner, "fallback_answered", False))
     resolved = _resolved_id(spec)
-    if fallback:
-        resolved = str(getattr(answering, "_model_id", "") or getattr(answering, "model", ""))
     from assemblyzero.core.seats import current_profile_name
 
     return {
@@ -111,9 +106,7 @@ def call_fields(
         "seat": seat or "",
         "spec": spec or "",
         "resolved_model_id": resolved,
-        "provider_class": type(answering).__name__,
-        "fallback": fallback,
-        "fallback_provider": type(answering).__name__ if fallback else "",
+        "provider_class": type(inner).__name__,
         "effort": effort or "",
         "duration_ms": int(duration_ms),
         "input_tokens": int(getattr(result, "input_tokens", 0) or 0),

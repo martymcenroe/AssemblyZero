@@ -25,13 +25,8 @@ graph TD
         C3["Estimates next iteration cost<br/>Trips if would exceed budget<br/>Prevents 'one more try' waste"]
     end
 
-    subgraph CB["FallbackProvider Circuit Breaker"]
-        C4["2 consecutive both-fail calls<br/>→ Stop, suggest --resume"]
-    end
-
     C1 --> C2
     C2 --> C3
-    C3 --> CB
 ```
 
 ---
@@ -177,13 +172,12 @@ These patterns are checked by `is_non_retryable_error()` before any retry logic 
 CLI call → stderr contains "usage has been exhausted"
   → is_non_retryable_error() returns True
   → LLMCallResult.retryable = False
-  → FallbackProvider trips circuit breaker
   → Workflow halts with "[NON-RETRYABLE]" prefix
 ```
 
 ### Implementation Node (N4) Integration
 
-In the implementation workflow, `call_claude_for_file()` (Issue #546) classifies SDK errors through `classify_anthropic_error()`. Non-retryable errors skip the retry loop entirely and raise `ImplementationError`, preventing wasted API calls against a quota that won't recover within the retry window.
+In the implementation workflow, `call_claude_for_file()` (Issue #546) returns a failed result for a CLI error. Non-retryable errors skip the retry loop entirely and raise `ImplementationError`, preventing wasted API calls against a quota that won't recover within the retry window.
 
 ### Cost Optimization Stack (Issues #643, #625, #647)
 
@@ -191,33 +185,15 @@ The implementation node uses three layers of cost optimization:
 
 1. **Stable system prompt** (#643): LLD, repo structure, tests, and context are built once as a system prompt, identical across all files. Per-file user messages contain only file-specific content.
 
-2. **Prompt caching** (#625): The system prompt is sent as a structured block with `cache_control: {"type": "ephemeral"}`. First file pays 125% (cache creation), files 2+ pay 10% (cache read). Log line: `[CACHE] read=N create=N`.
+2. **Prompt caching** (#625; the `cache_control` blocks belonged to the removed paid API provider, #2864, and are no longer sent): The system prompt is sent as a structured block with `cache_control: {"type": "ephemeral"}`. First file pays 125% (cache creation), files 2+ pay 10% (cache read). Log line: `[CACHE] read=N create=N`.
 
 3. **Batch generation** (#647): Small Haiku-routed files are grouped into batches of up to 5, reducing API calls. Failed batches fall back to individual generation.
 
 ---
 
-## FallbackProvider Economics
+## No Paid Fallback
 
-The `FallbackProvider` wraps two providers in a cost-optimized failover:
-
-```
-Primary:   Claude CLI (free via Max subscription, 180s timeout)
-Secondary: Anthropic API (paid, full timeout)
-```
-
-| Scenario | Cost | Action |
-|----------|------|--------|
-| CLI succeeds | $0.00 | Use response |
-| CLI fails/times out | API price | Fall back to Anthropic API |
-| Both fail once | $0.00 + API price | Log warning, continue |
-| Both fail twice consecutively | N/A | **Circuit breaker trips** — suggests `--resume` |
-
-The circuit breaker trips after **2 consecutive both-fail calls**. This prevents burning money on a failing API when the problem is likely infrastructure (rate limits, outages). The message:
-
-```
-[CIRCUIT BREAKER] 2 consecutive failures. Use --resume after API recovers.
-```
+There is no paid Anthropic API path (#2864). A rate-limited or failed Claude CLI call fails loudly, records when the quota renews, and stops the run. The answer to an exhausted weekly quota is to wait for it to renew, not to spend. `tests/unit/test_no_api_key_path.py` fails if a module imports `anthropic` or reads `ANTHROPIC_API_KEY`, or if either package returns to `pyproject.toml`.
 
 ---
 

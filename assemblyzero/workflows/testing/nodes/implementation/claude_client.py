@@ -1,7 +1,7 @@
 """Claude API client for code generation.
 
 Uses the unified provider gate (get_provider) for all LLM calls.
-Issue #783: Sealed API gate — no more direct CLI/SDK fallback.
+Issue #783: no direct CLI/SDK fallback; #2864: no paid API path at all.
 """
 
 import os
@@ -243,7 +243,7 @@ def call_claude_for_file(
     NO RETRIES - if it fails, it fails.
 
     Issue #783: Uses unified provider gate (get_provider) instead of
-    rolling its own CLI/SDK fallback. Respects --no-api policy.
+    rolling its own CLI/SDK fallback. There is no paid API behind it (#2864).
     """
     # Issue #373: Dynamic timeout based on prompt size
     timeout = (
@@ -254,7 +254,7 @@ def call_claude_for_file(
     # Issue #643: Use provided stable system prompt, fall back to per-file prompt
     effective_system_prompt = system_prompt or build_system_prompt(file_path)
 
-    # Issue #783: Use unified provider — respects API policy gate.
+    # Issue #783: Use the unified provider.
     # An exception from the seat, the gate or the transport is returned as
     # the call's error (this function's contract: the caller retries, then
     # raises ImplementationError, which the runner alerts on), after an ERROR

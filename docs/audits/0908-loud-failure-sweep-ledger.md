@@ -483,7 +483,7 @@ A file is marked read only after every line of it has been read. Each finding is
 
 | Site | What fails | What the code does now | Violates | Fix |
 |---|---|---|---|---|
-| `assemblyzero/core/llm_provider.py:291` | .env read | None | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:291` | .env read | None | loud, logged, alerts | WON'T DO (#2864): the code is removed |
 | `assemblyzero/core/llm_provider.py:412` | idle timeout not int | default | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:418` | idle timeout <=0 | default | loud, stops, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:487` | stdin write | pass | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
@@ -504,13 +504,13 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/llm_provider.py:1103` | empty result | success | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:1113` | non-json | success | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:1145` | invoke | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/llm_provider.py:1248` | unpriced | 0.0 | loud, logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/llm_provider.py:1372` | no key | failed result | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/llm_provider.py:1387` | api exc | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/llm_provider.py:1555` | breaker | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/llm_provider.py:1596` | primary | fallback | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/llm_provider.py:1609` | fallback | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
-| `assemblyzero/core/llm_provider.py:1617` | both | stdout | loud, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
+| `assemblyzero/core/llm_provider.py:1248` | unpriced | 0.0 | loud, logged | WON'T DO (#2864): the code is removed |
+| `assemblyzero/core/llm_provider.py:1372` | no key | failed result | loud, alerts | WON'T DO (#2864): the code is removed |
+| `assemblyzero/core/llm_provider.py:1387` | api exc | failed result | loud, logged, alerts | WON'T DO (#2864): the code is removed |
+| `assemblyzero/core/llm_provider.py:1555` | breaker | stdout | loud, alerts | WON'T DO (#2864): the code is removed |
+| `assemblyzero/core/llm_provider.py:1596` | primary | fallback | loud, alerts | WON'T DO (#2864): the code is removed |
+| `assemblyzero/core/llm_provider.py:1609` | fallback | stdout | loud, alerts | WON'T DO (#2864): the code is removed |
+| `assemblyzero/core/llm_provider.py:1617` | both | stdout | loud, alerts | WON'T DO (#2864): the code is removed |
 | `assemblyzero/core/llm_provider.py:1729` | contract | False | logged | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:1756` | gemini invoke | failed result | loud, logged, alerts | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
 | `assemblyzero/core/llm_provider.py:2009` | recording wrap | bare | all | FIXED in the core batch (#3780): loud on stderr; a failed call routes to HALT, which alerts, or the fault is raised; test_<line> in test_llm_provider_loud_failure.py |
@@ -545,7 +545,7 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/core/call_recording.py:353` | replay overrun | failed result | loud, alerts | FIXED in the core batch (#3772): every replay refusal is an ERROR line on stderr and the log, and still a failed result; test_353 in test_call_recording_loud_failure.py |
 | `assemblyzero/core/call_recording.py:372` | divergence | failed result | loud, alerts | FIXED in the core batch (#3772): every replay refusal is an ERROR line on stderr and the log, and still a failed result; test_372 in test_call_recording_loud_failure.py |
 | `assemblyzero/core/call_recording.py:388` | missing success | True | logged, stops | FIXED in the core batch (#3772): a recorded call with no success field is refused, not served as a success; test_388 in test_call_recording_loud_failure.py |
-| `assemblyzero/core/errors.py:365` | retry-after | None | logged | FIXED in the core batch (#3774): a retry-after header that is not a number of seconds is an ERROR line naming its value, and the rate limit is still raised with no hint; test_<line> in test_errors_loud_failure.py |
+| `assemblyzero/core/errors.py:365` | retry-after | None | logged | WON'T DO (#2864): the code is removed |
 | `assemblyzero/core/recovery_plan.py:72` | unknown workflow | string | compliant | none |
 | `assemblyzero/core/recovery_plan.py:144` | halt summary | stdout | loud | FIXED in #3581 core batch 1 (#3724): stderr |
 | `assemblyzero/core/settlement.py:111` | hash | None | loud, logged, alerts | FIXED in the core batch (#3795): an input that exists and cannot be read alerts and still unsettles; a binding doc outside the repo raises; an artifact that cannot be hashed is never settled; test_<line> in test_settlement_loud_failure.py |
@@ -1561,8 +1561,8 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/workflows/janitor/reporter.py:164` | gh issue edit timed out | raises RuntimeError with no log and no alert | alerts | call alert_operator before raising |
 | `assemblyzero/workflows/janitor/reporter.py:166` | gh issue edit failed | raises RuntimeError with the stderr, with no alert | alerts | call alert_operator before raising |
 | `assemblyzero/workflows/janitor/reporter.py:276` | probes that crashed | lists them only as a section of the report body, and only when the run reaches the reporter | loud, stops, alerts | halt the workflow and alert on any probe error |
-| `assemblyzero/workflows/lld/nodes/assembly_node.py:17` | the required issue context is absent | defaults to "", and the LLD is generated with no issue context | loud, logged, stops, alerts | return error_message when issue_context is empty |
-| `assemblyzero/workflows/lld/nodes/assembly_node.py:72` | the LLM section generation | print()s to stdout, not an ERROR to stderr, retries, and after 3 attempts raises AssemblyError with no alert | loud, alerts | log ERROR to stderr, and alert or return error_message routed to HALT on exhaustion |
+| `assemblyzero/workflows/lld/nodes/assembly_node.py:17` | the required issue context is absent | defaults to "", and the LLD is generated with no issue context | loud, logged, stops, alerts | WON'T DO (#2864): the code is removed |
+| `assemblyzero/workflows/lld/nodes/assembly_node.py:72` | the LLM section generation | print()s to stdout, not an ERROR to stderr, retries, and after 3 attempts raises AssemblyError with no alert | loud, alerts | WON'T DO (#2864): the code is removed |
 | `assemblyzero/workflows/scout/budget.py:25` | tiktoken encoding failed | silently falls back to len(text)//4, and the budget gate runs on a guessed count | loud, logged, stops, alerts | log ERROR and re-raise |
 | `assemblyzero/workflows/scout/graph.py:34` | the scout workflow's error channel | failures go into a list; this module has no error_message field, no graph, no router and no HALT node | stops, alerts | add error_message and a graph whose conditional edges route it to a HALT node that calls alert_operator |
 | `assemblyzero/workflows/scout/instrumentation.py:48` | enabling LangSmith tracing | logs a WARNING and continues without tracing | loud, alerts | log ERROR and raise |
@@ -1741,7 +1741,7 @@ A file is marked read only after every line of it has been read. Each finding is
 | `assemblyzero/metrics/collector.py:213` | fetching docs/reports fails (any API error) | DEBUG, returns (0, 0, 0) | loud, logged, stops, alerts | narrow to 404; raise CollectionError otherwise |
 | `assemblyzero/metrics/collector.py:234` | reading or decoding a verdict file | WARNING, file already counted in total, approval rate skewed | loud, stops, alerts | raise CollectionError with repo, path and cause |
 | `assemblyzero/metrics/collector.py:238` | listing a report subdirectory fails | `continue` with no log; that directory's verdicts dropped | loud, logged, stops, alerts | raise CollectionError naming repo and directory |
-| `assemblyzero/nodes/anthropic_provider.py:91` | response object cannot be dumped to a dict | substitutes {}; record carries model "unknown" and null tokens, cost estimates as 0.0 | loud, logged, stops, alerts | raise when the response lacks model_dump instead of recording empty usage |
+| `assemblyzero/nodes/anthropic_provider.py:91` | response object cannot be dumped to a dict | substitutes {}; record carries model "unknown" and null tokens, cost estimates as 0.0 | loud, logged, stops, alerts | WON'T DO (#2864): the code is removed |
 | `assemblyzero/nodes/check_type_renames.py:135` | git grep fails (return code other than 0 or 1) | `continue` with no log; zero usages found, check can report passed | loud, logged, stops, alerts | raise with return code and stderr |
 | `assemblyzero/nodes/check_type_renames.py:146` | a git grep output line does not parse | skipped silently | loud, logged, stops | raise naming the unparseable line |
 | `assemblyzero/nodes/check_type_renames.py:160` | git grep line number is not an int | skipped silently | loud, logged, stops | raise naming the line |

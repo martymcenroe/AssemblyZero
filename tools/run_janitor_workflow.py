@@ -69,13 +69,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="github",
         help="Report backend (default: github)",
     )
-    # Issue #773: API policy
-    parser.add_argument(
-        "--allow-api",
-        action="store_true",
-        dest="allow_api",
-        help="Allow paid Anthropic API calls (default: blocked, uses claude -p via Max subscription)",
-    )
     return parser.parse_args(argv)
 
 
@@ -147,10 +140,6 @@ def main(argv: list[str] | None = None) -> int:
     # cannot work refuses before its first node, --silent or not.
     from assemblyzero.core import alert
     alert.require_alert_channel("tools/run_janitor_workflow.py")
-
-    # Issue #773: Set API policy before any providers are created
-    from assemblyzero.core.llm_provider import set_api_policy
-    set_api_policy(args.allow_api)
 
     # Validate git repo
     result = subprocess.run(

@@ -4,8 +4,6 @@ Issue #542: Unified error handling.
 """
 
 import subprocess
-from unittest.mock import MagicMock
-
 
 from assemblyzero.core.errors import (
     APIError,
@@ -17,7 +15,6 @@ from assemblyzero.core.errors import (
     RateLimitError,
     ServerError,
     TimeoutError_,
-    classify_anthropic_error,
     classify_http_status,
     classify_subprocess_error,
 )
@@ -68,102 +65,6 @@ class TestExceptionHierarchy:
     def test_cli_not_found_not_retryable(self):
         err = CLINotFoundError("claude not found")
         assert err.retryable is False
-
-
-class TestClassifyAnthropicError:
-    """Test classify_anthropic_error with real and mocked SDK exceptions."""
-
-    def test_classify_anthropic_billing(self):
-        """BillingError from 'credit balance is too low' message."""
-        import anthropic
-
-        # Anthropic raises BadRequestError for billing issues
-        mock_response = MagicMock()
-        mock_response.status_code = 400
-        mock_response.headers = {}
-        exc = anthropic.BadRequestError(
-            message="Your credit balance is too low to access the Anthropic API.",
-            response=mock_response,
-            body={"error": {"message": "Your credit balance is too low"}},
-        )
-        result = classify_anthropic_error(exc)
-        assert isinstance(result, BillingError)
-        assert result.retryable is False
-
-    def test_classify_anthropic_auth(self):
-        """AuthenticationError from invalid API key."""
-        import anthropic
-
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.headers = {}
-        exc = anthropic.AuthenticationError(
-            message="Invalid API key",
-            response=mock_response,
-            body={"error": {"message": "Invalid API key"}},
-        )
-        result = classify_anthropic_error(exc)
-        assert isinstance(result, AuthenticationError)
-        assert result.retryable is False
-
-    def test_classify_anthropic_rate_limit(self):
-        """RateLimitError from 429."""
-        import anthropic
-
-        mock_response = MagicMock()
-        mock_response.status_code = 429
-        mock_response.headers = {"retry-after": "10"}
-        exc = anthropic.RateLimitError(
-            message="Rate limited",
-            response=mock_response,
-            body={"error": {"message": "Rate limited"}},
-        )
-        result = classify_anthropic_error(exc)
-        assert isinstance(result, RateLimitError)
-        assert result.retryable is True
-        assert result.retry_after == 10.0
-
-    def test_classify_anthropic_timeout(self):
-        """TimeoutError_ from API timeout."""
-        import anthropic
-
-        exc = anthropic.APITimeoutError(request=MagicMock())
-        result = classify_anthropic_error(exc)
-        assert isinstance(result, TimeoutError_)
-        assert result.retryable is True
-
-    def test_classify_anthropic_server_error(self):
-        """ServerError from 500."""
-        import anthropic
-
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.headers = {}
-        exc = anthropic.InternalServerError(
-            message="Internal server error",
-            response=mock_response,
-            body={"error": {"message": "Internal server error"}},
-        )
-        result = classify_anthropic_error(exc)
-        assert isinstance(result, ServerError)
-        assert result.retryable is True
-
-    def test_classify_anthropic_overloaded(self):
-        """CapacityError from 529 overloaded."""
-        import anthropic
-
-        mock_response = MagicMock()
-        mock_response.status_code = 529
-        mock_response.headers = {}
-        exc = anthropic.InternalServerError(
-            message="Overloaded",
-            response=mock_response,
-            body={"error": {"message": "Overloaded"}},
-        )
-        # Set status_code on the exception itself
-        exc.status_code = 529
-        result = classify_anthropic_error(exc)
-        assert isinstance(result, CapacityError)
 
 
 class TestClassifyHttpStatus:

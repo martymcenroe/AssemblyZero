@@ -73,11 +73,11 @@ Major features shipped in the last 712 commits:
 | Feature | What It Does | Wiki Page |
 |---------|-------------|-----------|
 | **End-to-End Orchestration** | LangGraph pipeline: Triage → LLD → Spec → TDD → PR. Resumable, retryable, gated. | [End-to-End Pipeline](End-to-End-Orchestration) |
-| **Cost Management** | Per-call tracking, $5 budget guard, iteration circuit breaker, FallbackProvider economics | [Cost Management](Cost-Management) |
+| **Cost Management** | Per-call tracking, $5 budget guard, iteration circuit breaker, no paid fallback | [Cost Management](Cost-Management) |
 | **Telemetry System** | DynamoDB + JSONL, fire-and-forget, 90-day TTL, kill switch | [Observability](Observability-and-Monitoring) |
 | **Cascade Prevention** | 15+ patterns, 4 categories, risk scoring, auto-approve blocking | [Safety & Guardrails](Safety-and-Guardrails) |
 | **Multi-Framework TDD** | Auto-detects pytest/Playwright/Jest/Vitest, unified TestRunResult | [Orchestration](End-to-End-Orchestration#multi-framework-test-support) |
-| **Circuit Breakers** | Token budget estimation, FallbackProvider failover, stagnation detection | [Cost Management](Cost-Management#layer-3-iteration-circuit-breaker) |
+| **Circuit Breakers** | Token budget estimation, stagnation detection | [Cost Management](Cost-Management#layer-3-iteration-circuit-breaker) |
 | **Structured LLM Logging** | Every call: `[LLM] provider=X model=Y input=N output=M cost=$X.XX cumulative=$Y.YY` | [Observability](Observability-and-Monitoring#structured-llm-call-logging) |
 | **3,386 Tests** | 134 test files, 105 unit test files, full coverage of all subsystems | [Orchestration](End-to-End-Orchestration#test-suite) |
 
