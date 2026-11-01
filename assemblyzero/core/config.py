@@ -4,50 +4,32 @@ This module defines constants that control LLD review behavior,
 including model hierarchy and credential paths.
 """
 
-import os
 from pathlib import Path
+
+from assemblyzero.fleet_models import forbidden, model_for, of_provider
 
 # =============================================================================
 # Model Hierarchy (NEVER downgrade for reviews)
 # =============================================================================
 
-# Primary review model - highest reasoning tier available
+# Primary review model: the fleet switch's `reviewer` role (#4450).
 # Issue #773 made this Claude Opus via the Max subscription. ADR 0234 (2026-09-24): Gemini in agy validates, so the reviewer id is the Gemini model the agy transport accepts.
-REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.8-flash-high")
+REVIEWER_MODEL = model_for("reviewer").id
 
 # Acceptable fallback models
 REVIEWER_MODEL_FALLBACKS: list[str] = []  # no Claude fallback for the reviewer seat (ADR 0234)
 
-# Forbidden models - fail closed rather than use these
-FORBIDDEN_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.5-flash",
-    "gemini-flash",
-    "gemini-2.5-lite",
-    "gemini-lite",
-    "gemini-3-pro-preview",
-    "gemini-3-pro",
-    # Never Argon: the operator's order, 2026-10-16 and again 2026-10-21
-    # ("DO NOT USE ARGON", #4178). Argon's budget is weekly, and a previous
-    # agent spent a whole week of it in one run. A family entry: every check
-    # matches it as a substring, so all three gemini-4-argon ids are refused.
-    "gemini-4-argon",
-]
+# Forbidden models - fail closed rather than use these. The list is the fleet
+# switch's `[policy]` table (#4450), which carries the reasons.
+FORBIDDEN_MODELS = list(forbidden())
 
-# The Gemini ids GeminiProvider may send: the 3.8 Flash models `agy models`
-# lists (catalog read 2026-10-21, #4178; recorded in tests/fixtures/
-# agy_models.txt). The catalog's other Gemini is Argon, which is forbidden
-# above, and it lists no Pro. Every GeminiProvider.MODEL_MAP value must be one
-# of these; when agy's catalog changes, re-record the fixture and update this.
-AGY_GEMINI_MODELS = frozenset(
-    {"gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low"}
-)
-
-# =============================================================================
-# Claude Model (REQ-2: Claude 4.6)
-# =============================================================================
-
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+# The Gemini ids GeminiProvider may send: the fleet switch's models reached
+# through agy (#4450), which are the 3.8 Flash models `agy models` lists
+# (catalog read 2026-10-21, #4178; recorded in tests/fixtures/agy_models.txt).
+# The catalog's other Gemini is Argon, which is forbidden, and it lists no Pro.
+# Every GeminiProvider.MODEL_MAP value must be one of these; when agy's catalog
+# changes, re-record the fixture and update the switch.
+AGY_GEMINI_MODELS = frozenset(of_provider("agy"))
 
 # =============================================================================
 # Credential Paths

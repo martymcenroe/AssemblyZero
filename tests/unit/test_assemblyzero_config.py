@@ -410,16 +410,10 @@ class TestModelIdVerification:
     """
 
     def test_t020_claude_model_id_is_4_6(self):
-        """T020: CLAUDE_MODEL defaults to claude-sonnet-4-6 (REQ-2)."""
+        """T020: the provider's Claude aliases are 4.6 ids (REQ-2)."""
         import inspect
 
-        from assemblyzero.core import config as config_module
         from assemblyzero.core import llm_provider as llm_module
-
-        source = inspect.getsource(config_module)
-        assert 'claude-sonnet-4-6' in source, (
-            "config.py source must reference claude-sonnet-4-6 as default"
-        )
 
         provider_source = inspect.getsource(llm_module)
 

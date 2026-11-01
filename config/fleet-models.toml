@@ -1,0 +1,112 @@
+# The fleet's one model switch. Every tool asks this file which model plays its role, so changing a
+# word here changes every tool that plays that role. No tool names a model itself.
+#
+#   To change a role's model: change its word under [roles].
+#   To retire a model: set its status to "retired" under [models]. Every role on it then stops loud.
+#
+#   To go back to Codex, change two words:
+#     1. under [models.codex-sol], status = "live"
+#     2. under [roles], second-eye = "codex-sol"
+#
+# A role whose model is not live stops its tool, naming the role and the model. Nothing falls back to
+# another model. Check the whole file with:
+#
+#     python assemblyzero/fleet_models.py --check
+
+[roles]
+# Reviews work: the review seat, and what a run's preflight probes.
+reviewer = "gemini-high"
+# Every seat of a workflow run in the default profile.
+workflow = "gemini-high"
+# Judges text against a rule.
+judge = "gemini-high"
+# A second, independent reader beside the judge. Back to Codex: "codex-sol".
+second-eye = "gemini-high"
+# Describes and compares pictures.
+vision = "gemini-high"
+# Hears recordings and transcribes them.
+listener = "gemini-high"
+# The cheapest call that proves the transport answers.
+preflight = "gemini-low"
+# Sorts a large input down before a judge reads it.
+screen = "gemini-low"
+# Makes pictures. Only Codex can: agy cannot draw.
+picture-maker = "codex-sol"
+# Searches the live web for an answer. Only Codex has done this.
+web-research = "codex-sol"
+# Records speech. Every model named here is recorded, so a take can be compared.
+speech = ["gemini-tts-preview", "gemini-tts", "gemini-tts-lite"]
+# The live session a harness candidate is qualified with.
+harness-test = "claude-haiku"
+# Drafting that needs depth, drafting that needs speed, and small, cheap proposals.
+writer-deep = "claude-opus"
+writer-fast = "claude-sonnet"
+writer-light = "claude-haiku"
+
+# One entry for each model. `provider` is how it is reached: agy, codex, claude or gemini-api. `status`
+# is "live" or "retired". A retired entry stays here, so going back is one word.
+
+[models.gemini-high]
+provider = "agy"
+id = "gemini-3.8-flash-high"
+status = "live"
+
+[models.gemini-medium]
+provider = "agy"
+id = "gemini-3.8-flash-medium"
+status = "live"
+
+[models.gemini-low]
+provider = "agy"
+id = "gemini-3.8-flash-low"
+status = "live"
+
+[models.codex-sol]
+provider = "codex"
+id = "gpt-6.1-sol"
+status = "retired"
+
+[models.gemini-tts-preview]
+provider = "gemini-api"
+id = "gemini-3.1-flash-tts-preview"
+status = "live"
+
+[models.gemini-tts]
+provider = "gemini-api"
+id = "gemini-3.8-flash-tts"
+status = "live"
+
+[models.gemini-tts-lite]
+provider = "gemini-api"
+id = "gemini-3.8-flash-lite-tts"
+status = "live"
+
+[models.claude-opus]
+provider = "claude"
+id = "opus"
+status = "live"
+
+[models.claude-sonnet]
+provider = "claude"
+id = "sonnet"
+status = "live"
+
+[models.claude-haiku]
+provider = "claude"
+id = "haiku"
+status = "live"
+
+# Never used, whatever a role says. A family entry refuses every id that contains it.
+[policy]
+forbidden = [
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",
+    "gemini-flash",
+    "gemini-2.5-lite",
+    "gemini-lite",
+    "gemini-3-pro-preview",
+    "gemini-3-pro",
+    # Never Argon: the operator's order, 2026-10-16 and again 2026-10-21 ("DO NOT USE ARGON", #4178).
+    # Argon's budget is weekly, and a previous agent spent a whole week of it in one run.
+    "gemini-4-argon",
+]
