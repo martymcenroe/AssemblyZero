@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from assemblyzero.fleet_models import model_for
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,10 +54,9 @@ def gemini_in_specs(*specs: str) -> bool:
     return any(str(s or "").strip().lower().startswith("gemini:") for s in specs)
 
 
-#: The probe's model when no spec names one. Not ``config.REVIEWER_MODEL``,
-#: even though ADR 0234 made it a Gemini id: it was a Claude id once and
-#: ``GeminiClient`` rejected it (#3541); the probe names its model itself.
-DEFAULT_PROBE_MODEL = "gemini-3.8-flash-high"
+#: The probe's model when no spec names one: the fleet switch's ``reviewer``
+#: role (#4450), so a preflight proves the model a review will call.
+DEFAULT_PROBE_MODEL = model_for("reviewer").id
 
 
 def gemini_model_for(*specs: str) -> str:

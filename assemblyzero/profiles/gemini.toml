@@ -4,7 +4,7 @@
 # A run with no --models flag, no AZ_MODEL_PROFILE, and no
 # <target>/.assemblyzero/models.toml uses this file.
 name = "gemini"
-description = "Every seat on Gemini through agy (ADR 0234); the gemini:3.1-pro alias runs gemini-3.8-flash-high (GeminiProvider.MODEL_MAP, #4178)."
+description = "Every seat on Gemini through agy (ADR 0234); the gemini:3.1-pro alias runs the fleet switch's workflow role (GeminiProvider.MODEL_MAP, #4450)."
 
 [defaults]
 spec = "gemini:3.1-pro"

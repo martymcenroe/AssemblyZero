@@ -37,6 +37,7 @@ from typing import Optional
 from assemblyzero.core import provider_storm, retry_gate
 from assemblyzero.core.errors import RateLimitError
 from assemblyzero.core.text_sanitizer import strip_emoji
+from assemblyzero.fleet_models import model_for
 from assemblyzero.utils.process import kill_process_tree
 
 # Closes #1495: llm_provider.py uses logger.warning for the #1431 defensive
@@ -1298,13 +1299,15 @@ class GeminiProvider(LLMProvider):
     # Issue #4178: `agy models` (read 2026-10-21) lists no Pro id, only 3.8
     # Flash and Argon, and the operator forbids Argon. Every alias resolves
     # to 3.8 Flash.
+    # Issue #4450: the dead aliases a profile still names resolve through the
+    # fleet switch, so the default profile's seats follow its `workflow` role.
     MODEL_MAP = {
-        "2.5-pro": "gemini-3.8-flash-high",  # dead at the CLI (#3710)
-        "pro": "gemini-3.8-flash-high",  # dead at the CLI (#3710)
-        "3.1-pro-preview": "gemini-3.8-flash-high",  # superseded preview (#1764)
-        "3.1-pro": "gemini-3.8-flash-high",  # dead at the CLI (#4178)
-        "3.1-pro-high": "gemini-3.8-flash-high",  # dead at the CLI (#4178)
-        "3.1-pro-low": "gemini-3.8-flash-low",  # dead at the CLI (#4178)
+        "2.5-pro": model_for("workflow").id,  # dead at the CLI (#3710)
+        "pro": model_for("workflow").id,  # dead at the CLI (#3710)
+        "3.1-pro-preview": model_for("workflow").id,  # superseded preview (#1764)
+        "3.1-pro": model_for("workflow").id,  # dead at the CLI (#4178)
+        "3.1-pro-high": model_for("workflow").id,  # dead at the CLI (#4178)
+        "3.1-pro-low": model_for("screen").id,  # dead at the CLI (#4178)
         "3.8-flash-high": "gemini-3.8-flash-high",
         "3.8-flash-medium": "gemini-3.8-flash-medium",
         "3.8-flash-low": "gemini-3.8-flash-low",
