@@ -11,6 +11,7 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 
+from assemblyzero.workflows.target_env import hook_environment
 from assemblyzero.workflows.testing.coverage_report import CoverageReportError, FileLines
 from assemblyzero.workflows.testing.framework_detector import (
     FrameworkConfig,
@@ -338,6 +339,7 @@ class BaseTestRunner(ABC):
                 text=True,
                 timeout=timeout,
                 cwd=working_dir,
+                env=hook_environment(),  # #4490: the target's, never the workflow's
             )
         except subprocess.TimeoutExpired as e:
             raise self._could_not_run(shown, working_dir, f"timed out after {timeout}s") from e

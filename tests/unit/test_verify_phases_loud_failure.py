@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from assemblyzero.workflows.target_env import TargetEnvironmentError
 from assemblyzero.workflows.testing.nodes import verify_phases as vp
 
 pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
@@ -137,8 +137,13 @@ class TestRunPytest:
         """Kept: a path that is not there is not a package, which is an answer."""
         assert vp._is_python_package_dir(tmp_path / "absent") is False
 
-    def test_767_coverage_without_pytest_cov_raises(self, monkeypatch):
-        monkeypatch.setitem(sys.modules, "pytest_cov", None)
+    def test_767_an_environment_that_cannot_run_this_raises(self, monkeypatch):
+        """Which environments cannot is test_pytest_runs_in_the_target.py's."""
+        def refusing(_root, *, coverage):
+            assert coverage is True
+            raise TargetEnvironmentError("pytest-cov is not installed")
+
+        monkeypatch.setattr(vp, "require_pytest", refusing)
         monkeypatch.setattr(vp, "run_command", lambda *a, **k: pytest.fail("pytest ran"))
 
         with pytest.raises(RuntimeError, match="pytest-cov") as raised:
@@ -146,19 +151,24 @@ class TestRunPytest:
 
         _is_step_error(raised)
 
-    def test_767_kept_no_coverage_asked_needs_no_pytest_cov(self, monkeypatch):
-        monkeypatch.setitem(sys.modules, "pytest_cov", None)
+    def test_767_kept_no_coverage_asked_asks_for_no_coverage(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(
+            vp, "require_pytest", lambda _root, *, coverage: asked.append(coverage),
+        )
         monkeypatch.setattr(
             vp, "run_command",
             lambda *a, **k: subprocess.CompletedProcess(a[0], 1, "1 failed", ""),
         )
 
         assert vp.run_pytest(["tests/test_x.py"])["returncode"] == 1
+        assert asked == [False]
 
     def test_791_a_pytest_timeout_raises_naming_command_and_timeout(self, monkeypatch, capsys):
         def timing_out(cmd, **_kw):
             raise subprocess.TimeoutExpired(cmd=cmd, timeout=vp.PYTEST_TIMEOUT_SECONDS)
 
+        monkeypatch.setattr(vp, "require_pytest", lambda *a, **k: None)
         monkeypatch.setattr(vp, "run_command", timing_out)
 
         with pytest.raises(RuntimeError, match=f"{vp.PYTEST_TIMEOUT_SECONDS}") as raised:
@@ -172,6 +182,7 @@ class TestRunPytest:
         def missing(cmd, **_kw):
             raise FileNotFoundError(2, "No such file or directory", "poetry")
 
+        monkeypatch.setattr(vp, "require_pytest", lambda *a, **k: None)
         monkeypatch.setattr(vp, "run_command", missing)
 
         with pytest.raises(RuntimeError, match="FileNotFoundError") as raised:

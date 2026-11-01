@@ -20,7 +20,7 @@ It needs the network. In bash, from the worktree:
 
 This is what `--mock` only plans. It cuts a worktree of the target, runs `poetry install` and `npm ci` there through the run's own `provision_worktree`, then runs both whole suites, each in the environment just installed. It passes only when both suites ran tests and passed, and then it removes that worktree and its Poetry environment. On a failure the worktree stays, and the step names it.
 
-pytest here runs in the target's environment on purpose. A real run's `run_pytest` still inherits AssemblyZero's virtualenv, which is #4490, so until that lands this step proves provisioning, not that a real run's pytest uses what was provisioned.
+pytest runs through `run_pytest`, the gate's own call, under this process's virtualenv, which is the condition a real run is in. So a pass proves a real run's pytest uses what was provisioned (#4490). Three things have to hold: pytest lists no plugin, because the fixture installs none; coverage is refused, naming pytest-cov; and once the fixture's optional `coverage` group is installed, coverage is measured and the one plugin listed is pytest-cov. A plugin the fixture never installed means the suite ran in another environment.
 
 Run it from a worktree, because JavaScript on Ubuntu runs only in worktrees installed with Linux npm.
 

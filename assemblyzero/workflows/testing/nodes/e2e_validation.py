@@ -20,6 +20,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.workflows.target_env import (
+    TargetEnvironmentError,
+    hook_environment,
+    require_pytest,
+)
 from assemblyzero.workflows.testing.audit import (
     gate_log,
     get_repo_root,
@@ -200,8 +205,14 @@ def run_e2e_tests(
         E2ERunFailed: #3585 (ledger 0908, e2e_validation.py:182, :188) when
             the run times out or cannot start, naming the command, the
             ceiling or the cause. Both used to return code -1 with a fixed
-            string, and the halt that followed said neither.
+            string, and the halt that followed said neither. Also when the
+            target's own environment cannot run pytest (#4490).
     """
+    try:
+        require_pytest(repo_root)
+    except TargetEnvironmentError as err:
+        raise E2ERunFailed(f"the E2E run could not start: {err}") from err
+
     # Filter for E2E tests only
     e2e_files = _e2e_files(test_files, repo_root)
 
@@ -233,7 +244,7 @@ def run_e2e_tests(
             errors="replace",
             timeout=E2E_TIMEOUT_SECONDS,
             cwd=str(repo_root),
-            env={**subprocess.os.environ, **env},
+            env={**hook_environment(), **env},
         )
 
         return {

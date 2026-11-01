@@ -7,6 +7,7 @@ previously hardcoded workflow nodes.
 import logging
 import re
 
+from assemblyzero.workflows.target_env import require_pytest
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
     TestFramework,
@@ -39,6 +40,11 @@ UNFINISHED_EXIT_CODES: dict[int, str] = {
 
 class PytestRunner(BaseTestRunner):
     """Test runner adapter for pytest + pytest-cov."""
+
+    def require_dependencies(self) -> None:
+        """Raise OSError unless the target's own environment has pytest (#4490):
+        without it `poetry run pytest` runs the next one on PATH."""
+        require_pytest(self.project_dir)
 
     def run_tests(
         self,

@@ -13,8 +13,12 @@ the target's git state, its origin's refs, and AssemblyZero's state directories.
 `provision` is the part --mock only plans. It cuts a worktree of the target,
 really runs `poetry install` and `npm ci` in it through the run's own
 `provision_worktree`, then runs both whole suites there, each in the environment
-that was just installed. It needs the network, and exits 0 only when both suites
-ran tests and passed.
+that was just installed. pytest runs through `run_pytest`, the gate's own call,
+under this process's virtualenv, which is the condition a real run is in (#4490).
+It lists no plugin, because the fixture installs none; coverage is refused by
+name; and once the fixture's optional `coverage` group is installed, coverage is
+measured and the one plugin listed is pytest-cov. The step needs the network,
+and exits 0 only when all of that held and both suites ran tests and passed.
 
 Neither step touches anything outside the new directory, except that `mock`
 reads the state directories it snapshots.
@@ -53,6 +57,12 @@ python = ">=3.10,<4.0"
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8,<10"
 
+[tool.poetry.group.coverage]
+optional = true
+
+[tool.poetry.group.coverage.dependencies]
+pytest-cov = ">=6"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 """
@@ -68,7 +78,7 @@ LOCK = ROOT / "tests" / "fixtures" / "two_framework" / "web-package-lock.json.tx
 FILES = {
     ".gitignore": (
         "data/\ndocs/lineage/\nnode_modules/\ncoverage/\n__pycache__/\n.pytest_cache/\n"
-        "poetry.lock\n"
+        "poetry.lock\n.coverage\ncoverage.json\n"
     ),
     "README.md": "A throwaway target with two test frameworks.\n",
     "pyproject.toml": PYPROJECT,
@@ -203,43 +213,80 @@ def step_provision(work: Path) -> int:
     for line in provision_worktree(worktree, mock=False):
         print(line)
 
-    python = _pytest_in_the_target(worktree)
-    print(python["stdout"][-600:])
+    python = pytest_proof(worktree)
     vitest = get_runner(
         TestFramework.VITEST, str(worktree), working_directory="web"
     ).run_tests(test_paths=None)
     print(vitest["raw_output"][-600:])
 
     results = {
-        "pytest": (python["parsed"].get("passed", 0), python["returncode"]),
+        "pytest": (python["passed"], python["exit"]),
         "vitest": (vitest.get("passed", 0), vitest.get("exit_code")),
     }
     print(f"both suites, passed and exit: {results}")
-    if not all(passed > 0 and code == 0 for passed, code in results.values()):
+    for failure in python["failures"]:
+        print(f"pytest: {failure}", file=sys.stderr)
+    suites_ran = all(passed > 0 and code == 0 for passed, code in results.values())
+    if python["failures"] or not suites_ran:
         print(f"the worktree stays, for diagnosis: {worktree}", file=sys.stderr)
         return 1
     _remove_worktree(root, worktree)
     return 0
 
 
-def _pytest_in_the_target(worktree: Path) -> dict:
-    """pytest in the environment `poetry install` just built.
+def listed_plugins(output: str) -> list[str]:
+    """The plugins pytest's header names. A pytest with none prints no such line."""
+    for line in output.splitlines():
+        if line.startswith("plugins: "):
+            return [name.strip() for name in line.removeprefix("plugins: ").split(",")]
+    return []
 
-    Not `run_pytest`, the gate's call, which inherits this process's virtualenv
-    and so tests in AssemblyZero's (#4490). The point of this step is that what
-    was installed is what runs, so it strips that the way provisioning does.
+
+def pytest_proof(worktree: Path) -> dict:
+    """What `run_pytest`, the gate's call, does in the worktree (#4490).
+
+    Returns the whole suite's passed count and exit code, and `failures`, in
+    words, for each thing that did not hold; none means all of it did.
     """
-    from assemblyzero.workflows.testing.nodes.mechanical_hooks import hook_environment
-    from assemblyzero.workflows.testing.nodes.verify_phases import parse_pytest_output
-
-    done = subprocess.run(
-        ["poetry", "run", "pytest", "-vv", "--tb=short"], cwd=worktree,
-        env=hook_environment(), capture_output=True, text=True, check=False,
+    from assemblyzero.workflows.target_env import hook_environment
+    from assemblyzero.workflows.testing.nodes.verify_phases import (
+        PhaseStepError,
+        run_pytest,
     )
+
+    failures: list[str] = []
+    suite = run_pytest([], repo_root=worktree)
+    print(suite["stdout"][-600:])
+    if plugins := listed_plugins(suite["stdout"]):
+        failures.append(f"listed plugins the fixture does not install: {plugins}")
+
+    measured_args = {"coverage_module": "app", "repo_root": worktree}
+    try:
+        run_pytest(["tests/test_app.py"], **measured_args)
+        failures.append("coverage ran in a target with no pytest-cov")
+    except PhaseStepError as exc:
+        if "pytest-cov" not in str(exc):
+            failures.append(f"coverage was refused without naming pytest-cov: {exc}")
+
+    subprocess.run(
+        ["poetry", "install", "--with", "coverage"], cwd=worktree,
+        env=hook_environment(), capture_output=True, text=True, check=True,
+    )
+    report = worktree / "coverage.json"
+    measured = run_pytest(["tests/test_app.py"], coverage_report=report, **measured_args)
+    print(measured["stdout"][-600:])
+    plugins = listed_plugins(measured["stdout"])
+    if len(plugins) != 1 or not plugins[0].startswith("cov-"):
+        failures.append(f"with pytest-cov installed, the plugins listed were {plugins}")
+    if measured["returncode"] != 0 or not report.is_file():
+        failures.append(
+            f"coverage was not measured: exit {measured['returncode']}, "
+            f"report written: {report.is_file()}"
+        )
     return {
-        "stdout": done.stdout + done.stderr,
-        "returncode": done.returncode,
-        "parsed": parse_pytest_output(done.stdout + done.stderr),
+        "passed": suite["parsed"].get("passed", 0),
+        "exit": suite["returncode"],
+        "failures": failures,
     }
 
 

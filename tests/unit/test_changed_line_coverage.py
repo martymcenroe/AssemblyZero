@@ -8,8 +8,9 @@ covers every line it wrote, could never reach 95, so it was sent back to the
 cap and N4c was asked to test code the run never touched.
 
 The pytest tests here run real pytest and real pytest-cov against a real git
-repository under tmp_path; `poetry run` is the one thing they replace, because
-the throwaway target has no virtualenv. The Vitest tests use real git and a
+repository under tmp_path; `poetry run`, and the check of the environment it
+would use, are the one thing they replace, because the throwaway target has no
+virtualenv. The Vitest tests use real git and a
 stand-in for `npx` that writes the two reports a coverage run writes, in the
 shape of a real `coverage-final.json` (`test_changed_lines.py` reads one).
 
@@ -151,7 +152,7 @@ def mixed_target(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def real_pytest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def real_pytest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target_can_run_pytest):
     """`poetry run pytest` as this interpreter's pytest, on the target."""
     real = verify_phases.run_command
 

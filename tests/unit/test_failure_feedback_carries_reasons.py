@@ -133,13 +133,15 @@ def test_pytest_env_restores_the_reason(failing_suite: tuple[Path, Path]) -> Non
     assert any("TypeError: unsupported operand" in line for line in summary_lines)
 
 
-def test_pytest_env_inherits_and_only_sets_columns() -> None:
-    """The venv and PATH must survive -- this replaces the environment."""
+def test_pytest_env_sets_columns_and_keeps_what_a_run_needs() -> None:
+    """COLUMNS is added and the rest survives -- this replaces the environment.
+    The workflow's own virtualenv is what it drops (#4490), so PATH may differ."""
     env = _pytest_env()
     assert env["COLUMNS"] == PYTEST_OUTPUT_COLUMNS
-    for key in ("PATH", "SYSTEMROOT", "HOME"):
+    for key in ("SYSTEMROOT", "HOME"):
         if key in os.environ:
             assert env[key] == os.environ[key]
+    assert env["PATH"]
 
 
 def test_summary_carries_source_line_and_error(failing_suite: tuple[Path, Path]) -> None:

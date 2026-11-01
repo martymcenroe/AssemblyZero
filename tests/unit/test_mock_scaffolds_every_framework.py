@@ -24,7 +24,7 @@ from assemblyzero.workflows.testing.runner_registry import (
 )
 from tools import rehearse_two_frameworks as rehearsal
 
-PYTHON_OK = {"stdout": "1 passed", "returncode": 0, "parsed": {"passed": 1}}
+PYTHON_OK = {"passed": 1, "exit": 0, "failures": []}
 VITEST_OK = {"raw_output": "1 passed", "passed": 1, "exit_code": 0}
 
 
@@ -165,7 +165,7 @@ class TestTheProvisionStepCannotPassOnNothing:
         runner.run_tests.return_value = vitest
         with (
             patch("assemblyzero.workflows.provisioning.provision_worktree", return_value=list(lines)),
-            patch.object(rehearsal, "_pytest_in_the_target", return_value=python),
+            patch.object(rehearsal, "pytest_proof", return_value=python),
             patch(
                 "assemblyzero.workflows.testing.nodes.verify_phases.get_runner",
                 return_value=runner,
@@ -187,18 +187,16 @@ class TestTheProvisionStepCannotPassOnNothing:
 
         assert code == 1
 
-    def test_pytest_runs_in_the_targets_environment(self, tmp_path, monkeypatch):
-        """#4490: inheriting VIRTUAL_ENV would test in AssemblyZero's."""
-        monkeypatch.setenv("VIRTUAL_ENV", "/somewhere/assemblyzero-venv")
-        done = MagicMock(stdout="1 passed", stderr="", returncode=0)
-
-        with patch.object(rehearsal.subprocess, "run", return_value=done) as run:
-            rehearsal._pytest_in_the_target(tmp_path)
-
-        assert "VIRTUAL_ENV" not in run.call_args.kwargs["env"]
-
     def test_a_failing_suite_fails(self, tmp_path):
-        python = {"stdout": "1 failed", "returncode": 1, "parsed": {"passed": 3}}
+        python = {"passed": 3, "exit": 1, "failures": []}
+
+        code, _ = self._step(tmp_path, python=python, vitest=VITEST_OK)
+
+        assert code == 1
+
+    def test_a_pytest_proof_that_did_not_hold_fails_a_passing_suite(self, tmp_path):
+        """#4490: green suites do not excuse testing in the wrong environment."""
+        python = {"passed": 1, "exit": 0, "failures": ["listed plugins: ['langsmith']"]}
 
         code, _ = self._step(tmp_path, python=python, vitest=VITEST_OK)
 
