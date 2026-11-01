@@ -9,6 +9,8 @@ import logging
 import os
 import re
 import shutil
+import tempfile
+from pathlib import Path
 
 from assemblyzero.workflows.testing.coverage_report import (
     FileLines,
@@ -284,14 +286,36 @@ class JestRunner(BaseTestRunner):
         if test_paths:
             command.extend(test_paths)
 
-        stdout, stderr, exit_code = self._run_subprocess(command)
-        result = self.parse_results(stdout, exit_code, stderr)
+        report, stderr, exit_code = self._run_for_report(command)
+        result = self.parse_results(report, exit_code, stderr)
         if measure_coverage:
             if result["passed"] > 0 and result["failed"] == 0 and result["errors"] == 0:
                 result["coverage_percent"] = self.read_coverage_report()
             else:
                 self._discard_reports()  # Jest writes them even when tests fail
         return result
+
+    def _run_for_report(self, command: list[str]) -> tuple[str, str, int]:
+        """Run the suite; return (its JSON report, stderr, exit code).
+
+        #4504: Vitest 5's JSON reporter writes `.vitest/json/output.json` in the
+        project and prints one line, where earlier versions printed the report.
+        So the run names the file, which every version honours, in a folder
+        outside the target's tree that goes with the run. A run that wrote
+        nothing hands on its stdout, and `parse_results` raises on it naming
+        what the run said.
+        """
+        if not self._is_vitest:
+            return self._run_subprocess(command)
+        with tempfile.TemporaryDirectory(prefix="az-vitest-") as folder:
+            report = Path(folder) / "report.json"
+            after_reporter = command.index("--reporter=json") + 1
+            stdout, stderr, exit_code = self._run_subprocess(
+                [*command[:after_reporter], f"--outputFile={report}", *command[after_reporter:]]
+            )
+            if report.is_file():
+                return report.read_text(encoding="utf-8"), stderr, exit_code
+            return stdout, stderr, exit_code
 
     def parse_results(
         self, raw_output: str, exit_code: int, stderr: str = "",

@@ -157,15 +157,17 @@ def test_t1_jest_asks_for_coverage_too(tmp_path):
 
 
 def test_t1_a_run_that_does_not_ask_for_coverage_carries_no_coverage_flag(tmp_path):
-    """The red phase and the full-suite gate measure nothing, and their argv
-    stays as it was."""
+    """The red phase and the full-suite gate measure nothing: no coverage flag
+    in their argv, which is the reporter and where its report goes (#4504)."""
     root = _web(tmp_path)
     npx = _Npx(passed=3)
     runner = _vitest(root)
     with patch.object(base_runner, "run_command", side_effect=npx):
         result = runner.run_tests(test_paths=None)
 
-    assert npx.calls[-1] == ["npx", "vitest", "run", "--reporter=json"]
+    command = npx.calls[-1]
+    assert command[:4] == ["npx", "vitest", "run", "--reporter=json"]
+    assert len(command) == 5 and command[4].startswith("--outputFile=")
     assert result["coverage_percent"] is None, "not measured, and never 0%"
 
 
