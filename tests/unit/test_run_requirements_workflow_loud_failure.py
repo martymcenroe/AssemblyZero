@@ -204,26 +204,40 @@ def _assert_failed(rc, capsys, operator_alerts, *needles: str) -> str:
 
 
 class TestHelpersRaise:
-    def test_118_an_unreadable_checkpoint_database_stops_the_resume(
-        self, target, tmp_path, monkeypatch, capsys, operator_alerts,
+    def test_4476_resume_says_it_runs_the_brief_again_from_the_start(
+        self, target, monkeypatch, capsys, operator_alerts,
     ):
-        """It returned False, "no checkpoint", and the resume started fresh."""
-        db = tmp_path / "ckpt" / "wf.db"
-        db.parent.mkdir(parents=True)
-        db.write_bytes(b"this is not a sqlite database" * 64)
+        """T1: it printed "resuming..." and spent the whole run again."""
         _brief(target)
+        audit = target / "docs" / "lineage" / "active" / "feature"
+        audit.mkdir(parents=True)
         driver, _ = _install(monkeypatch, ISSUE_FILED)
 
         rc = _main("--type", "issue", "--resume", "feature.md", "--repo", str(target))
 
-        _assert_failed(rc, capsys, operator_alerts, str(db))
-        assert not driver.calls
+        out = capsys.readouterr().out
+        assert rc == 0, out
+        assert "resuming..." not in out
+        assert "again from the start" in out
+        assert str(audit) in out
+        assert driver.calls
+        assert not operator_alerts
 
-    def test_118_a_database_with_no_checkpoint_is_a_plain_no(self, tmp_path):
-        """Absence is the legitimate answer and stays quiet."""
-        from tools.run_requirements_workflow import checkpoint_exists
+    def test_4476_resume_never_opens_a_checkpoint_database(
+        self, target, tmp_path, monkeypatch, capsys, operator_alerts,
+    ):
+        """T2: nothing writes that database, so it cannot stop a run."""
+        db = tmp_path / "ckpt" / "wf.db"
+        db.parent.mkdir(parents=True)
+        db.write_bytes(b"this is not a sqlite database" * 64)
+        _brief(target)
+        (target / "docs" / "lineage" / "active" / "feature").mkdir(parents=True)
+        _install(monkeypatch, ISSUE_FILED)
 
-        assert checkpoint_exists("never-run") is False
+        rc = _main("--type", "issue", "--resume", "feature.md", "--repo", str(target))
+
+        assert rc == 0, capsys.readouterr().err
+        assert not operator_alerts
 
     def test_175_an_unreadable_brief_is_named(
         self, target, monkeypatch, capsys, operator_alerts,

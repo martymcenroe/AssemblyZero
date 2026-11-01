@@ -96,58 +96,8 @@ class RunFailed(Exception):
 
 
 # =============================================================================
-# Checkpoint Database (SQLite)
+# Audit Directories
 # =============================================================================
-
-
-def get_checkpoint_db_path() -> Path:
-    """Get path to SQLite checkpoint database.
-
-    Supports ASSEMBLYZERO_WORKFLOW_DB environment variable for worktree isolation.
-
-    Returns:
-        Path to checkpoint database.
-    """
-    if db_path_env := os.environ.get("ASSEMBLYZERO_WORKFLOW_DB"):
-        db_path = Path(db_path_env)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        return db_path
-
-    db_dir = Path.home() / ".assemblyzero"
-    db_dir.mkdir(parents=True, exist_ok=True)
-    return db_dir / "requirements_workflow.db"
-
-
-def checkpoint_exists(slug: str) -> bool:
-    """Check if checkpoint exists for a slug.
-
-    False means the database holds no checkpoint for the slug, which is a
-    legitimate answer: sqlite creates an empty database on first use. A
-    database that cannot be opened or read raises naming it (ledger 0908, line
-    118); it used to return False, and a resume read that as "no checkpoint".
-
-    Args:
-        slug: Workflow slug to check.
-
-    Returns:
-        True if checkpoint exists.
-
-    Raises:
-        RunFailed: the checkpoint database cannot be read.
-    """
-    from langgraph.checkpoint.sqlite import SqliteSaver
-
-    db_path = get_checkpoint_db_path()
-    try:
-        with SqliteSaver.from_conn_string(str(db_path)) as memory:
-            config = {"configurable": {"thread_id": slug}}
-            checkpoints = list(memory.list(config))
-            return len(checkpoints) > 0
-    except Exception as exc:
-        raise RunFailed(
-            f"cannot read the checkpoint database {db_path}: "
-            f"{type(exc).__name__}: {exc}"
-        ) from exc
 
 
 def audit_dir_exists(slug: str, target_repo: Path) -> bool:
@@ -440,7 +390,10 @@ Examples:
         "--resume",
         type=str,
         metavar="FILE",
-        help="Resume interrupted workflow by brief filename (issue workflow only)",
+        help=(
+            "Run a brief again from the start, adding to its audit directory "
+            "(issue workflow only)"
+        ),
     )
     parser.add_argument(
         "--resume-review",
@@ -1437,7 +1390,12 @@ def run_resume_workflow(
     assemblyzero_root: Path,
     target_repo: Path,
 ) -> int:
-    """Resume an interrupted workflow.
+    """Run a brief again from the start, adding to its audit directory.
+
+    It does not pick a run up where it stopped. Every graph in this tool is
+    compiled with no checkpointer, so no run saves state to start from, and
+    this says so (#4476). It used to announce "resuming..." and spend the whole
+    run again, after asking a database nothing writes.
 
     Args:
         args: Parsed CLI arguments (args.resume contains the brief filename).
@@ -1449,16 +1407,15 @@ def run_resume_workflow(
 
     Raises:
         RunFailed: the brief is in none of the places --resume looks (ledger
-            0908, lines 1306 and 1330), the checkpoint database cannot be
-            read, or there is nothing to resume (line 1291): it used to
-            print a WARNING and start a fresh workflow.
+            0908, lines 1306 and 1330), or there is nothing to resume (line
+            1291): it used to print a WARNING and start a fresh workflow.
     """
     brief_file = args.resume
     slug = generate_slug(brief_file)
 
     print()
     print("=" * 60)
-    print("RESUME WORKFLOW")
+    print("RUN THE BRIEF AGAIN")
     print("=" * 60)
     print(f"Brief: {brief_file}")
     print(f"Slug:  {slug}")
@@ -1466,22 +1423,17 @@ def run_resume_workflow(
 
     brief_path = _resolve_resume_brief(brief_file, target_repo)
 
-    # Check if audit directory exists
-    has_audit = audit_dir_exists(slug, target_repo)
-    has_checkpoint = checkpoint_exists(slug)
-
-    if not has_audit and not has_checkpoint:
+    if not audit_dir_exists(slug, target_repo):
         raise RunFailed(
-            f"--resume {brief_file}: no checkpoint and no audit directory for "
-            f"'{slug}', so there is nothing to resume; start it with --brief instead"
+            f"--resume {brief_file}: no audit directory for '{slug}', so there "
+            "is nothing to resume; start it with --brief instead"
         )
 
-    # Resume: set brief and run
     print()
-    if has_checkpoint:
-        print(f"Found checkpoint for '{slug}', resuming...")
-    else:
-        print(f"Found audit directory for '{slug}', resuming...")
+    print(
+        "No run saves state to start from, so this runs the brief again from "
+        f"the start and adds to {target_repo / AUDIT_ACTIVE_DIR / slug}"
+    )
     print()
 
     # #4443: a halt's resume line gives the brief as the run had it, and a run
