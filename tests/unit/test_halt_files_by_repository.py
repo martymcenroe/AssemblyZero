@@ -389,6 +389,29 @@ class TestBriefRunsHaveKeysOfTheirOwn:
         assert "--resume" not in plan["resume_command"]
         assert "Issue:     #42" in capsys.readouterr().out
 
+    def test_a_brief_runs_evidence_names_the_brief_not_issue_zero(self, tmp_path):
+        """#4479, T1: the heading and the draft issue body said `#0`."""
+        repo = _repo(tmp_path, "one")
+        state = self._brief_state(repo, "ideas/active/alpha.md")
+
+        _halt("requirements", state)
+
+        text = (Path(state["audit_dir"]) / "halt-evidence.md").read_text(encoding="utf-8")
+        assert text.startswith("# Halt evidence — requirements brief ideas/active/alpha.md,")
+        assert "workflow for brief ideas/active/alpha.md, stage" in text
+        assert "#0" not in text
+
+    def test_an_issue_runs_evidence_keeps_its_heading(self, tmp_path):
+        """#4479, T2."""
+        repo = _repo(tmp_path, "one")
+        state = _state(repo)
+
+        _halt("testing", state)
+
+        text = (Path(state["audit_dir"]) / "halt-evidence.md").read_text(encoding="utf-8")
+        assert text.startswith("# Halt evidence — testing #42,")
+        assert "workflow for issue #42, stage" in text
+
 
 class TestAMocksHaltNeverReachesARealRun:
     """The comment on #4292: a --mock run's halt must not be a real run's."""

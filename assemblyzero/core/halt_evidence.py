@@ -243,6 +243,7 @@ def build_halt_evidence(
         "bundle_version": 2,
         "workflow": workflow,
         "issue": issue_number,
+        "brief": str(state.get("brief_file") or ""),
         "stage": stage,
         "halted_at": datetime.now(tz=timezone.utc).isoformat(),
         "error_message": error_message,
@@ -330,10 +331,17 @@ def _md_events(title: str, lines: list[str]) -> list[str]:
     return out
 
 
+def _run_name(evidence: dict[str, Any], issue_word: str = "") -> str:
+    """The run a bundle belongs to: its issue, or a brief run's brief (#4479)."""
+    if evidence["issue"]:
+        return f"{issue_word}#{evidence['issue']}"
+    return f"brief {evidence.get('brief', '')}"
+
+
 def render_halt_evidence_md(evidence: dict[str, Any]) -> str:
     """The bundle as a document, ending in the draft issue body."""
     lines: list[str] = [
-        f"# Halt evidence — {evidence['workflow']} #{evidence['issue']}, "
+        f"# Halt evidence — {evidence['workflow']} {_run_name(evidence)}, "
         f"{evidence['stage']}",
         "",
         f"Halted at {evidence['halted_at']}. Assembled by the halt path "
@@ -429,8 +437,8 @@ def render_halt_evidence_md(evidence: dict[str, Any]) -> str:
         f"**Suggested title:** {head[:120]}",
         "",
         "```markdown",
-        f"Observed on the {evidence['workflow']} workflow for issue "
-        f"#{evidence['issue']}, stage {evidence['stage']}, "
+        f"Observed on the {evidence['workflow']} workflow for "
+        f"{_run_name(evidence, 'issue ')}, stage {evidence['stage']}, "
         f"{evidence['halted_at']}.",
         "",
         "## What the halt said",

@@ -127,6 +127,54 @@ class TestTheBuiltCommand:
         assert "no resume command is defined" in command
 
 
+def _parser_of(workflow: str):
+    """The real argument parser of the tool that resumes `workflow`."""
+    if workflow == "requirements":
+        return cli.parse_args
+    if workflow == "implementation_spec":
+        from tools.run_implementation_spec_workflow import parse_args
+
+        return parse_args
+    if workflow == "testing":
+        from tools.run_implement_from_lld import create_argument_parser
+
+        return create_argument_parser().parse_args
+    from tools.speedrun_roll import build_parser
+
+    return build_parser().parse_args
+
+
+class TestEveryToolTakesItsCommand:
+    """A halted LLD run printed a line its tool refused (#4475).
+
+    `test_the_tool_accepts_the_flags_the_command_passes` passed anyway, because
+    it looks for two strings in the tool's source. This hands each tool the
+    line an operator would be given.
+    """
+
+    @pytest.mark.parametrize("workflow", sorted(RESUME_COMMANDS))
+    def test_t2_the_tools_own_parser_accepts_the_line(self, workflow: str) -> None:
+        command = build_resume_command(workflow, 42, {"target_repo": "C:/x/app"})
+
+        args = _parser_of(workflow)(shlex.split(command)[4:])
+
+        # speedrun_roll takes --issue more than once, so it holds a list.
+        assert args.issue in (42, [42])
+
+    def test_t1_a_requirements_issue_run_names_its_type(self) -> None:
+        command = build_resume_command("requirements", 42, {})
+
+        assert command == (
+            "poetry run python tools/run_requirements_workflow.py "
+            "--type lld --issue 42"
+        )
+        assert _parser_of("requirements")(shlex.split(command)[4:]).type == "lld"
+
+    @pytest.mark.parametrize("workflow", ["implementation_spec", "testing", "orchestrator"])
+    def test_no_other_tool_is_given_a_type(self, workflow: str) -> None:
+        assert "--type" not in build_resume_command(workflow, 42, {})
+
+
 class TestABriefRunResumesByItsBrief:
     """A brief run has no issue number, and `--issue 0` resumes nothing (#4443).
 
@@ -149,7 +197,6 @@ class TestABriefRunResumesByItsBrief:
             seen["brief"] = run_args.brief
             return 0
 
-        monkeypatch.setattr(cli, "checkpoint_exists", lambda _slug: False)
         monkeypatch.setattr(cli, "run_single_workflow", run)
 
         assert cli.run_resume_workflow(args, repo, repo) == 0
