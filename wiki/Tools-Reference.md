@@ -11,7 +11,7 @@ AssemblyZero provides a suite of Python tools that enable enterprise-grade AI ag
 - **Gemini Integration** - The `agy` transport, retry logic, model validation
 - **Permission Management** - Friction tracking, permission propagation
 - **Configuration** - Project setup, template generation
-- **Cross-Project Operations** - Pattern harvesting, credential management
+- **Cross-Project Operations** - Pattern harvesting
 
 ---
 
@@ -146,17 +146,6 @@ poetry run python tools/assemblyzero-harvest.py --format json
 - Tools that have been duplicated
 - Permissions that should be elevated
 - CLAUDE.md patterns worth generalizing
-
----
-
-### assemblyzero_credentials.py
-
-**Purpose:** Secure credential management using system keychain with fallback to encrypted files.
-
-**Features:**
-- Stores credentials in Windows Credential Manager / macOS Keychain
-- Falls back to file-based storage if keychain unavailable
-- Used by gemini-rotate.py for API key management
 
 ---
 

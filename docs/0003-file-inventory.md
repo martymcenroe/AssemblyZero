@@ -115,8 +115,6 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0625p-code-review-prompt.md` | Stable | Prompt: Code review |
 | `0626c-commit-push-pr-cli.md` | Stable | CLI: Git workflow |
 | `0626p-commit-push-pr-prompt.md` | Stable | Prompt: Git workflow |
-| `0626c-gemini-rotate-cli.md` | Stable | CLI: Gemini rotation |
-| `0626p-gemini-rotate-prompt.md` | Stable | Prompt: Gemini rotation |
 | `0627c-test-gaps-cli.md` | Stable | CLI: Test gap analysis |
 | `0627p-test-gaps-prompt.md` | Stable | Prompt: Test gap analysis |
 | `0627c-assemblyzero-harvest-cli.md` | Stable | CLI: Pattern harvester |
@@ -4900,8 +4898,6 @@ These tools live outside AZ but operate fleet-wide. The user invokes them from t
 | docs/skills/0626p-commit-push-pr-prompt.md | 0626p-commit-push-pr-prompt.md | Skills | Active |
 | docs/skills/0627c-test-gaps-cli.md | 0627c-test-gaps-cli.md | Skills | Active |
 | docs/skills/0627p-test-gaps-prompt.md | 0627p-test-gaps-prompt.md | Skills | Active |
-| docs/skills/0629c-gemini-rotate-cli.md | 0629c-gemini-rotate-cli.md | Skills | Active |
-| docs/skills/0629p-gemini-rotate-prompt.md | 0629p-gemini-rotate-prompt.md | Skills | Active |
 | docs/skills/0630c-assemblyzero-harvest-cli.md | 0630c-assemblyzero-harvest-cli.md | Skills | Active |
 | docs/skills/0630p-assemblyzero-harvest-prompt.md | 0630p-assemblyzero-harvest-prompt.md | Skills | Active |
 | docs/skills/0631c-archive-worktree-lineage-cli.md | 0631c-archive-worktree-lineage-cli.md | Skills | Active |
