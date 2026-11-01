@@ -757,9 +757,14 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     is_valid = len(all_errors) == 0
 
     if hollow_description and not spec_has_bodies:
-        _report_hollow_scaffold(
-            state, hollow_description, stub_names, proceeds=is_valid,
-        )
+        if state.get("mock_mode"):
+            # A mock's scaffold is placeholders by design, so nothing has
+            # failed and no one is alerted.
+            print(f"    [MOCK] The scaffold is placeholders by design: {stub_count} test(s)")
+        else:
+            _report_hollow_scaffold(
+                state, hollow_description, stub_names, proceeds=is_valid,
+            )
 
     # #2317: `real` now excludes placeholders. It previously could not --
     # stub_count was pinned at 0, so every stub was reported as a real test
