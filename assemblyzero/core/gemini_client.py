@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 
 from assemblyzero.utils.process import kill_process_tree
 import time
@@ -425,6 +426,72 @@ def _agy_json_reply(text: str) -> Optional[dict]:
     return None
 
 
+#: Where one call's stdout goes, inside its temporary directory (#4509).
+AGY_REPLY_FILENAME = "agy-reply.out"
+
+#: How often the watcher looks, and how long a finished-looking reply has to sit
+#: unchanged before the call stops waiting for agy to exit (#4509).
+AGY_ANSWER_POLL_SECONDS = 0.25
+AGY_ANSWER_SETTLE_SECONDS = 2.0
+
+
+class _AnswerWatcher(threading.Thread):
+    """Ends an agy that has printed its whole answer and not exited (#4509).
+
+    Measured 2026-11-01 on a 108,943-character prompt: the full reply reached
+    stdout at 20.5 s, and at 120 s agy was alive with nothing else in its
+    session. `communicate` returns at EOF, so the transport sat out its 300 s,
+    threw the answer away and called it a capacity failure, twice, which is the
+    call's whole budget. Why agy stays alive is not known; waiting for it is
+    what this removes.
+
+    This decides only when to stop waiting. It reads `{...}` that has stopped
+    changing as finished, and `_agy_json_reply` still judges what was printed,
+    so a reply that does not parse raises and a bad status fails the call.
+    Output that is not `{...}` never ends a call: a warning line, plain text, or
+    a reply still arriving waits for the exit or the timeout as before.
+    """
+
+    def __init__(self, proc: subprocess.Popen, reply_path: Path) -> None:
+        super().__init__(daemon=True, name="agy-answer-watcher")
+        self._proc = proc
+        self._reply_path = reply_path
+        self._stop_watching = threading.Event()
+        #: True once this ended agy because its answer had arrived.
+        self.answered = False
+
+    def stop(self) -> None:
+        self._stop_watching.set()
+        self.join(timeout=5)
+
+    def _looks_finished(self) -> bool:
+        text = _strip_ansi(
+            self._reply_path.read_bytes().decode("utf-8", errors="replace")
+        ).strip()
+        return text.startswith("{") and text.endswith("}")
+
+    def run(self) -> None:
+        size = 0
+        settled_at = time.monotonic()
+        while not self._stop_watching.wait(AGY_ANSWER_POLL_SECONDS):
+            if self._proc.poll() is not None:
+                return
+            current = self._reply_path.stat().st_size
+            if current != size:
+                size, settled_at = current, time.monotonic()
+                continue
+            waited = time.monotonic() - settled_at
+            if size and waited >= AGY_ANSWER_SETTLE_SECONDS and self._looks_finished():
+                logger.warning(
+                    "[agy] pid %s printed its answer and has not exited after "
+                    "%.0f s; ending it and using the answer (#4509)",
+                    self._proc.pid, waited,
+                )
+                self.answered = True
+                kill_process_tree(self._proc.pid)
+                return
+
+
 # =============================================================================
 # Gemini Client
 # =============================================================================
@@ -578,25 +645,32 @@ class GeminiClient:
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_cwd:
                 # #3612: the agent this call runs as lives in this directory.
                 write_text_only_agent(tmp_cwd)
-                proc = subprocess.Popen(
-                    self._agy_argv(
-                        tmp_cwd, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
-                        "--model", self.model, "--output-format", "json",
-                    ),
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    cwd=tmp_cwd,
-                    # #4195: off Windows, kill_process_tree signals the process
-                    # GROUP. In the caller's group, a timeout killed the caller
-                    # and every sibling with SIGKILL; in a session of its own,
-                    # the group is agy and its descendants only.
-                    start_new_session=os.name != "nt",
-                )
+                # #4509: stdout goes to a file, so `_AnswerWatcher` can see the
+                # answer while `communicate` waits for the exit.
+                reply_path = Path(tmp_cwd) / AGY_REPLY_FILENAME
+                with reply_path.open("wb") as reply_sink:
+                    proc = subprocess.Popen(
+                        self._agy_argv(
+                            tmp_cwd, "--agent", AGY_AGENT_NAME, *AGY_SAFETY_ARGS,
+                            "--model", self.model, "--output-format", "json",
+                        ),
+                        stdin=subprocess.PIPE,
+                        stdout=reply_sink,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        cwd=tmp_cwd,
+                        # #4195: off Windows, kill_process_tree signals the
+                        # process GROUP. In the caller's group, a timeout killed
+                        # the caller and every sibling with SIGKILL; in a
+                        # session of its own, the group is agy and its
+                        # descendants only.
+                        start_new_session=os.name != "nt",
+                    )
                 spent["ran"] = True
+                watcher = _AnswerWatcher(proc, reply_path)
+                watcher.start()
                 try:
                     stdout, stderr = proc.communicate(
                         input=full_prompt, timeout=timeout_seconds
@@ -615,7 +689,13 @@ class GeminiClient:
                     return False, "", (
                         f"agy CLI timeout ({timeout_seconds:.0f}s, stdin path)"
                     )
-                returncode = proc.returncode
+                finally:
+                    watcher.stop()
+                # #4509: the exit status of a process this call ended says
+                # nothing about the call; the reply's own status decides.
+                returncode = 0 if watcher.answered else proc.returncode
+                if stdout is None:
+                    stdout = reply_path.read_bytes().decode("utf-8", errors="replace")
         except OSError as e:
             return False, "", f"agy stdin invocation failed: {e}"
 
