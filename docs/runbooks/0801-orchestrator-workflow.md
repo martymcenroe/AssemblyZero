@@ -183,21 +183,11 @@ touch docs/LLDs/active/98-schema-backend-crud.md
 
 ### 4. Submit for Gemini Review
 
+The review runs inside the requirements workflow, which drafts the LLD and sends it to Gemini over the `agy` CLI. There is no separate tool for submitting a draft. In bash, from the AssemblyZero checkout:
+
 ```bash
-# Create prompt file
-cat > /tmp/lld-review-prompt.txt << 'EOF'
-REVIEW THE FOLLOWING LLD ONLY. DO NOT SEARCH FOR OTHER FILES.
-
-[Paste full LLD content here]
-
-END OF LLD. Respond with JSON only.
-EOF
-
-# Submit to Gemini
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
-  /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-retry.py \
-  --model gemini-3-pro-preview \
-  --prompt-file /tmp/lld-review-prompt.txt
+PYTHONUNBUFFERED=1 poetry run python tools/run_requirements_workflow.py \
+    --type lld --issue 98 --repo /c/Users/mcwiz/Projects/Talos --yes
 ```
 
 ### 5. Handle Response
@@ -328,7 +318,7 @@ No collisions. Each writes to its own shard. The orchestrator sees a unified vie
 |---------|---------|
 | `gh issue list` | View open issues |
 | `git worktree add` | Create isolated branch |
-| `poetry run python tools/gemini-retry.py` | Submit Gemini review |
+| `poetry run python tools/run_requirements_workflow.py --type lld --issue N` | Draft an LLD and put it through Gemini review |
 | `poetry run python tools/view_audit.py` | View audit log |
 
 ### Gate Checklist

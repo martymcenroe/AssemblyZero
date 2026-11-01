@@ -1484,7 +1484,11 @@ def run_resume_workflow(
         print(f"Found audit directory for '{slug}', resuming...")
     print()
 
-    args.brief = str(brief_path.relative_to(target_repo))
+    # #4443: a halt's resume line gives the brief as the run had it, and a run
+    # may take a brief from outside the repository.
+    if brief_path.is_relative_to(target_repo):
+        brief_path = brief_path.relative_to(target_repo)
+    args.brief = str(brief_path)
     return run_single_workflow(args, assemblyzero_root, target_repo)
 
 

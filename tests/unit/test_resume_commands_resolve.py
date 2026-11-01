@@ -17,6 +17,8 @@ loudly, so something has to ask it.
 
 from __future__ import annotations
 
+import shlex
+
 import pytest
 
 from pathlib import Path
@@ -25,6 +27,7 @@ from assemblyzero.core.recovery_plan import (
     RESUME_COMMANDS,
     build_resume_command,
 )
+from tools import run_requirements_workflow as cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -122,6 +125,105 @@ class TestTheBuiltCommand:
         assert "poetry run python" not in command
         assert "nonesuch" in command
         assert "no resume command is defined" in command
+
+
+class TestABriefRunResumesByItsBrief:
+    """A brief run has no issue number, and `--issue 0` resumes nothing (#4443).
+
+    The tool is asked rather than the string: a command that reads right and
+    fails in argparse is the defect #2663 already found once.
+    """
+
+    BRIEF = "ideas/active/alpha.md"
+
+    def _resume(self, monkeypatch, repo: Path, brief: str) -> str:
+        """Runs the printed command's arguments; returns the brief the run got."""
+        command = build_resume_command(
+            "requirements", 0, {"brief_file": brief, "target_repo": str(repo)}
+        )
+        args = cli.parse_args(shlex.split(command)[4:])
+        (repo / cli.AUDIT_ACTIVE_DIR / "alpha").mkdir(parents=True)
+        seen: dict[str, str] = {}
+
+        def run(run_args, _root, _target) -> int:
+            seen["brief"] = run_args.brief
+            return 0
+
+        monkeypatch.setattr(cli, "checkpoint_exists", lambda _slug: False)
+        monkeypatch.setattr(cli, "run_single_workflow", run)
+
+        assert cli.run_resume_workflow(args, repo, repo) == 0
+        return seen["brief"]
+
+    def test_the_command_names_the_brief_and_no_issue(self) -> None:
+        command = build_resume_command(
+            "requirements", 0, {"brief_file": self.BRIEF, "target_repo": "C:/x/app"}
+        )
+
+        assert command == (
+            "poetry run python tools/run_requirements_workflow.py "
+            f"--type issue --resume {self.BRIEF} --repo C:/x/app"
+        )
+
+    def test_the_tool_takes_the_command_as_a_resume_of_that_brief(self) -> None:
+        command = build_resume_command("requirements", 0, {"brief_file": self.BRIEF})
+
+        args = cli.parse_args(shlex.split(command)[4:])
+
+        assert args.type == "issue"
+        assert args.resume == self.BRIEF
+        assert args.issue is None
+
+    def test_the_tool_resumes_the_brief_the_command_names(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        brief = tmp_path / self.BRIEF
+        brief.parent.mkdir(parents=True)
+        brief.write_text("# alpha\n", encoding="utf-8")
+
+        assert Path(self._resume(monkeypatch, tmp_path, self.BRIEF)) == Path(self.BRIEF)
+
+    def test_a_brief_outside_the_repository_resumes_too(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        repo = tmp_path / "app"
+        repo.mkdir()
+        brief = tmp_path / "notes" / "alpha.md"
+        brief.parent.mkdir()
+        brief.write_text("# alpha\n", encoding="utf-8")
+
+        assert self._resume(monkeypatch, repo, str(brief)) == str(brief)
+
+    def test_a_brief_with_a_space_stays_one_argument(self) -> None:
+        command = build_resume_command(
+            "requirements", 0, {"brief_file": "ideas/active/my notes.md"}
+        )
+
+        args = cli.parse_args(shlex.split(command)[4:])
+
+        assert args.resume == "ideas/active/my notes.md"
+
+    def test_an_issue_number_wins_over_a_brief(self) -> None:
+        """#4443, R2: a run with a number resumes by it, whatever else it holds."""
+        command = build_resume_command(
+            "requirements", 42, {"brief_file": self.BRIEF}
+        )
+
+        assert "--issue 42" in command
+        assert "--resume" not in command
+
+    @pytest.mark.parametrize("workflow", sorted(RESUME_COMMANDS))
+    def test_a_run_with_neither_says_so(self, workflow: str) -> None:
+        command = build_resume_command(workflow, 0, {})
+
+        assert "poetry run python" not in command
+        assert "neither an issue number nor a brief" in command
+
+    def test_only_the_requirements_tool_is_given_a_brief(self) -> None:
+        """Only that tool has `--resume`; the others would refuse the command."""
+        command = build_resume_command("testing", 0, {"brief_file": self.BRIEF})
+
+        assert "poetry run python" not in command
 
 
 class TestThereIsOnlyOneProducer:
