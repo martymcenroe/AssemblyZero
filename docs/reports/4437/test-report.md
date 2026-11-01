@@ -18,3 +18,5 @@ No existing test changed.
 - With the two old behaviours put back by hand (`_lld_decides` and N5's leg list), restored after: 11 of the 24 failed. A plain stash would have failed on the new imports alone and proved nothing.
 - The 29 existing test files that touch framework choice: 967 passed.
 - Integration, e2e and adversarial tiers before the last merge from `main`: 64 passed and 7 skipped; 19 passed; 1 skipped.
+- First full `tests/unit` run: 2 failed, both from `tests/unit/test_fail_open_audit.py`, which called `_gate_only_legs`'s early empty return a vacuous pass. An empty list is N0's own answer, so the function now reads it as data and returns no early answer. The baseline is unchanged.
+- Full `tests/unit` suite through `tools/test-gate.py`, on this branch merged with `main` at `1d7d37c9`: 13497 passed, 66 skipped, 7 deselected, 7 xfailed in 10m 11s.

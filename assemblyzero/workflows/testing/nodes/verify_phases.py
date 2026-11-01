@@ -1508,14 +1508,13 @@ def _gate_only_legs(state: TestingWorkflowState) -> list[_Leg]:
 
     Each is a leg with no test file of this run, which N5 already knows how to
     treat: its whole suite runs at the gate, and it is judged on that suite
-    when the run changed its source (#3087, #4436). A checkpoint from before
-    #4437 has none.
+    when the run changed its source (#3087, #4436). An empty list is N0's own
+    answer that the project has nothing else, and a checkpoint from before
+    #4437 carries none.
     """
-    configs = state.get("gate_only_framework_configs")
-    if not configs:
-        return []
+    configs = state.get("gate_only_framework_configs") or []
     try:
-        described = run_frameworks({"framework_configs": configs})
+        described = run_frameworks({"framework_configs": configs}) if configs else []
     except TestFileOwnershipError as e:
         raise FrameworkLegError(str(e)) from e
     return [_Leg(run.config, run.framework, run.directory, ()) for run in described]
