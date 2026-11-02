@@ -931,6 +931,7 @@ def _pin_revision(
     """``_apply_pinning`` with the whole result, for callers that must say
     why a revision came back unchanged (#4545)."""
     from assemblyzero.workflows.implementation_spec.revision_pinning import (
+        complaint_answers,
         demands_additions,
         enforce_pinning,
         named_tokens,
@@ -960,6 +961,7 @@ def _pin_revision(
         current_ranges=ranges,
         additions_demanded=demands_additions(completeness_issues),
         unlock_reason=unlock_requested(response),
+        complaint=complaint_answers(completeness_issues),
     )
 
     events: list[str] = []
@@ -982,6 +984,11 @@ def _pin_revision(
         events.append(
             f"[PINNING] demanded addition passed: {addition} — this round's "
             f"completeness failures demand new tests (#2560)"
+        )
+    for answer in result.answers:
+        events.append(
+            f"[PINNING] completeness answer passed: {answer} — the revised "
+            f"lines carry what this round's completeness failures name (#4551)"
         )
     if result.conservation_event:
         events.append(

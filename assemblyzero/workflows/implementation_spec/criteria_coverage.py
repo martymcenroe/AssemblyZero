@@ -73,6 +73,20 @@ table, or with untagged rows, passed the gate unverified. And a criteria row
 the check cannot read -- the wrong number of cells, or neither a REQ tag nor an
 ID -- raises ``CriteriaTableError`` naming it, where it used to be skipped and
 the criterion dropped from the count.
+
+A TypeScript test counts as a Python test does (#4551)
+------------------------------------------------------
+
+For a target whose runtime is TypeScript, the honest test of a runtime
+criterion is a Vitest test. The join read only Python ``def test_`` functions,
+so on a real run the reviewer told the drafter to delete Python tautologies
+for eight criteria the spec covered with Vitest tests, the drafter did, and
+this check named the same eight criteria on every revision until the cap. A
+TypeScript ``it`` or ``test`` call the spec carries, in Section 10 or in a
+TypeScript test file Section 6 plans, now joins on the REQ tags it cites, read
+by ``typescript_bodies.spec_typescript_tests`` with the tree-sitter parser the
+TypeScript member check already uses. A test that never runs (``it.todo``,
+``it.skip``) covers nothing.
 """
 
 from __future__ import annotations
@@ -80,6 +94,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from assemblyzero.workflows.implementation_spec import typescript_bodies
 from assemblyzero.workflows.requirements.form_check import (
     _norm,
     parse_tables,
@@ -134,6 +149,7 @@ class CoverageReport:
     criteria: list[Criterion] = field(default_factory=list)
     missing: list[Criterion] = field(default_factory=list)
     test_count: int = 0
+    typescript_count: int = 0  # of test_count, the TypeScript tests (#4551)
     reason: str = ""          # why it did not run, when it did not
 
     @property
@@ -297,14 +313,16 @@ def criteria_coverage(spec: str, lld: str) -> CoverageReport:
             ),
         )
 
-    tests = spec_tests(spec)
+    # #4551: a TypeScript test the spec carries joins exactly as a Python one.
+    typescript = [t.source for t in typescript_bodies.spec_typescript_tests(spec)]
+    sources = [body for _name, body in spec_tests(spec)] + typescript
     tagged_in_spec = {
         f"REQ-{n}"
-        for _name, body in tests
+        for body in sources
         for n in REQ_TAG.findall(body)
     }
 
-    if not tests or not tagged_in_spec:
+    if not sources or not tagged_in_spec:
         # Every criterion is tagged and the spec cites none of them: that is a
         # real, exact miss -- all of them -- not an absence of information.
         return CoverageReport(
@@ -312,7 +330,8 @@ def criteria_coverage(spec: str, lld: str) -> CoverageReport:
             join_mode=MODE_EXACT,
             criteria=criteria,
             missing=list(criteria),
-            test_count=len(tests),
+            test_count=len(sources),
+            typescript_count=len(typescript),
         )
 
     missing = [c for c in criteria if c.key not in tagged_in_spec]
@@ -321,7 +340,8 @@ def criteria_coverage(spec: str, lld: str) -> CoverageReport:
         join_mode=MODE_EXACT,
         criteria=criteria,
         missing=missing,
-        test_count=len(tests),
+        test_count=len(sources),
+        typescript_count=len(typescript),
     )
 
 
@@ -335,9 +355,14 @@ def format_report(report: CoverageReport) -> str:
             f"that cannot run is not a pass (#3585)."
         )
 
+    languages = (
+        f", {report.typescript_count} of them TypeScript"
+        if report.typescript_count else ""
+    )
     head = (
         f"{report.covered}/{len(report.criteria)} LLD pass criteria have a test "
-        f"across {report.test_count} spec test(s) [join {report.join_mode}]"
+        f"across {report.test_count} spec test(s){languages} "
+        f"[join {report.join_mode}]"
     )
     if report.ok:
         return head + "."
@@ -352,4 +377,11 @@ def format_report(report: CoverageReport) -> str:
     for c in report.missing:
         where = f" (row {c.row_id})" if c.row_id else ""
         lines.append(f"  - {c.key}{where}: {c.scenario} -- expected: {c.outcome}")
+    # #4551: the drafter is told what counts, so it does not swap an honest
+    # TypeScript test for a Python one. No backticks and no section number
+    # here: either would add a pinning token that names half the draft.
+    lines.append(
+        "A test covers a criterion when it cites the criterion's REQ tag. A "
+        "Python test function and a TypeScript it or test call both count."
+    )
     return "\n".join(lines)

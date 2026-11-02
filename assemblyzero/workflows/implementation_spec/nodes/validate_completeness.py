@@ -39,6 +39,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
+from assemblyzero.core.errors import GATE_THAT_BLOCKED, RECURRENCE_UNDER_PINNING
 from assemblyzero.workflows.target_env import hook_environment
 from assemblyzero.workflows.implementation_spec.state import (
     CompletenessCheck,
@@ -640,18 +641,45 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                         f"spec."
                     )
                 if reverted:
+                    # #4551: the halt names the gate that blocked progress,
+                    # and its marker gives it a class (halt_node). A
+                    # conservation override refuses a revision entire, so
+                    # the check saw the previous draft. A refusal no longer
+                    # can: pinning passes a revised line that answers the
+                    # round's named complaint, so a refused line answered
+                    # none, and the check saw every line that did. That is
+                    # also why the old "deadlocked" reading is gone.
+                    conserved = [
+                        event for event in reversions
+                        if "[PINNING] CONSERVATION:" in event
+                    ]
+                    if conserved:
+                        blocked = (
+                            f"the conservation gate (spec.conservation_gate), "
+                            f"which refused {len(conserved)} revision(s) "
+                            f"entire for removing tests no verdict named, so "
+                            f"the check was shown the previous draft"
+                        )
+                    else:
+                        blocked = (
+                            f"the completeness check(s) {', '.join(reverted)} "
+                            f"(spec.completeness_cap). Pinning passes a "
+                            f"revised line that carries what the round's "
+                            f"completeness complaints name (#4551), so the "
+                            f"lines it refused answered none of them, and "
+                            f"the check(s) saw every line that did"
+                        )
                     detail += (
-                        f" NOTE: {', '.join(reverted)} drew the IDENTICAL "
+                        f" NOTE {RECURRENCE_UNDER_PINNING}: "
+                        f"{', '.join(reverted)} drew the IDENTICAL "
                         f"complaint on every revision while pinning "
                         f"enforcement reverted revision content in this "
                         f"run ({len(reversions)} refusal(s), e.g. "
                         f"{reversions[0]}). A reverted revision re-presents "
                         f"the previous bytes to the check, so the recurrence "
                         f"cannot be read as the drafter leaving the flagged "
-                        f"content unchanged — the complaint and the pinning "
-                        f"vocabulary are deadlocked (#2555): the check's "
-                        f"complaint must name its target in terms pinning "
-                        f"reads, or the named span must be unlocked."
+                        f"content unchanged (#2555, #2556). "
+                        f"{GATE_THAT_BLOCKED} {blocked}."
                     )
                 if complied:
                     detail += (

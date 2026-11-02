@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.errors import GATE_THAT_BLOCKED
+
 
 # Error types classified as transient (will resolve on their own)
 TRANSIENT_ERROR_TYPES = frozenset({"capacity_exhausted", "quota_exhausted"})
@@ -407,6 +409,28 @@ def _build_recommendation(
             "Non-transient: the implementer spent its iterations and the "
             "suite still fails. Read the failure in the reason and the run's "
             f"last green-phase output before re-running: {error_message[:300]}"
+        )
+    elif error_type == "completeness_recurrence_under_pinning":
+        # #4551: the cap message names the gate that blocked progress; the
+        # recommendation repeats it, because a relaunch replays the same
+        # draft into the same check and the same pinning.
+        message = error_message or ""
+        start = message.find(GATE_THAT_BLOCKED)
+        ends = [
+            at for at in (
+                message.find(" NOTE", start), message.find(" Unfixed:", start),
+            ) if at >= 0
+        ]
+        blocked = (
+            message[start:min(ends) if ends else None].strip()
+            if start >= 0 else f"{GATE_THAT_BLOCKED} not recorded in the halt."
+        )
+        return (
+            "Non-transient: a completeness check drew the same complaint on "
+            "every revision while pinning reverted revision content. "
+            f"{blocked} Read the [PINNING] events and the complaint in the "
+            "halt evidence before a relaunch: a relaunch puts the same draft "
+            "in front of the same check."
         )
     else:
         return f"Workflow {workflow} halted: {error_message[:200]}"

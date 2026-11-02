@@ -27,6 +27,7 @@ from pathlib import Path
 
 from assemblyzero.core import alert as _alert
 from assemblyzero.core.errors import (
+    RECURRENCE_UNDER_PINNING,
     AuthenticationError,
     CapacityError,
     RateLimitError,
@@ -68,6 +69,12 @@ def classify_error(error_message: str) -> str:
     # if they were the workflow's own.
     if "green phase failed after" in msg_lower:
         return "iterations_exhausted"
+    # #4551: a completeness check drew an identical complaint on every
+    # revision while pinning reverted revision content; the message names the
+    # gate that blocked progress. Checked this early because the message
+    # quotes the unresolved complaints, whose words are not the halt's own.
+    if RECURRENCE_UNDER_PINNING.lower() in msg_lower:
+        return "completeness_recurrence_under_pinning"
     # #1899/#1900: a contradiction in the ISSUE's own requirements. Nothing
     # transient about it — no retry, revise cycle, or regenerated spec can
     # satisfy two criteria that specify different outcomes for the same

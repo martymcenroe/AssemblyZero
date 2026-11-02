@@ -34,6 +34,12 @@ This module makes that impossible mechanically:
 * **Demanded additions** (#2560): when the round's completeness failures
   demand new tests, a locked region introducing one passes — a demand to
   add has no line to cite, so the named-content exemptions cannot cover it.
+* **Answers to a named complaint** (#4551): a revised line that carries what
+  the round's completeness failures name (a backticked span, a quoted
+  phrase, a test name, a criterion's REQ tag) answers the complaint, and
+  counts as named the way a line in a block the verdict names does. Naming
+  read only the old lines, so a revision replacing locked lines with the
+  test a failing check asked for was refused.
 
 Iteration 1 (the initial draft) is untouched — this governs revisions only.
 Every function here is pure (ADR 0224): text in, text and events out.
@@ -44,6 +50,8 @@ from __future__ import annotations
 import difflib
 import re
 from dataclasses import dataclass
+
+from assemblyzero.workflows.implementation_spec.criteria_coverage import REQ_TAG
 
 
 class PinningMergeError(RuntimeError):
@@ -111,6 +119,53 @@ def named_line_ranges(completeness_issues: list[str] | None) -> tuple[tuple[int,
             if 1 <= start <= end:
                 ranges.append((start, end))
     return tuple(ranges)
+
+
+# ---------------------------------------------------------------------------
+# Lines that answer a named completeness complaint (#4551)
+# ---------------------------------------------------------------------------
+#
+# Naming reads the PREVIOUS draft: a block is named when a token the round
+# names appears in it. A completeness check that asks for something the draft
+# lacks names a criterion, an exception or a function the old lines need not
+# carry, so the revised lines that answer it could replace locked lines and be
+# refused. On a real TypeScript run, `criteria_have_tests` named the same eight
+# criteria on every revision while pinning refused revision content beside
+# them. A revised line that carries what the complaint names is the answer to
+# it, and counts as named: it is not refused and it is not the regression
+# class, the same rule as a line range a check cites (#2555).
+
+
+@dataclass(frozen=True)
+class ComplaintAnswers:
+    """What this round's completeness failures name, as a revised line can
+    carry it (#4551): the tokens `named_tokens` reads from them, and the
+    criterion keys (``REQ-6``) they list."""
+
+    tokens: frozenset[str] = frozenset()
+    keys: frozenset[str] = frozenset()
+
+    def answered_by(self, lines: list[str]) -> bool:
+        """Whether any of ``lines`` carries a token or cites a key. A key is
+        matched as a tag, so REQ-6 is not answered by REQ-60."""
+        for line in lines:
+            lower = line.lower()
+            if any(token in lower for token in self.tokens):
+                return True
+            if any(f"REQ-{n}" in self.keys for n in REQ_TAG.findall(line)):
+                return True
+        return False
+
+
+def complaint_answers(completeness_issues: list[str] | None) -> ComplaintAnswers:
+    """The answers vocabulary of the round's completeness failures (#4551)."""
+    issues = [str(issue) for issue in completeness_issues or []]
+    return ComplaintAnswers(
+        tokens=frozenset(named_tokens("", issues)),
+        keys=frozenset(
+            f"REQ-{n}" for issue in issues for n in REQ_TAG.findall(issue)
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +434,9 @@ class PinningResult:
     #: Regions passed through as demanded additions (#2560) — a completeness
     #: failure demanded new tests, and the region introduces one.
     additions: tuple[str, ...] = ()
+    #: Locked regions passed through because the revised lines answer a named
+    #: completeness complaint (#4551).
+    answers: tuple[str, ...] = ()
     #: Non-empty when the conservation gate overrode the merge (#2559): the
     #: revision itself removed tests no verdict named, so ``text`` is the
     #: previous draft entire. A merge malfunction raises PinningMergeError
@@ -534,6 +592,7 @@ def enforce_pinning(
     current_ranges: tuple[tuple[int, int], ...] = (),
     additions_demanded: bool = False,
     unlock_reason: str = "",
+    complaint: ComplaintAnswers | None = None,
 ) -> PinningResult:
     """Carry every unnamed span of ``previous`` forward byte-verbatim.
 
@@ -542,6 +601,11 @@ def enforce_pinning(
     attempt recorded as a refusal. Regions that touch any named line pass
     through — restructuring AROUND a named item is the named item's business.
     Insertions pass through: adding is not un-fixing.
+
+    ``complaint`` (#4551) is what the CURRENT completeness failures name
+    (``complaint_answers``). A locked region whose REVISED lines carry it
+    answers a named complaint and counts as named: it passes, it is never a
+    refusal and never the regression class, as a cited line range is not.
 
     ``current_ranges`` (#2555) are the 1-based line spans the CURRENT
     completeness failures cite against ``previous``; they name lines exactly
@@ -600,6 +664,7 @@ def enforce_pinning(
     refusals: list[str] = []
     regressions: list[str] = []
     additions: list[str] = []
+    answers: list[str] = []
     out: list[str] = []
 
     matcher = difflib.SequenceMatcher(None, prev_lines, rev_lines, autojunk=False)
@@ -618,15 +683,27 @@ def enforce_pinning(
         if old_region and new_region and _is_expansion(old_region, new_region):
             out.extend(new_region)
             continue
+        # #4551: revised lines that answer a named completeness complaint
+        # count as named, so they are neither refused nor the regression
+        # class -- the rule a cited line range already has (#2555).
+        answers_complaint = bool(
+            complaint is not None and complaint.answered_by(new_region)
+        )
         # The S2-regression class: this change touches lines NO verdict ever
         # named. Recorded before any restoration decision.
-        if old_region and all(not ever_flags[i] for i in range(i1, i2)):
+        if (
+            old_region and not answers_complaint
+            and all(not ever_flags[i] for i in range(i1, i2))
+        ):
             regressions.append(_preview(old_region, i2 - i1))
         locked = old_region and all(
             not current_flags[i] for i in range(i1, i2)
         )
         if locked and not unlock_reason:
-            if additions_demanded and _introduces_demanded_artifact(
+            if answers_complaint:
+                out.extend(new_region)
+                answers.append(_preview(new_region, j2 - j1))
+            elif additions_demanded and _introduces_demanded_artifact(
                 new_region, prev_test_names
             ):
                 # The demanded compliance: this round's completeness
@@ -664,6 +741,7 @@ def enforce_pinning(
         refusals=tuple(refusals),
         regressions=tuple(regressions),
         additions=tuple(additions),
+        answers=tuple(answers),
         unlock_reason=unlock_reason,
     )
 
