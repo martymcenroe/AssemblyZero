@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from assemblyzero.core.text_sanitizer import strip_emoji
 from typing import Optional
@@ -110,37 +110,79 @@ MIN_ATTEMPT_SECONDS = 20.0
 #: the explicit set of tools the agent may call, and ``commandExecutionPolicy:
 #: off`` turns shell execution off. Both transports run in a fresh temporary
 #: directory, so each call writes this definition there and names the agent on
-#: its command line. Nothing is read from the machine's agy settings and
-#: nothing is deployed anywhere. Proved 2026-09-25: asked to run ``whoami`` and
+#: its command line. The machine's agy settings file plays no part and nothing
+#: is deployed anywhere. Proved 2026-09-25: asked to run ``whoami`` and
 #: write a file, the model answered "I cannot run commands, read or write
 #: files, or reach the network because I have no tools available", in one
-#: turn, with no prompt from agy or Windows, and the call's input fell from
-#: 15,983 tokens to 2,766 because the tool schemas left the prompt.
+#: turn, with no prompt from agy or Windows.
+#:
+#: #4531: the agent takes none of the machine's agy customizations except its
+#: hooks. agy gives a Markdown agent the user's rules, skills, plugins,
+#: subagents and MCP servers unless ``inheritCustomizations: false``, so until
+#: 2026-11-02 every call carried the operator's whole agy rule set
+#: (``~/.gemini/config/AGENTS.md`` and ``rules/*.md``, 51,319 characters) as
+#: ``<user_rules>``, uncached, ahead of the prompt: an empty prompt was billed
+#: 16,079 input tokens and a 2,141-character one 16,687. The tool schemas never
+#: came back; ``tools: []`` held throughout. The switch also drops the machine's
+#: hooks, which are the shell guard's hold on agy, so the definition names the
+#: hooks file again by an absolute path (agy reads ``~/`` there as nothing, and
+#: says nothing). Measured 2026-11-02 with ``tools/agy_agent_probe.py``: empty
+#: 2,126 input tokens, 2,141 characters 2,732, the ``whoami`` request refused in
+#: one turn with no tool call, and the guard's PreInvocation hook still ran.
 AGY_AGENT_NAME = "assemblyzero-text"
-AGY_AGENT_DEFINITION = """---
+AGY_AGENT_DEFINITION_TEMPLATE = """---
 name: assemblyzero-text
 description: AssemblyZero pipeline seat. Answers from the prompt text alone. No tools, no shell, no files, no network.
 mainAgent: true
 subagent: false
 hidden: true
 inheritMcp: false
+inheritCustomizations: false
+hooks:
+  - {hooks_file}
 tools: []
 commandExecutionPolicy: "off"
 ---
 
 You answer from the text you are given and nothing else. You have no tools: you cannot run commands, read or write files, or reach the network, and you never ask for any of them. If the prompt refers to files or attachments, their content is absent; say so in one sentence and answer from what is present.
 """
+#: The machine's agy hooks file, relative to the home of the user agy runs as.
+AGY_HOOKS_RELATIVE = ".gemini/config/hooks.json"
 
 
-def write_text_only_agent(cwd: Path | str) -> Path:
+def _absolute(path: str) -> bool:
+    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
+
+
+def agy_hooks_file(home: str) -> str:
+    """The hooks file under ``home``, the home directory as agy itself sees it."""
+    if not _absolute(home):
+        raise ValueError(f"the home agy runs in must be an absolute path: {home!r}")
+    return home.rstrip("/\\") + "/" + AGY_HOOKS_RELATIVE
+
+
+def agent_definition(hooks_file: str) -> str:
+    """The pipeline's agent definition, naming ``hooks_file`` as its one hooks file (#4531)."""
+    if not _absolute(hooks_file):
+        # Measured 2026-11-02: an entry agy cannot resolve, such as one starting
+        # with ``~/``, is dropped without a word and the guard's hooks never run.
+        raise ValueError(f"the agent's hooks file must be an absolute path: {hooks_file!r}")
+    return AGY_AGENT_DEFINITION_TEMPLATE.format(hooks_file=json.dumps(hooks_file))
+
+
+def write_text_only_agent(cwd: Path | str, hooks_file: str | None = None) -> Path:
     """Write the pipeline's agent definition into ``cwd`` and return its path.
 
     Called inside the temporary directory of every call, before the spawn, so
     ``--agent assemblyzero-text`` resolves to this file and to nothing else.
+    ``hooks_file`` defaults to the one under this process's home, which is the
+    right one when agy runs on this side; a WSL agy passes its own.
     """
+    if hooks_file is None:
+        hooks_file = agy_hooks_file(Path.home().as_posix())
     path = Path(cwd) / ".agents" / "agents" / AGY_AGENT_NAME / "agent.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(AGY_AGENT_DEFINITION, encoding="utf-8")
+    path.write_text(agent_definition(hooks_file), encoding="utf-8")
     return path
 
 
@@ -240,6 +282,34 @@ def _find_wsl_agy() -> Optional[str]:
     if probe.returncode == 0:
         return candidate
     return None
+
+
+@functools.lru_cache(maxsize=1)
+def _wsl_home() -> str:
+    """HOME inside the default WSL distribution, where a WSL agy finds its hooks (#4531).
+
+    Raises when it cannot be read: a call that cannot name the guard's hooks
+    file does not run, because agy would run it without them and say nothing.
+    """
+    wsl = shutil.which("wsl.exe") or shutil.which("wsl")
+    if not wsl:
+        raise RuntimeError("wsl.exe not found, so WSL's HOME cannot be read")
+    try:
+        got = subprocess.run(
+            [wsl, "--exec", "printenv", "HOME"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(
+            f"could not run `{wsl} --exec printenv HOME`: {type(exc).__name__}: {exc}"
+        ) from exc
+    home = got.stdout.strip()
+    if got.returncode != 0 or not home.startswith("/"):
+        raise RuntimeError(
+            f"WSL's HOME could not be read (exit {got.returncode}: "
+            f"{(got.stderr or got.stdout).strip()[:200]!r})"
+        )
+    return home
 
 #: Named in every failure this module hands back to a caller (#2476).
 #:
@@ -559,6 +629,15 @@ class GeminiClient:
             return ["wsl.exe", "--cd", cwd, "--exec", cli[len(AGY_WSL_PREFIX):], *tail]
         return [cli, *tail]
 
+    def _agy_hooks_file(self) -> str:
+        """The machine's agy hooks file, as the agy this client runs reads it (#4531).
+
+        A WSL agy reads it under WSL's HOME, not under the Windows home.
+        """
+        if (self._agy_cli or "").startswith(AGY_WSL_PREFIX):
+            return agy_hooks_file(_wsl_home())
+        return agy_hooks_file(Path.home().as_posix())
+
     def _invoke_via_cli(
         self,
         system_instruction: str,
@@ -644,6 +723,8 @@ class GeminiClient:
         """
         import tempfile
 
+        # #4531: raises when it cannot be named; agy would run without the hooks.
+        hooks_file = self._agy_hooks_file()
         try:
             # #1874: Popen, not subprocess.run. run()'s own timeout kills only
             # the root process on Windows and then drains the pipes with an
@@ -653,7 +734,7 @@ class GeminiClient:
             # temp cwd for a moment; that must not fail the call.
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_cwd:
                 # #3612: the agent this call runs as lives in this directory.
-                write_text_only_agent(tmp_cwd)
+                write_text_only_agent(tmp_cwd, hooks_file)
                 # #4509: stdout goes to a file, so `_AnswerWatcher` can see the
                 # answer while `communicate` waits for the exit.
                 reply_path = Path(tmp_cwd) / AGY_REPLY_FILENAME
@@ -712,6 +793,9 @@ class GeminiClient:
         reply = _agy_json_reply(text)
         if reply is not None and isinstance(reply.get("usage"), dict):
             spent["usage"] = reply["usage"]
+        if reply is not None and reply.get("conversation_id"):
+            # #4531: names agy's own transcript of the call, under its brain/.
+            spent["conversation_id"] = str(reply["conversation_id"])
 
         # #3612: an agent agy could not load means the default agent, with its
         # tools, answered. That is a failed call, whatever the exit status.
