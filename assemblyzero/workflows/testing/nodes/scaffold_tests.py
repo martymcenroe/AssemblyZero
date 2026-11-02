@@ -1526,7 +1526,10 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
                 Path(f).unlink(missing_ok=True)
         else:
             gate_log(f"[N2] {len(existing_test_files)} test files already exist — skipping scaffold")
-            return {}
+            # #4508: on a resume's own pass N2.5 is told nothing was generated.
+            # Any other skip, such as the red phase sending a suite back, is
+            # still measured as a regeneration, which is what bounds that loop.
+            return {"scaffold_reused": True} if state.get("resume_pass") else {}
 
     # #4244: every framework of the run, when there is more than one.
     try:

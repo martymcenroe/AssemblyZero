@@ -25,6 +25,7 @@ from assemblyzero.workflows.testing.framework_detector import (
 from assemblyzero.workflows.testing.runners.base_runner import (
     BaseTestRunner,
     CoverageReportError,
+    LintFailure,
     RunnerError,
     combined_output,
     first_json_object,
@@ -201,7 +202,11 @@ class JestRunner(BaseTestRunner):
                 ) from e
 
     def _has_typecheck_script(self) -> bool:
-        """Whether the project's package.json declares a `typecheck` script.
+        """Whether the project's package.json declares a `typecheck` script."""
+        return self._declares_script("typecheck")
+
+    def _declares_script(self, name: str) -> bool:
+        """Whether the project's package.json declares the script `name`.
 
         No package.json is a project that declares none: False, quietly. A
         package.json that cannot be read, does not parse, or is not an object
@@ -218,7 +223,7 @@ class JestRunner(BaseTestRunner):
         except (OSError, ValueError) as e:
             message = (
                 f"the package.json at {path} cannot be read, so whether the "
-                f"project declares a typecheck script is unknown and its tests "
+                f"project declares a {name} script is unknown and its tests "
                 f"are not run: {type(e).__name__}: {e}"
             )
             loud(message)
@@ -227,12 +232,27 @@ class JestRunner(BaseTestRunner):
         if not isinstance(scripts, dict):
             message = (
                 f"the package.json at {path} is not an object with an object "
-                f"of scripts, so whether the project declares a typecheck "
+                f"of scripts, so whether the project declares a {name} "
                 f"script is unknown and its tests are not run"
             )
             loud(message)
             raise RunnerError(message)
-        return "typecheck" in scripts
+        return name in scripts
+
+    def run_lint(self) -> LintFailure | None:
+        """The project's own `npm run lint`, when package.json declares one
+        (#4523). None when there is no such script or it passes.
+
+        The run's CI runs it, and the green phase did not: a real run passed
+        every step and its PR failed on a `prefer-const` in a test file. A
+        lint that cannot start raises RunnerError, as any command does here.
+        """
+        if not self._declares_script("lint"):
+            return None
+        out, err, code = self._run_subprocess(["npm", "run", "lint"])
+        if code == 0:
+            return None
+        return LintFailure(command="npm run lint", output=combined_output(out, err), exit_code=code)
 
     def run_tests(
         self,

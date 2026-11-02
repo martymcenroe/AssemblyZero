@@ -586,6 +586,20 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         ),
     ),
     Gate(
+        "impl.unrequested_change", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
+        "changed line(s) outside the spec's hunks",
+        decided_in=(
+            f"{_TS}/nodes/implementation/orchestrator.py::_report_unrequested_changes "
+            f"(advisory)"
+        ),
+        created_by="#4522",
+        notes=(
+            "reports and never stops: a spec's hunks are written by a model and "
+            "placed by their context, so a line outside them may still be "
+            "right, and only a person reading the diff can say"
+        ),
+    ),
+    Gate(
         "impl.api_error", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "API error after",
         _s(f"{_TS}/nodes/implementation/orchestrator.py::generate_file_with_retry::raise", 0, 1),

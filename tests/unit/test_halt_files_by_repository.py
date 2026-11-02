@@ -386,7 +386,8 @@ class TestBriefRunsHaveKeysOfTheirOwn:
 
         plan = json.loads(Path(result["recovery_plan_path"]).read_text(encoding="utf-8"))
         assert "--issue 42" in plan["resume_command"]
-        assert "--resume" not in plan["resume_command"]
+        # No brief: #4524's bare `--resume` flag ends the line, with nothing after it.
+        assert plan["resume_command"].split()[-1] == "--resume"
         assert "Issue:     #42" in capsys.readouterr().out
 
     def test_a_brief_runs_evidence_names_the_brief_not_issue_zero(self, tmp_path):

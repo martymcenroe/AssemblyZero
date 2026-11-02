@@ -8,6 +8,7 @@ import logging
 import re
 
 from assemblyzero.workflows.target_env import require_pytest
+from assemblyzero.workflows.testing.audit import pytest_summary_counts
 from assemblyzero.workflows.testing.framework_detector import (
     CoverageType,
     TestFramework,
@@ -108,30 +109,15 @@ class PytestRunner(BaseTestRunner):
             )
             loud(message)
             raise RunnerError(message)
-        passed = 0
-        failed = 0
-        skipped = 0
-        errors = 0
         coverage_percent: float | None = None
 
-        # Try to parse the summary line: "X passed, Y failed, Z skipped"
-        summary_match = re.search(
-            r"(\d+)\s+passed", raw_output
-        )
-        if summary_match:
-            passed = int(summary_match.group(1))
-
-        failed_match = re.search(r"(\d+)\s+failed", raw_output)
-        if failed_match:
-            failed = int(failed_match.group(1))
-
-        skipped_match = re.search(r"(\d+)\s+skipped", raw_output)
-        if skipped_match:
-            skipped = int(skipped_match.group(1))
-
-        error_match = re.search(r"(\d+)\s+error", raw_output)
-        if error_match:
-            errors = int(error_match.group(1))
+        # #4525: pytest's closing line alone, never a count a test's message
+        # happens to print.
+        counts = pytest_summary_counts(raw_output)
+        passed = counts.get("passed", 0)
+        failed = counts.get("failed", 0)
+        skipped = counts.get("skipped", 0)
+        errors = counts.get("errors", 0)
 
         # Try to extract coverage percentage
         cov_match = re.search(r"TOTAL\s+\d+\s+\d+\s+(\d+)%", raw_output)

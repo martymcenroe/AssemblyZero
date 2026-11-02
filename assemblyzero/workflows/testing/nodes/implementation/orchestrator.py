@@ -39,6 +39,7 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.changed_lines import ChangedLinesError, run_base_commit
 from assemblyzero.workflows.testing.circuit_breaker import record_iteration_cost
 from assemblyzero.workflows.testing.framework_detector import TestFramework
 from assemblyzero.workflows.testing.framework_ownership import (
@@ -60,6 +61,7 @@ from .keep_passing_tests import (
     passing_test_names,
     release_spec_twins,
 )
+from .unrequested_changes import spec_hunks, unrequested_lines
 from .parsers import (
     detect_summary_response,
     extract_code_block,
@@ -264,6 +266,7 @@ def generate_file_with_retry(
     system_prompt: str = "",
     repo_root: Path | None = None,
     planned_paths: list[str] | None = None,
+    spec_text: str = "",
 ) -> tuple[str, bool]:
     """Generate code for a single file with retry on validation failure and model routing.
 
@@ -440,6 +443,7 @@ def generate_file_with_retry(
             code, filepath, existing_content,
             repo_root=str(repo_root) if repo_root else "",
             planned_paths=planned_paths,
+            spec_text=spec_text,
         )
 
         # Handle both tuple (valid, error_msg) and bare bool returns
@@ -866,6 +870,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 valid, val_error = validate_code_response(
                     code, fp, repo_root=str(repo_root),
                     planned_paths=planned_paths,
+                    spec_text=lld_content,
                 )
                 if not valid:
                     print(
@@ -1245,6 +1250,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                     system_prompt=stable_system_prompt,
                     repo_root=repo_root,
                     planned_paths=planned_paths,
+                    spec_text=lld_content,
                 )
             # Note: generate_file_with_retry raises ImplementationError on
             # failure, so if we get here, code is valid
@@ -1326,6 +1332,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"\n    Implementation complete: {len(written_paths)} files written")
 
+    # #4522: a Modify file's lines outside the spec's hunks are reported.
+    unrequested = _report_unrequested_changes(
+        state, repo_root, state.get("files_to_modify", []),
+    )
+
     # Issue #460 replaced the scaffold with the implementer's test files. Since
     # #2316 the scaffold is the spec's own suite -- the contract -- and it
     # stays (#2709). One helper decides, so the rule has one home.
@@ -1364,7 +1375,83 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         "test_files": test_files_after,
         "node_costs": node_costs,  # Issue #511
         "nothing_changed": nothing_changed,
+        "unrequested_changes": unrequested,
     }
+
+
+#: What the run does after an unrequested change is reported (#4522).
+UNREQUESTED_CONTINUES = (
+    "The file is written and the run continues; a person reading the diff "
+    "decides whether the change stays."
+)
+
+
+def _report_unrequested_changes(
+    state: TestingWorkflowState, repo_root: Path, files: list[dict],
+) -> dict[str, list[str]]:
+    """Each Modify file's changed lines that the spec's hunks do not cover,
+    against the run's base, said at the advisory and in the audit log (#4522).
+
+    Returns {path: ["line N: text", ...]} for the files that have any. A file
+    the spec gives no diff for, or that the base does not have, is not judged.
+    A base that cannot be found, or a base file git cannot show, raises
+    ChangedLinesError naming it, as N5's coverage gate does on the same base.
+    """
+    hunks = spec_hunks(state.get("lld_content", "") or "")
+    targets = [
+        f["path"] for f in files
+        if str(f.get("change_type", "")).lower() == "modify" and f.get("path") in hunks
+    ]
+    if not targets:
+        return {}
+    base = run_base_commit(
+        repo_root, state.get("base_branch", ""), state.get("base_commit", ""),
+    )
+    found: dict[str, list[str]] = {}
+    for path in targets:
+        target = repo_root / path
+        on_base = subprocess.run(
+            ["git", "cat-file", "-e", f"{base}:{path}"], cwd=str(repo_root),
+            capture_output=True, check=False,
+        )
+        if on_base.returncode != 0 or not target.is_file():
+            continue  # new since the base, or not written: nothing it replaced
+        shown = subprocess.run(
+            ["git", "show", f"{base}:{path}"], cwd=str(repo_root),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False,
+        )
+        if shown.returncode != 0:
+            raise ChangedLinesError(
+                f"git cannot show {path} at the run's base {base[:12]}, so its "
+                f"lines cannot be held against the spec's hunks (#4522): "
+                f"{shown.stderr.strip()}"
+            )
+        lines = unrequested_lines(
+            shown.stdout, target.read_text(encoding="utf-8"), hunks[path],
+        )
+        if not lines:
+            continue
+        found[path] = [f"line {u.line}: {u.text}" for u in lines]
+        named = "; ".join(
+            f"{path} line {u.line} {'removed' if u.kind == 'removed' else 'reads'} {u.text}"
+            for u in lines[:5]
+        )
+        more = f" (and {len(lines) - 5} more)" if len(lines) > 5 else ""
+        print("    [UNREQUESTED] " + advised(
+            "impl.unrequested_change",
+            f"{len(lines)} changed line(s) outside the spec's hunks: {named}{more}.",
+            continues=UNREQUESTED_CONTINUES,
+        ))
+    if found:
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="unrequested_changes",
+            details=found,
+        )
+    return found
 
 
 def merge_test_files(

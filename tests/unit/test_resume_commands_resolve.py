@@ -175,6 +175,30 @@ class TestEveryToolTakesItsCommand:
         assert "--type" not in build_resume_command(workflow, 42, {})
 
 
+class TestAnImplementationResumeSaysResume:
+    """#4524 R3: the testing halt recommended a resume and printed the plain
+    command, which clears the checkpoint and starts again."""
+
+    def test_t3_the_plans_command_names_resume(self) -> None:
+        from assemblyzero.core.recovery_plan import generate_recovery_plan
+
+        plan = generate_recovery_plan(
+            issue_number=42, workflow="testing", stage="N3_verify_red",
+            error_type="unknown", error_message="crashed",
+            state={"original_repo_root": "C:/x/app"},
+        )
+
+        args = _parser_of("testing")(shlex.split(plan.resume_command)[4:])
+        assert args.resume is True
+        assert args.repo == "C:/x/app"
+
+    @pytest.mark.parametrize("workflow", ["implementation_spec", "orchestrator"])
+    def test_tools_without_a_resume_flag_are_not_given_one(self, workflow: str) -> None:
+        """The spec tool resumes by being run again, and the relaunch works out
+        its own stage; neither takes `--resume`."""
+        assert "--resume" not in build_resume_command(workflow, 42, {})
+
+
 class TestABriefRunResumesByItsBrief:
     """A brief run has no issue number, and `--issue 0` resumes nothing (#4443).
 

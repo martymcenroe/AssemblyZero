@@ -409,7 +409,9 @@ def _git_checked(repo: Path, *args: str) -> str:
     return result.stdout
 
 
-def _keep_uncommitted(worktree: Path, keep_root: Path) -> list[str]:
+def _keep_uncommitted(
+    worktree: Path, keep_root: Path, kept: dict[Path, Path] | None = None,
+) -> list[str]:
     """Move every untracked or ignored, non-cache entry out of ``worktree``
     into ``keep_root`` at the same relative path.
 
@@ -418,9 +420,12 @@ def _keep_uncommitted(worktree: Path, keep_root: Path) -> list[str]:
     a lineage directory and the bin. Untracked entries are the checkpoint's
     own exclusions (``.assemblyzero/``, ``data/lineage/``), which no commit
     carries. Returns one line per entry moved; a `git status` that fails is
-    _FinishStopped before anything moves."""
+    _FinishStopped before anything moves. Each move is also recorded in
+    ``kept``, source to destination (#4526)."""
     import shutil
 
+    if kept is None:
+        kept = {}
     moved: list[str] = []
     listing = _git_checked(worktree, "status", "--porcelain", "--ignored")
     for line in listing.splitlines():
@@ -435,6 +440,7 @@ def _keep_uncommitted(worktree: Path, keep_root: Path) -> list[str]:
         dest = keep_root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
+        kept[src] = dest
         moved.append(f"kept: {rel} -> {dest}")
     return moved
 
@@ -547,10 +553,27 @@ def impl_pr_body(issue_number: int, summary: str = "") -> str:
     return body + (f"\n{summary.strip()}\n" if summary.strip() else "")
 
 
+def followed_through_kept(path: str, kept: dict[Path, Path]) -> str:
+    """Where ``path`` is now, after the landing moved what held it aside (#4526).
+
+    `_keep_uncommitted` moves the ignored lineage out of the worktree before
+    the driver runs. When the driver then refuses, the HALT that reports it
+    reads the state's audit_dir, which still named the old place, so it could
+    write neither the halt's evidence nor its contract into the lineage.
+    """
+    if not path:
+        return path
+    target = Path(path)
+    for source, destination in kept.items():
+        if target.is_relative_to(source):
+            return str(destination / target.relative_to(source))
+    return path
+
+
 def finish_standalone_run(
     original_repo_root: Path, worktree_path: Path, issue_number: int,
     base_branch: str, mock: bool, *, scaffold_only: bool = False,
-    pr_summary: str = "",
+    pr_summary: str = "", kept: dict[Path, Path] | None = None,
 ) -> tuple[bool, list[str]]:
     """Bring a SUCCESSFUL standalone run to END_STATE (#3509, #4150).
 
@@ -566,12 +589,15 @@ def finish_standalone_run(
     Returns ``(finished, lines)``: whether the end state was reached, and one
     line per step taken or refused. Never raises for a git or driver refusal;
     the refusal is the line, and the caller halts on ``finished`` False.
+    ``kept``, when given, is filled with each path moved aside and where it
+    went (#4526).
     """
     lines: list[str] = []
     try:
         _finish(
             Path(original_repo_root), Path(worktree_path), issue_number,
             base_branch, mock, scaffold_only, pr_summary, lines,
+            {} if kept is None else kept,
         )
     except _FinishStopped as stop:
         lines.append(str(stop))
@@ -582,6 +608,7 @@ def finish_standalone_run(
 def _finish(
     repo: Path, wt: Path, issue_number: int, base_branch: str, mock: bool,
     scaffold_only: bool, pr_summary: str, lines: list[str],
+    kept: dict[Path, Path],
 ) -> None:
     from datetime import datetime
 
@@ -626,7 +653,7 @@ def _finish(
     keep_root = repo / "data" / "runs-kept" / (
         f"impl-{issue_number}-{datetime.now().strftime('%H%M%S')}"
     )
-    lines += _keep_uncommitted(wt, keep_root)
+    lines += _keep_uncommitted(wt, keep_root, kept)
 
     if mock:
         removed = _git_out(repo, "worktree", "remove", str(wt))
@@ -944,8 +971,9 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--accept-changed-inputs",
         action="store_true",
         help=(
-            "Proceed even when inputs changed since the last halt's resume "
-            "contract (#2570). The acceptance is printed, never silent."
+            "With --resume, proceed even when inputs changed since the last "
+            "halt's resume contract (#2570). The acceptance is printed, never "
+            "silent. A run without --resume is not held to the contract (#4524)."
         ),
     )
     parser.add_argument(
@@ -1433,12 +1461,20 @@ def _main(args: argparse.Namespace):
     # #2570: a resume finds the world the halt described, or refuses by
     # name -- before the worktree is touched and any token is spent. A
     # fresh run has no contract and passes silently.
-    from assemblyzero.core.resume_contract import check_and_consume
+    from assemblyzero.core.resume_contract import check_and_consume, set_aside_contract
 
     # #3508: a dry run consumes nothing either; a verified contract is deleted
     # on the way through, and a dry run must leave the halt's record for the
     # real resume that follows it.
-    if not args.dry_run and not check_and_consume(
+    if args.dry_run:
+        pass
+    elif not args.resume:
+        # #4524: a plain run clears the checkpoint and seeds nothing from the
+        # halt, so it is not held to the halt's contract. It says so.
+        set_aside_contract(
+            "testing", args.issue, repo_root=repo_root, mock=bool(args.mock),
+        )
+    elif not check_and_consume(
         "testing", args.issue,
         # #4292: the repository's own halt files, and a --mock run's apart.
         repo_root=repo_root,
@@ -1754,6 +1790,11 @@ def _main(args: argparse.Namespace):
     if args.sandbox_repo:
         initial_state["sandbox_repo"] = args.sandbox_repo
 
+    # #4508: a resume re-enters the graph at the top. This marks its first
+    # pass, so N2.5 does not read the suite N2 reuses as one it regenerated.
+    if args.resume:
+        initial_state["resume_pass"] = True
+
     # Build workflow
     try:
         workflow = build_testing_workflow()
@@ -1956,11 +1997,13 @@ def _main(args: argparse.Namespace):
             if worktree_path:
                 print()
                 print("[implement] Finishing the run (see --help, 'End state'):")
+                kept: dict[Path, Path] = {}
                 finished, steps = finish_standalone_run(
                     original_repo_root, Path(worktree_path), args.issue,
                     base_branch or "", mock=bool(args.mock),
                     scaffold_only=bool(args.scaffold_only),
                     pr_summary=adversarial_summary(values),
+                    kept=kept,
                 )
                 for step in steps:
                     print(f"[implement]   {step}")
@@ -1972,6 +2015,10 @@ def _main(args: argparse.Namespace):
                         + (steps[-1] if steps else "no step reported why")
                     )
                     print(f"[implement] ERROR: {reason}", file=sys.stderr)
+                    # #4526: the halt writes into the lineage where it now is.
+                    values["audit_dir"] = followed_through_kept(
+                        str(values.get("audit_dir") or ""), kept,
+                    )
                     halt_unfinished_run(values, reason)
                     return _run_failed(reason, values)
 
