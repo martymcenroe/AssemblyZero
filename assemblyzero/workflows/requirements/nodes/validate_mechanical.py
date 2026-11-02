@@ -34,6 +34,9 @@ This node validates LLD content deterministically without LLM calls:
 - Target repo validation (None, empty, non-existent paths are blocking errors)
 - Change type normalization (handles parenthetical suffixes like "Add (Directory)")
 - AST-based import sentinel on existing Python files (findings warn; a crash raises)
+- A requirement naming a concept the target builds at runtime has a file that
+  builds or declares it in Section 2.1 (#4537; the homes come from N0b's
+  ``runtime_homes``)
 """
 
 import logging
@@ -47,6 +50,7 @@ from typing import Any, Dict
 from assemblyzero.core import alert
 from assemblyzero.core.seats import resolve
 from assemblyzero.utils.ast_sentinel import analyze_file as ast_analyze_file
+from assemblyzero.workflows.requirements.runtime_homes import unlanded_requirements
 
 logger = logging.getLogger(__name__)
 
@@ -896,6 +900,41 @@ def validate_decision_table_survives(
         )
     )
     return errors
+
+
+def validate_requirements_land_where_they_run(
+    lld_content: str,
+    files: list[dict],
+    runtime_homes: dict,
+) -> list[ValidationError]:
+    """A requirement about a runtime concept needs a file that builds it (#4537).
+
+    An approved LLD required "the observation generator MUST set `stale:
+    true`" and listed only a new module beside an offline compiler, while the
+    target built the observation in one function of a file the plan never
+    changed. The homes are N0b's: the concepts the issue names that the
+    target declares as types, and the functions that return them. A
+    requirement that names one, while Section 2.1 changes no file that
+    builds or declares it, is refused, naming the requirement and the file
+    that builds it.
+
+    Every requirement is read whatever the homes hold. With none, no
+    requirement names a concept the target builds, so none is refused: N0b
+    found that answer and said it in its log, and this check reaches the same
+    one by reading the requirements, not by skipping them.
+    """
+    from assemblyzero.core.validation.test_plan_validator import extract_requirements
+
+    return [
+        ValidationError(
+            severity=ValidationSeverity.ERROR,
+            section="3",
+            message=message,
+        )
+        for message in unlanded_requirements(
+            list(extract_requirements(lld_content)), files, runtime_homes
+        )
+    ]
 
 
 def validate_mandatory_sections(lld_content: str) -> list[ValidationError]:
@@ -1825,6 +1864,15 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     all_errors.extend(
         validate_decision_table_survives(
             state.get("issue_body", ""), lld_content
+        )
+    )
+
+    # Step 6e (#4537): a requirement about a concept the target builds at
+    # runtime is implemented only by a file that builds it. An approved plan
+    # put such a mechanic in a module the target never runs.
+    all_errors.extend(
+        validate_requirements_land_where_they_run(
+            lld_content, files, state.get("runtime_homes") or {}
         )
     )
 

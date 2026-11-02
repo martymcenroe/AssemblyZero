@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 2.6.0 |
-| **Last Updated** | 2026-02-04 |
+| **Version** | 2.8.0 |
+| **Last Updated** | 2026-11-02 |
 | **Role** | Senior Software Architect & AI Governance Lead |
 | **Purpose** | LLD gatekeeper review before implementation begins |
 | **Standard** | [0010-prompt-schema.md](../standards/0010-prompt-schema.md) |
@@ -62,6 +62,12 @@ OPEN QUESTIONS:
 ## Tier 1: BLOCKING (Must Pass)
 
 These issues PREVENT implementation from starting. Be exhaustive.
+
+### Implementability
+
+| Check | Question |
+|-------|----------|
+| **Requirement → File (CRITICAL)** | For EACH requirement in Section 3, which file listed in Section 2.1 implements it? A requirement that no listed file can implement is BLOCKING: name the requirement and the file in the target where its behaviour runs. A requirement about runtime behaviour (what the running program computes, shows or stores) is implemented only by a file the running program executes; a new module nothing in the target calls implements nothing. Issue #4537. |
 
 ### Cost
 
@@ -185,6 +191,9 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 ## Tier 1: BLOCKING Issues
 {If none, write "No blocking issues found. LLD is approved for implementation."}
 
+### Implementability
+- [ ] {Requirement N: no listed file implements it; its behaviour runs in `path`}
+
 ### Cost
 - [ ] {Issue description + recommendation}
 
@@ -304,6 +313,7 @@ The LLD proposes a batch file cleanup utility but contains critical Safety block
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-11-02 | 2.8.0 | Added Tier 1 Implementability: for each requirement, which listed file implements it; a requirement no listed file can implement is blocking. The review node also appends the draft's own requirements, each with that question. Issue #4537. |
 | 2026-02-28 | 2.7.0 | Removed 5 redundant checks (section existence, path validity, coverage calc, assertion vagueness, human delegation) — all pre-validated by mechanical gates. Added Pre-Validated preamble. Issue #495. |
 | 2026-02-04 | 2.6.0 | Added note that path existence is validated mechanically before Gemini review. Gemini should focus on semantic path correctness. Issue #277. |
 | 2026-02-03 | 2.5.0 | Added Open Questions Protocol. Gemini must answer unchecked questions in Section 1 before approving. Issue #248. |

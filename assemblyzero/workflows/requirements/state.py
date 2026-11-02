@@ -281,6 +281,10 @@ class RequirementsWorkflowState(TypedDict, total=False):
     # Tiphys: real interface surface for the drafter (Issue #1688)
     interface_map: dict
 
+    # #4537: concept -> where the target builds it at runtime (N0b), read by
+    # the drafter, mechanical validation and the reviewer
+    runtime_homes: dict
+
     # Issue #476: API cost budget
     cost_budget_usd: float
 
@@ -415,6 +419,8 @@ def create_initial_state(
         "codebase_context": {},
         # Tiphys: real interface surface (Issue #1688)
         "interface_map": {},
+        # #4537: where the issue's runtime concepts are built
+        "runtime_homes": {},
         # Issue #476: API cost budget
         "cost_budget_usd": 0.0,
         # Issue #486: Halt-and-Plan
