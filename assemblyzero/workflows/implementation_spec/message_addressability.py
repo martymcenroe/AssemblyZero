@@ -37,7 +37,7 @@ from assemblyzero.workflows.implementation_spec.revision_pinning import (
     named_line_ranges,
     named_tokens,
     section_spans,
-    section_token_number,
+    section_token_numbers,
 )
 
 #: The three ways a complaint can stand with respect to enforcement. The
@@ -128,7 +128,8 @@ def addresses_draft(message: str, draft: str) -> Addressability:
 
     A Section reference token addresses the lines of the section whose
     heading carries its number, as pinning resolves it (#4552), and never
-    matches as text.
+    matches as text; a whole plural token addresses each of its items
+    (#4554).
     """
     lines = (draft or "").splitlines()
     total = len(lines)
@@ -143,9 +144,9 @@ def addresses_draft(message: str, draft: str) -> Addressability:
     token_hit = False
     sections: set[tuple[int, ...]] = set()
     for token in tokens:
-        number = section_token_number(token)
-        if number is not None:
-            sections.add(number)
+        numbers = section_token_numbers(token)
+        if numbers:
+            sections.update(numbers)
             continue
         if len(token) < MIN_MATCH_CHARS:
             continue

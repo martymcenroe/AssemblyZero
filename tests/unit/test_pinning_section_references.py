@@ -17,7 +17,9 @@ The same objection came back, and the run spent its cap on it.
   unrelated edit is still refused.
 
 The reference grammar is closed, and ``TestTheReferenceGrammar`` enumerates
-it: each accepted form, and the forms that are not references.
+it: each accepted form, and the forms that are not references. Plurals
+("Sections 3.6 and 5.7") are read by the plural grammar #4554 added, and
+``test_pinning_plural_section_references.py`` enumerates that one.
 """
 
 from __future__ import annotations
@@ -351,8 +353,8 @@ class TestTheReferenceGrammar:
     @pytest.mark.parametrize(
         "text",
         [
-            "Sections 3.6 and 5.7 agree",  # plural
-            "see §§5.1",                    # doubled sign, a plural
+            "Sections 3.6 cover it",        # the plural word, one item (#4554)
+            "see §§5.1",                    # doubled sign, one item (#4554)
             "Section 5.1.2 is wrong",       # three parts
             "Section 5a is wrong",          # runs into a letter
             "Section 5.x is wrong",         # runs into a letter past a dot

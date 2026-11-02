@@ -114,8 +114,9 @@ def named_tokens(feedback: str, completeness_issues: list[str] | None = None) ->
 # | number | one ASCII digit run (N), or two joined by one ``.`` (N.M) | ``6``, ``5.1``, ``10.2`` |
 # | end | the end of the text, or a character that is neither a letter, digit or ``_`` nor a ``.`` followed by one | ``Section 5.1.``, ``Section 6.7's``, ``(Section 10)`` |
 #
-# Anything else is not a reference: a plural (``Sections 3.6 and 5.7``,
-# ``§§5.1``), a number of three parts (``Section 5.1.2``), a number running into a letter
+# Anything else is not a singular reference: a plural (``Sections 3.6 and
+# 5.7``, ``§§5.1 and 5.2``), which the plural grammar below reads (#4554), a
+# number of three parts (``Section 5.1.2``), a number running into a letter
 # (``Section 5a``, ``Section 5.x``), a longer word ending in the marker word
 # (``subsection 5.1``), and any marker word or sign not enumerated above.
 #
@@ -137,6 +138,53 @@ def named_tokens(feedback: str, completeness_issues: list[str] | None = None) ->
 # reads them. A reference whose number no heading carries names nothing, and
 # because it is never read as text, it cannot reach a block that merely
 # mentions the section.
+#
+# Plural references (#4554)
+# -------------------------
+#
+# Reviewers name several sections at once ("Update Sections 5.1 and 6.2 to
+# ..."). The singular grammar reads none of them, so every line under both
+# headings stayed locked and the edit the verdict asked for was refused, as
+# the singular reference once was. A plural names every section a singular
+# reference to each of its items would name, and nothing more: an item no
+# heading carries names nothing, and no item names a test (#2559).
+#
+# The plural grammar is closed. A plural reference is exactly
+# ``<plural marker> <list>``:
+#
+# | part | accepted forms | example |
+# |---|---|---|
+# | plural marker, word | ``sections`` in any letter case, not preceded by a letter, digit or ``_``, then one or more whitespace characters | ``Sections 5.1 and 6.2``, ``SECTIONS 5 and 6`` |
+# | plural marker, sign | ``§§`` not preceded by another ``§``, then optional whitespace | ``§§5.1 and 6.2``, ``§§ 5 and 6`` |
+# | item | a number as the singular grammar reads it, N or N.M, with the same end rule | ``5.1``, ``6``, ``10.2`` |
+# | separator | ``,`` directly after an item, then one or more whitespace characters | ``5.1, 5.2`` |
+# | conjunction | one or more whitespace characters, ``and`` in any letter case, then one or more whitespace characters | ``5.1 and 6.2`` |
+# | list | two or more items: the last two joined by the conjunction, every earlier pair by the separator | ``5.1 and 6.2``, ``5.1, 5.2 and 6.2``, ``5.1, 5.2, 5.3 and 6.2`` |
+# | end | the last item's end, where no separator or conjunction carries the list on to another item | ``Sections 5.1 and 6.2.``, ``Sections 5.1 and 6.2, which`` |
+#
+# Every other plural shape names nothing until it is added here on purpose:
+#
+# | refused shape | example |
+# |---|---|
+# | one item | ``Sections 5.1 cover it`` |
+# | ``or`` | ``Sections 5.1 or 5.2`` |
+# | ``&`` or ``/`` | ``Sections 5.1 & 5.2``, ``Sections 5.1/5.2`` |
+# | a range, by dash or word | ``Sections 5.1-5.3``, ``Sections 5.1–5.3``, ``Sections 5.1 through 5.3``, ``Sections 5.1 to 5.3``, ``§§5.1–5.3`` |
+# | a comma before the ``and`` | ``Sections 5.1, 5.2, and 6.2`` |
+# | separators only | ``Sections 5.1, 5.2`` |
+# | a conjunction between earlier items | ``Sections 5.1 and 5.2 and 6.2`` |
+# | a list carried on past its last pair | ``Sections 5.1 and 5.2, 6.2`` |
+# | a comma with no whitespace after it, or whitespace before it | ``Sections 5.1,5.2 and 6.2``, ``Sections 5.1 , 5.2 and 6.2`` |
+# | an item of three parts, or running into a letter | ``Sections 5.1.2 and 6.2``, ``Sections 5a and 6`` |
+# | a tripled sign | ``§§§5.1 and 6.2`` |
+# | a longer word ending in the plural word | ``subsections 5.1 and 5.2`` |
+# | no whitespace after the plural word | ``Sections5.1 and 6.2`` |
+#
+# Two shapes name less than they seem to, by the rules above. An item that
+# carries its own marker ends the list, and the marked item is read as a
+# singular reference on its own: ``Sections 5.1 and Section 6.2`` names 6.2
+# only. The singular word before a list is a singular reference:
+# ``Section 5.1 and 6.2`` names 5.1 only.
 
 #: The words a reference may open with, compared in lower case.
 SECTION_WORDS: tuple[str, ...] = ("section",)
@@ -144,12 +192,29 @@ SECTION_WORDS: tuple[str, ...] = ("section",)
 SECTION_SIGNS: tuple[str, ...] = ("§",)
 #: How many dot-joined parts a reference's number may have: N or N.M.
 SECTION_REFERENCE_PARTS: tuple[int, ...] = (1, 2)
+#: The words a plural reference may open with, compared in lower case (#4554).
+SECTION_PLURAL_WORDS: tuple[str, ...] = ("sections",)
+#: The signs a plural reference may open with (#4554).
+SECTION_PLURAL_SIGNS: tuple[str, ...] = ("§§",)
+#: What joins a plural's items before its last pair: written directly after
+#: an item, then whitespace (#4554).
+SECTION_LIST_SEPARATORS: tuple[str, ...] = (",",)
+#: What joins a plural's last two items, with whitespace on both sides,
+#: compared in lower case (#4554).
+SECTION_LIST_CONJUNCTIONS: tuple[str, ...] = ("and",)
 
 _ASCII_DIGITS = frozenset("0123456789")
 
 
 def _is_word_char(char: str) -> bool:
     return char.isalnum() or char == "_"
+
+
+def _skip_whitespace(text: str, pos: int) -> int:
+    """The first position at or after ``pos`` that is not whitespace."""
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    return pos
 
 
 def _read_number(text: str, pos: int) -> tuple[tuple[int, ...], int] | None:
@@ -208,7 +273,7 @@ def _read_marker(text: str, pos: int) -> int | None:
         if text[pos:end] != sign:
             continue
         if text[:pos].endswith(SECTION_SIGNS):
-            return None  # a doubled sign is a plural, not a reference
+            return None  # a doubled sign opens a plural, read on its own
         while end < len(text) and text[end].isspace():
             end += 1
         return end
@@ -220,22 +285,128 @@ def _read_reference(text: str, pos: int) -> tuple[tuple[int, ...], int] | None:
     after = _read_marker(text, pos)
     if after is None:
         return None
-    number = _read_number(text, after)
+    return _read_item(text, after)
+
+
+def _read_item(text: str, pos: int) -> tuple[tuple[int, ...], int] | None:
+    """A reference's number starting at ``pos`` (N or N.M) and where it ends."""
+    number = _read_number(text, pos)
     if number is None or len(number[0]) not in SECTION_REFERENCE_PARTS:
         return None
     return number
 
 
+def _read_plural_marker(text: str, pos: int) -> int | None:
+    """Where the first item after a plural marker at ``pos`` starts, or None."""
+    for word in SECTION_PLURAL_WORDS:
+        end = pos + len(word)
+        if text[pos:end].lower() != word:
+            continue
+        if pos > 0 and _is_word_char(text[pos - 1]):
+            return None
+        after = _skip_whitespace(text, end)
+        return after if after > end else None
+    for sign in SECTION_PLURAL_SIGNS:
+        end = pos + len(sign)
+        if text[pos:end] != sign:
+            continue
+        if text[:pos].endswith(SECTION_SIGNS):
+            return None  # a tripled sign is not enumerated
+        return _skip_whitespace(text, end)
+    return None
+
+
+def _read_separator(text: str, pos: int) -> int | None:
+    """Where the next item starts after a separator at ``pos``, or None.
+
+    The separator sits directly after the item it follows, and whitespace
+    follows it.
+    """
+    for separator in SECTION_LIST_SEPARATORS:
+        end = pos + len(separator)
+        if text[pos:end] != separator:
+            continue
+        after = _skip_whitespace(text, end)
+        return after if after > end else None
+    return None
+
+
+def _read_conjunction(text: str, pos: int) -> int | None:
+    """Where the next item starts after a conjunction at ``pos``, or None.
+
+    Whitespace comes before the conjunction and after it.
+    """
+    start = _skip_whitespace(text, pos)
+    if start == pos:
+        return None
+    for conjunction in SECTION_LIST_CONJUNCTIONS:
+        end = start + len(conjunction)
+        if text[start:end].lower() != conjunction:
+            continue
+        after = _skip_whitespace(text, end)
+        return after if after > end else None
+    return None
+
+
+def _read_plural_reference(
+    text: str, pos: int
+) -> tuple[tuple[tuple[int, ...], ...], int] | None:
+    """The item numbers of the plural reference at ``pos`` and where it ends.
+
+    None for every shape the plural grammar does not enumerate: one item,
+    a joiner that is neither the separator nor the conjunction, a list that
+    never reaches its conjunction, a separator or conjunction with no item
+    after it, and a list a joiner carries on past its last pair (#4554).
+    """
+    start = _read_plural_marker(text, pos)
+    if start is None:
+        return None
+    item = _read_item(text, start)
+    if item is None:
+        return None
+    numbers = [item[0]]
+    index = item[1]
+    while True:
+        after = _read_separator(text, index)
+        last = after is None  # no separator: only the conjunction may follow
+        if after is None:
+            after = _read_conjunction(text, index)
+        if after is None:
+            return None
+        item = _read_item(text, after)
+        if item is None:
+            return None
+        numbers.append(item[0])
+        index = item[1]
+        if last:
+            break
+    for joiner in (_read_separator, _read_conjunction):
+        after = joiner(text, index)
+        if after is not None and _read_item(text, after) is not None:
+            return None  # the list carries on past its last pair
+    return tuple(numbers), index
+
+
 def section_references(text: str) -> tuple[tuple[int, ...], ...]:
     """Every section number the text references, in order, each once.
 
-    ``"Update Section 5.1 to match §6.3."`` is ``((5, 1), (6, 3))``.
+    ``"Update Section 5.1 to match §6.3."`` is ``((5, 1), (6, 3))``, and
+    ``"Update Sections 5.1 and 6.2."`` is ``((5, 1), (6, 2))`` (#4554).
     """
     found: list[tuple[int, ...]] = []
-    for pos in range(len(text or "")):
+    text = text or ""
+    for pos in range(len(text)):
+        numbers: tuple[tuple[int, ...], ...] = ()
         reference = _read_reference(text, pos)
-        if reference is not None and reference[0] not in found:
-            found.append(reference[0])
+        if reference is not None:
+            numbers = (reference[0],)
+        else:
+            plural = _read_plural_reference(text, pos)
+            if plural is not None:
+                numbers = plural[0]
+        for number in numbers:
+            if number not in found:
+                found.append(number)
     return tuple(found)
 
 
@@ -256,6 +427,25 @@ def section_token_number(token: str) -> tuple[int, ...] | None:
     if reference is None or reference[1] != len(text):
         return None
     return reference[0]
+
+
+def section_token_numbers(token: str) -> tuple[tuple[int, ...], ...]:
+    """The section numbers a token is, when the whole token is one reference.
+
+    A singular reference is its one number, and a plural (``sections 5.1
+    and 6.2``, quoted or backticked whole) is each of its items (#4554).
+    Every reader that keeps Section tokens away from text matching asks
+    this, so a plural is never matched as text either. A token that merely
+    holds a reference, or holds none, is ``()`` and stays an ordinary token.
+    """
+    text = (token or "").strip()
+    single = section_token_number(text)
+    if single is not None:
+        return (single,)
+    plural = _read_plural_reference(text, 0)
+    if plural is None or plural[1] != len(text):
+        return ()
+    return plural[0]
 
 
 def heading_number(heading: str) -> tuple[int, ...] | None:
@@ -344,15 +534,15 @@ class ComplaintAnswers:
 def complaint_answers(completeness_issues: list[str] | None) -> ComplaintAnswers:
     """The answers vocabulary of the round's completeness failures (#4551).
 
-    A Section reference token is left out (#4552): it names the section's
-    blocks through their heading, and a revised line elsewhere that merely
-    mentions the section answers nothing.
+    A Section reference token is left out (#4552), a plural one included
+    (#4554): it names the section's blocks through their heading, and a
+    revised line elsewhere that merely mentions the section answers nothing.
     """
     issues = [str(issue) for issue in completeness_issues or []]
     return ComplaintAnswers(
         tokens=frozenset(
             token for token in named_tokens("", issues)
-            if section_token_number(token) is None
+            if not section_token_numbers(token)
         ),
         keys=frozenset(
             f"REQ-{n}" for issue in issues for n in REQ_TAG.findall(issue)
@@ -632,10 +822,11 @@ def named_line_flags(
     block for the same reason a token does: restructuring AROUND a named
     item is the named item's business.
 
-    A Section reference token (``section 5.1``) is the exception to text
-    matching (#4552): it names the blocks of the section whose heading
-    carries its number (``section_spans``), and nothing when no heading
-    does. It is never looked for as text, so a block that only mentions
+    A Section reference token (``section 5.1``, or a whole plural such as
+    ``sections 5.1 and 6.2``, #4554) is the exception to text matching
+    (#4552): it names the blocks of each section whose heading carries one
+    of its numbers (``section_spans``), and nothing for a number no heading
+    carries. It is never looked for as text, so a block that only mentions
     the section stays locked.
     """
     lines = draft.splitlines()
@@ -645,11 +836,11 @@ def named_line_flags(
     text_tokens: set[str] = set()
     sections: set[tuple[int, ...]] = set()
     for token in tokens:
-        number = section_token_number(token)
-        if number is None:
-            text_tokens.add(token)
+        numbers = section_token_numbers(token)
+        if numbers:
+            sections.update(numbers)
         else:
-            sections.add(number)
+            text_tokens.add(token)
     spans = section_spans(draft, sections)
     for block in _blocks(draft):
         block_lower = block.text.lower()
@@ -985,7 +1176,7 @@ def enforce_pinning(
     if not unlock_reason:
         text_tokens = {
             token for token in current_tokens
-            if section_token_number(token) is None
+            if not section_token_numbers(token)
         }
         override = _conservation_override(
             previous, revised, text,
