@@ -431,15 +431,26 @@ class TestTheDriverIsCheckedAtStart:
 
 
 class _FakeApp:
-    def __init__(self, values, events, write_work):
+    def __init__(self, values, events, write_work, lineage=False):
         self._values = values
         self._events = events
         self._write_work = write_work
+        self._lineage = lineage
+        self.initial_state: dict = {}
 
     def stream(self, initial_state, config):
+        self.initial_state = dict(initial_state)
         if self._write_work:
             wt = Path(initial_state["worktree_path"])
             (wt / "impl.py").write_text("x = 1\n", encoding="utf-8")
+        if self._lineage:
+            # Where N7 leaves the lineage, in a target that keeps
+            # docs/lineage/ out of git.
+            wt = Path(initial_state["worktree_path"])
+            lineage = wt / "docs" / "lineage" / "done" / "42-testing"
+            lineage.mkdir(parents=True)
+            (lineage / "001-lld.md").write_text("lineage\n", encoding="utf-8")
+            self._values["audit_dir"] = str(lineage)
         for event in self._events:
             if isinstance(event, BaseException):
                 raise event
@@ -450,18 +461,18 @@ class _FakeApp:
 
 
 class _FakeWorkflow:
-    def __init__(self, values, events=(), write_work=True):
-        self._app = _FakeApp(values, list(events), write_work)
+    def __init__(self, values, events=(), write_work=True, lineage=False):
+        self._app = _FakeApp(values, list(events), write_work, lineage)
 
     def compile(self, checkpointer=None):
         return self._app
 
 
-def _run_main(target: Path, tmp_path: Path, workflow) -> tuple[int, str]:
+def _run_main(target: Path, tmp_path: Path, workflow, *extra: str) -> tuple[int, str]:
     from tools import run_implement_from_lld as tool
 
     argv = ["prog", "--issue", "42", "--repo", str(target), "--auto",
-            "--db-path", str(tmp_path / "ckpt.db")]
+            "--db-path", str(tmp_path / "ckpt.db"), *extra]
     out = io.StringIO()
     with patch("sys.argv", argv), redirect_stdout(out), \
          patch("assemblyzero.workflows.testing.build_testing_workflow", return_value=workflow):
@@ -577,3 +588,102 @@ class TestTheRunsOutcome:
 
         assert rc == 1, out
         assert not operator_alerts
+
+
+# --- #4524: only a resume is held to the last halt's contract ---------------
+
+
+def _a_halt_whose_input_changed(target: Path) -> Path:
+    """The contract a halt left, for an input edited since: the normal repair."""
+    from assemblyzero.core import resume_contract as rc
+
+    spec = target.parent / "spec-42.md"
+    spec.write_text("# Spec\n", encoding="utf-8")
+    contract = rc.build_resume_contract(
+        {"issue_number": 42, "repo_root": str(target), "lld_path": str(spec)}, "testing",
+    )
+    path = rc.save_resume_contract(contract, rc.contract_directory(target, False))
+    spec.write_text("# Spec, repaired\n", encoding="utf-8")
+    return path
+
+
+class TestOnlyAResumeIsHeldToTheContract:
+    def test_t1_a_plain_run_after_a_halt_with_changed_inputs_starts(
+        self, target_repo, tmp_path, driver_configured, monkeypatch, operator_alerts,
+    ):
+        """T1 (#4524 R1): it says it set the contract aside, and consumes it."""
+        contract = _a_halt_whose_input_changed(target_repo)
+        monkeypatch.setattr(merge_driver, "land", _Landed())
+
+        rc, out = _run_main(target_repo, tmp_path, _FakeWorkflow(COMPLETED))
+
+        assert rc == 0, out
+        assert "set aside" in out
+        assert "RESUME CONTRACT: the world changed" not in out
+        assert not contract.exists()
+        assert not operator_alerts
+
+    def test_t2_a_resume_with_changed_inputs_refuses_as_before(
+        self, target_repo, tmp_path, driver_configured, monkeypatch, operator_alerts,
+    ):
+        """T2 (#4524 R2)."""
+        contract = _a_halt_whose_input_changed(target_repo)
+        workflow = _FakeWorkflow(COMPLETED)
+
+        rc, out = _run_main(target_repo, tmp_path, workflow, "--resume")
+
+        assert rc == 1, out
+        assert "RESUME CONTRACT: the world changed" in out
+        assert contract.exists()
+        assert not workflow._app.initial_state
+
+    def test_a_plain_run_is_not_marked_as_a_resume(
+        self, target_repo, tmp_path, driver_configured, monkeypatch, operator_alerts,
+    ):
+        """#4508: N2 tells a resume's own pass from any other by this key."""
+        monkeypatch.setattr(merge_driver, "land", _Landed())
+        workflow = _FakeWorkflow(COMPLETED)
+
+        _run_main(target_repo, tmp_path, workflow)
+
+        assert "resume_pass" not in workflow._app.initial_state
+
+    def test_a_resume_is_marked_as_one(
+        self, target_repo, tmp_path, driver_configured, monkeypatch, operator_alerts,
+    ):
+        from tools import run_implement_from_lld as tool
+
+        monkeypatch.setattr(merge_driver, "land", _Landed())
+        monkeypatch.setattr(tool, "resume_checkpoint_refusal", lambda *a: None)
+        workflow = _FakeWorkflow(COMPLETED)
+
+        _run_main(target_repo, tmp_path, workflow, "--resume")
+
+        assert workflow._app.initial_state.get("resume_pass") is True
+
+
+# --- #4526: a halt after the lineage moved still writes its record ----------
+
+
+class TestARefusedLandingKeepsItsRecord:
+    def test_t2_a_driver_refusal_leaves_an_evidence_bundle_and_no_missing_folder_alert(
+        self, target_repo, tmp_path, driver_configured, monkeypatch, operator_alerts,
+    ):
+        """T2 (#4526 R2): the landing moved the ignored lineage aside before the
+        driver refused, so the state's audit_dir named a folder that was gone."""
+        monkeypatch.setattr(merge_driver, "land", _Refused())
+        finished = {**COMPLETED, "repo_root": str(target_repo)}
+
+        rc, out = _run_main(
+            target_repo, tmp_path, _FakeWorkflow(finished, lineage=True),
+        )
+
+        assert rc == 1, out
+        not_written = [a for a in operator_alerts if "not written" in a["what"]]
+        assert not not_written, not_written
+        kept = target_repo / "data" / "runs-kept"
+        evidence = list(kept.rglob("halt-evidence.json"))
+        contracts = list(kept.rglob("resume-contract-testing-42.json"))
+        assert len(evidence) == 1, out
+        assert len(contracts) == 1, out
+        assert (evidence[0].parent / "001-lld.md").is_file()

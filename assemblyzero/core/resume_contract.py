@@ -266,6 +266,63 @@ def _ownership(
     )
 
 
+def set_aside_contract(
+    workflow: str,
+    issue: int | str,
+    *,
+    repo_root: Path | str,
+    mock: bool = False,
+    directory: Path | None = None,
+    log: Callable[[str], None] = print,
+) -> None:
+    """A run that is not a resume sets the last halt's contract aside (#4524).
+
+    The contract constrains resumes, never first runs. A run without
+    ``--resume`` clears the checkpoint database and seeds nothing from the
+    halt, so holding it to the halt's inputs refused the normal repair after a
+    halt, an edited spec, and told the reader a resume had been refused when
+    none was asked for. The contract is consumed and the run says so, because
+    a later ``--resume`` would otherwise be checked against a halt this run
+    has replaced.
+
+    Only this repository's own contract is touched. One written before #4292,
+    in the shared directory, is consumed only when it can be attributed to
+    this repository; any other is left where it is, and said, as
+    ``check_and_consume`` leaves it.
+
+    A contract that cannot be read, attributed or removed raises: a run that
+    went on past it would leave a later ``--resume`` checked against a halt
+    this run replaced. The caller's handler alerts (ADR 0236).
+    """
+    repository = repository_key(repo_root)
+    own_directory = (
+        Path(directory) if directory is not None
+        else contract_directory(repo_root, mock)
+    )
+    paths = [contract_path(workflow, issue, own_directory)]
+    legacy = _unscoped_contract_path(workflow, issue)
+    if directory is None and legacy.exists():
+        owner, detail = _ownership(
+            load_resume_contract(workflow, issue, STATE_DIR) or {},
+            repository, repo_root,
+        )
+        if owner == THIS_REPOSITORY:
+            paths.append(legacy)
+        else:
+            log(
+                f"resume contract: {legacy} is not this repository's ({detail}); "
+                f"it is left where it is"
+            )
+    for path in paths:
+        if not path.exists():
+            continue
+        log(
+            f"resume contract: this run is not a --resume, so the last halt's "
+            f"contract {path} is set aside (#4524)"
+        )
+        path.unlink()
+
+
 def check_and_consume(
     workflow: str,
     issue: int | str,

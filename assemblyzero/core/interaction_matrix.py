@@ -343,9 +343,11 @@ HALT_RESUME = Artifact(
         ),
         key("workflow-runners", "resume-contract"): Cell(
             invariant=(
-                "The runner verifies the contract FIRST and refuses by name "
+                "A resume verifies the contract FIRST and refuses by name "
                 "on any mismatch, before a single token is spent; "
-                "--accept-changed-inputs is the loud, logged override."
+                "--accept-changed-inputs is the loud, logged override. The "
+                "implementation runner's plain run is no resume: it sets the "
+                "contract aside and says so (#4524)."
             ),
             fixture="tests/unit/test_resume_after_ceiling_halt.py",
         ),

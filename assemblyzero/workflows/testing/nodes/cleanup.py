@@ -156,28 +156,35 @@ def cleanup(state: dict[str, Any]) -> dict[str, Any]:
         cleanup_skipped_reason = "No PR URL in state"
         logger.info("[N9] No PR URL — skipping worktree cleanup")
 
-    # === 2. LEARNING SUMMARY (generated in active/ first) ===
+    # === 2. LEARNING SUMMARY (generated where the lineage is) ===
     active_dir = (
         repo_root / "docs" / "lineage" / "active" / f"{issue_number}-testing"
     )
+    # #4526: N7 has normally moved the lineage to done/ already, and the state
+    # names where. Only a lineage still in active/ is left for step 3.
+    lineage_dir = (
+        active_dir if active_dir.exists()
+        else Path(state.get("audit_dir") or active_dir)
+    )
 
-    if active_dir.exists():
+    if lineage_dir.exists():
         try:
             summary_data = build_learning_summary(
-                active_dir, issue_number, outcome, final_coverage, target_coverage
+                lineage_dir, issue_number, outcome, final_coverage, target_coverage
             )
             markdown = render_learning_summary(summary_data)
-            write_learning_summary(active_dir, markdown)
+            write_learning_summary(lineage_dir, markdown)
         except (OSError, LineageReadError) as exc:
             raise _failed(
-                f"the learning summary in {active_dir} could not be built or "
+                f"the learning summary in {lineage_dir} could not be built or "
                 f"written: {type(exc).__name__}: {exc}"
             ) from exc
-        logger.info("[N9] Learning summary written to active/")
+        logger.info("[N9] Learning summary written to %s", lineage_dir)
     else:
-        logger.info("[N9] No active lineage directory found — skipping summary generation")
+        logger.info("[N9] No lineage directory found — skipping summary generation")
 
     # === 3. LINEAGE ARCHIVAL (only if PR merged) ===
+    moved: dict[str, str] = {}
     if active_dir.exists() and pr_merged:
         try:
             done_dir = archive_lineage(repo_root, issue_number)
@@ -192,6 +199,7 @@ def cleanup(state: dict[str, Any]) -> dict[str, Any]:
                 f"there a moment before and is not now"
             )
         learning_summary_path = _posix_path_str(done_dir / "learning-summary.md")
+        moved["audit_dir"] = str(done_dir)  # #4526: the state follows the move
         logger.info("[N9] Lineage archived to done/")
     elif active_dir.exists() and not pr_merged:
         learning_summary_path = _posix_path_str(
@@ -200,12 +208,16 @@ def cleanup(state: dict[str, Any]) -> dict[str, Any]:
         logger.info(
             "[N9] Lineage kept in active/ (PR not merged) — summary available for inspection"
         )
+    elif lineage_dir.exists():
+        learning_summary_path = _posix_path_str(lineage_dir / "learning-summary.md")
+        logger.info("[N9] Lineage already archived by N7: %s", lineage_dir)
     else:
         logger.info("[N9] No lineage directory available — skipping archival")
 
     logger.info("[N9] Cleanup complete")
 
     return {
+        **moved,
         "pr_merged": pr_merged,
         "learning_summary_path": learning_summary_path,
         "cleanup_skipped_reason": cleanup_skipped_reason,

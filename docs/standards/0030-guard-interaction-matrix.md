@@ -104,7 +104,7 @@ What a halt records and a resume reads.
 | halt-node × resume-contract | `test_resume_after_ceiling_halt.py` | Every halt writes a contract, and verification CONSUMES it — a completed lifecycle leaves none behind. |
 | halt-evidence × halt-node | `test_halt_evidence.py` | Every halt emits its bundle, and a bundle that cannot be written never masks the halt it describes. |
 | halt-evidence × resume-contract | **non-interacting** | Both are write-only at halt and read by different readers — the contract by the next launch, the bundle by a human or a report. Neither reads the other's output, and the halt node wraps each in its own fail-open so one cannot suppress the other. |
-| workflow-runners × resume-contract | `test_resume_after_ceiling_halt.py` | The runner verifies the contract FIRST and refuses by name on any mismatch, before a single token is spent; `--accept-changed-inputs` is the loud, logged override. |
+| workflow-runners × resume-contract | `test_resume_after_ceiling_halt.py` | A resume verifies the contract FIRST and refuses by name on any mismatch, before a single token is spent; `--accept-changed-inputs` is the loud, logged override. The implementation runner's plain run is no resume: it sets the contract aside and says so (#4524). |
 | workflow-runners × halt-node | `test_resume_after_failure.py` | A resume seeds from the snapshot the halt wrote, and inherits its counters rather than rediscovering them. |
 | workflow-runners × halt-evidence | **non-interacting** | The bundle is forensic output addressed to a human or a report; no runner reads it, and none should — a resume consulting the bundle would be reading a summary when the contract carries the authoritative hashes. Deliberate asymmetry. |
 
