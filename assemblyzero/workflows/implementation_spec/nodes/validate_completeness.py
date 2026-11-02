@@ -28,8 +28,10 @@ pattern references, no pyproject) stays quiet and says so in its details.
 
 import ast
 import importlib
+import itertools
 import json
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -256,6 +258,27 @@ def _run_checks(
     )
     checks.append(check_spec_fixtures)
     _log_check(check_spec_fixtures)
+
+    # Checks 10d and 10e (#4514): the emitted file goes to the target verbatim
+    # and the implementer may not change it, so a body the target's own lint
+    # refuses, or a tool started from the wrong directory, is a run that
+    # cannot finish. The red phase cannot show either: a real run carried both
+    # through a passing red phase and failed on them only at the green phase.
+    check_spec_lint = check_spec_tests_pass_target_lint(
+        spec_draft, state.get("issue_number", 0), files_to_modify, repo_root_str
+    )
+    checks.append(check_spec_lint)
+    _log_check(check_spec_lint)
+    check_spec_js = check_spec_tests_start_js_tools_in_their_project(
+        spec_draft, state.get("issue_number", 0), files_to_modify, repo_root_str
+    )
+    checks.append(check_spec_js)
+    _log_check(check_spec_js)
+    check_spec_filters = check_spec_tests_name_filters_can_match(
+        spec_draft, state.get("issue_number", 0), files_to_modify
+    )
+    checks.append(check_spec_filters)
+    _log_check(check_spec_filters)
 
     # Check 11: Manifest traceability — every manifest row in exactly one
     # test, every test tracing to a real identifier (Issue #2533). A diff, not
@@ -2659,6 +2682,293 @@ def check_spec_test_fixtures_resolvable(
             "§10 test block, or a fixture from a plugin the repo's pyproject "
             f"declares{declared_note}. Drop the parameter, define the fixture "
             "in §10, or use monkeypatch or unittest.mock instead."
+        ),
+    )
+
+
+class _SpecTestsNotEmittable(Exception):
+    """Section 10 cannot become a test file, so nothing can be proved of it."""
+
+
+def _emitted_spec_tests(
+    suite: dict[str, Any], issue_number: int, files_to_modify: list[dict] | None,
+) -> tuple[str, ast.Module]:
+    """The test file the scaffolder will write, as text and as a tree (#4514)."""
+    from assemblyzero.workflows.testing.nodes.scaffold_tests import (
+        ScaffoldImportError,
+        generate_spec_test_file_content,
+    )
+
+    try:
+        content = generate_spec_test_file_content(suite, issue_number, files_to_modify or [])
+        return content, ast.parse(content)
+    except (ScaffoldImportError, SyntaxError) as exc:
+        raise _SpecTestsNotEmittable(f"Section 10 cannot be scaffolded: {exc}") from exc
+
+
+def _named_finding(line: str, tree: ast.Module) -> str:
+    """A ruff line, naming the test function it falls in (#4514).
+
+    The drafter may change only what a complaint names, so a line number alone
+    would leave it unable to act.
+    """
+    _path, number, _column, rest = line.split(":", 3)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+            node.lineno <= int(number) <= (node.end_lineno or node.lineno)
+        ):
+            return f"`{node.name}`:{rest}"
+    return f"the file's imports or fixtures, line {number}:{rest}"
+
+
+def _target_configures_ruff(repo_root: Path) -> bool:
+    """Whether the target has a ruff configuration of its own (#4514)."""
+    if (repo_root / "ruff.toml").is_file() or (repo_root / ".ruff.toml").is_file():
+        return True
+    pyproject = repo_root / "pyproject.toml"
+    if not pyproject.is_file():
+        return False
+    try:
+        return "ruff" in tomllib.loads(pyproject.read_text(encoding="utf-8")).get("tool", {})
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise CompletenessCannotCheck(
+            f"spec_tests_pass_target_lint cannot read {pyproject}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def check_spec_tests_pass_target_lint(
+    spec: str,
+    issue_number: int = 0,
+    files_to_modify: list[dict] | None = None,
+    repo_root_str: str = "",
+) -> CompletenessCheck:
+    """The emitted test file passes the target's own ruff configuration (#4514).
+
+    Builds the file as the scaffolder will and hands it to ruff on stdin, under
+    the path it will have, so the target's per-file ignores apply and nothing
+    is written. A target with no ruff configuration has no such rule to break.
+    """
+    name = "spec_tests_pass_target_lint"
+    suite = _spec_test_functions(spec)
+    if not suite["functions"]:
+        return CompletenessCheck(
+            check_name="spec_tests_pass_target_lint", passed=True,
+            details="Section 10 carries no executable test functions — check not applicable.",
+        )
+    if not repo_root_str:
+        raise CompletenessCannotCheck(
+            f"{name} was given no repo root, so the target's lint configuration "
+            f"cannot be read"
+        )
+    repo_root = Path(repo_root_str)
+    if not _target_configures_ruff(repo_root):
+        return CompletenessCheck(
+            check_name="spec_tests_pass_target_lint", passed=True,
+            details="The target has no ruff configuration — check not applicable.",
+        )
+    try:
+        content, tree = _emitted_spec_tests(suite, issue_number, files_to_modify)
+    except _SpecTestsNotEmittable as exc:
+        return _failed_check(check_name="spec_tests_pass_target_lint", details=str(exc))
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        raise CompletenessCannotCheck(
+            f"{name}: the target configures ruff and no ruff is on PATH"
+        )
+    result = subprocess.run(
+        [
+            ruff, "check", "--output-format", "concise",
+            "--stdin-filename", f"tests/test_issue_{issue_number}.py", "-",
+        ],
+        input=content, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", cwd=repo_root, check=False,
+    )
+    if result.returncode == 0:
+        return CompletenessCheck(
+            check_name="spec_tests_pass_target_lint", passed=True,
+            details="The emitted test file passes the target's ruff configuration.",
+        )
+    if result.returncode != 1:
+        raise CompletenessCannotCheck(
+            f"{name}: ruff exited {result.returncode}: "
+            f"{(result.stderr or result.stdout).strip()[:300]}"
+        )
+    findings = [
+        _named_finding(line, tree) for line in result.stdout.splitlines()
+        if line.startswith(f"tests/test_issue_{issue_number}.py:")
+    ]
+    return CompletenessCheck(
+        check_name="spec_tests_pass_target_lint", passed=False,
+        details=(
+            f"The test file Section 10 emits fails the target's ruff "
+            f"configuration, and the implementer may not change that file. "
+            f"Repair Section 10's test functions: {'; '.join(findings[:20])}"
+        ),
+    )
+
+
+#: Package managers that need a project's `package.json` beside them (#4514).
+_JS_TOOLS = frozenset({"npm", "npx", "pnpm", "yarn"})
+_SUBPROCESS_STARTERS = frozenset({"Popen", "call", "check_call", "check_output", "run"})
+
+
+def _subprocess_command(call: ast.Call) -> list[ast.expr] | None:
+    """The list a `subprocess` call is given as its command, or None."""
+    func = call.func
+    if not (
+        isinstance(func, ast.Attribute)
+        and func.attr in _SUBPROCESS_STARTERS
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "subprocess"
+    ):
+        return None
+    command = call.args[0] if call.args else None
+    if isinstance(command, ast.List) and command.elts:
+        return command.elts
+    return None
+
+
+def _js_tool_started_without_cwd(call: ast.Call) -> str | None:
+    """The tool a `subprocess` call starts with no `cwd`, or None.
+
+    The tool is a literal, or a variable named for it, the usual result of
+    `npx = shutil.which("npx")`.
+    """
+    command = _subprocess_command(call)
+    if command is None:
+        return None
+    if any(keyword.arg == "cwd" or keyword.arg is None for keyword in call.keywords):
+        return None
+    first = command[0]
+    if isinstance(first, ast.Constant) and first.value in _JS_TOOLS:
+        return str(first.value)
+    if isinstance(first, ast.Name) and first.id in _JS_TOOLS:
+        return first.id
+    return None
+
+
+#: The flags that filter Vitest and Jest by test name, a regular expression.
+_TEST_NAME_FLAGS = frozenset({"--testNamePattern", "-t"})
+#: A bare group with no alternation: `(row 080)` matches `row 080`, so it can
+#: never match a title that holds the parentheses.
+_BARE_GROUP_RE = re.compile(r"(?<!\\)\([^|)]*(?<!\\)\)")
+
+
+def _name_filter_that_matches_nothing(call: ast.Call) -> str | None:
+    """The test-name filter a call passes with a bare group, or None."""
+    command = _subprocess_command(call)
+    if command is None:
+        return None
+    words = [
+        part.value if isinstance(part, ast.Constant) and isinstance(part.value, str) else ""
+        for part in command
+    ]
+    for flag, pattern in itertools.pairwise(words):
+        if flag in _TEST_NAME_FLAGS and _BARE_GROUP_RE.search(pattern):
+            return pattern
+    return None
+
+
+def check_spec_tests_name_filters_can_match(
+    spec: str, issue_number: int = 0, files_to_modify: list[dict] | None = None,
+) -> CompletenessCheck:
+    """A spec test's Vitest filter can match the test it names (#4514).
+
+    The filter is a regular expression and a title's parentheses are literal,
+    so `-t "REQ-5 (row 080)"` matches nothing. Vitest then skips every test
+    and exits 0, and the spec test passes having run none: eight of a real
+    spec's twelve tests could not fail.
+    """
+    suite = _spec_test_functions(spec)
+    if not suite["functions"]:
+        return CompletenessCheck(
+            check_name="spec_tests_name_filters_can_match", passed=True,
+            details="Section 10 carries no executable test functions — check not applicable.",
+        )
+    try:
+        _content, tree = _emitted_spec_tests(suite, issue_number, files_to_modify)
+    except _SpecTestsNotEmittable as exc:
+        return _failed_check(check_name="spec_tests_name_filters_can_match", details=str(exc))
+    found = [
+        f"`{function.name}` filters on {pattern}"
+        for function in tree.body
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for call in ast.walk(function)
+        if isinstance(call, ast.Call)
+        for pattern in [_name_filter_that_matches_nothing(call)]
+        if pattern
+    ]
+    if not found:
+        return CompletenessCheck(
+            check_name="spec_tests_name_filters_can_match", passed=True,
+            details="No spec test filters by a name that cannot match.",
+        )
+    return CompletenessCheck(
+        check_name="spec_tests_name_filters_can_match", passed=False,
+        details=(
+            f"{'; '.join(found)}. The filter is a regular expression, so "
+            f"parentheses in a test title must be escaped, or every test is "
+            f"skipped and the run exits 0 having proved nothing."
+        ),
+    )
+
+
+def check_spec_tests_start_js_tools_in_their_project(
+    spec: str,
+    issue_number: int = 0,
+    files_to_modify: list[dict] | None = None,
+    repo_root_str: str = "",
+) -> CompletenessCheck:
+    """A JavaScript tool a spec test starts runs where its project is (#4514).
+
+    pytest runs from the repository root. A target whose `package.json` is in
+    a subdirectory has no project there, so `npx tsc` with no `cwd` fails on
+    every run, whatever the code does.
+    """
+    name = "spec_tests_start_js_tools_in_their_project"
+    suite = _spec_test_functions(spec)
+    if not suite["functions"]:
+        return CompletenessCheck(
+            check_name="spec_tests_start_js_tools_in_their_project", passed=True,
+            details="Section 10 carries no executable test functions — check not applicable.",
+        )
+    if not repo_root_str:
+        raise CompletenessCannotCheck(
+            f"{name} was given no repo root, so where the target's project "
+            f"lives cannot be read"
+        )
+    if (Path(repo_root_str) / "package.json").is_file():
+        return CompletenessCheck(
+            check_name="spec_tests_start_js_tools_in_their_project", passed=True,
+            details="The target's JavaScript project is at the repository root.",
+        )
+    try:
+        _content, tree = _emitted_spec_tests(suite, issue_number, files_to_modify)
+    except _SpecTestsNotEmittable as exc:
+        return _failed_check(
+            check_name="spec_tests_start_js_tools_in_their_project", details=str(exc),
+        )
+    found = [
+        f"`{function.name}` runs {tool}"
+        for function in tree.body
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for call in ast.walk(function)
+        if isinstance(call, ast.Call)
+        for tool in [_js_tool_started_without_cwd(call)]
+        if tool
+    ]
+    if not found:
+        return CompletenessCheck(
+            check_name="spec_tests_start_js_tools_in_their_project", passed=True,
+            details="No spec test starts a JavaScript tool without naming its directory.",
+        )
+    return CompletenessCheck(
+        check_name="spec_tests_start_js_tools_in_their_project", passed=False,
+        details=(
+            f"{'; '.join(found)} from the repository root, which has no "
+            f"package.json. Pass cwd with the directory that holds the "
+            f"target's JavaScript project."
         ),
     )
 

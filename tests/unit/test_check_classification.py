@@ -85,14 +85,19 @@ class TestTheSweepIsExhaustive:
         two to not-applicable (#2741). The seventeenth checks the keyword
         arguments of calls into existing first-party code against the callee's
         real signature, which boostgauge #2's `Telltale(duration=...)` showed
-        nothing else did (#3755)."""
+        nothing else did (#3755). The eighteenth to twentieth prove the emitted
+        test file can pass at all: its lint, where it starts JavaScript tools,
+        and whether its name filters match anything (#4514)."""
         assert "python_fences_parse" in CLASSIFICATIONS
         assert "function_spec_sections_have_examples" in CLASSIFICATIONS
         assert "spec_test_functions_have_assertions" in CLASSIFICATIONS
         assert "spec_test_fixtures_resolvable" in CLASSIFICATIONS
         assert "section_ten_carries_test_functions" in CLASSIFICATIONS
         assert "call_signatures_match" in CLASSIFICATIONS
-        assert len(CLASSIFICATIONS) == 17
+        assert "spec_tests_pass_target_lint" in CLASSIFICATIONS
+        assert "spec_tests_start_js_tools_in_their_project" in CLASSIFICATIONS
+        assert "spec_tests_name_filters_can_match" in CLASSIFICATIONS
+        assert len(CLASSIFICATIONS) == 20
 
     @pytest.mark.parametrize("name", sorted(CLASSIFICATIONS))
     def test_each_entry_states_what_it_reads_and_why(self, name: str) -> None:

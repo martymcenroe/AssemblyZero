@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core import alert, retry_gate
+from assemblyzero.core.gate_registry import advised
 from assemblyzero.core.llm_provider import get_cumulative_cost
 from assemblyzero.core.retry_mode import is_regeneration
 from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import (
@@ -20,6 +21,7 @@ from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import 
     is_attributed,
     response_is_a_regeneration,
     should_use_edit_script,
+    type_declarations_for,
 )
 from assemblyzero.hooks.file_write_validator import path_advisory
 from assemblyzero.telemetry import emit
@@ -61,6 +63,7 @@ from .keep_passing_tests import (
 from .parsers import (
     detect_summary_response,
     extract_code_block,
+    final_newline_as_before,
     parse_batch_response,
     validate_code_response,
 )
@@ -130,6 +133,39 @@ def _read_or_stop(path: Path, purpose: str) -> str:
         raise
 
 
+#: How much of the failure the stall quotes (#4515).
+_STALL_FAILURE_QUOTE_CHARS = 1500
+
+
+def _nothing_changed(
+    iteration: int, failure: str, declined: list[tuple[str, str]], issue_number: int,
+) -> str:
+    """What a revision that changed no file has to say (#4515, #4514).
+
+    A real run reran an identical tree until its budget was gone, then said
+    only that a test was still failing. The run goes on, because the iteration
+    cap is what ends this loop and a model can answer differently on the next
+    pass (#2723), but this is printed at once and the cap's halt quotes it. A
+    failing test in the spec's suite gets a word of its own: this run cannot
+    change that file, so the spec may be what has to change.
+    """
+    reasons = "; ".join(f"{path}: NO-EDIT: {why}" for path, why in declined)
+    quoted = failure.strip()[:_STALL_FAILURE_QUOTE_CHARS]
+    spec_suite = f"test_issue_{issue_number}.py"
+    points_at_spec = (
+        f" The failure names {spec_suite}, which the spec's Section 10 writes "
+        f"and this run cannot change, so if that test is wrong the spec must "
+        f"change."
+        if issue_number and spec_suite in failure else ""
+    )
+    return (
+        f"N4 changed no file on iteration {iteration}, so the next test run "
+        f"will repeat this failure.{points_at_spec}"
+        + (f" {reasons}." if reasons else "")
+        + f" The failure: {quoted}"
+    )
+
+
 def try_edit_script_fix(
     filepath: str,
     existing_content: str,
@@ -140,6 +176,8 @@ def try_edit_script_fix(
     spec_excerpt: str = "",
     repo: str = "",
     issue: int | None = None,
+    run_files: list[str] | None = None,
+    repo_root: Path | None = None,
 ) -> EditScriptOutcome:
     """One attempt to fix `filepath` with an edit script instead of a rewrite.
 
@@ -158,6 +196,8 @@ def try_edit_script_fix(
         existing_content=existing_content,
         failure_context=scoped,
         spec_excerpt=spec_excerpt,
+        run_files=run_files,
+        type_declarations=type_declarations_for(filepath, scoped, repo_root),
     )
 
     if audit_dir is not None and audit_dir.exists():
@@ -723,6 +763,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     completed_files: list[tuple[str, str]] = []
     written_paths: list[str] = []
 
+    # #4515: whether this iteration changed anything, and what the files that
+    # did not change said. A revision that changes nothing cannot change the
+    # next test run either.
+    files_changed = False
+    declined: list[tuple[str, str]] = []
+    # #4512: every file of the run, before batching divides them.
+    run_files = [spec["path"] for spec in files_to_modify]
+
     # Issue #647: Batch small Haiku-routed files to reduce API calls.
     # Partition files: batchable (Haiku-routed Add files that aren't fast-pathed)
     # vs regular (everything else).
@@ -832,6 +880,13 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 # Write file
                 target_path = repo_root / fp
                 target_path.parent.mkdir(parents=True, exist_ok=True)
+                on_disk = (
+                    _read_or_stop(target_path, "the file a batch reply replaces")
+                    if target_path.is_file() else ""
+                )
+                code = final_newline_as_before(code, on_disk)
+                if code != on_disk:
+                    files_changed = True
                 temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
                 temp_path.write_text(code, encoding="utf-8")
                 temp_path.replace(target_path)
@@ -943,6 +998,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             target = repo_root / filepath
             if target.exists():
                 target.unlink()
+                files_changed = True
                 print("        Deleted")
             continue
 
@@ -1140,9 +1196,13 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 audit_dir=audit_dir if audit_dir.exists() else None,
                 repo=str(repo_root),
                 issue=state.get("issue_number"),
+                run_files=run_files,
+                repo_root=repo_root,
             )
             print(f"        {outcome.describe()}")
             code = outcome.code
+            if outcome.no_edit is not None:
+                declined.append((filepath, outcome.no_edit))
 
             # #2866: a failed patch on a planned TEST file is not a licence to
             # rewrite it. On boostgauge #4 the fallback below regenerated a
@@ -1229,6 +1289,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                     f"passing test(s) as written in {filepath}: {names} (#2905)"
                 )
 
+        on_disk = (
+            _read_or_stop(target_path, "the file this write replaces")
+            if target_path.is_file() else ""
+        )
+        code = final_newline_as_before(code, on_disk)
+        if code != on_disk:
+            files_changed = True
+
         # Write file (atomic: write to temp, then rename)
         temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
         try:
@@ -1247,6 +1315,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         # Add to accumulated context
         completed_files.append((filepath, code))
         written_paths.append(str(target_path))
+
+    nothing_changed = ""
+    if revision_error_context and not files_changed:
+        nothing_changed = _nothing_changed(
+            iteration_count, revision_error_context, declined,
+            state.get("issue_number", 0),
+        )
+        print("    [STAGNANT] " + advised("impl.stagnation.nothing_changed", nothing_changed))
 
     print(f"\n    Implementation complete: {len(written_paths)} files written")
 
@@ -1287,6 +1363,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         "error_message": "",
         "test_files": test_files_after,
         "node_costs": node_costs,  # Issue #511
+        "nothing_changed": nothing_changed,
     }
 
 

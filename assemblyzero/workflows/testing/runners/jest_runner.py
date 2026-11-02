@@ -48,6 +48,10 @@ COVERAGE_SUMMARY = "coverage-summary.json"
 #: judges a run's changed lines by, which a json-summary does not carry (#4436).
 COVERAGE_LINES = "coverage-final.json"
 
+#: How much of one failed test's message reaches the implementer (#4516).
+FAILURE_LINES_PER_TEST = 8
+FAILURE_LINE_CAP = 300
+
 #: Vitest measures coverage through one of these packages (#4246). Closed:
 #: the two providers Vitest ships.
 VITEST_COVERAGE_PROVIDERS: tuple[str, ...] = ("@vitest/coverage-v8", "@vitest/coverage-istanbul")
@@ -388,7 +392,39 @@ class JestRunner(BaseTestRunner):
             "raw_output": shown,
             "exit_code": exit_code,
             "framework": self.config["framework"],
+            "failure_summary": self._failure_summary(report),
         }
+
+    def _failure_summary(self, report: dict) -> str:
+        """Each failed test and why, one unit each (#4516).
+
+        A unit opens at column 0 and its lines are indented, which is how
+        `edit_script_fix` keeps a failure with the file it names. A file that
+        could not load has no test to report, so its own message stands.
+        """
+        units: list[str] = []
+        for suite in report.get("testResults") or []:
+            name = str(suite.get("name") or "")
+            shown = os.path.relpath(name, self.project_dir) if name else "(unnamed file)"
+            failed = [
+                test for test in suite.get("assertionResults") or []
+                if test.get("status") == "failed"
+            ]
+            for test in failed:
+                title = test.get("fullName") or test.get("title") or "(unnamed test)"
+                messages = "\n".join(test.get("failureMessages") or [])
+                units.append(self._failure_unit(f"{shown} > {title}", messages))
+            if not failed and suite.get("status") == "failed":
+                units.append(self._failure_unit(shown, str(suite.get("message") or "")))
+        return "\n\n".join(units)
+
+    @staticmethod
+    def _failure_unit(heading: str, message: str) -> str:
+        lines = [line.strip() for line in message.splitlines() if line.strip()]
+        return "\n".join(
+            [f"FAILED {heading}"]
+            + [f"  {line[:FAILURE_LINE_CAP]}" for line in lines[:FAILURE_LINES_PER_TEST]]
+        )
 
     def _typecheck_failed_result(self, raw_output: str, exit_code: int) -> TestRunResult:
         """The result of a Vitest run whose typecheck failed: one failure and
@@ -408,6 +444,8 @@ class JestRunner(BaseTestRunner):
             "raw_output": raw_output,
             "exit_code": exit_code,
             "framework": self.config["framework"],
+            "failure_summary": raw_output,
+            "typecheck_failed": True,
         }
 
     def validate_test_file(self, file_path: str, content: str) -> list[str]:

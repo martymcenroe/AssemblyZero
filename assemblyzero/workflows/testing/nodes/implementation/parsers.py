@@ -11,6 +11,20 @@ from assemblyzero.telemetry import emit
 from assemblyzero.utils.file_type import get_language_tag
 
 
+def final_newline_as_before(code: str, prior_text: str) -> str:
+    """`code`, ending the way the file it replaces ended (#4513).
+
+    `extract_code_block` strips a reply, so a real run took the final newline
+    off all seven files it modified and failed the target's lint test on them.
+    A file that had none keeps none, since adding one is a change nobody
+    asked for, and a new file ends in a newline.
+    """
+    body = code.rstrip("\n")
+    if prior_text and not prior_text.endswith("\n"):
+        return body
+    return body + "\n" if body else body
+
+
 def extract_code_block(response: str, file_path: str = "") -> str | None:
     """Extract code block content from response.
 

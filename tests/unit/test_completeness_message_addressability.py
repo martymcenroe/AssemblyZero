@@ -441,6 +441,11 @@ class TestTheSweepIsExhaustive:
             "check_criteria_have_tests",
             "check_error_paths_have_tests",
             "check_api_symbols_exist",
+            # #4514: each needs a real target or ruff, as above;
+            # tests/unit/test_green_phase_real_run_defects.py drives them.
+            "check_spec_tests_name_filters_can_match",
+            "check_spec_tests_pass_target_lint",
+            "check_spec_tests_start_js_tools_in_their_project",
         }
         unaccounted = exported - swept - uncovered
         assert not unaccounted, (
@@ -460,6 +465,11 @@ class TestTheSweepIsExhaustive:
             "check_criteria_have_tests",
             "check_error_paths_have_tests",
             "check_api_symbols_exist",
+            # #4514: each needs a real target or ruff, as above;
+            # tests/unit/test_green_phase_real_run_defects.py drives them.
+            "check_spec_tests_name_filters_can_match",
+            "check_spec_tests_pass_target_lint",
+            "check_spec_tests_start_js_tools_in_their_project",
         }
         phantom = uncovered - exported
         assert not phantom, (

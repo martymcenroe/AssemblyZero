@@ -3271,7 +3271,10 @@ def _verify_green_pytest_single(state: TestingWorkflowState) -> dict[str, Any]:
         # Check if we've exhausted iterations
         if iteration_count + 1 >= max_iterations:
             print(f"    [ERROR] Max iterations ({max_iterations}) reached with {failed_count} failures")
-            error_msg = f"Green phase failed after {max_iterations} iterations: {failed_count} tests still failing"
+            error_msg = _with_the_stall(
+                f"Green phase failed after {max_iterations} iterations: {failed_count} tests still failing",
+                state,
+            )
             return {
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
@@ -3989,6 +3992,42 @@ def _full_suite_gate(
     return None
 
 
+def _stop_rank(res: dict[str, Any]) -> int:
+    """Which framework's stop decides the route, lowest first (#4516).
+
+    A halt ends the run whatever the others said. A coverage gap comes last,
+    because tests are not added to code another framework says is failing.
+    Equal ranks keep the frameworks' order.
+    """
+    if res.get("error_message") or res.get("next_node") == "end":
+        return 0
+    if res.get("next_node") == "N4c_augment_tests":
+        return 2
+    return 1
+
+
+def _every_frameworks_failures(stopped: list[dict[str, Any]]) -> dict[str, str]:
+    """What each failing framework said, for N4 and for a halt (#4516).
+
+    A framework with no summary of its own is read from its output, or its
+    failures would vanish beside a framework that has one.
+    """
+    failing = [res for res in stopped if _stop_rank(res) < 2]
+    joined: dict[str, str] = {}
+    summaries = [
+        (res.get("test_failure_summary") or res.get("green_phase_output") or "").strip()
+        for res in failing
+    ]
+    if len(summaries) > 1:
+        joined["test_failure_summary"] = "\n\n".join(s for s in summaries if s)
+    reasons = list(dict.fromkeys(
+        res["error_message"] for res in failing if res.get("error_message")
+    ))
+    if len(reasons) > 1:
+        joined["error_message"] = "; ".join(reasons)
+    return joined
+
+
 @_halts_on_a_failed_step("N5", "green_phase_output")
 def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """N5: Verify all tests pass (TDD green phase).
@@ -3999,7 +4038,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     whole suite at the full-suite gate (#3087). One that cannot run, or a
     test file no framework owns, halts the phase. #3585: so does any step
     under it that raises PhaseStepError. #4437: the gate runs every framework
-    the project has, whichever ones the LLD named.
+    the project has, whichever ones the LLD named. #4516: every framework
+    runs in every green phase, and N4 and a halt hear from all of them.
     """
     gate_log("[N5] Verifying green phase (all tests should pass)...")
 
@@ -4035,6 +4075,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     validated: list[bool] = []
     whole_suite_only: list[_Leg] = []
     merged: dict[str, Any] = {}
+    stopped: list[dict[str, Any]] = []
 
     for leg in legs:
         if multi and not leg.test_files:
@@ -4094,18 +4135,11 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         next_node = res.get("next_node")
 
         if next_node in ("N4_implement_code", "N4c_augment_tests", "end", "N2_scaffold_tests") or res.get("error_message"):
-            merged["green_phase_output"] = aggregated_output
-            merged["file_counter"] = file_counter
-            if next_node == "N2_scaffold_tests" or highest_exit:
-                merged["pytest_exit_code"] = highest_exit
-            if "iteration_count" not in res and iteration_count:
-                merged["iteration_count"] = iteration_count
-            if multi:
-                # An earlier framework's clean gate does not validate the run
-                # while this one fails: only this framework's own result, or
-                # what the state already held, stands (#4236).
-                merged["full_suite_validated"] = res.get("full_suite_validated", already_validated)
-            return merged
+            # #4516: the frameworks after this one still run. Returning here
+            # left a second framework's failures unseen until the first was
+            # green, so a run could spend its whole budget on one of them.
+            stopped.append(res)
+            continue
 
         # #3585 (ledger 0908 line 3310): a framework that passed must say
         # what coverage it reached. A result without the figure used to count
@@ -4127,6 +4161,23 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
         if not final_next_node:
             final_next_node = next_node
+
+    if stopped:
+        route = min(stopped, key=_stop_rank)
+        merged.update(route)
+        merged["green_phase_output"] = aggregated_output
+        merged["file_counter"] = file_counter
+        if route.get("next_node") == "N2_scaffold_tests" or highest_exit:
+            merged["pytest_exit_code"] = highest_exit
+        if "iteration_count" not in route and iteration_count:
+            merged["iteration_count"] = iteration_count
+        if multi:
+            # An earlier framework's clean gate does not validate the run
+            # while this one fails: only this framework's own result, or
+            # what the state already held, stands (#4236).
+            merged["full_suite_validated"] = route.get("full_suite_validated", already_validated)
+            merged.update(_every_frameworks_failures(stopped))
+        return merged
 
     if not any_judged:
         min_coverage = min_unjudged
@@ -4362,6 +4413,20 @@ def _verify_red_non_pytest(
     }
 
 
+def _with_the_stall(message: str, state: TestingWorkflowState) -> str:
+    """The iteration cap's reason, with why N4's last pass changed nothing (#4515)."""
+    stall = state.get("nothing_changed", "")
+    return f"{message}. {stall}" if stall else message
+
+
+def _first_compiler_error(output: str) -> str:
+    """The first line of a typecheck's output that reports an error (#4515)."""
+    for line in output.splitlines():
+        if "error" in line.lower():
+            return line.strip()
+    return output.strip()[:300] or "(no output)"
+
+
 def _verify_green_non_pytest(
     state: TestingWorkflowState,
     framework_config: dict,
@@ -4477,8 +4542,15 @@ def _verify_green_non_pytest(
                 coverage_achieved = verdict.percent
     coverage_judged = verdict is None or verdict.judged
 
-    print(f"    [N5] Results: {passed} passed, {failed} failed | "
-          f"Whole-file coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
+    # #4515: the runner counts a failed typecheck as one failure so the phases
+    # read it as failing, and no test has run behind that count.
+    no_test_ran = bool(result.get("typecheck_failed"))
+    failure_summary = result.get("failure_summary", "")
+    if no_test_ran:
+        print(f"    [N5] Typecheck failed (exit {exit_code}, {framework.value}); no test ran")
+    else:
+        print(f"    [N5] Results: {passed} passed, {failed} failed | "
+              f"Whole-file coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
 
     # #3585 (ledger 0908 line 3592): the runner reports a timeout, a missing
     # command or an OS error as exit -1. That is a crash, never a collection
@@ -4527,13 +4599,19 @@ def _verify_green_non_pytest(
 
     if failed > 0 or errors > 0:
         if iteration_count + 1 >= max_iterations:
-            error_msg = (
-                f"Green phase failed after {max_iterations} iterations: "
-                f"{failed} tests still failing ({framework.value})"
+            still_failing = (
+                f"the typecheck still fails, so no test ran ({framework.value}): "
+                f"{_first_compiler_error(output)}"
+                if no_test_ran else f"{failed} tests still failing ({framework.value})"
+            )
+            error_msg = _with_the_stall(
+                f"Green phase failed after {max_iterations} iterations: {still_failing}",
+                state,
             )
             print(f"    [ERROR] {error_msg}")
             return {
                 "green_phase_output": output,
+                "test_failure_summary": failure_summary,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed,
@@ -4559,6 +4637,7 @@ def _verify_green_non_pytest(
             print(f"    {trip_reason}")
             return {
                 "green_phase_output": output,
+                "test_failure_summary": failure_summary,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed,
@@ -4569,12 +4648,17 @@ def _verify_green_non_pytest(
                 "error_message": trip_reason,
             }
 
+        tests_line = (
+            "Typecheck failed, no test ran" if no_test_ran
+            else f"Tests: {passed}/{passed + failed} passed"
+        )
         print(f"    [N5] Iteration {iteration_count + 1}/{max_iterations} | "
-              f"Tests: {passed}/{passed + failed} passed | "
+              f"{tests_line} | "
               f"Coverage: {coverage_achieved:.1f}% | Target: {coverage_target}%")
 
         return {
             "green_phase_output": output,
+            "test_failure_summary": failure_summary,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
             "previous_passed": passed,

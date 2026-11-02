@@ -64,6 +64,10 @@ def classify_error(error_message: str) -> str:
     msg_lower = error_message.lower()
 
     # Domain-specific classifications first (no HTTP equivalent)
+    # #4517: this quotes a test failure, whose words must not be classified as
+    # if they were the workflow's own.
+    if "green phase failed after" in msg_lower:
+        return "iterations_exhausted"
     # #1899/#1900: a contradiction in the ISSUE's own requirements. Nothing
     # transient about it — no retry, revise cycle, or regenerated spec can
     # satisfy two criteria that specify different outcomes for the same
@@ -427,6 +431,9 @@ def _require_audit_dir(audit_dir: str) -> None:
 
 def _infer_stage(state: dict, workflow_name: str) -> str:
     """Infer which stage the workflow was in when it halted."""
+    # #4517: a workflow that records the node that ran has no need to infer it.
+    if state.get("last_node"):
+        return state["last_node"]
     # Use review_iteration or iteration_count as hints
     if "review_iteration" in state:
         iteration = state.get("review_iteration", 0)

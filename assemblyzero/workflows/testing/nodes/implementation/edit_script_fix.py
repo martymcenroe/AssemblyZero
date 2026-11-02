@@ -65,6 +65,7 @@ fallback (#3585).
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 from pathlib import Path
@@ -432,13 +433,135 @@ def failures_for_file(
     return "\n\n".join(kept)
 
 
+#: TypeScript's own names, which no file declares (#4512).
+_TS_BUILTIN_TYPES = frozenset({
+    "any", "bigint", "boolean", "never", "null", "number", "object", "string",
+    "symbol", "undefined", "unknown", "void",
+})
+_TS_ERROR_LINE_RE = re.compile(r"error TS\d+:.*$", re.MULTILINE)
+_TS_NAMED_TYPE_RE = re.compile(r"\b[Tt]ype '([A-Za-z_$][\w$]*)")
+_TS_RELATIVE_IMPORT_RE = re.compile(r"""\bfrom\s+["'](\.{1,2}/[^"']+)["']""")
+#: How far the search walks, and how much of a declaration a prompt carries.
+_TS_IMPORT_DEPTH = 2
+_TS_DECLARATION_CAP = 3000
+
+
+def type_names_in_failure(failure_context: str) -> list[str]:
+    """The types a TypeScript compiler error names, first seen first (#4512)."""
+    names: list[str] = []
+    for line in _TS_ERROR_LINE_RE.findall(failure_context):
+        for name in _TS_NAMED_TYPE_RE.findall(line):
+            if name not in _TS_BUILTIN_TYPES and name not in names:
+                names.append(name)
+    return names
+
+
+def _imported_ts_files(path: Path, source: str) -> list[Path]:
+    """The files `source` imports by relative path that exist on disk."""
+    found: list[Path] = []
+    for target in _TS_RELATIVE_IMPORT_RE.findall(source):
+        stem = (path.parent / target).resolve()
+        for candidate in (
+            stem, stem.with_suffix(".ts"), Path(f"{stem}.ts"), Path(f"{stem}.tsx"),
+            Path(f"{stem}.d.ts"), stem / "index.ts",
+        ):
+            if candidate.is_file():
+                found.append(candidate)
+                break
+    return found
+
+
+def _ts_declaration(name: str, source: str) -> str | None:
+    """The text of `name`'s interface, type, class or enum in `source`, or None."""
+    opening = re.search(
+        r"^[ \t]*(?:export\s+)?(?:declare\s+)?(?:abstract\s+)?"
+        rf"(interface|type|class|enum)\s+{re.escape(name)}\b",
+        source, re.MULTILINE,
+    )
+    if opening is None:
+        return None
+    depth = 0
+    opened = False
+    for index in range(opening.start(), len(source)):
+        char = source[index]
+        if char == "{":
+            depth, opened = depth + 1, True
+        elif char == "}":
+            depth -= 1
+            if opened and depth == 0:
+                return source[opening.start():index + 1].strip()
+        elif char == ";" and depth == 0 and opening.group(1) == "type":
+            return source[opening.start():index + 1].strip()
+    return source[opening.start():].strip()
+
+
+def type_declarations_for(
+    filepath: str, failure_context: str, repo_root: Path | None,
+) -> str:
+    """The prompt section showing the types a compiler error names (#4512).
+
+    A real run answered `NO-EDIT` until its budget was gone because the error
+    named a type declared in a file the prompt never showed, and the fix was
+    one line in the file it did show. Only the failing file's first-party
+    imports are searched, so a name is never matched against an unrelated
+    file. A type declared in the file itself is in the prompt already, and a
+    type nothing here declares is said to be missing rather than left out.
+    """
+    names = type_names_in_failure(failure_context)
+    if not names or repo_root is None:
+        return ""
+    path = repo_root / filepath
+    if not path.is_file():
+        return ""
+    own_source = path.read_text(encoding="utf-8")
+    sources: dict[Path, str] = {}
+    frontier = [(path, own_source)]
+    for _depth in range(_TS_IMPORT_DEPTH):
+        reached: list[tuple[Path, str]] = []
+        for parent, source in frontier:
+            for imported in _imported_ts_files(parent, source):
+                if imported not in sources and imported != path.resolve():
+                    sources[imported] = imported.read_text(encoding="utf-8")
+                    reached.append((imported, sources[imported]))
+        frontier = reached
+
+    shown: list[str] = []
+    for name in names:
+        if _ts_declaration(name, own_source) is not None:
+            continue
+        for source_path, source in sources.items():
+            declaration = _ts_declaration(name, source)
+            if declaration is not None:
+                where = Path(os.path.relpath(source_path, repo_root)).as_posix()
+                shown.append(
+                    f"`{name}`, declared in {where}:\n\n"
+                    f"```\n{declaration[:_TS_DECLARATION_CAP]}\n```"
+                )
+                break
+        else:
+            shown.append(
+                f"`{name}`: no declaration was found in this file or in the "
+                f"first-party files it imports."
+            )
+    if not shown:
+        return ""
+    return "## TYPES THE COMPILER ERROR NAMES (reference, read-only)\n\n" + "\n\n".join(shown)
+
+
 def build_code_edit_script_prompt(
     filepath: str,
     existing_content: str,
     failure_context: str,
     spec_excerpt: str = "",
+    run_files: list[str] | None = None,
+    type_declarations: str = "",
 ) -> str:
-    """Ask for edits against the current file, not a regeneration of it."""
+    """Ask for edits against the current file, not a regeneration of it.
+
+    #4512: `run_files` are the files this run may change. Without them a model
+    can name any file as the one at fault, and a file outside the run cannot
+    change, so its `NO-EDIT` leaves the failure standing for good.
+    """
     sections: list[str] = [
         f"# Fix Request: {filepath}\n\n"
         "The file below already exists and MOSTLY WORKS. Some tests fail. "
@@ -469,6 +592,18 @@ def build_code_edit_script_prompt(
         "something to say."
     ]
 
+    if run_files:
+        listed = "\n".join(f"- {path}" for path in run_files)
+        sections.append(
+            "## FILES THIS RUN MAY CHANGE\n\n"
+            f"{listed}\n\n"
+            "A file not on this list cannot change in this run. If the failure "
+            "can be repaired in the current file, repair it there, even when "
+            "code in a file not listed looks like a natural place for the "
+            "change. NO-EDIT is only for a fix that belongs in another file "
+            "on this list."
+        )
+
     if failure_context:
         sections.append(
             "## FAILING TESTS TO FIX\n\n"
@@ -476,6 +611,9 @@ def build_code_edit_script_prompt(
             "Read the assertions for the expected behavior. Concentrate on "
             "these; everything else in the file already passes."
         )
+
+    if type_declarations:
+        sections.append(type_declarations)
 
     if spec_excerpt:
         sections.append(f"## SPEC (for reference)\n\n{spec_excerpt}")
