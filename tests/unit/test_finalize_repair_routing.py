@@ -418,7 +418,9 @@ class TestHaltsRatherThanRegenerating:
         self, monkeypatch, approved_state, quiet_finalize
     ):
         blocked = finalize(dict(approved_state))
-        drafter = _Recorder(_edit_block("text that is not in the draft", "x"))
+        # #4503: a block that missed is re-asked once before the halt.
+        miss = _edit_block("text that is not in the draft", "x")
+        drafter = _Recorder(miss, miss)
 
         out = _revise(monkeypatch, blocked, drafter)
 

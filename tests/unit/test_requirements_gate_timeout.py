@@ -283,7 +283,8 @@ class TestItHaltsWhenItCannotRun:
 
         update = analyze_requirements(_state(tmp_path))
 
-        assert "unparseable" in update.get("requirements_unverified", "")
+        # #4485: it says which failure, where it said "unparseable" for all three.
+        assert "not JSON" in update.get("requirements_unverified", "")
 
     def test_an_invalid_provider_halts_without_waiting(
         self, tmp_path, monkeypatch, slept

@@ -331,7 +331,9 @@ def _is_readable(finding: dict) -> bool:
     return bool(category or _first_str(finding, ("term",)))
 
 
-def _parse_analysis(raw: str, unreadable: list[dict] | None = None) -> dict | None:
+def _parse_analysis(
+    raw: str, unreadable: list[dict] | None = None, why: list[str] | None = None,
+) -> dict | None:
     """Parse the analysis JSON, tolerating fenced or prefixed output and, since
     #2830, a response that carries the findings under another key or at the
     root, with the two criteria and the diverging situation under other names.
@@ -347,17 +349,38 @@ def _parse_analysis(raw: str, unreadable: list[dict] | None = None) -> dict | No
     (`_is_readable`): it used to become a note, with the same result, and it
     goes into ``unreadable`` as the model wrote it, for the halt to quote. Every
     caller treats None as no verdict and retries, then halts unverified.
+
+    #4485: ``why``, when given, receives the reason for a None in the
+    operator's words, so the halt can tell an answer that is not JSON from
+    valid JSON the gate cannot use.
     """
     if not raw:
         return None
     try:
         parsed = json.loads(_strip_fence(raw))
     except ValueError:
+        if why is not None:
+            why.append(f"the answer is not JSON: {raw.strip()[:120]!r}")
         return None
     findings = _findings_of(parsed)
     if findings is None:
+        if why is not None:
+            if isinstance(parsed, dict):
+                keys = ", ".join(sorted(str(key) for key in parsed)) or "none"
+                why.append(
+                    "the answer is valid JSON the gate cannot use: it carries no "
+                    f"list of findings; its top-level keys are {keys}"
+                )
+            else:
+                why.append(
+                    "the answer is valid JSON the gate cannot use: a JSON "
+                    f"{type(parsed).__name__} where an object or a list of "
+                    "findings was asked for"
+                )
         return None
     if not all(isinstance(item, dict) for item in findings):
+        if why is not None:
+            why.append("the answer is valid JSON the gate cannot use: a finding is not an object")
         return None
     conflicts: list[dict] = []
     notes: list[dict] = []
@@ -447,16 +470,26 @@ def _verdict_of(result: Any) -> dict | None:
     return parsed
 
 
+def _call_failed(result: Any) -> bool:
+    """No answer came back at all, as opposed to one the gate cannot use (#4485)."""
+    return not getattr(result, "success", False) or not getattr(result, "response", "")
+
+
 def _no_verdict_reason(result: Any) -> str:
     """Why this attempt produced no verdict, in the operator's words.
 
     One function so the backoff loop, the halt message and the log line cannot
-    disagree about which of the two failures happened.
+    disagree about which failure happened. #4485: a call that failed, an answer
+    that is not JSON, and valid JSON the gate cannot use are three different
+    facts. All six answers behind #4483 were valid JSON, and each was reported
+    as "unparseable".
     """
-    if not getattr(result, "success", False) or not getattr(result, "response", ""):
-        return getattr(result, "error_message", "") or "empty response"
+    if _call_failed(result):
+        error = getattr(result, "error_message", "") or ""
+        return f"the call failed: {error}" if error else "the call returned an empty response"
     unreadable: list[dict] = []
-    parsed = _parse_analysis(result.response, unreadable)
+    why: list[str] = []
+    parsed = _parse_analysis(result.response, unreadable, why)
     if unreadable:
         return (
             "the analysis reported a finding the gate cannot read: "
@@ -464,11 +497,22 @@ def _no_verdict_reason(result: Any) -> str:
         )
     if parsed is not None:
         return "the analysis said the requirements are inconsistent and named no conflict"
-    return "the analysis response was unparseable"
+    return why[0] if why else "the answer is valid JSON the gate cannot use"
+
+
+def _recording_line() -> str:
+    """Where the answers the gate got are recorded, or that they are not (#4485)."""
+    from assemblyzero.core import call_recording
+
+    if call_recording.recording_is_armed():
+        path = call_recording.calls_path(call_recording.current_context().audit_dir)
+        return f"  Answers: recorded in {path}\n"
+    return "  Answers: no recording exists; this run was not recording its calls.\n"
 
 
 def _halt_unverified(
-    state: dict, answered_by: str, reason: str, *, retried: bool = True
+    state: dict, answered_by: str, reason: str, *, retried: bool = True,
+    waited: int | None = None, storm_seen: bool = False,
 ) -> dict[str, Any]:
     """Stop the run because the gate could not run (#2474).
 
@@ -479,13 +523,18 @@ def _halt_unverified(
 
     ``retried`` is False for a halt that no wait could change (an invalid seat,
     an empty body, an answer that states no divergence); the message then says
-    so rather than claim a backoff that never ran (#3585).
+    so rather than claim a backoff that never ran (#3585). ``waited`` is the
+    seconds of backoff the retries actually spent (#4485: a resample waits for
+    nothing), and ``storm_seen`` whether the storm detector reported a storm
+    during the attempts, which is the only case the recovery text names one.
     """
     repo = state.get("target_repo") or "<repo>"
     issue = state.get("issue_number") or "<N>"
+    retries = len(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)
+    if waited is None:
+        waited = sum(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)
     attempts = (
-        f"  Attempts: 1 + {len(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)} retries "
-        f"over {sum(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)}s of backoff.\n"
+        f"  Attempts: 1 + {retries} retries over {waited}s of backoff.\n"
         if retried else
         "  Attempts: not retried; waiting would not change this.\n"
     )
@@ -497,6 +546,7 @@ def _halt_unverified(
         f"  Gate model: {answered_by}\n"
         f"  Why: {reason}\n"
         f"{attempts}"
+        f"{_recording_line()}"
         f"  The run stopped here rather than spend drafter budget against "
         f"unverified requirements (#2474).\n"
         f"  Resume: poetry run python tools/check_requirements.py --repo {repo} "
@@ -504,7 +554,11 @@ def _halt_unverified(
         f"  Then relaunch the roll once the gate returns a verdict."
     )
     print(f"  [N0c] {message}")
-    return {"error_message": message, "requirements_unverified": reason}
+    return {
+        "error_message": message,
+        "requirements_unverified": reason,
+        "requirements_storm_seen": storm_seen,
+    }
 
 
 #: A heading that opens the issue's provenance section -- the dated log of
@@ -694,34 +748,53 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
             )
         result = _invoke(provider)
 
-    # #2474: no verdict is a halt condition, not a warning -- but not before a
-    # backoff, because the outage that prompted this ruling cleared on its own
-    # within minutes. Unreachable and unparseable share this path because they
-    # are the same fact from the graph's side ("no verdict"), and because both
-    # are plausibly transient: one is the transport, the other is a sample. What
+    # #2474: no verdict is a halt condition, not a warning -- but not before
+    # the attempts below, because the outage that prompted this ruling cleared
+    # on its own within minutes. Unreachable and unusable share this path
+    # because they are the same fact from the graph's side ("no verdict"). What
     # they must NOT share is the verified-clean return value, which is the
     # collapse #2474 is about.
+    #
+    # #4485: what they also must not share is the wait. A failed call waits out
+    # the backoff, because a transport can recover. An answer the gate cannot
+    # use is a sample, and on the record a wait does not change it: in both real
+    # runs behind #4483 the same shape came back three times, four minutes
+    # apart. So it is resampled at once, and called a resample, never a
+    # capacity event. A storm is named only when the detector reports one.
     parsed = _verdict_of(result)
     if parsed is None:
         # #2375: every line below names the model. "The gate did not answer" and
         # "the gate did not answer ON SONNET" are different facts, and only the
         # second tells the next reader whether escalating is worth trying.
         reason = _no_verdict_reason(result)
+        storm_seen = _provider_storm_active()
+        waited = 0
+        retries = len(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)
         for attempt, delay in enumerate(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS, 1):
-            print(
-                f"  [N0c] no verdict on {answered_by} ({reason}); waiting {delay}s "
-                f"before retry {attempt} of "
-                f"{len(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)} (#2474)."
-            )
-            _sleep(delay)
+            if _call_failed(result):
+                print(
+                    f"  [N0c] no verdict on {answered_by} ({reason}); waiting {delay}s "
+                    f"before retry {attempt} of {retries} (#2474)."
+                )
+                _sleep(delay)
+                waited += delay
+            else:
+                print(
+                    f"  [N0c] no verdict on {answered_by} ({reason}); resampling "
+                    f"now, retry {attempt} of {retries}: the answer came back and "
+                    f"the gate cannot use it, so waiting would not change it (#4485)."
+                )
             result = _invoke(provider)
             parsed = _verdict_of(result)
+            storm_seen = storm_seen or _provider_storm_active()
             if parsed is not None:
                 print(f"  [N0c] the retry reached a verdict on {answered_by}.")
                 break
             reason = _no_verdict_reason(result)
         if parsed is None:
-            return _halt_unverified(state, answered_by, reason)
+            return _halt_unverified(
+                state, answered_by, reason, waited=waited, storm_seen=storm_seen,
+            )
 
     conflicts = parsed.get("conflicts") or []
     # #2830: a finding that quotes fewer than two criteria is not a conflict

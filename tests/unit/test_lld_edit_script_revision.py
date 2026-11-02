@@ -282,19 +282,23 @@ class TestNeverRedraws:
     def test_unmatched_search_halts_rather_than_redrawing(
         self, monkeypatch, lld_state
     ):
-        drafter = _Recorder(_edit_block("text that is not in the draft", "x"))
+        # #4503: a block that missed is re-asked once, as an edit script.
+        miss = _edit_block("text that is not in the draft", "x")
+        drafter = _Recorder(miss, miss)
 
         out = _run(monkeypatch, lld_state, drafter)
 
         assert "current_draft" not in out
         assert "SEARCH text not found" in out["error_message"]
-        assert len(drafter.calls) == 1
+        assert len(drafter.calls) == 2
+        assert all("precision patch engine" in c["system_prompt"] for c in drafter.calls)
 
     def test_ambiguous_search_halts(self, monkeypatch, lld_state, draft_003):
         repeated = "| Risk | Impact |"
         state = dict(lld_state)
         state["current_draft"] = f"## 1. A\n\n{repeated}\n\n{repeated}\n"
-        drafter = _Recorder(_edit_block(repeated, "changed"))
+        ambiguous = _edit_block(repeated, "changed")
+        drafter = _Recorder(ambiguous, ambiguous)
 
         out = _run(monkeypatch, state, drafter)
 

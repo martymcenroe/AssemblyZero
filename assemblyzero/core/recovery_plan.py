@@ -350,18 +350,45 @@ def _build_recommendation(
             "Check that agy is signed in to the subscription."
         )
     elif error_type == "requirements_unverified":
-        # #2474: deliberately not filed as transient even though the usual
-        # cause is. A transient classification tells the launcher it may retry
-        # on its own, and the point of this halt is that a human learns the
+        # #2474: deliberately not filed as transient, even when a storm caused
+        # it. A transient classification tells the launcher it may retry on
+        # its own, and the point of this halt is that a human learns the
         # requirements were never checked before anything spends again.
+        # #4485: a storm is named only when the detector reported one during
+        # the gate's attempts. Otherwise the cause is in the answers, and this
+        # text blamed a storm under a halt that printed `Transient: No`.
+        if (state or {}).get("requirements_storm_seen"):
+            cause = (
+                "The storm detector reported a capacity storm during the "
+                "attempts, and the gate waited it out across its backoff and "
+                "still got nothing."
+            )
+        else:
+            cause = (
+                "The cause is in what came back: read the reason above, and "
+                "the recorded answers where the halt says they are."
+            )
         return (
             "Non-transient: the requirements gate never reached a verdict, so "
             "NOTHING about the issue text was checked -- this is not a clean "
-            "check and not a conflict (#2474). The usual cause is a transient "
-            "capacity storm, and the gate already waited it out across its "
-            "backoff and still got nothing. Re-run the gate on its own with "
-            "tools/check_requirements.py --repo <repo> --issue <N>; relaunch "
-            "the roll only once that returns a verdict."
+            f"check and not a conflict (#2474). {cause} Re-run the gate on its "
+            "own with tools/check_requirements.py --repo <repo> --issue <N>; "
+            "relaunch the roll only once that returns a verdict."
+        )
+    elif error_type == "edit_script_rejected":
+        # #4503: the halt used to say a relaunch resumes this stage. For the
+        # LLD it drafts again from the start, and the line below says so.
+        relaunch = (
+            "There is no resume from this point: the command below drafts the "
+            "LLD again from the start, and asks before it moves this lineage "
+            "to its -n1 copy (--yes answers YES)."
+            if workflow == "requirements" else
+            "Run the command below to try the stage again."
+        )
+        return (
+            "Non-transient: the drafter's revision could not be applied as "
+            "SEARCH/REPLACE edits, and the prior draft is unchanged. "
+            f"{relaunch} Reason: {error_message[:300]}"
         )
     elif error_type == "requirements_conflict":
         return (

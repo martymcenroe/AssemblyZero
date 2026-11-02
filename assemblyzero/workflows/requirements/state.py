@@ -247,6 +247,9 @@ class RequirementsWorkflowState(TypedDict, total=False):
     # against unverified requirements. Carries the reason; routing keys on
     # presence.
     requirements_unverified: str
+    # #4485: whether the storm detector reported a capacity storm during the
+    # gate's attempts. The recovery text names a storm only when it did.
+    requirements_storm_seen: bool
 
     # Mechanical validation (Issue #277)
     validation_errors: list[str]
