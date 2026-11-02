@@ -52,6 +52,7 @@ from assemblyzero.workflows.implementation_spec.base_tree import (
     exists_on_base,
     read_from_base,
 )
+from assemblyzero.workflows.implementation_spec import typescript_bodies
 from assemblyzero.workflows.implementation_spec.check_classification import (
     advisory_details,
     is_proxy,
@@ -279,6 +280,13 @@ def _run_checks(
     )
     checks.append(check_spec_filters)
     _log_check(check_spec_filters)
+    # Check 10f (#4519): a TypeScript test body reads only members its types
+    # have, where the type is one the plan leaves as it is.
+    check_spec_ts = check_spec_typescript_tests_read_real_members(
+        spec_draft, files_to_modify, repo_root_str
+    )
+    checks.append(check_spec_ts)
+    _log_check(check_spec_ts)
 
     # Check 11: Manifest traceability — every manifest row in exactly one
     # test, every test tracing to a real identifier (Issue #2533). A diff, not
@@ -2969,6 +2977,103 @@ def check_spec_tests_start_js_tools_in_their_project(
             f"{'; '.join(found)} from the repository root, which has no "
             f"package.json. Pass cwd with the directory that holds the "
             f"target's JavaScript project."
+        ),
+    )
+
+
+def check_spec_typescript_tests_read_real_members(
+    spec: str,
+    files_to_modify: list[dict] | None = None,
+    repo_root_str: str = "",
+) -> CompletenessCheck:
+    """A TypeScript test body reads only members its types have (#4519).
+
+    Each Section 10 TypeScript body that names its file is compiled with the
+    target's own TypeScript under its own configuration. A property the
+    compiler says a type lacks fails the check when the type is declared in
+    the target, and the plan changes none of the files that declare it. A type
+    the plan adds or modifies is left alone, and so is a type declared nowhere
+    in the target, such as a library's.
+
+    Not applicable, and said so, when no body names its file, the file has no
+    TypeScript project, or the target has not installed its compiler. A
+    compiler that cannot run, or output that cannot be read, cannot be told
+    from a pass, so it raises ``CompletenessCannotCheck``.
+    """
+    name = "spec_typescript_tests_read_real_members"
+    bodies = typescript_bodies.spec_typescript_bodies(spec)
+    if not bodies:
+        return CompletenessCheck(
+            check_name="spec_typescript_tests_read_real_members", passed=True,
+            details=(
+                "Section 10 carries no TypeScript test body that names its file "
+                "— check not applicable."
+            ),
+        )
+    if not repo_root_str:
+        raise CompletenessCannotCheck(
+            f"{name} was given no repo root, so the target's types cannot be read"
+        )
+    repo_root = Path(repo_root_str)
+    planned = {
+        str(f.get("path", "")).replace("\\", "/") for f in (files_to_modify or [])
+    }
+    by_project: dict[Path, list] = {}
+    unchecked: list[str] = []
+    for body in bodies:
+        project = typescript_bodies.project_of(repo_root, body.path)
+        compiler = (
+            typescript_bodies.typescript_compiler(project, repo_root) if project else None
+        )
+        if project is None:
+            unchecked.append(f"{body.path} (no tsconfig.json above it)")
+        elif compiler is None:
+            unchecked.append(f"{body.path} (TypeScript is not installed for {project})")
+        else:
+            by_project.setdefault(project, []).append(body)
+    if not by_project:
+        return CompletenessCheck(
+            check_name="spec_typescript_tests_read_real_members", passed=True,
+            details=(
+                f"Nothing could compile the TypeScript bodies: {'; '.join(unchecked)} "
+                f"— check not applicable."
+            ),
+        )
+    findings: list[str] = []
+    try:
+        for project, project_bodies in by_project.items():
+            compiler = typescript_bodies.typescript_compiler(project, repo_root)
+            for missing in typescript_bodies.missing_members(
+                repo_root, project, compiler, project_bodies,
+            ):
+                if not typescript_bodies.is_bare_type_name(missing.type_name):
+                    continue
+                declared = typescript_bodies.declared_in(repo_root, missing.type_name)
+                if not declared or planned & set(declared):
+                    continue
+                findings.append(
+                    f"`{missing.test}` in {missing.path} reads "
+                    f"`{missing.member}` of `{missing.type_name}`, which "
+                    f"{', '.join(declared)} declares without it, and the plan does "
+                    f"not change that file"
+                )
+    except typescript_bodies.TypeScriptCheckError as exc:
+        raise CompletenessCannotCheck(f"{name}: {exc}") from exc
+    if not findings:
+        checked = sum(len(b) for b in by_project.values())
+        return CompletenessCheck(
+            check_name="spec_typescript_tests_read_real_members", passed=True,
+            details=(
+                f"{checked} TypeScript test body(ies) read only members their "
+                f"unchanged types have."
+                + (f" Not compiled: {'; '.join(unchecked)}." if unchecked else "")
+            ),
+        )
+    return CompletenessCheck(
+        check_name="spec_typescript_tests_read_real_members", passed=False,
+        details=(
+            f"{'; '.join(findings)}. Read a member the type has, or add the "
+            f"type's file to the plan with the change that gives it one."
         ),
     )
 

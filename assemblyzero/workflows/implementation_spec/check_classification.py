@@ -242,6 +242,20 @@ CLASSIFICATIONS: dict[str, Classification] = {
             "test is skipped and the runner exits 0 with nothing proved (#4514)."
         ),
     ),
+    "spec_typescript_tests_read_real_members": Classification(
+        check="spec_typescript_tests_read_real_members",
+        kind=FACT,
+        reads=(
+            "each Section 10 TypeScript body that names its file, compiled by "
+            "the target's own TypeScript under its own tsconfig, and which of "
+            "the target's files declare each type the compiler names"
+        ),
+        reason=(
+            "the compiler says a type lacks a property or it does not, and a "
+            "type whose every declaration is in a file the plan leaves as it is "
+            "cannot gain the property during the run (#4519)."
+        ),
+    ),
     "visual_baselines_not_self_referential": Classification(
         check="visual_baselines_not_self_referential",
         kind=FACT,

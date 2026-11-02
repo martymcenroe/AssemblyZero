@@ -87,7 +87,8 @@ class TestTheSweepIsExhaustive:
         real signature, which boostgauge #2's `Telltale(duration=...)` showed
         nothing else did (#3755). The eighteenth to twentieth prove the emitted
         test file can pass at all: its lint, where it starts JavaScript tools,
-        and whether its name filters match anything (#4514)."""
+        and whether its name filters match anything (#4514). The twenty-first
+        compiles the TypeScript bodies, which none of those read (#4519)."""
         assert "python_fences_parse" in CLASSIFICATIONS
         assert "function_spec_sections_have_examples" in CLASSIFICATIONS
         assert "spec_test_functions_have_assertions" in CLASSIFICATIONS
@@ -97,7 +98,8 @@ class TestTheSweepIsExhaustive:
         assert "spec_tests_pass_target_lint" in CLASSIFICATIONS
         assert "spec_tests_start_js_tools_in_their_project" in CLASSIFICATIONS
         assert "spec_tests_name_filters_can_match" in CLASSIFICATIONS
-        assert len(CLASSIFICATIONS) == 20
+        assert "spec_typescript_tests_read_real_members" in CLASSIFICATIONS
+        assert len(CLASSIFICATIONS) == 21
 
     @pytest.mark.parametrize("name", sorted(CLASSIFICATIONS))
     def test_each_entry_states_what_it_reads_and_why(self, name: str) -> None:
