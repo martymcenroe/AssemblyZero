@@ -20,8 +20,8 @@ reviewer = "gemini-high"
 workflow = "gemini-high"
 # Judges text against a rule.
 judge = "gemini-high"
-# A second, independent reader beside the judge. Back to Codex: "codex-sol".
-second-eye = "gemini-high"
+# A second, independent reader beside the judge.
+second-eye = "codex-sol"
 # Describes and compares pictures.
 vision = "gemini-high"
 # Hears recordings and transcribes them.
@@ -64,7 +64,7 @@ status = "live"
 [models.codex-sol]
 provider = "codex"
 id = "gpt-6.1-sol"
-status = "retired"
+status = "live"
 
 [models.gemini-tts-preview]
 provider = "gemini-api"
