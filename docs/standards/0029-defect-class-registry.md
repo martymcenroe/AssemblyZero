@@ -104,7 +104,11 @@ citations added to the vocabulary), #2560 (demanded ADDITIONS land — a demand
 to add has no line to cite by construction), #2557 (the sweep that found three
 more unaddressable messages and the `()`-suffix hazard), #2628 (the section
 boundary that ended at injection's own subheading, so a compliant draft read as
-empty), #2633 (the variant below).
+empty), #2633 (the variant below), #4551 (a revised line that carries what the
+round's completeness complaint names counts as named, so the answer lands where
+the old lines carried nothing to name; and the variant again:
+`criteria_have_tests` read only Python tests, so a TypeScript target's Vitest
+tests were reported absent).
 
 **The taxonomy is three-way, not two.** A complaint is *addressed* (it cites a
 line), *demands an addition* (there is no line to cite, and the #2560 exemption

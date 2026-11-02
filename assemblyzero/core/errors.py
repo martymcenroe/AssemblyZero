@@ -292,6 +292,22 @@ def _is_billing_message(msg: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# A completeness complaint that recurred under pinning (#4551)
+# ---------------------------------------------------------------------------
+
+#: The marker the spec stage's completeness cap writes when a check drew an
+#: identical complaint on every revision while pinning reverted revision
+#: content. Single source of truth shared by the writer
+#: (implementation_spec/nodes/validate_completeness.py) and halt
+#: classification (halt_node.py), which gives the halt a class of its own.
+RECURRENCE_UNDER_PINNING = "[RECURRENCE UNDER PINNING]"
+
+#: The words that introduce, in that halt, the gate that blocked progress.
+#: The recovery plan (recovery_plan.py) quotes the clause they open.
+GATE_THAT_BLOCKED = "Gate that blocked progress:"
+
+
+# ---------------------------------------------------------------------------
 # Capacity-signature detection (#1909)
 # ---------------------------------------------------------------------------
 
