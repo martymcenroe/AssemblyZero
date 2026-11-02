@@ -11,7 +11,8 @@ This module makes that impossible mechanically:
 
 * **Named** content is what the current verdict (and the current completeness
   failures) actually point at — test names, backticked spans, quoted phrases,
-  manifest row ids, and line-range citations (``lines 81-83``, #2555) —
+  manifest row ids, line-range citations (``lines 81-83``, #2555), and
+  ranges of numbered tests (``test_req_060 through test_req_130``, #4545) —
   attributed to the draft's natural blocks (a test function, a markdown
   section).
 * **Locked** content is everything else in the reviewed draft: a completed
@@ -110,6 +111,135 @@ def named_line_ranges(completeness_issues: list[str] | None) -> tuple[tuple[int,
             if 1 <= start <= end:
                 ranges.append((start, end))
     return tuple(ranges)
+
+
+# ---------------------------------------------------------------------------
+# Ranges of numbered tests (#4545)
+# ---------------------------------------------------------------------------
+#
+# A reviewer asked a drafter to remove the tests it named as "test_req_060
+# through test_req_130". The drafter did; the conservation gate (#2559) read
+# only the two endpoint names, counted the six tests between them as removed
+# with no verdict naming them, and refused the revision three times until the
+# run halted. A range is a way of naming, so it names.
+#
+# The grammar is closed: a regex here reads syntax from a finite, authored set
+# of forms and decides nothing else. A range is exactly
+#
+#     <endpoint> <joiner> <endpoint>
+#
+# where both endpoints have the same prefix and the first number is not
+# greater than the second, and:
+#
+# | part | accepted forms | example |
+# |---|---|---|
+# | endpoint, test name | ``test_``, letters and underscores (the prefix), a digit run (the number), then nothing or ``_`` and more | ``test_req_060``, ``test_req_060_typescript_compilation``, ``test_t060``, ``test_060`` |
+# | endpoint, T-style id | ``T`` and a digit run; its prefix is ``test_t``, because the fleet names T060's test ``test_t060_...`` | ``T060`` |
+# | joiner, word | ``through``, ``to``, with whitespace on both sides | ``T060 to T130`` |
+# | joiner, dash | a hyphen or an en dash, whitespace optional | ``test_req_060-test_req_130``, ``T060 – T130`` |
+#
+# Anything else is not a range: mixed prefixes (``test_req_060 through
+# T130``), a reversed span, other joiners (``and``, ``until``), and other
+# identifier shapes (``REQ-060``). A T-style range names only tests whose
+# names carry the T number; it does not reach a ``test_req_`` test through a
+# mapping table, because the table is the draft's prose and not the verdict's
+# naming.
+
+#: The joiners a range may use, enumerated (#4545). Words need whitespace on
+#: both sides; a dash may stand bare.
+RANGE_WORD_JOINERS: tuple[str, ...] = ("through", "to")
+RANGE_DASH_JOINERS: tuple[str, ...] = ("-", "–")  # hyphen, en dash
+
+#: The prefix a T-style id stands for: T060 is the test named test_t060_...
+T_ID_PREFIX = "test_t"
+
+#: A numbered test name, whole: prefix, number, optional ``_`` tail.
+_NUMBERED_TEST_RE = re.compile(r"(test_[A-Za-z_]*)(\d+)(?:_[A-Za-z0-9_]*)?")
+#: A T-style id, whole.
+_T_ID_RE = re.compile(r"T(\d+)")
+
+_ENDPOINT = r"(?:test_[A-Za-z_]*\d+(?:_[A-Za-z0-9_]*)?|T\d+)"
+_JOINER = (
+    r"(?:\s+(?:" + "|".join(RANGE_WORD_JOINERS) + r")\s+"
+    r"|\s*[" + "".join(re.escape(d) for d in RANGE_DASH_JOINERS) + r"]\s*)"
+)
+_TEST_RANGE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(" + _ENDPOINT + r")" + _JOINER
+    + r"(" + _ENDPOINT + r")(?![A-Za-z0-9_])"
+)
+
+
+def numbered_test(identifier: str) -> tuple[str, int] | None:
+    """(prefix, number) of a numbered test identifier, or None.
+
+    ``test_req_070_single_turn`` is ``("test_req_", 70)``; ``T070`` is
+    ``("test_t", 70)``, the same as ``test_t070_reset``. A name with no
+    digit run, or whose digit run is not followed by ``_`` or the end
+    (``test_2fa_login``), carries no number.
+    """
+    t_id = _T_ID_RE.fullmatch(identifier)
+    if t_id is not None:
+        return T_ID_PREFIX, int(t_id.group(1))
+    name = _NUMBERED_TEST_RE.fullmatch(identifier)
+    if name is None:
+        return None
+    return name.group(1).lower(), int(name.group(2))
+
+
+@dataclass(frozen=True)
+class NumberedRange:
+    """A span of numbered tests a verdict named by its endpoints (#4545)."""
+
+    prefix: str
+    first: int
+    last: int
+
+    def names(self, identifier: str) -> bool:
+        numbered = numbered_test(identifier)
+        return (
+            numbered is not None
+            and numbered[0] == self.prefix
+            and self.first <= numbered[1] <= self.last
+        )
+
+
+def named_test_ranges(
+    feedback: str, completeness_issues: list[str] | None = None
+) -> tuple[NumberedRange, ...]:
+    """Every range of numbered tests the verdict and complaints name."""
+    text = (feedback or "") + "\n" + "\n".join(completeness_issues or [])
+    ranges: list[NumberedRange] = []
+    for match in _TEST_RANGE_RE.finditer(text):
+        start = numbered_test(match.group(1))
+        end = numbered_test(match.group(2))
+        if start is None or end is None:
+            continue
+        if start[0] != end[0] or start[1] > end[1]:
+            continue
+        span = NumberedRange(start[0], start[1], end[1])
+        if span not in ranges:
+            ranges.append(span)
+    return tuple(ranges)
+
+
+def range_named_tests(
+    draft: str, feedback: str, completeness_issues: list[str] | None = None
+) -> set[str]:
+    """The draft's test names that a named range covers, lowercased (#4545).
+
+    These join the round's named tokens, so a range names each test inside
+    it exactly as listing that test by name would: the conservation gate
+    lets it go, and its blocks are named for pinning. A test outside every
+    range, or a range the grammar above does not accept, names nothing.
+    """
+    ranges = named_test_ranges(feedback, completeness_issues)
+    if not ranges:
+        return set()
+    return {
+        name.lower()
+        for name in _TEST_NAME_RE.findall(draft or "")
+        if any(span.names(name) for span in ranges)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +370,9 @@ class PinningResult:
     #: previous draft entire. A merge malfunction raises PinningMergeError
     #: instead (#3585); it used to set this and emit the revision unenforced.
     conservation_event: str = ""
+    #: The tests that conservation event names, so the drafter can be told
+    #: which ones to keep (#4545). Empty exactly when the event is.
+    conservation_lost: tuple[str, ...] = ()
     unlock_reason: str = ""
 
 
@@ -535,7 +668,10 @@ def _conservation_override(
 
     A test definition the previous draft held is lost when it is absent
     from the walked output and no current verdict named it — neither as a
-    token nor by flagging any of its definition lines. Tier one: the
+    token nor by flagging any of its definition lines. A test inside a range
+    the verdict names (``test_req_060 through test_req_130``) arrives here
+    as a token: the caller adds ``range_named_tests`` to ``current_tokens``
+    (#4545). Tier one: the
     revision still holds every lost test (differ misalignment — a moved
     block the walk mispaired): the merge malfunctioned, and this raises
     (#3585). Tier two: the revision lost them too (an eliding rewrite —
@@ -602,6 +738,7 @@ def _conservation_override(
     return PinningResult(
         text=previous,
         regressions=regressions,
+        conservation_lost=tuple(lost),
         conservation_event=(
             f"the revision removed {len(lost)} test(s) no verdict named "
             f"({', '.join(lost)}) -- revision refused entire, previous "
