@@ -21,6 +21,14 @@ Existing tests changed:
 - `test_check_requirements.py`, `test_requirements_conflict.py`, `test_requirements_gate_timeout.py`: an answer that is not JSON is now reported as "not JSON". It was "unparseable".
 - `test_lld_edit_script_revision.py`, `test_finalize_repair_routing.py`: a revision whose blocks miss now makes two calls, both edit scripts, and then halts.
 
-## Runs
+## Runs, 2026-11-02
 
-RUNS
+Every test marked "Fails on main" in the issues was run against unchanged code first, and failed for the reason the issue gives.
+
+The branch took `origin/main` by merge at 2:34 AM Central, after #4532 and the gate-defects batch had landed. Both runs below came after it.
+
+- Unit tier, finished 2:50 AM Central: 13836 passed, 66 skipped, 7 deselected, 7 xfailed, in 14m 54s.
+- Integration, e2e and adversarial tiers, finished 2:52 AM Central: 84 passed, 8 skipped.
+- `ruff check`: no changed file has a finding `main` does not.
+
+An earlier unit run, before the merge, failed `test_finalize_repair_routing.py::test_an_unmatched_search_halts_too`, which supplied one reply to a revision that now makes two calls. It is updated as listed above.
