@@ -37,6 +37,11 @@ from assemblyzero.utils.pattern_scanner import (
     extract_conventions_from_claude_md,
     scan_patterns,
 )
+from assemblyzero.workflows.requirements.runtime_homes import (
+    builder_files,
+    find_runtime_homes,
+    runtime_home_files,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +170,9 @@ def analyze_codebase(state: dict) -> dict:
             - directory_tree (str): Pre-computed directory listing from #389
 
     Returns:
-        dict with ``codebase_context`` and ``interface_map``, or with
+        dict with ``codebase_context``, ``interface_map`` and
+        ``runtime_homes`` (#4537: where the target builds each concept the
+        issue names, from ``find_runtime_homes``), or with
         ``error_message`` (#3585) when the analysis cannot read what it
         analyzes, which routes to HALT.
     """
@@ -390,6 +397,34 @@ def analyze_codebase(state: dict) -> dict:
             related_code[result["path"]] = result["content"]
 
     # ------------------------------------------------------------------
+    # Step 8a (#4537): where the target builds the concepts the issue names.
+    # An approved plan put a runtime mechanic in a module the target never
+    # runs; the drafter had not been told which function built the concept
+    # the issue was about. The homes go to the drafter as where the change
+    # lands, to mechanical validation as what a requirement needs listed,
+    # and to the interface surface first, so their signatures are read.
+    # A file the finder cannot read halts, as every read here does.
+    # ------------------------------------------------------------------
+    try:
+        runtime_homes = find_runtime_homes(repo_path, issue_text)
+    except (OSError, SyntaxError, ValueError) as exc:
+        return {"error_message": _loud(
+            f"LLD analysis cannot find where the issue's runtime concepts are "
+            f"built in {repo_path}: {type(exc).__name__}: {exc}"
+        )}
+    for concept, home in runtime_homes.items():
+        print(
+            f"    [N0b] runtime home: {concept} is built in "
+            f"{', '.join(builder_files(home))} (#4537)"
+        )
+    if not runtime_homes:
+        print(
+            "    [N0b] runtime homes: the issue names no concept the target "
+            "declares as a type and builds in a function (#4537)"
+        )
+    home_paths = [repo_path / rel for rel in runtime_home_files(runtime_homes)]
+
+    # ------------------------------------------------------------------
     # Step 8b: Tiphys (#1688) — ground-truth interface surface.
     # Size-adaptive: small repos ship their whole public surface (no
     # selection, no selection miss); large repos use explicit-path +
@@ -404,7 +439,7 @@ def analyze_codebase(state: dict) -> dict:
         interface_map = build_interface_map(
             repo_path,
             issue_text=issue_text,
-            related_paths=related_paths_all,
+            related_paths=home_paths + related_paths_all,
         )
     except (OSError, SyntaxError, ValueError) as exc:
         return {"error_message": _loud(
@@ -437,7 +472,11 @@ def analyze_codebase(state: dict) -> dict:
         len(interface_map),
     )
 
-    return {"codebase_context": context, "interface_map": interface_map}
+    return {
+        "codebase_context": context,
+        "interface_map": interface_map,
+        "runtime_homes": runtime_homes,
+    }
 
 
 def _select_key_files(repo_path: Path) -> list[Path]:

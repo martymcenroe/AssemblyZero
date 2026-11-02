@@ -41,6 +41,10 @@ from assemblyzero.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
 )
+from assemblyzero.workflows.requirements.runtime_homes import (
+    format_runtime_homes_section,
+    requirement_trace_brief,
+)
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 
 logger = logging.getLogger(__name__)
@@ -300,6 +304,17 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     interface_section = format_interface_map_section(state.get("interface_map") or {})
     if interface_section:
         target_repo_context = f"{target_repo_context}{interface_section}\n\n"
+    # #4537: the reviewer passed, in three lines, a plan whose requirements
+    # described runtime behaviour no listed file could run. It now sees where
+    # the issue's concepts are built, and is asked of every requirement which
+    # listed file implements it; one that none can is a blocking finding.
+    if workflow_type == "lld":
+        homes_section = format_runtime_homes_section(state.get("runtime_homes") or {})
+        if homes_section:
+            target_repo_context = f"{target_repo_context}{homes_section}\n\n"
+        trace_brief = requirement_trace_brief(current_draft)
+        if trace_brief:
+            review_prompt = f"{review_prompt}\n\n{trace_brief}"
     review_content = _build_review_content(
         current_draft=current_draft,
         review_prompt=review_prompt,

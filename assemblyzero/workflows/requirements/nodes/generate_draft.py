@@ -56,6 +56,10 @@ from assemblyzero.workflows.requirements.table_injection import (  # noqa: E402
     reassert,
 )
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
+from assemblyzero.workflows.requirements.runtime_homes import (
+    format_runtime_homes_section,
+    runtime_home_files,
+)
 from assemblyzero.workflows.requirements.feedback_window import (
     build_feedback_block,
     render_feedback_markdown,
@@ -967,6 +971,13 @@ def build_revision_context(state: RequirementsWorkflowState) -> str:
     # generate_draft turns into the halt. It used to be logged as a warning
     # and the revision went on against the N0b map, stale by exactly the
     # files this draft names; interface_surface raises since #3779.
+    # #4537: the files that build the issue's runtime concepts are refreshed
+    # too. A draft that left them out of its table is exactly the draft that
+    # must now see them; refreshing only its own files hid them again.
+    runtime_homes = state.get("runtime_homes") or {}
+    homes_section = format_runtime_homes_section(runtime_homes)
+    if homes_section:
+        revision_context += homes_section + "\n\n"
     refreshed_map: dict = {}
     revision_target_repo = state.get("target_repo", "")
     if revision_target_repo and current_draft:
@@ -974,6 +985,9 @@ def build_revision_context(state: RequirementsWorkflowState) -> str:
         draft_paths = [
             e.get("path", "") for e in entries
             if has_extractor(e.get("path", ""))
+        ]
+        draft_paths += [
+            p for p in runtime_home_files(runtime_homes) if p not in draft_paths
         ]
         if draft_paths:
             try:
@@ -1060,6 +1074,14 @@ def _build_prompt(
         # nothing is dropped.) On revision passes the refreshed surface rides
         # in revision_context instead — never both.
         if not is_revision:
+            # #4537: where the issue's runtime concepts are built, first, as
+            # the place the change must land. On a revision it rides in
+            # revision_context, beside the refreshed surface.
+            homes_section = format_runtime_homes_section(
+                state.get("runtime_homes") or {}
+            )
+            if homes_section:
+                input_content += f"\n\n{homes_section}"
             interface_section = format_interface_map_section(
                 state.get("interface_map") or {}
             )
