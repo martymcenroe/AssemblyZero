@@ -107,6 +107,33 @@ class TestAnAnswerAndNoExit:
         assert "exited" not in error
 
 
+class TestANormalExitIsLeftAlone:
+    """#4510: agy's own exit takes up to 2.8 s after its answer (26 real calls,
+    2026-11-02). The watcher must let that happen, not end it as a hang."""
+
+    SLOWEST_MEASURED_EXIT_S = 2.8
+
+    def test_the_settle_outlasts_the_slowest_measured_exit(self):
+        assert gc.AGY_ANSWER_SETTLE_SECONDS >= 3 * self.SLOWEST_MEASURED_EXIT_S
+
+    def test_a_process_that_exits_late_is_not_ended_or_warned_about(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        # The real settle, not the short one the other tests use.
+        monkeypatch.setattr(GeminiClient, "_find_agy_cli", lambda self: "agy")
+        argv = _stand_in(
+            tmp_path, _printed(REPLY) + f"time.sleep({self.SLOWEST_MEASURED_EXIT_S})\n"
+        )
+        monkeypatch.setattr(GeminiClient, "_agy_argv", lambda self, cwd, *tail: argv)
+        client = GeminiClient(model="gemini-3.8-flash-high")
+
+        with caplog.at_level("WARNING", logger=gc.logger.name):
+            ok, text, error = client._agy_once("the prompt", 20.0, {})
+
+        assert (ok, text, error) == (True, "the model's answer", "")
+        assert "has not exited" not in caplog.text
+
+
 class TestWhatNeverEndsACallEarly:
     HANG = "time.sleep(600)\n"
 
