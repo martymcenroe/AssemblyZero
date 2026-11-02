@@ -199,6 +199,21 @@ def agent_warning(text: str) -> str:
     return ""
 
 
+def agy_diagnostics(stderr: str, stdout_text: str, reply: dict | None) -> str:
+    """What agy itself wrote about a call, and never the model's answer (#4538).
+
+    ``agent_warning`` reads this. stderr always; stdout only when it is not
+    agy's JSON envelope; from the envelope, every field but ``response``. The
+    envelope is one line, so reading it whole made an answer that mentioned
+    ``--agent`` read as agy failing to load the agent: three paid calls were
+    thrown away that way between 2026-10-27 and 2026-11-02.
+    """
+    if reply is None:
+        return f"{stderr}\n{stdout_text}"
+    meta = {key: value for key, value in reply.items() if key != "response"}
+    return f"{stderr}\n{json.dumps(meta, ensure_ascii=False)}"
+
+
 #: On Windows agy runs inside WSL, never as agy.exe (#3623). The Windows build
 #: wraps its shell in PowerShell, where the fleet's shell guard cannot see it,
 #: so the tool-less agent above would be the only thing between a pipeline
@@ -800,8 +815,9 @@ class GeminiClient:
         # #3612: an agent agy could not load means the default agent, with its
         # tools, answered. That is a failed call, whatever the exit status.
         # Both streams are read (#3624): the removed PTY path saw them merged,
-        # and nothing proves agy writes the warning to stderr only.
-        warned = agent_warning(f"{stderr or ''}\n{text}")
+        # and nothing proves agy writes the warning to stderr only. #4538: of
+        # stdout, only what agy wrote; the model's answer is not a diagnostic.
+        warned = agent_warning(agy_diagnostics(stderr or "", text, reply))
         if warned:
             return False, "", f"agy did not run as {AGY_AGENT_NAME}: {warned[:400]}"
 
