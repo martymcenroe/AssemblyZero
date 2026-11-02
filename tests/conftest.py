@@ -8,6 +8,16 @@ from pathlib import Path
 
 import pytest
 
+# #3708: the tests run LangGraph's serializer in the strict mode it has
+# announced as the future default, so a new unregistered type in a checkpoint
+# fails a test instead of printing a warning on every run and breaking on the
+# next dependency bump. Production stays lenient so checkpoints written before
+# #3708 still load. LangGraph reads the variable once, at import, so it is set
+# here, in the conftest pytest loads before any test module under tests/.
+# Set in tests/unit/conftest.py, it came too late in a whole-tree run, where a
+# module outside tests/unit imports LangGraph first (#4540).
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
+
 # Ensure the repo root (for `import tools.x`) AND tools/ itself (for bare
 # `import enable_dependabot`) are importable. tools_dir is computed off this
 # conftest's own __file__, so it is correct regardless of which subdirectory
