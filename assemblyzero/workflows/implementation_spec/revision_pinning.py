@@ -135,12 +135,22 @@ def named_line_ranges(completeness_issues: list[str] | None) -> tuple[tuple[int,
 # |---|---|---|
 # | endpoint, test name | ``test_``, letters and underscores (the prefix), a digit run (the number), then nothing or ``_`` and more | ``test_req_060``, ``test_req_060_typescript_compilation``, ``test_t060``, ``test_060`` |
 # | endpoint, T-style id | ``T`` and a digit run; its prefix is ``test_t``, because the fleet names T060's test ``test_t060_...`` | ``T060`` |
+# | endpoint, in backticks (#4549) | either form above inside one pair of single backticks, each endpoint on its own | `` `test_req_060` through `test_req_130` ``, `` `T060`–`T130` `` |
 # | joiner, word | ``through``, ``to``, with whitespace on both sides | ``T060 to T130`` |
 # | joiner, dash | a hyphen or an en dash, whitespace optional | ``test_req_060-test_req_130``, ``T060 – T130`` |
 #
+# A whole range inside one code span (`` `T060 to T130` ``) reads as the bare
+# form, because a backtick is not an identifier character. #4549 added the
+# backticked endpoint: a Markdown verdict names code in backticks, and a
+# reviewer wrote "Functions `test_req_060` through `test_req_130`", which the
+# grammar refused because a backtick, not the joiner, followed the first
+# endpoint.
+#
 # Anything else is not a range: mixed prefixes (``test_req_060 through
-# T130``), a reversed span, other joiners (``and``, ``until``), and other
-# identifier shapes (``REQ-060``). A T-style range names only tests whose
+# T130``), a reversed span, other joiners (``and``, ``until``), other
+# identifier shapes (``REQ-060``), an endpoint with an unpaired backtick next
+# to the joiner, and an endpoint in double backticks; backticks change none
+# of these. A T-style range names only tests whose
 # names carry the T number; it does not reach a ``test_req_`` test through a
 # mapping table, because the table is the draft's prose and not the verdict's
 # naming.
@@ -163,9 +173,13 @@ _JOINER = (
     r"(?:\s+(?:" + "|".join(RANGE_WORD_JOINERS) + r")\s+"
     r"|\s*[" + "".join(re.escape(d) for d in RANGE_DASH_JOINERS) + r"]\s*)"
 )
+#: An endpoint, bare or in one pair of single backticks (#4549). The
+#: conditional group closes a backtick only when one opened, so an unpaired
+#: backtick beside the joiner is not a range, as before.
+_FIRST = r"(?P<open1>`)?(?P<first>" + _ENDPOINT + r")(?(open1)`)"
+_LAST = r"(?P<open2>`)?(?P<last>" + _ENDPOINT + r")(?(open2)`)"
 _TEST_RANGE_RE = re.compile(
-    r"(?<![A-Za-z0-9_])(" + _ENDPOINT + r")" + _JOINER
-    + r"(" + _ENDPOINT + r")(?![A-Za-z0-9_])"
+    r"(?<![A-Za-z0-9_])" + _FIRST + _JOINER + _LAST + r"(?![A-Za-z0-9_])"
 )
 
 
@@ -210,8 +224,8 @@ def named_test_ranges(
     text = (feedback or "") + "\n" + "\n".join(completeness_issues or [])
     ranges: list[NumberedRange] = []
     for match in _TEST_RANGE_RE.finditer(text):
-        start = numbered_test(match.group(1))
-        end = numbered_test(match.group(2))
+        start = numbered_test(match.group("first"))
+        end = numbered_test(match.group("last"))
         if start is None or end is None:
             continue
         if start[0] != end[0] or start[1] > end[1]:

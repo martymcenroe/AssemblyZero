@@ -352,11 +352,88 @@ class TestTheReasonForEachGate:
 
 
 # ---------------------------------------------------------------------------
+# #4549: the range written as Markdown code
+# ---------------------------------------------------------------------------
+
+#: The resumed run's verdict item, generic: the reviewer names the range's
+#: endpoints in backticks, the way a Markdown verdict names code.
+BACKTICK_VERDICT = (
+    "Verdict: REVISE\n"
+    "\n"
+    "## Feedback Items\n"
+    "- Section 10.1 (`tests/unit/test_widget_ledger.py`): Non-discriminating "
+    "test assertions. Functions `test_req_060` through `test_req_130` in the "
+    "Python test block in Section 10.1 do not test the code under test; they "
+    "assert hardcoded constants against each other (e.g., `type_errors = 0; "
+    "assert type_errors == 0`). Remove these tautological Python test stubs.\n"
+)
+
+
+class TestARangeInBackticksNamesEveryTestInIt:
+    def test_t1_a_backticked_range_lets_the_requested_removal_through(self):
+        """#4549 T1: fails on main, where conservation names 070 to 120."""
+        revised = _draft(drop=set(RANGE))
+        text, events = _pin(revised, feedback=BACKTICK_VERDICT)
+        assert _conservation(events) == []
+        assert text == revised
+
+    def test_t1_a_backticked_en_dash_range_lets_it_through(self):
+        revised = _draft(drop=set(RANGE))
+        feedback = BACKTICK_VERDICT.replace(
+            "`test_req_060` through `test_req_130`",
+            "`test_req_060`–`test_req_130`",
+        )
+        assert "`test_req_060`–`test_req_130`" in feedback
+        text, events = _pin(revised, feedback=feedback)
+        assert _conservation(events) == []
+        assert text == revised
+
+    def test_t4_a_test_outside_a_backticked_range_is_still_refused(self):
+        revised = _draft(drop={"050", *RANGE})
+        text, events = _pin(revised, feedback=BACKTICK_VERDICT)
+        assert text == PREVIOUS
+        (event,) = _conservation(events)
+        assert _name("050") in event
+        for number in RANGE:
+            assert _name(number) not in event
+
+
+# ---------------------------------------------------------------------------
 # The closed range grammar
 # ---------------------------------------------------------------------------
 
 
+#: How a range's endpoints may sit in Markdown code. "each in backticks",
+#: "first in backticks" and "last in backticks" are #4549's form; a whole
+#: range inside one code span was already read as the bare form.
+WRAPPINGS: dict[str, str] = {
+    "bare": "{first}{joiner}{last}",
+    "each in backticks": "`{first}`{joiner}`{last}`",
+    "first in backticks": "`{first}`{joiner}{last}",
+    "last in backticks": "{first}{joiner}`{last}`",
+    "whole range in one span": "`{first}{joiner}{last}`",
+}
+
+#: The forms refused before #4549, as (first, joiner, last), so each can be
+#: tried bare and with its endpoints in backticks.
+REFUSED: list[tuple[str, str, str]] = [
+    ("test_req_060", " and ", "test_req_130"),        # not a joiner
+    ("test_req_060", " until ", "test_req_130"),      # not a joiner
+    ("test_req_060", " , ", "test_req_130"),          # not a joiner
+    ("test_req_060", " through ", "T130"),            # mixed prefixes
+    ("test_req_060", " through ", "test_t130"),       # mixed prefixes
+    ("test_req_130", " through ", "test_req_060"),    # reversed
+    ("REQ-060", " through ", "REQ-130"),              # not a test identifier
+    ("t060", " through ", "t130"),                    # a T-style id is upper case
+    ("test_req_060", " through", "test_req_130"),     # a word joiner needs spaces
+    ("mytest_req_060", " through ", "test_req_130"),  # endpoint inside a word
+    ("test_2fa", " through ", "test_9fa"),            # no delimited number
+    ("Section 10.1", " through ", "Section 10.3"),    # not a test identifier
+]
+
+
 class TestTheRangeGrammar:
+    @pytest.mark.parametrize("wrapping", sorted(WRAPPINGS))
     @pytest.mark.parametrize("joiner", [
         f" {word} " for word in rp.RANGE_WORD_JOINERS
     ] + [
@@ -371,30 +448,36 @@ class TestTheRangeGrammar:
         ("test_060", "test_130", "test_"),
         ("T060", "T130", "test_t"),
     ])
-    def test_each_accepted_form_is_a_range(self, joiner, first, last, prefix):
-        assert rp.named_test_ranges(f"Remove {first}{joiner}{last} now.") == (
+    def test_each_accepted_form_is_a_range(self, wrapping, joiner, first, last, prefix):
+        text = WRAPPINGS[wrapping].format(first=first, joiner=joiner, last=last)
+        assert rp.named_test_ranges(f"Remove {text} now.") == (
             rp.NumberedRange(prefix, 60, 130),
+        )
+
+    def test_the_backticked_en_dash_range_written_out(self):
+        """`test_req_060`–`test_req_130`, written out rather than built."""
+        assert rp.named_test_ranges("Drop `test_req_060`–`test_req_130`.") == (
+            rp.NumberedRange("test_req_", 60, 130),
         )
 
     def test_the_joiners_are_exactly_the_four_enumerated(self):
         assert rp.RANGE_WORD_JOINERS == ("through", "to")
         assert rp.RANGE_DASH_JOINERS == ("-", "–")
 
+    @pytest.mark.parametrize("wrapping", ["bare", "each in backticks"])
+    @pytest.mark.parametrize("first, joiner, last", REFUSED)
+    def test_forms_outside_the_grammar_are_not_ranges(self, wrapping, first, joiner, last):
+        """T3 of #4549: backticks change none of these."""
+        text = WRAPPINGS[wrapping].format(first=first, joiner=joiner, last=last)
+        assert rp.named_test_ranges(text) == ()
+
     @pytest.mark.parametrize("text", [
-        "test_req_060 and test_req_130",          # not a joiner
-        "test_req_060 until test_req_130",        # not a joiner
-        "test_req_060 , test_req_130",            # not a joiner
-        "test_req_060 through T130",              # mixed prefixes
-        "test_req_060 through test_t130",         # mixed prefixes
-        "test_req_130 through test_req_060",      # reversed
-        "REQ-060 through REQ-130",                # not a test identifier
-        "t060 through t130",                      # a T-style id is upper case
-        "test_req_060 throughtest_req_130",       # a word joiner needs spaces
-        "mytest_req_060 through test_req_130",    # endpoint inside a word
-        "test_2fa through test_9fa",              # no delimited number
-        "Section 10.1 through Section 10.3",      # not a test identifier
+        "test_req_060` through test_req_130",      # unpaired, closing
+        "test_req_060 through `test_req_130",      # unpaired, opening
+        "``test_req_060`` through ``test_req_130``",  # double backticks
+        "`test_req_060`through `test_req_130`",    # a word joiner needs spaces
     ])
-    def test_forms_outside_the_grammar_are_not_ranges(self, text):
+    def test_backticks_that_do_not_wrap_an_endpoint_are_not_ranges(self, text):
         assert rp.named_test_ranges(text) == ()
 
     def test_complaints_are_read_as_well_as_the_verdict(self):
