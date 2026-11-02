@@ -174,9 +174,11 @@ def format_report(report: ErrorPathReport) -> str:
     lines: list[str] = []
 
     if report.untested:
+        # No section number (#4552): pinning reads "Section 10" as naming the
+        # whole section, and the unlock belongs to the tests named below.
         lines.append(
             f"{len(report.untested)} exception type(s) the spec raises have no "
-            f"test asserting them. Section 10 owes each a test:"
+            f"test asserting them. The spec owes each a test:"
         )
         # The exception name and the demanded form are backticked on purpose
         # (#2875): revision pinning names draft lines by the backticked spans

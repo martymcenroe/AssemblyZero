@@ -107,10 +107,14 @@ class TestPinningPassesTheConversion:
         assert "(50.0," in result.text
 
     def test_the_bare_message_was_the_defect(self):
-        """Pinned: with the pre-#2875 wording the same conversion is refused."""
+        """Pinned: with the pre-#2875 wording the same conversion is refused.
+
+        The header is today's: the pre-#2875 one said "Section 10 owes each
+        a test", which since #4552 names the whole of Section 10 by its
+        heading, so the bare item lines would no longer be what decides."""
         bare = (
             "1 exception type(s) the spec raises have no test asserting them. "
-            "Section 10 owes each a test:\n"
+            "The spec owes each a test:\n"
             "  - OSError: raised once by the spec's own code, and no test uses "
             "pytest.raises(OSError)"
         )

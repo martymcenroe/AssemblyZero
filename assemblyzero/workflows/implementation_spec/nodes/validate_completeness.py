@@ -1206,6 +1206,9 @@ def check_function_spec_sections_have_examples(spec: str) -> CompletenessCheck:
     if missing:
         listed = "; ".join(missing[:5])
         suffix = f" (and {len(missing) - 5} more)" if len(missing) > 5 else ""
+        # No section number of the template here (#4552): pinning reads
+        # "section 5" as the DRAFT's Section 5 and would unlock every
+        # function subsection, the passing ones included.
         return CompletenessCheck(
             check_name="function_spec_sections_have_examples",
             passed=False,
@@ -1213,7 +1216,7 @@ def check_function_spec_sections_have_examples(spec: str) -> CompletenessCheck:
                 f"{len(missing)} of {len(sections)} function-specification "
                 f"subsection(s) are missing a required example block: "
                 f"{listed}{suffix}. Add the block inside that subsection; "
-                f"template 0701 section 5 requires both."
+                f"template 0701 requires both in every function subsection."
             ),
         )
 
@@ -1270,10 +1273,12 @@ def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
     def _exempt_note() -> str:
         if not exempt_tests:
             return ""
+        # No section number of the template (#4552): pinning would read it as
+        # the draft's section of that number.
         return (
             f" {len(exempt_tests)} test function(s) were NOT checked: a test's "
             f"body is its input and its assertion is its expected output "
-            f"(template 0701 section 8 specifies tests as a table, not as "
+            f"(template 0701 specifies tests as a table, not as "
             f"functions carrying example blocks)."
         )
 
@@ -2536,8 +2541,10 @@ def check_spec_test_functions_have_assertions(
         # is what pinning unlocks, and a function left off the list stays
         # locked against the very edit this complaint demands.
         listed = "; ".join(by_function)
+        # No section number (#4552): pinning reads one as naming the whole
+        # section, and the spans above already address each function.
         parts.append(
-            f"{len(by_function)} of {len(functions)} §10 test function(s) "
+            f"{len(by_function)} of {len(functions)} spec test function(s) "
             f"would be refused by the implementation stage's scaffolder: {listed}. "
             "Replace each pass body with the setup and at least one assert "
             "statement (or a pytest.raises block) that checks the value its "
@@ -2682,9 +2689,12 @@ def check_spec_test_fixtures_resolvable(
                     "repo's pyproject does not declare"
                 )
             else:
+                # No section number here or below (#4552): pinning reads one
+                # as naming the whole section, and the spans address each
+                # function.
                 why = (
                     " — not a pytest builtin, not decorated as a fixture in "
-                    "§10, and no declared plugin provides it"
+                    "the spec's test block, and no declared plugin provides it"
                 )
             failures.append(f"`{node.name}`{where} takes `{param}`{why}")
 
@@ -2715,9 +2725,9 @@ def check_spec_test_fixtures_resolvable(
             f"would error at setup in the implementation stage: {listed}. A "
             "parameter must be a pytest builtin fixture (monkeypatch, tmp_path, "
             "capsys, ...), a function decorated with pytest.fixture inside the "
-            "§10 test block, or a fixture from a plugin the repo's pyproject "
+            "spec's test block, or a fixture from a plugin the repo's pyproject "
             f"declares{declared_note}. Drop the parameter, define the fixture "
-            "in §10, or use monkeypatch or unittest.mock instead."
+            "in that block, or use monkeypatch or unittest.mock instead."
         ),
     )
 
