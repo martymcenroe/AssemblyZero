@@ -10,7 +10,11 @@ already accepted.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from enum import Enum
+from pathlib import Path
 
 import pytest
 from langgraph.checkpoint.serde import _msgpack as lg_msgpack
@@ -18,9 +22,13 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from assemblyzero.workflows.testing import framework_detector as fd
 from assemblyzero.workflows.testing.nodes.verify_phases import _resolve_framework_enum
-from assemblyzero.workflows.testing.runner_registry import checkpoint_safe, get_framework_config
+from assemblyzero.workflows.testing.runner_registry import (
+    checkpoint_safe,
+    get_framework_config,
+)
 
 FRAMEWORKS = list(fd.TestFramework)
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize("framework", FRAMEWORKS)
@@ -65,10 +73,38 @@ def test_the_strict_serializer_keeps_the_state_and_loses_the_old_shape():
 
 
 def test_the_unit_tier_runs_the_serializer_strict():
-    """tests/unit/conftest.py sets LANGGRAPH_STRICT_MSGPACK before LangGraph
-    is imported, so a new unregistered type in any checkpoint fails a test
-    here instead of printing a warning on every run."""
+    """tests/conftest.py sets LANGGRAPH_STRICT_MSGPACK before LangGraph is
+    imported, so a new unregistered type in any checkpoint fails a test here
+    instead of printing a warning on every run."""
     assert lg_msgpack.STRICT_MSGPACK_ENABLED, (
         "LANGGRAPH_STRICT_MSGPACK was not in force when langgraph was imported; "
-        "see tests/unit/conftest.py (#3708)"
+        "see tests/conftest.py (#3708, #4540)"
+    )
+
+
+def test_the_conftest_every_run_loads_first_sets_strict_before_langgraph():
+    """In a whole-tree run a module outside tests/unit imports LangGraph
+    before tests/unit is collected, so a setting in tests/unit/conftest.py
+    came too late (#4540). pytest loads tests/conftest.py before any test
+    module under tests/, in every kind of run. A fresh interpreter that
+    imports only that conftest, and then LangGraph, gets the strict
+    serializer; moving the setting back down a level fails this."""
+    env = {k: v for k, v in os.environ.items() if k != "LANGGRAPH_STRICT_MSGPACK"}
+    probe = (
+        "import tests.conftest\n"
+        "from langgraph.checkpoint.serde import _msgpack\n"
+        "raise SystemExit(0 if _msgpack.STRICT_MSGPACK_ENABLED else 3)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        "importing tests/conftest.py did not put LANGGRAPH_STRICT_MSGPACK in "
+        f"force before langgraph loaded (exit {result.returncode}): {result.stderr}"
     )
