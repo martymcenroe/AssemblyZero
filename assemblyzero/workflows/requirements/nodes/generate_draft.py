@@ -127,14 +127,109 @@ def _edit_script_halt(reason: str) -> str:
 
     Legible on its own in a halt banner (#2197): it names the contract, what
     broke it, and the fact that nothing was lost.
+
+    #4503: it ended "Relaunch to resume from this stage", which no command
+    does. A relaunch without --yes stops to ask, and with --yes it moves the
+    lineage aside and drafts again from the start. It now says that.
     """
     return (
         f"[EDIT-SCRIPT] LLD revision rejected: {reason}. The prior draft is "
-        f"unchanged and remains the working copy. A revision is applied as "
-        f"SEARCH/REPLACE edit blocks and is never redrawn wholesale (#2200), "
-        f"so there is no full-regeneration fallback to take. Relaunch to "
-        f"resume from this stage."
+        f"unchanged in the lineage. A revision is applied as SEARCH/REPLACE "
+        f"edit blocks and is never redrawn wholesale (#2200), so there is no "
+        f"full-regeneration fallback to take. There is no resume from this "
+        f"point: a relaunch drafts the LLD again from the start, after it moves "
+        f"this lineage to its -n1 copy on a YES at the prompt, or on --yes."
     )
+
+
+def _aimed_section(draft: str, search: str) -> str:
+    """The section of ``draft`` a SEARCH that missed was aiming at (#4503).
+
+    Each heading opens a candidate that runs to the next heading of its level
+    or higher. The candidate sharing the longest run of characters with the
+    SEARCH wins, and the shorter one on a tie, so a block aimed inside a
+    subsection is shown that subsection rather than its whole parent.
+    """
+    import difflib
+
+    lines = draft.splitlines(keepends=True)
+    headings = [
+        (index, len(line) - len(line.lstrip("#")))
+        for index, line in enumerate(lines)
+        if line.startswith("#")
+    ]
+    best, best_score = draft, (-1, 0)
+    for position, (start, level) in enumerate(headings):
+        end = next(
+            (other for other, other_level in headings[position + 1:] if other_level <= level),
+            len(lines),
+        )
+        section = "".join(lines[start:end])
+        match = difflib.SequenceMatcher(None, search, section, autojunk=False).find_longest_match(
+            0, len(search), 0, len(section)
+        )
+        score = (match.size, -len(section))
+        if score > best_score:
+            best, best_score = section, score
+    return best.rstrip("\n")
+
+
+def _reask_failed_edits(
+    drafter: Any, edit_prompt: str, prior_draft: str,
+    blocks: list[tuple[str, str]], failures: list[str],
+) -> tuple[Any, list[tuple[str, str]], str, list[str]]:
+    """Ask the drafter once more after its blocks missed the draft (#4503).
+
+    A SEARCH that misses by a few characters used to halt the run: the model
+    is shown which block failed and the section it was aiming at, exactly as
+    the draft has it, and asked for the whole set again. It is one call inside
+    the same iteration, so it cannot loop; a second miss halts as before, and
+    nothing here can redraw the document (#2200).
+
+    Returns the re-ask's result, its blocks, the patched draft and its
+    failures; failures is non-empty when the re-ask did not apply either.
+    """
+    shown: list[str] = []
+    for failure in failures:
+        label = failure.split(":", 1)[0].strip()
+        number = label.removeprefix("block ").strip()
+        aimed = ""
+        if number.isdigit() and 0 < int(number) <= len(blocks):
+            aimed = _aimed_section(prior_draft, blocks[int(number) - 1][0])
+        shown.append(f"- {failure}")
+        if aimed:
+            shown.append(
+                f"\n  The text of the section {label} was aiming at, exactly as "
+                f"the CURRENT LLD has it:\n\n{aimed}\n"
+            )
+    reask_prompt = (
+        f"{edit_prompt}\n\n"
+        "## YOUR PREVIOUS ATTEMPT FAILED TO APPLY (#4503)\n\n"
+        + "\n".join(shown)
+        + "\n\nThis is a correction round, not a restart: emit a fresh, complete "
+        "set of edit blocks for every fix, with each SEARCH copied "
+        "character-for-character from the CURRENT LLD."
+    )
+    print(
+        f"    [EDIT-SCRIPT] {len(failures)} block(s) did not apply; asking once "
+        f"more with the section each was aiming at (#4503)"
+    )
+    result = drafter.invoke(
+        system_prompt=EDIT_SCRIPT_SYSTEM_PROMPT,
+        content=reask_prompt,
+        timeout_seconds=1800,
+    )
+    if not result.success:
+        return result, [], prior_draft, [f"the re-ask failed: {result.error_message}"]
+    reask_blocks = parse_edit_blocks(result.response or "")
+    if not reask_blocks:
+        return result, [], prior_draft, [
+            "the re-ask returned no well-formed SEARCH/REPLACE blocks"
+        ]
+    patched, reask_failures = apply_edit_blocks(prior_draft, reask_blocks)
+    if reask_failures:
+        reask_failures = [f"after one re-ask, {failure}" for failure in reask_failures]
+    return result, reask_blocks, patched, reask_failures
 
 
 #: A conventional-commit type at the head of a title: ``feat:``, ``fix(api):``,
@@ -666,13 +761,14 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
 
     response = result.response or ""
     draft_content = response
+    extra_tokens = (0, 0)  # #4503: a re-ask's tokens, when there was one
 
     if use_edit_script:
         # #2200: apply the named edits, or halt. There is no fall back to a
         # full redraw -- wholesale regeneration is the defect being removed,
         # so a revision that cannot be expressed as edits stops and names the
         # contract it broke (standard 0028). The prior draft is untouched on
-        # disk and stays in state, and a relaunch resumes this stage (#2193).
+        # disk and stays in the lineage (#4503: a relaunch drafts again).
         prior_draft = state.get("current_draft", "")
         blocks = parse_edit_blocks(response)
         if not blocks:
@@ -683,6 +779,15 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
             }
 
         patched, failures = apply_edit_blocks(prior_draft, blocks)
+        if failures:
+            # #4503: a block that missed is re-asked once before the halt.
+            reask, reask_blocks, patched, failures = _reask_failed_edits(
+                drafter, edit_prompt, prior_draft, blocks, failures,
+            )
+            node_cost_usd = get_cumulative_cost() - cost_before
+            extra_tokens = (reask.input_tokens or 0, reask.output_tokens or 0)
+            if reask_blocks:
+                blocks = reask_blocks
         if failures:
             return {"error_message": _edit_script_halt("; ".join(failures))}
         if patched == prior_draft:
@@ -754,8 +859,8 @@ DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
     node_tokens = accumulate_node_tokens(
         dict(state.get("node_tokens", {})),
         "generate_draft",
-        result.input_tokens,
-        result.output_tokens,
+        result.input_tokens + extra_tokens[0],
+        result.output_tokens + extra_tokens[1],
     )
 
     return {

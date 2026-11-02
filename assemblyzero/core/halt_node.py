@@ -82,6 +82,10 @@ def classify_error(error_message: str) -> str:
     # checked. Transient or not is the second question here, not the first.
     if "requirements unverified" in msg_lower:
         return "requirements_unverified"
+    # #4503: a revision whose SEARCH/REPLACE blocks did not apply, in the LLD
+    # or the spec stage. It was `unknown`, which said nothing about the cause.
+    if "[edit-script]" in msg_lower:
+        return "edit_script_rejected"
     # #1939: 'stagnant' is what the live guards actually print
     # ("[STAGNANT] Coverage stagnant: 87.0% -> 86.0%") — the old
     # 'stagnation'-only pattern never matched a real halt message.

@@ -259,7 +259,8 @@ class TestNeverASilentPass:
         result = _run(tmp_path)
 
         assert result.status == "error"
-        assert "unparseable" in result.detail
+        # #4485: it says which failure, where it said "unparseable" for all three.
+        assert "not JSON" in result.detail
 
     def test_schema_violating_json_is_an_error(self, tmp_path, monkeypatch):
         """Valid JSON missing the contract's required key is still no verdict."""

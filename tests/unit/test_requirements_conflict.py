@@ -98,7 +98,8 @@ class TestN0cGate:
         provider = _provider_returning("I think it looks fine!")
         with patch(f"{MODULE}.get_provider", return_value=provider):
             result = analyze_requirements(_state())
-        assert "unparseable" in result.get("requirements_unverified", "")
+        # #4485: it says which failure, where it said "unparseable" for all three.
+        assert "not JSON" in result.get("requirements_unverified", "")
 
     def test_mock_mode_skips_entirely(self):
         with patch(f"{MODULE}.get_provider") as gp:
