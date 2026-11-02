@@ -92,4 +92,13 @@ def recursion_limit(max_iterations: int | None = None) -> int:
     # iteration cap the green loop reads.
     total += iterations * 4
 
+    # #4523: N8.5 -> N4 -> N4b -> N4.5 -> N5 -> N6 -> N7 -> N7.5 -> N8 -> N8.5,
+    # once per repair the final suite asks for. Each takes an iteration, so the
+    # same cap bounds it, with the repair grace past it.
+    from assemblyzero.workflows.testing.nodes.verify_phases import (
+        MAX_FULL_SUITE_REPAIR_PASSES,
+    )
+
+    total += (iterations + MAX_FULL_SUITE_REPAIR_PASSES) * 9
+
     return total + HEADROOM_STEPS

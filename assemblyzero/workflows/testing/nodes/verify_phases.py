@@ -3805,16 +3805,16 @@ def _halt_coverage_unreadable(label: str, error: Exception | str) -> dict[str, A
     return {"next_node": "end", "error_message": message}
 
 
-def _halt_full_suite_gate(label: str, why: str) -> dict[str, Any]:
+def _halt_full_suite_gate(label: str, why: str, node: str = "N5") -> dict[str, Any]:
     """The gate's halt when the whole suite cannot run, or collects nothing
     (#3087). A gate that cannot run cannot be told from one that passed, so
     `full_suite_validated` says False and the run stops (ADR 0236)."""
     message = (
-        f"{DETERMINISTIC_FAILURE}: [N5] the full-suite regression gate cannot "
+        f"{DETERMINISTIC_FAILURE}: [{node}] the full-suite regression gate cannot "
         f"run for {label}: {why}. A gate that cannot run cannot be told from "
         f"one that passed, so the run stops here (#3087)."
     )
-    print(f"    [N5] ERROR {message}")
+    print(f"    [{node}] ERROR {message}")
     return {
         "full_suite_validated": False,
         "full_suite_regressions": [],
@@ -3830,8 +3830,12 @@ def _full_suite_gate(
     framework_config: dict | None,
     iteration_count: int,
     max_iterations: int,
+    node: str = "N5",
 ) -> dict[str, Any] | None:
     """Issue #842's full-suite regression gate, for every framework (#3087).
+
+    `node` is the step running it, for its lines: N5, or N8.5 once the
+    review's tests and the docs are written (#4523).
 
     Run ONCE after the targeted tests pass. Catches regressions in existing
     tests that the targeted test run misses. The framework's whole suite runs
@@ -3847,7 +3851,7 @@ def _full_suite_gate(
     label = _framework_label(framework, framework_config)
     is_pytest = framework == TestFramework.PYTEST
     print(
-        "    [N5] Running full test suite regression check"
+        f"    [{node}] Running full test suite regression check"
         + ("" if is_pytest else f" ({label})") + "..."
     )
     # #2048: iterations must be independent. boostgauge #2's generated
@@ -3873,7 +3877,7 @@ def _full_suite_gate(
             runner.require_dependencies()
         except (ValueError, OSError) as e:
             return _halt_full_suite_gate(
-                label, f"its runner cannot run: {type(e).__name__}: {e}"
+                label, f"its runner cannot run: {type(e).__name__}: {e}", node,
             )
         full_run = runner.run_tests(test_paths=None)
         full_output = full_run["raw_output"]
@@ -3894,7 +3898,7 @@ def _full_suite_gate(
     if full_passed + full_failed + full_errors == 0:
         cause = _summarize_collection_failure(full_output) or "no error line captured"
         return _halt_full_suite_gate(
-            label, f"its whole suite collected 0 tests (exit {full_exit}): {cause}"
+            label, f"its whole suite collected 0 tests (exit {full_exit}): {cause}", node,
         )
 
     # #3585 (ledger 0908 line 3098): an exit that says the run failed while
@@ -3907,6 +3911,7 @@ def _full_suite_gate(
             label,
             f"its whole suite ended with exit {full_exit} but reported no "
             f"failure ({full_passed} passed), so it cannot be read as clean: {cause}",
+            node,
         )
 
     if full_failed > 0 or full_errors > 0:
@@ -3922,7 +3927,7 @@ def _full_suite_gate(
         if collection_cause:
             regression_summary = (collection_cause + "\n\n" + regression_summary).strip()
             print(
-                f"    [N5] Full suite: collection failed ({full_errors} error(s)); "
+                f"    [{node}] Full suite: collection failed ({full_errors} error(s)); "
                 f"nothing ran -- routing the cause to N4 (#2914)"
             )
 
@@ -3945,7 +3950,7 @@ def _full_suite_gate(
                 f"iterations: {named}.",
             ))
 
-        print(f"    [N5] Full suite ({label}): {full_failed + full_errors} regression(s) "
+        print(f"    [{node}] Full suite ({label}): {full_failed + full_errors} regression(s) "
               f"detected ({full_passed} passed) — routing back to N4")
 
         log_workflow_execution(
@@ -3976,7 +3981,7 @@ def _full_suite_gate(
             "error_message": "",
         }
 
-    print(f"    [N5] Full suite ({label}): {full_passed} tests passed — no regressions")
+    print(f"    [{node}] Full suite ({label}): {full_passed} tests passed — no regressions")
 
     # #2443: the leg's baselines stand accepted here. Name the preserved
     # samples out loud -- a sample discoverable only by knowing where to
@@ -4026,6 +4031,104 @@ def _every_frameworks_failures(stopped: list[dict[str, Any]]) -> dict[str, str]:
     if len(reasons) > 1:
         joined["error_message"] = "; ".join(reasons)
     return joined
+
+
+def _late_files_named(state: TestingWorkflowState, summary: str) -> list[str]:
+    """The files the review wrote after N5 that `summary` names, repository-
+    relative, in the order the review wrote them (#4523)."""
+    repo_root = Path(state.get("repo_root") or ".")
+    named: list[str] = []
+    for path in state.get("generated_test_files") or {}:
+        rel = os.path.relpath(path, repo_root) if os.path.isabs(path) else path
+        rel = rel.replace("\\", "/")
+        if rel in summary and rel not in named:
+            named.append(rel)
+    return named
+
+
+def _late_files_to_repair(
+    state: TestingWorkflowState, regressions: list[str], summary: str,
+) -> list[str]:
+    """The files written after N5 that N4 may change to repair the suite.
+
+    A file a failure outside it names, as a target's lint test names the
+    files it found faults in. A test the review wrote that itself fails is
+    evidence against the implementation and stays as written: handing it to
+    N4 would let the run pass the review by editing it.
+    """
+    failing = {name.split("::")[0].replace("\\", "/") for name in regressions}
+    return [rel for rel in _late_files_named(state, summary) if rel not in failing]
+
+
+@_halts_on_a_failed_step("N8.5", "green_phase_output")
+def verify_final_suite(state: TestingWorkflowState) -> dict[str, Any]:
+    """N8.5: the full suite again, over what N7.5 and N8 wrote (#4523).
+
+    N5's full-suite gate runs before the adversarial review writes its tests
+    and before N8 writes the docs, so nothing checked those files: a real run
+    passed all fourteen steps and its PR failed CI on 21 ruff findings in the
+    adversarial tests, which the target's own lint test reported. This runs
+    the same gate for every framework once more before N9 lands the run.
+
+    A regression goes to N4, as N5's does, and the late files a failure names
+    from outside become N4's to change. The iteration cap and the repair grace
+    bound the loop, and the halt at the cap names the files. A gate that
+    cannot run halts.
+    """
+    gate_log("[N8.5] Running the full suite over what the review and the docs wrote...")
+    if state.get("mock_mode"):
+        return {"next_node": "N9_cleanup", "error_message": "", "late_failures": []}
+    try:
+        legs = _framework_legs(state) + _gate_only_legs(state)
+    except FrameworkLegError as e:
+        return _halt_legs_cannot_run("N8.5", "green_phase_output", e)
+    repo_root = Path(state["repo_root"]) if state.get("repo_root") else get_repo_root()
+    iteration_count = state.get("iteration_count", 0)
+    max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
+
+    failing: list[dict[str, Any]] = []
+    for leg in legs:
+        gate = _full_suite_gate(
+            state, repo_root, leg.framework, leg.config, iteration_count, max_iterations,
+            node="N8.5",
+        )
+        if gate is None:
+            continue
+        if gate.get("error_message"):
+            return gate
+        failing.append(gate)
+
+    if not failing:
+        print("    [N8.5] The full suite passes with the review's tests and the docs in place")
+        return {"next_node": "N9_cleanup", "error_message": "", "late_failures": []}
+
+    summary = "\n\n".join(g.get("test_failure_summary", "") for g in failing).strip()
+    regressions = [name for g in failing for name in g.get("full_suite_regressions", [])]
+    late = _late_files_named(state, summary)
+    repair = _late_files_to_repair(state, regressions, summary)
+    files = list(state.get("files_to_modify") or [])
+    planned = {f.get("path") for f in files}
+    files.extend(
+        {
+            "path": rel, "change_type": "Modify",
+            "description": "Repair what the target's own suite reports in this file (#4523).",
+        }
+        for rel in repair if rel not in planned
+    )
+    if late:
+        print(
+            f"    [N8.5] the failures name file(s) written after the green phase: "
+            f"{', '.join(late)}"
+            + (f"; N4 may now change {', '.join(repair)}" if repair else "")
+        )
+    return {
+        **failing[0],
+        "test_failure_summary": summary,
+        "full_suite_regressions": regressions,
+        "files_to_modify": files,
+        "late_failures": late,
+        "iteration_count": iteration_count + 1,
+    }
 
 
 @_halts_on_a_failed_step("N5", "green_phase_output")
@@ -4542,12 +4645,36 @@ def _verify_green_non_pytest(
                 coverage_achieved = verdict.percent
     coverage_judged = verdict is None or verdict.judged
 
+    # #4523: the project's own lint, once every test has passed. The target's
+    # CI runs it and this phase did not, so a real run passed every step and
+    # its PR failed on a `prefer-const` in a test file. A failed lint counts as
+    # one failure, as a failed typecheck does, and goes to N4 the same way.
+    lint_failed = False
+    if exit_code == 0 and passed > 0 and failed == 0 and errors == 0:
+        lint = runner.run_lint()
+        if lint is not None:
+            lint_failed = True
+            failed = 1
+            result = {
+                **result,
+                "failed": 1,
+                "failure_summary": (
+                    f"Every test passed, and the project's lint (`{lint.command}`) "
+                    f"failed with exit {lint.exit_code}. Fix what it reports:\n"
+                    f"{lint.output.strip()}"
+                ),
+                "lint_failed": True,
+            }
+            output = f"{output}\n\n{lint.output}"
+
     # #4515: the runner counts a failed typecheck as one failure so the phases
     # read it as failing, and no test has run behind that count.
     no_test_ran = bool(result.get("typecheck_failed"))
     failure_summary = result.get("failure_summary", "")
     if no_test_ran:
         print(f"    [N5] Typecheck failed (exit {exit_code}, {framework.value}); no test ran")
+    elif lint_failed:
+        print(f"    [N5] {passed} passed, and the project's lint failed ({framework.value})")
     else:
         print(f"    [N5] Results: {passed} passed, {failed} failed | "
               f"Whole-file coverage: {shown_coverage} | Exit: {exit_code} ({framework.value})")
@@ -4599,11 +4726,18 @@ def _verify_green_non_pytest(
 
     if failed > 0 or errors > 0:
         if iteration_count + 1 >= max_iterations:
-            still_failing = (
-                f"the typecheck still fails, so no test ran ({framework.value}): "
-                f"{_first_compiler_error(output)}"
-                if no_test_ran else f"{failed} tests still failing ({framework.value})"
-            )
+            if no_test_ran:
+                still_failing = (
+                    f"the typecheck still fails, so no test ran ({framework.value}): "
+                    f"{_first_compiler_error(output)}"
+                )
+            elif lint_failed:
+                still_failing = (
+                    f"the project's lint still fails, though every test passes "
+                    f"({framework.value})"
+                )
+            else:
+                still_failing = f"{failed} tests still failing ({framework.value})"
             error_msg = _with_the_stall(
                 f"Green phase failed after {max_iterations} iterations: {still_failing}",
                 state,

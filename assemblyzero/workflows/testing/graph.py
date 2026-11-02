@@ -83,6 +83,7 @@ from assemblyzero.workflows.testing.nodes import (
     route_after_document,
     review_test_plan,
     scaffold_tests,
+    verify_final_suite,
     verify_green_phase,
     verify_red_phase,
 )
@@ -361,6 +362,45 @@ def _stop_after_green(state: dict[str, Any]) -> dict[str, str]:
         f"{next_node!r} for issue {_issue(state)} and recorded no reason; the "
         f"graph has no such edge"
     )}
+
+
+def _stop_after_final_suite(state: dict[str, Any]) -> dict[str, str]:
+    """The halt N8.5's route takes, or {} when the run may land (#4523).
+
+    A regression in the final suite goes back to N4 under the same cap and
+    budget as one N5 found, so this is `_stop_after_green`'s decision. Its halt
+    also names the files written after the green phase that the failures
+    name, since those are what the run could not repair.
+    """
+    if state.get("next_node") == "N9_cleanup":
+        return {}
+    halt = _stop_after_green(state)
+    late = state.get("late_failures") or []
+    if halt and late:
+        halt["error_message"] = (
+            f"{halt['error_message']}. The full suite fails on file(s) written "
+            f"after the green phase: {', '.join(late)} (#4523)"
+        )
+    return halt
+
+
+def route_after_final_suite(
+    state: TestingWorkflowState,
+) -> Literal["N9_cleanup", "N4_implement_code", "HALT"]:
+    """Route after N8.5 (verify_final_suite, #4523).
+
+    A clean suite lands at N9. A regression goes to N4 while the cap and the
+    budget allow, and halts naming the late files when they do not. A gate
+    that could not run halts.
+    """
+    if state.get("error_message"):
+        return "HALT"
+    halt = _stop_after_final_suite(state)
+    if halt:
+        return _halt_unrecorded("N8.5", halt)
+    if state.get("next_node") == "N4_implement_code":
+        return "N4_implement_code"
+    return "N9_cleanup"
 
 
 def _stop_after_e2e(state: dict[str, Any]) -> dict[str, str]:
@@ -854,6 +894,9 @@ def build_testing_workflow() -> StateGraph:
     # suppressed for external repos upstream (#1627), so this stages only the
     # keeper docs there.
     _add("N8_document", _wrap_with_checkpoint(document, "post-document"))
+    # #4523: the full suite again, over what N7.5 and N8 wrote, before N9 lands.
+    _add("N8_5_final_suite",
+         _records_its_stop(verify_final_suite, _stop_after_final_suite, "N8.5"))
     _add("N9_cleanup", cleanup)  # Issue #180
     _add("HALT", create_halt_node("testing"))  # Issue #486
 
@@ -1026,13 +1069,25 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N8 -> N9 (conditional routing) or END - Issue #180
+    # N8 -> N8.5 (conditional routing) or END - Issue #180. #4523: what
+    # route_after_document sends to N9 passes the final suite first.
     workflow.add_conditional_edges(
         "N8_document",
         route_after_document,
         {
-            "N9_cleanup": "N9_cleanup",
+            "N9_cleanup": "N8_5_final_suite",
             "end": END,
+        },
+    )
+
+    # N8.5 -> N9 when the whole suite passes, N4 to repair it (#4523)
+    workflow.add_conditional_edges(
+        "N8_5_final_suite",
+        route_after_final_suite,
+        {
+            "N9_cleanup": "N9_cleanup",
+            "N4_implement_code": "N4_implement_code",
+            "HALT": "HALT",
         },
     )
 

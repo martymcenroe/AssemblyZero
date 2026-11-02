@@ -316,6 +316,48 @@ def log_workflow_execution(
         raise WorkflowAuditError(message) from e
 
 
+#: pytest's closing line: its counts, then how long the run took. pytest
+#: writes it last, between rules of `=` under `-v` and bare under `-q`:
+#: `===== 1 failed, 104 passed, 2 warnings in 3.21s =====`.
+_SUMMARY_LINE = re.compile(
+    r"^=*\s*(?P<counts>\d+ [a-z]+(?: [a-z]+)?(?:, \d+ [a-z]+(?: [a-z]+)?)*)"
+    r"(?: in [\d.]+s\b.*?)?\s*=*$"
+)
+
+#: The words on that line this parser keeps, and the key each fills.
+_SUMMARY_KEYS = {
+    "passed": "passed", "failed": "failed", "error": "errors",
+    "errors": "errors", "skipped": "skipped",
+}
+
+
+def pytest_summary_counts(output: str) -> dict[str, int]:
+    """The counts on pytest's closing line, or {} when there is none (#4525).
+
+    Only that line is read. The counts used to be taken from anywhere in the
+    output, so a failed test whose message quoted ruff's closing `Found 10
+    errors.` added ten errors to its one failure, and the full-suite gate
+    reported eleven regressions. Output with no closing line, a run that was
+    killed or never started, counts nothing, and the gate's exit check says it
+    cannot be read as clean.
+    """
+    for line in reversed(output.splitlines()):
+        stripped = line.strip().strip("=").strip()
+        if stripped.startswith("no tests ran"):
+            return {}
+        match = _SUMMARY_LINE.match(line.strip())
+        if not match:
+            continue
+        counts: dict[str, int] = {}
+        for item in match.group("counts").split(", "):
+            number, word = item.split(" ", 1)
+            key = _SUMMARY_KEYS.get(word)
+            if key:
+                counts[key] = int(number)
+        return counts
+    return {}
+
+
 def parse_pytest_output(output: str) -> dict:
     """Parse pytest output to extract test results.
 
@@ -334,19 +376,7 @@ def parse_pytest_output(output: str) -> dict:
         "test_names": [],
     }
 
-    # Parse summary line: "5 passed, 2 failed, 1 error in 1.23s"
-    summary_pattern = re.compile(
-        r"(\d+)\s+passed|(\d+)\s+failed|(\d+)\s+error|(\d+)\s+skipped"
-    )
-    for match in summary_pattern.finditer(output):
-        if match.group(1):
-            result["passed"] = int(match.group(1))
-        if match.group(2):
-            result["failed"] = int(match.group(2))
-        if match.group(3):
-            result["errors"] = int(match.group(3))
-        if match.group(4):
-            result["skipped"] = int(match.group(4))
+    result.update(pytest_summary_counts(output))
 
     # Parse coverage percentage: "TOTAL ... 85%"
     coverage_pattern = re.compile(r"TOTAL\s+\d+\s+\d+\s+(\d+)%")

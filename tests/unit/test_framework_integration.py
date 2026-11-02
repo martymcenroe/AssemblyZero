@@ -351,6 +351,7 @@ class TestN5GreenPhaseNonPytest:
     def test_all_pass_with_coverage_succeeds(self, mock_get_runner):
         """Green phase passes when all tests pass and coverage meets target."""
         mock_runner = MagicMock()
+        mock_runner.run_lint.return_value = None  # #4523: the project's lint passes
         mock_runner.run_tests.return_value = {
             "passed": 5,
             "failed": 0,
@@ -393,6 +394,7 @@ class TestN5GreenPhaseNonPytest:
     def test_playwright_scenario_coverage(self, mock_get_runner):
         """Playwright uses scenario coverage (passed/total_scenarios)."""
         mock_runner = MagicMock()
+        mock_runner.run_lint.return_value = None  # #4523: the project's lint passes
         mock_runner.run_tests.return_value = {
             "passed": 8,
             "failed": 0,
@@ -566,6 +568,7 @@ class TestN5GreenPhaseNonPytest:
     def test_skip_e2e_routes_to_finalize(self, mock_get_runner):
         """When skip_e2e is set, successful green phase routes to N7."""
         mock_runner = MagicMock()
+        mock_runner.run_lint.return_value = None  # #4523: the project's lint passes
         mock_runner.run_tests.return_value = {
             "passed": 3,
             "failed": 0,

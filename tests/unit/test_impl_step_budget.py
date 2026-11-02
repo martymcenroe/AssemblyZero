@@ -53,9 +53,10 @@ class TestTheBudgetIsDerived:
         cannot drift apart, because one is computed from the other."""
         base = recursion_limit(5)
         assert recursion_limit(6) > base
-        assert recursion_limit(6) - base == 7, (
-            "one more green iteration is 3 super-steps and one more e2e "
-            "iteration is 4; if that shape changed, the budget must follow"
+        assert recursion_limit(6) - base == 16, (
+            "one more green iteration is 3 super-steps, one more e2e iteration "
+            "is 4, and one more final-suite repair is 9 (#4523); if that shape "
+            "changed, the budget must follow"
         )
 
     def test_raising_the_scaffold_cap_raises_the_budget(self):
@@ -85,6 +86,9 @@ class TestTheBudgetIsDerived:
         from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             MAX_SCAFFOLD_ATTEMPTS,
         )
+        from assemblyzero.workflows.testing.nodes.verify_phases import (
+            MAX_FULL_SUITE_REPAIR_PASSES,
+        )
         from assemblyzero.workflows.testing.state import (
             DEFAULT_MAX_ITERATIONS,
             GREEN_ITERATION_CEILING,
@@ -101,6 +105,9 @@ class TestTheBudgetIsDerived:
             + (GREEN_ITERATION_CEILING - DEFAULT_MAX_ITERATIONS) * 3
             + MAX_COVERAGE_AUGMENT_ATTEMPTS * 2
             + 5 * 4
+            # #4523: N8.5 back through N4 to N8.5, per iteration and per
+            # repair the grace allows past the cap.
+            + (5 + MAX_FULL_SUITE_REPAIR_PASSES) * 9
             + HEADROOM_STEPS
         )
         assert recursion_limit(5) == expected
