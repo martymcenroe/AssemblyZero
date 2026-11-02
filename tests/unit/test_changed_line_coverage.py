@@ -601,9 +601,12 @@ def test_r2_a_changed_comment_is_no_changed_line(target, real_pytest):
     assert result["coverage_judged"] is False
 
 
-def test_r2_a_framework_with_changed_source_and_no_test_file_is_still_judged(mixed_target):
+def test_r2_a_framework_with_changed_source_and_no_test_file_is_still_judged(
+    mixed_target, real_pytest,
+):
     """`_no_targeted_tests` used to say there was nothing to verify. There is
-    when the run changed that framework's source: its whole suite is measured."""
+    when the run changed that framework's source: its whole suite is measured.
+    #4516: the pytest framework runs too, so this target needs its pytest."""
     first = _append(
         mixed_target / "web" / "src" / "engine.ts", "export const added = 1;\n",
     )

@@ -371,5 +371,11 @@ def _build_recommendation(
             "error message, rule on the correct reading, edit the issue's "
             "acceptance criteria to say it, then re-run."
         )
+    elif error_type == "iterations_exhausted":
+        return (
+            "Non-transient: the implementer spent its iterations and the "
+            "suite still fails. Read the failure in the reason and the run's "
+            f"last green-phase output before re-running: {error_message[:300]}"
+        )
     else:
         return f"Workflow {workflow} halted: {error_message[:200]}"

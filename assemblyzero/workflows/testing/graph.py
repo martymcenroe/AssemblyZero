@@ -65,6 +65,7 @@ state writes are discarded at the graph boundary (#2018), so the node in front
 of it records the reason (`_records_its_stop`), and HALT's alert carries it.
 """
 
+import functools
 import sys
 from typing import Any, Callable, Literal
 
@@ -379,6 +380,22 @@ def _stop_after_e2e(state: dict[str, Any]) -> dict[str, str]:
             f"{max_iterations} is reached"
         )}
     return {}
+
+
+def _names_itself(name: str, fn: Callable) -> Callable:
+    """`fn`, with its update recording that this node ran (#4517).
+
+    The halt reads it to say where the run stopped. It used to infer the stage
+    from the iteration count and a drafter's fields, which this workflow does
+    not have, so a halt at the green phase was filed under N0.
+    """
+
+    @functools.wraps(fn)
+    def _node(state, *args, **kwargs):
+        update = fn(state, *args, **kwargs)
+        return {**update, "last_node": name} if isinstance(update, dict) else update
+
+    return _node
 
 
 def route_after_load(
@@ -800,7 +817,9 @@ def build_testing_workflow() -> StateGraph:
     from assemblyzero.workflows.testing.atlas import ATLAS, TOTAL_STEPS
 
     def _add(name, fn):
-        workflow.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS, stage="impl"))
+        workflow.add_node(
+            name, narrated(name, _names_itself(name, fn), ATLAS, TOTAL_STEPS, stage="impl"),
+        )
 
     # Add nodes. #3585: a node whose router can halt on a condition the node
     # does not record is wrapped by `_records_its_stop`, so the reason reaches

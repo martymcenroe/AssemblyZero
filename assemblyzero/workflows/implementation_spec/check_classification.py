@@ -203,6 +203,45 @@ CLASSIFICATIONS: dict[str, Classification] = {
             "fact this check reports early (#2707)."
         ),
     ),
+    "spec_tests_pass_target_lint": Classification(
+        check="spec_tests_pass_target_lint",
+        kind=FACT,
+        reads=(
+            "the test file as the scaffolder will emit it, under ruff with the "
+            "target's own configuration"
+        ),
+        reason=(
+            "ruff reports a finding or it does not, by the rules the target "
+            "chose, and a target that lints its tests fails on that file, "
+            "which the implementer may not change (#4514)."
+        ),
+    ),
+    "spec_tests_start_js_tools_in_their_project": Classification(
+        check="spec_tests_start_js_tools_in_their_project",
+        kind=FACT,
+        reads=(
+            "each subprocess call in the emitted test file, by AST, and whether "
+            "the repository root holds a package.json"
+        ),
+        reason=(
+            "a call names a package manager without a cwd on a target with no "
+            "project at the root or it does not; such a call fails on every "
+            "run, whatever the code does (#4514)."
+        ),
+    ),
+    "spec_tests_name_filters_can_match": Classification(
+        check="spec_tests_name_filters_can_match",
+        kind=FACT,
+        reads=(
+            "each subprocess call in the emitted test file, by AST, for a "
+            "test-name filter holding a regular-expression group with no "
+            "alternation"
+        ),
+        reason=(
+            "such a group cannot match a title's literal parentheses, so every "
+            "test is skipped and the runner exits 0 with nothing proved (#4514)."
+        ),
+    ),
     "visual_baselines_not_self_referential": Classification(
         check="visual_baselines_not_self_referential",
         kind=FACT,

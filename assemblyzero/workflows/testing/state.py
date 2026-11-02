@@ -271,6 +271,8 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Routing
     next_node: str
+    last_node: str  # #4517: the node that ran last, which a halt reports
+    nothing_changed: str  # #4515: why N4's last revision changed no file
     implementation_exists: bool
 
     # Output

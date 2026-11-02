@@ -575,6 +575,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         created_by="#445",
     ),
     Gate(
+        "impl.stagnation.nothing_changed", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
+        "N4 changed no file on iteration",
+        decided_in=f"{_TS}/nodes/implementation/orchestrator.py::implement_code (advisory)",
+        created_by="#4515",
+        notes=(
+            "advisory for the reason the other stagnation guards are: the "
+            "iteration cap ends this loop (#2723), and a model can answer "
+            "differently on the next pass; the cap's halt quotes it"
+        ),
+    ),
+    Gate(
         "impl.api_error", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "API error after",
         _s(f"{_TS}/nodes/implementation/orchestrator.py::generate_file_with_retry::raise", 0, 1),

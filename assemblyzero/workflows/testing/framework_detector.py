@@ -11,7 +11,7 @@ import re
 import sys
 from collections.abc import Callable
 from enum import Enum
-from typing import Optional, TypedDict
+from typing import NotRequired, Optional, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,11 @@ class TestRunResult(TypedDict):
     raw_output: str
     exit_code: int
     framework: TestFramework
+    #: #4516: the failures alone, in the units `edit_script_fix` splits on,
+    #: because a report's raw output carries every passing test as well.
+    failure_summary: NotRequired[str]
+    #: #4515: the typecheck stopped the run, so no test ran.
+    typecheck_failed: NotRequired[bool]
 
 
 # --- Explicit declaration patterns (highest priority) ---
