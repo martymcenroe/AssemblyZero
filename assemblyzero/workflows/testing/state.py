@@ -363,6 +363,12 @@ class TestingWorkflowState(TypedDict, total=False):
     # is the graph's merge schema, and an undeclared key is dropped between
     # the node's return and the router's read.
     scaffold_route: str  # "continue" | "regenerate" | "escalate"
+    # #4508: set by `--resume` for its first pass from the top of the graph,
+    # and cleared by N2.5. N2 skipping on that pass sets `scaffold_reused`, so
+    # N2.5 neither compares the suite with its own hash nor counts a scaffold
+    # that was never generated.
+    resume_pass: bool
+    scaffold_reused: bool
 
     # Issue #147: Completeness gate (N4b) - Anti-stub detection
     completeness_verdict: Literal["PASS", "WARN", "BLOCK", ""]

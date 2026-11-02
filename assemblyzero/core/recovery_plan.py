@@ -102,6 +102,10 @@ def build_resume_command(workflow: str, issue_number: int, state: dict) -> str:
     )
     if repo:
         parts.append(f"--repo {repo}")
+    # #4524: the implementation tool resumes only under --resume. Without it
+    # the line clears the checkpoint and starts the run again from nothing.
+    if workflow == "testing" and issue_number:
+        parts.append("--resume")
     return " ".join(parts)
 
 

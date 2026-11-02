@@ -10,11 +10,13 @@ stub tests early and route back for regeneration.
 """
 
 import ast
+import functools
 import hashlib
 import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -621,6 +623,35 @@ def validate_scenario_coverage(
 # =============================================================================
 
 
+def _a_reused_scaffold_is_not_a_new_one(
+    node: Callable[[dict[str, Any]], dict[str, Any]],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Validate a suite N2 reused on a resume as the suite it is (#4508).
+
+    A resume re-enters the graph at the top. N2 finds the suite on disk and
+    skips, and this node then hashed those same files against the hash it had
+    stored from them: always equal, so every resume after a crash at the red
+    phase halted with a scaffolder "repeating itself" when no model had been
+    called. The reused suite is validated as usual, but it is not compared with
+    its own hash and it is not counted against the scaffold budget. Either
+    marker lasts one pass.
+    """
+    @functools.wraps(node)
+    def wrapped(state: dict[str, Any]) -> dict[str, Any]:
+        seen = state
+        if state.get("scaffold_reused"):
+            seen = {
+                **state,
+                "previous_scaffold_hash": "",
+                # The node counts this pass as one more scaffold.
+                "scaffold_attempts": state.get("scaffold_attempts", 0) - 1,
+            }
+        return {**node(seen), "scaffold_reused": False, "resume_pass": False}
+
+    return wrapped
+
+
+@_a_reused_scaffold_is_not_a_new_one
 def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     """LangGraph node: Mechanical validation of generated tests.
 

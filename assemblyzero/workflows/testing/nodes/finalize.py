@@ -288,8 +288,16 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
             print(f"      - {file_path}")
 
     # Issue #100: Move lineage from active/ to done/
+    # #4526: and the state follows it. Every node after this one, and a HALT,
+    # reads audit_dir: N8 recreated the old path, and a halt could not write
+    # its evidence or its contract into a folder that had moved. A done/
+    # folder that already exists is left alone by the move, and so is the
+    # lineage, which the state then still names correctly.
+    moved: dict[str, str] = {}
     if audit_dir.exists():
-        move_lineage_to_done(audit_dir, repo_root)
+        done_dir = move_lineage_to_done(audit_dir, repo_root)
+        if not audit_dir.exists():
+            moved["audit_dir"] = str(done_dir)
 
     # Issue #511: Include cost data in completion event
     # Issue #513: First-pass = all tests pass on iteration 1
@@ -329,6 +337,7 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
         # recorded as a passed impl stage however quietly it ended.
         "workflow_status": "completed",
         "error_message": "",
+        **moved,
     }
 
 
