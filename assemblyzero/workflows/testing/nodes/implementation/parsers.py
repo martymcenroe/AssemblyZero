@@ -6,9 +6,13 @@ Mechanical validation — no LLM judgment.
 import ast
 import re
 import sys
+from collections.abc import Callable
+from pathlib import Path
 
 from assemblyzero.telemetry import emit
 from assemblyzero.utils.file_type import get_language_tag
+
+from .schema_keywords import schema_keyword_problem
 
 
 def final_newline_as_before(code: str, prior_text: str) -> str:
@@ -74,14 +78,115 @@ def extract_code_block(response: str, file_path: str = "") -> str | None:
     return best_match or fallback_match
 
 
+#: The ways a file can import a module by a name it computes, by family
+#: (#4521). Each is how a refused import was written back in on a real run,
+#: or the next spelling of the same thing.
+_DYNAMIC_ATTRIBUTES = {("importlib", "import_module"): "import_module", ("sys", "modules"): "sys.modules"}
+_DYNAMIC_NAMES = {"__import__": "__import__"}
+
+#: What the spec says when it asks for one of them.
+_DYNAMIC_SPEC_WORDS = {
+    "import_module": ("import_module",),
+    "sys.modules": ("sys.modules", "import modules"),
+    "__import__": ("__import__",),
+}
+
+
+def dynamic_imports(code: str) -> list[tuple[int, str]]:
+    """(line, family) of every dynamic import `code` makes (#4521). A word in
+    a string or a comment is not one. `code` must parse; SyntaxError otherwise.
+    """
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(ast.parse(code)):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and (node.value.id, node.attr) in _DYNAMIC_ATTRIBUTES
+        ):
+            found.append((node.lineno, _DYNAMIC_ATTRIBUTES[(node.value.id, node.attr)]))
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            for alias in node.names:
+                family = _DYNAMIC_ATTRIBUTES.get((node.module, alias.name))
+                if family:
+                    found.append((node.lineno, family))
+        elif isinstance(node, ast.Name) and node.id in _DYNAMIC_NAMES:
+            found.append((node.lineno, _DYNAMIC_NAMES[node.id]))
+    return sorted(set(found))
+
+
+def _dynamic_imports_added(
+    code: str, base_text: Callable[[], str], spec_text: str, filepath: str,
+) -> str:
+    """The refusal for a dynamic import the file did not have, or "" (#4521).
+
+    On a real run the import check refused `import numpy as np`, which the
+    file already had, and the retry wrote `np = importlib.import_module(
+    "numpy")` to get past it, then `sys.modules.get("numpy") or ...`. Both
+    passed every test. A family the file already used, or one the spec asks
+    for, is not refused.
+    """
+    found = dynamic_imports(code)
+    if not found:
+        return ""
+    had = {family for _, family in dynamic_imports(_parsed_base(base_text(), filepath))}
+    added = [
+        (line, family) for line, family in found
+        if family not in had
+        and not any(word in spec_text for word in _DYNAMIC_SPEC_WORDS[family])
+    ]
+    if not added:
+        return ""
+    named = ", ".join(f"{family} (line {line})" for line, family in added)
+    return (
+        f"Dynamic import added where the file had none: {named}. Import the "
+        f"module with a plain import statement. An import the file already "
+        f"had, or one the target's environment provides, is not refused (#4521)."
+    )
+
+
+def _parsed_base(base_text: str, filepath: str) -> str:
+    """`base_text`, once it is known to parse; "" stays "".
+
+    A base that does not parse cannot say what it already did, and the check
+    stops on an ERROR line naming it rather than guess (ADR 0236).
+    """
+    try:
+        ast.parse(base_text)
+    except SyntaxError as exc:
+        print(
+            f"ERROR [N4] {filepath}: the file before this write does not parse "
+            f"(line {exc.lineno}: {exc.msg}), so what it already did cannot be "
+            f"read (#4521)",
+            file=sys.stderr, flush=True,
+        )
+        raise
+    return base_text
+
+
+def _base_on_disk(repo_root: str, filepath: str) -> str:
+    """The file as it stands before this write, or "" when there is none.
+
+    N4 hands the validator no base for a file the LLD calls Add that the base
+    already ships, so the base is read from the tree. A file that is there and
+    cannot be read raises, naming it.
+    """
+    if not repo_root:
+        return ""
+    path = Path(repo_root) / filepath
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
 def validate_code_response(
     code: str, filepath: str, existing_content: str = "", repo_root: str = "",
-    planned_paths: list[str] | None = None,
+    planned_paths: list[str] | None = None, spec_text: str = "",
 ) -> tuple[bool, str]:
     """Mechanically validate code. No LLM judgment.
 
     `planned_paths` is the plan's file list (#2883): an import of a file the
     plan is about to write resolves even though it is not on disk yet.
+
+    `spec_text` is the run's spec. What it asks for is never refused: a dynamic
+    import it names (#4521), or a JSON Schema key it quotes (#4522).
 
     Returns (valid, error_message).
     """
@@ -113,6 +218,16 @@ def validate_code_response(
                 emit("quality.gate_rejected", repo="", metadata={"filepath": filepath, "type": "size_gate", "error": "drastic_shrink"})
                 return False, f"Mechanical Size Gate: File shrank drastically from {len(existing_lines)} lines to {new_lines} lines. You must output the ENTIRE file without using placeholders."
 
+    def base_text() -> str:
+        """The file before this write, read only when a check needs it."""
+        return existing_content or _base_on_disk(repo_root, filepath)
+
+    # #4522: a JSON Schema keeps to its draft's keywords.
+    if filepath.endswith(".json"):
+        problem = schema_keyword_problem(code, base_text, spec_text, filepath)
+        if problem:
+            return False, problem
+
     # Python syntax validation
     if filepath.endswith(".py"):
         try:
@@ -120,15 +235,19 @@ def validate_code_response(
         except SyntaxError as e:
             return False, f"Python syntax error: {e}"
 
+        added = _dynamic_imports_added(code, base_text, spec_text, filepath)
+        if added:
+            return False, added
+
         # Issue #842: Validate imports resolve to real modules.
         # #2547: repo_root now travels through the batch path too, so this
         # runs for every generated .py, not just the individual-retry path.
         if repo_root:
             from .import_validator import validate_imports
-            from pathlib import Path
 
             imports_ok, bad_imports = validate_imports(
                 code, filepath, Path(repo_root), planned_paths=planned_paths,
+                base_text=base_text,
             )
             if not imports_ok:
                 return False, f"Unresolvable imports: {', '.join(bad_imports)}"

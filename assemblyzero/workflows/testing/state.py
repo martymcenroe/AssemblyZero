@@ -273,6 +273,10 @@ class TestingWorkflowState(TypedDict, total=False):
     next_node: str
     last_node: str  # #4517: the node that ran last, which a halt reports
     nothing_changed: str  # #4515: why N4's last revision changed no file
+    #: #4522: each Modify file's lines N4 changed outside the spec's hunks
+    unrequested_changes: dict
+    #: #4523: files written after N5 that the final suite found failing
+    late_failures: list
     implementation_exists: bool
 
     # Output

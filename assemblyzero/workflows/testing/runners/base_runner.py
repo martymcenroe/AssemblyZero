@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from assemblyzero.workflows.target_env import hook_environment
 from assemblyzero.workflows.testing.coverage_report import CoverageReportError, FileLines
@@ -57,6 +58,16 @@ def output_head(text: str) -> str:
 def combined_output(stdout: str, stderr: str) -> str:
     """Both streams, stdout first, as a reader of the run's output sees them."""
     return stdout + ("\n" + stderr if stderr else "")
+
+
+@dataclass(frozen=True)
+class LintFailure:
+    """A project's own lint that ran and failed (#4523): the command, what it
+    printed, and its exit code."""
+
+    command: str
+    output: str
+    exit_code: int
 
 
 def _object_end(text: str, start: int) -> int:
@@ -164,6 +175,12 @@ class BaseTestRunner(ABC):
             else:
                 out.append(path)
         return out
+
+    def run_lint(self) -> LintFailure | None:
+        """The project's own lint, run after its tests pass (#4523), or None
+        when it passes or the project declares none. A runner whose projects
+        declare no lint the green phase can run has none to run."""
+        return None
 
     def require_dependencies(self) -> None:
         """Raise OSError (EnvironmentError) when this runner's project cannot

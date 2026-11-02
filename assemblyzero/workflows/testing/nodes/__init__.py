@@ -46,6 +46,7 @@ from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
 # reachability probe counted the module live: it measures whether a module is
 # IMPORTABLE from a built graph, not whether any node calls it. See #2791.
 from assemblyzero.workflows.testing.nodes.verify_phases import (
+    verify_final_suite,
     verify_green_phase,
     verify_red_phase,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "completeness_gate",
     "mechanical_hooks",
     "verify_green_phase",
+    "verify_final_suite",
     "e2e_validation",
     "finalize",
     "document",

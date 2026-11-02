@@ -83,6 +83,8 @@ class TestTheGraphReachesHalt:
             "N6_e2e_validation",
             "N7_finalize",
             "N7_5_adversarial",  # #3725: a review that cannot run halts
+            # #4523: a final suite that cannot run, or a repair the cap refuses
+            "N8_5_final_suite",
         }, inbound
 
     def test_halt_still_ends_the_run(self):

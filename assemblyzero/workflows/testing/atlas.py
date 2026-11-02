@@ -23,10 +23,10 @@ give: it is an exit, never a step.
 
 from __future__ import annotations
 
-#: The forward path: N0, N1, N2, N2.5, N3, N4, N4b, N5, N6, N7, N7.5, N8, N9.
-#: `N1_5_revise_test_plan` and `N4c_augment_tests` are loops and are excluded,
-#: as is `HALT`.
-TOTAL_STEPS = 14
+#: The forward path: N0, N1, N2, N2.5, N3, N4, N4b, N5, N6, N7, N7.5, N8,
+#: N8.5, N9. `N1_5_revise_test_plan` and `N4c_augment_tests` are loops and are
+#: excluded, as is `HALT`.
+TOTAL_STEPS = 15
 
 ATLAS: dict[str, dict] = {
     "N0_load_lld": {
@@ -278,13 +278,29 @@ ATLAS: dict[str, dict] = {
             "instead of being written and lost."
         ),
         "successors": {
-            "N9_cleanup": "documented",
+            "N8_5_final_suite": "documented",
             "END": "documentation failed or was skipped",
+        },
+    },
+    "N8_5_final_suite": {
+        "title": "final suite",
+        "ordinal": 14,
+        "goal": "Run the whole suite over what the review and the docs wrote.",
+        "teach": (
+            "N5's full-suite gate runs before N7.5 writes its tests and N8 its "
+            "docs, so a real run passed every step and its PR failed CI on "
+            "lint in the adversarial tests (#4523). The gate runs once more "
+            "here, and a regression goes back to N4 like one N5 found."
+        ),
+        "successors": {
+            "N9_cleanup": "the whole suite passes",
+            "N4_implement_code": "a regression, sent back for repair",
+            "HALT": "the gate could not run, or the cap or budget is spent",
         },
     },
     "N9_cleanup": {
         "title": "cleanup",
-        "ordinal": 14,
+        "ordinal": 15,
         "goal": "Leave the target repository as the run found it.",
         "teach": (
             "The last forward step. What it removes is scaffolding the run "

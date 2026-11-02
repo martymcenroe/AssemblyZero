@@ -8,7 +8,7 @@ project modules that exist on disk. Catches hallucinated imports like
 
 import ast
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 # Python stdlib module names (Python 3.10+)
@@ -213,11 +213,55 @@ def _is_stdlib_module(module_top: str) -> bool:
     return module_top in _STDLIB_MODULES or module_top.startswith("_")
 
 
+def _modules_imported(source: str, filepath: str) -> set[str]:
+    """Every module `source`, the file before this write, imports by name.
+
+    A base that does not parse cannot say what it imported, and the check
+    stops on an ERROR line naming it rather than guess (ADR 0236).
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        print(
+            f"ERROR [N4] {filepath}: the file before this write does not parse "
+            f"(line {exc.lineno}: {exc.msg}), so what it already imported cannot "
+            f"be read (#4521)",
+            file=sys.stderr, flush=True,
+        )
+        raise
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            found.add(node.module)
+    return found
+
+
+def _importable_in_target(repo_root: Path, tops: list[str], filepath: str) -> dict[str, bool]:
+    """Ask the target's own environment which of `tops` import (#4521).
+
+    The question the spec stage already asks, by the same probe. A target with
+    no pyproject.toml has no environment to ask, and nothing is passed. One
+    that cannot answer raises the probe's CompletenessCannotCheck, naming the
+    cause: an answer nobody gave is neither a pass nor a refusal (ADR 0236).
+    """
+    if not tops or not (repo_root / "pyproject.toml").is_file():
+        return {}
+    from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+        _probe_target_env,
+    )
+
+    print(f"    [N4] {filepath}: asking the target's environment about {', '.join(tops)} (#4521)")
+    return _probe_target_env(repo_root, tops)
+
+
 def validate_imports(
     code: str,
     filepath: str,
     repo_root: Path,
     planned_paths: Iterable[str] | None = None,
+    base_text: Callable[[], str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Validate that all imports in generated code resolve to real modules.
 
@@ -231,6 +275,17 @@ def validate_imports(
             internal import that maps to a planned path resolves; one that
             is neither on disk nor in the plan is still refused, which is
             the hallucination #842 exists to catch.
+        base_text: Reads the file as it stands before this write (#4521),
+            and is called only when an import would otherwise be refused. An
+            import the file already makes is never refused: on a real run the check
+            refused `import numpy as np` kept from the base, numpy being
+            installed through scipy, and the retry rewrote the line as
+            `importlib.import_module("numpy")` to get past it.
+
+    A module neither declared, internal nor planned is asked of the target's
+    own environment, and passes when it imports there (#4521): a transitive
+    dependency is resolvable. A name the repository or the plan owns is never
+    passed that way, so `pkg.no_such_module` stays refused when `pkg` imports.
 
     Returns:
         Tuple of (valid, list_of_unresolvable_imports).
@@ -271,7 +326,10 @@ def validate_imports(
     third_party = _read_third_party_packages(repo_root) | _KNOWN_THIRD_PARTY
     planned = _planned_set(planned_paths)
 
+    already: set[str] | None = None
+
     bad_imports: list[str] = []
+    unknown: list[tuple[str, int, bool]] = []
     checked: set[str] = set()
 
     for module_path, lineno in imports:
@@ -300,7 +358,26 @@ def validate_imports(
             continue
         if _resolves_in_plan(module_path, planned):
             continue
-        bad_imports.append(f"{module_path} (line {lineno})")
+        # #4521: the file already made this import before this write.
+        if already is None:
+            base = base_text() if base_text else ""
+            already = _modules_imported(base, filepath) if base else set()
+        if module_path in already:
+            continue
+        # A name the repository or the plan owns is first-party: the
+        # environment importing its top level says nothing about the rest.
+        first_party = (
+            _resolve_internal_import(top_level, repo_root)
+            or _resolves_in_plan(top_level, planned)
+        )
+        unknown.append((module_path, lineno, first_party))
+
+    # 5. #4521: what is left is asked of the target's own environment.
+    tops = sorted({path.split(".")[0] for path, _, first_party in unknown if not first_party})
+    importable = _importable_in_target(repo_root, tops, filepath)
+    for module_path, lineno, first_party in unknown:
+        if first_party or not importable.get(module_path.split(".")[0]):
+            bad_imports.append(f"{module_path} (line {lineno})")
 
     return len(bad_imports) == 0, bad_imports
 
