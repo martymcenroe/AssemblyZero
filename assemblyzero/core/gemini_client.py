@@ -431,8 +431,17 @@ AGY_REPLY_FILENAME = "agy-reply.out"
 
 #: How often the watcher looks, and how long a finished-looking reply has to sit
 #: unchanged before the call stops waiting for agy to exit (#4509).
+#:
+#: The settle is longer than agy's own exit (#4510). Measured 2026-11-02 on 30
+#: real calls, prompts of 2,000 to 110,000 characters and replies up to a
+#: 9,280-token module: every agy exited by itself, 0.5 to 2.8 s after its
+#: answer, and 7 took 2.0 s or more. In that time agy logs "Waiting for
+#: migrations to complete to prevent partial migration state" and finishes
+#: reconciling its summary store. A 2 s settle ended those 7 mid-shutdown and
+#: warned about each as a hang. Ten seconds lets a normal exit happen and still
+#: ends a real hang long before the 300 s timeout.
 AGY_ANSWER_POLL_SECONDS = 0.25
-AGY_ANSWER_SETTLE_SECONDS = 2.0
+AGY_ANSWER_SETTLE_SECONDS = 10.0
 
 
 class _AnswerWatcher(threading.Thread):
