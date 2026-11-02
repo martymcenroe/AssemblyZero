@@ -11,10 +11,11 @@ This module makes that impossible mechanically:
 
 * **Named** content is what the current verdict (and the current completeness
   failures) actually point at — test names, backticked spans, quoted phrases,
-  manifest row ids, line-range citations (``lines 81-83``, #2555), and
-  ranges of numbered tests (``test_req_060 through test_req_130``, #4545) —
-  attributed to the draft's natural blocks (a test function, a markdown
-  section).
+  manifest row ids, line-range citations (``lines 81-83``, #2555),
+  ranges of numbered tests (``test_req_060 through test_req_130``, #4545),
+  and Section references (``Section 5.1``, read through the heading
+  numbered 5.1, #4552) — attributed to the draft's natural blocks (a test
+  function, a markdown section).
 * **Locked** content is everything else in the reviewed draft: a completed
   round passed it without objection. A revision that touches locked text is
   refused mechanically — the locked span carries forward byte-verbatim from
@@ -72,19 +73,202 @@ _TEST_NAME_RE = re.compile(r"\btest_[A-Za-z0-9_]+\b")
 _QUOTED_RE = re.compile(r"\"([^\"\n]{4,120})\"")
 #: Manifest row ids (#2533) — a verdict citing N4.2 names that row's test.
 _ROW_ID_RE = re.compile(r"\b[A-Z]\d{0,3}[a-z]?\.\d+\b")
-#: Section references like "Section 10.2" / "section 5".
-_SECTION_RE = re.compile(r"\bSection\s+[\w.]+", re.IGNORECASE)
 
 
 def named_tokens(feedback: str, completeness_issues: list[str] | None = None) -> set[str]:
-    """The identifiers a verdict actually points at, lowercased."""
+    """The identifiers a verdict actually points at, lowercased.
+
+    A Section reference arrives as its canonical token (``section 5.1``),
+    which ``named_line_flags`` resolves through the draft's numbered
+    headings rather than as text (#4552).
+    """
     text = (feedback or "") + "\n" + "\n".join(completeness_issues or [])
     tokens: set[str] = set()
     for pattern in (_BACKTICK_RE, _QUOTED_RE):
         tokens.update(m.group(1).strip() for m in pattern.finditer(text))
-    for pattern in (_TEST_NAME_RE, _ROW_ID_RE, _SECTION_RE):
+    for pattern in (_TEST_NAME_RE, _ROW_ID_RE):
         tokens.update(m.group(0).strip() for m in pattern.finditer(text))
+    tokens.update(section_token(number) for number in section_references(text))
     return {t.lower() for t in tokens if len(t.strip()) >= 3}
+
+
+# ---------------------------------------------------------------------------
+# Section references (#4552)
+# ---------------------------------------------------------------------------
+#
+# A reviewer names a spec section by its number ("update Section 5.1 to match
+# the implementation in Section 6.3"), and the spec's heading carries that
+# number with no word in front of it (``### 5.1 `validate_pack()` ``). Pinning
+# read "Section 5.1" as a token and looked for it as text, so it named no
+# block, the subsection the verdict asked to change stayed locked, and the
+# drafter's compliant edit was refused while the objection came back. A
+# Section reference is therefore resolved through the draft's numbered
+# headings, never as text.
+#
+# The grammar is closed. A reference is exactly ``<marker> <number>``:
+#
+# | part | accepted forms | example |
+# |---|---|---|
+# | marker, word | ``section`` in any letter case, not preceded by a letter, digit or ``_``, then one or more whitespace characters | ``Section 5.1``, ``section 5.1``, ``SECTION 6`` |
+# | marker, sign | ``§`` not preceded by another ``§``, then optional whitespace | ``§5.1``, ``§ 6`` |
+# | number | one ASCII digit run (N), or two joined by one ``.`` (N.M) | ``6``, ``5.1``, ``10.2`` |
+# | end | the end of the text, or a character that is neither a letter, digit or ``_`` nor a ``.`` followed by one | ``Section 5.1.``, ``Section 6.7's``, ``(Section 10)`` |
+#
+# Anything else is not a reference: a plural (``Sections 3.6 and 5.7``,
+# ``§§5.1``), a number of three parts (``Section 5.1.2``), a number running into a letter
+# (``Section 5a``, ``Section 5.x``), a longer word ending in the marker word
+# (``subsection 5.1``), and any marker word or sign not enumerated above.
+#
+# A heading's number is read by the same rules from the start of its text,
+# with the marker optional and the number of any depth:
+#
+# | heading | its number |
+# |---|---|
+# | ``## 6. Change Instructions`` | 6 |
+# | ``### 5.1 `validate_pack()` `` | 5.1 |
+# | ``#### 5.1.2 Edge cases`` | 5.1.2 |
+# | ``## Section 10 Tests``, ``## §10 Tests`` | 10 |
+#
+# A reference names the blocks from each heading carrying exactly its number
+# up to the next heading of the same or a shallower level: Section 6 names
+# everything under ``## 6.`` down to the next ``## ``, subsections included,
+# and Section 5.1 names the ``### 5.1`` subsection, its fenced functions
+# included. Headings inside a fence are code, not headings, as ``_blocks``
+# reads them. A reference whose number no heading carries names nothing, and
+# because it is never read as text, it cannot reach a block that merely
+# mentions the section.
+
+#: The words a reference may open with, compared in lower case.
+SECTION_WORDS: tuple[str, ...] = ("section",)
+#: The signs a reference may open with.
+SECTION_SIGNS: tuple[str, ...] = ("§",)
+#: How many dot-joined parts a reference's number may have: N or N.M.
+SECTION_REFERENCE_PARTS: tuple[int, ...] = (1, 2)
+
+_ASCII_DIGITS = frozenset("0123456789")
+
+
+def _is_word_char(char: str) -> bool:
+    return char.isalnum() or char == "_"
+
+
+def _read_number(text: str, pos: int) -> tuple[tuple[int, ...], int] | None:
+    """The dot-joined ASCII digit runs starting at ``pos``, and where they end.
+
+    None when no digit starts at ``pos``, or when the number runs into a
+    letter, digit or ``_``, or into a ``.`` followed by one (``5a``,
+    ``5.x``). A ``.`` followed by a digit joins the next part, so
+    ``5.1.2`` is three parts, never ``5.1`` and a stray ``.2``.
+    """
+    length = len(text)
+    index = pos
+    parts: list[int] = []
+    while index < length and text[index] in _ASCII_DIGITS:
+        start = index
+        while index < length and text[index] in _ASCII_DIGITS:
+            index += 1
+        parts.append(int(text[start:index]))
+        if (
+            index + 1 < length
+            and text[index] == "."
+            and text[index + 1] in _ASCII_DIGITS
+        ):
+            index += 1
+            continue
+        break
+    if not parts:
+        return None
+    if index < length:
+        following = text[index]
+        if _is_word_char(following):
+            return None
+        if (
+            following == "."
+            and index + 1 < length
+            and _is_word_char(text[index + 1])
+        ):
+            return None
+    return tuple(parts), index
+
+
+def _read_marker(text: str, pos: int) -> int | None:
+    """Where the number after a marker at ``pos`` starts, or None."""
+    for word in SECTION_WORDS:
+        end = pos + len(word)
+        if text[pos:end].lower() != word:
+            continue
+        if pos > 0 and _is_word_char(text[pos - 1]):
+            return None
+        after = end
+        while after < len(text) and text[after].isspace():
+            after += 1
+        return after if after > end else None
+    for sign in SECTION_SIGNS:
+        end = pos + len(sign)
+        if text[pos:end] != sign:
+            continue
+        if text[:pos].endswith(SECTION_SIGNS):
+            return None  # a doubled sign is a plural, not a reference
+        while end < len(text) and text[end].isspace():
+            end += 1
+        return end
+    return None
+
+
+def _read_reference(text: str, pos: int) -> tuple[tuple[int, ...], int] | None:
+    """The number of the reference starting at ``pos`` and where it ends."""
+    after = _read_marker(text, pos)
+    if after is None:
+        return None
+    number = _read_number(text, after)
+    if number is None or len(number[0]) not in SECTION_REFERENCE_PARTS:
+        return None
+    return number
+
+
+def section_references(text: str) -> tuple[tuple[int, ...], ...]:
+    """Every section number the text references, in order, each once.
+
+    ``"Update Section 5.1 to match §6.3."`` is ``((5, 1), (6, 3))``.
+    """
+    found: list[tuple[int, ...]] = []
+    for pos in range(len(text or "")):
+        reference = _read_reference(text, pos)
+        if reference is not None and reference[0] not in found:
+            found.append(reference[0])
+    return tuple(found)
+
+
+def section_token(number: tuple[int, ...]) -> str:
+    """The canonical token for a section number: ``section 5.1``."""
+    return "section " + ".".join(str(part) for part in number)
+
+
+def section_token_number(token: str) -> tuple[int, ...] | None:
+    """The section number a token is, when the whole token is one reference.
+
+    ``section 5.1`` and ``§5.1`` are ``(5, 1)``; a quoted phrase that merely
+    holds a reference (``update section 5.1 first``) is None, and stays an
+    ordinary token matched as text.
+    """
+    text = (token or "").strip()
+    reference = _read_reference(text, 0)
+    if reference is None or reference[1] != len(text):
+        return None
+    return reference[0]
+
+
+def heading_number(heading: str) -> tuple[int, ...] | None:
+    """The number a heading's text opens with, or None.
+
+    ``6. Change Instructions`` is ``(6,)``, ``5.1 `validate_pack()` `` is
+    ``(5, 1)`` and ``Section 10 Tests`` is ``(10,)``. The marker is
+    optional here and the number may have any depth.
+    """
+    text = (heading or "").strip()
+    start = _read_marker(text, 0)
+    number = _read_number(text, 0 if start is None else start)
+    return None if number is None else number[0]
 
 
 #: Line-range citations like "lines 81-83" (#2555). The DASH IS REQUIRED:
@@ -158,10 +342,18 @@ class ComplaintAnswers:
 
 
 def complaint_answers(completeness_issues: list[str] | None) -> ComplaintAnswers:
-    """The answers vocabulary of the round's completeness failures (#4551)."""
+    """The answers vocabulary of the round's completeness failures (#4551).
+
+    A Section reference token is left out (#4552): it names the section's
+    blocks through their heading, and a revised line elsewhere that merely
+    mentions the section answers nothing.
+    """
     issues = [str(issue) for issue in completeness_issues or []]
     return ComplaintAnswers(
-        tokens=frozenset(named_tokens("", issues)),
+        tokens=frozenset(
+            token for token in named_tokens("", issues)
+            if section_token_number(token) is None
+        ),
         keys=frozenset(
             f"REQ-{n}" for issue in issues for n in REQ_TAG.findall(issue)
         ),
@@ -383,6 +575,48 @@ def _blocks(draft: str) -> list[_Block]:
     return blocks
 
 
+def section_spans(
+    draft: str, numbers: set[tuple[int, ...]] | frozenset[tuple[int, ...]]
+) -> tuple[tuple[int, int], ...]:
+    """0-based ``[start, end)`` line spans of the sections ``numbers`` name.
+
+    Each span runs from a heading carrying one of ``numbers`` (read by
+    ``heading_number``) to the next heading of the same or a shallower
+    level, or to the end of the draft (#4552). Headings inside a fence are
+    skipped, as ``_blocks`` skips them, so every span is a run of whole
+    blocks. A number no heading carries contributes no span.
+    """
+    if not numbers:
+        return ()
+    lines = (draft or "").splitlines()
+    headings: list[tuple[int, int, tuple[int, ...] | None]] = []
+    in_fence = False
+    for index, line in enumerate(lines):
+        if _FENCE_RE.match(line.strip()):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = _HEADING_RE.match(line)
+        if match:
+            level = len(line) - len(line.lstrip("#"))
+            headings.append((index, level, heading_number(match.group(1))))
+    spans: list[tuple[int, int]] = []
+    for position, (index, level, number) in enumerate(headings):
+        if number is None or number not in numbers:
+            continue
+        end = next(
+            (
+                later
+                for later, later_level, _ in headings[position + 1:]
+                if later_level <= level
+            ),
+            len(lines),
+        )
+        spans.append((index, end))
+    return tuple(spans)
+
+
 def named_line_flags(
     draft: str,
     tokens: set[str],
@@ -397,20 +631,39 @@ def named_line_flags(
     the old behaviour always risked. A range names its whole enclosing
     block for the same reason a token does: restructuring AROUND a named
     item is the named item's business.
+
+    A Section reference token (``section 5.1``) is the exception to text
+    matching (#4552): it names the blocks of the section whose heading
+    carries its number (``section_spans``), and nothing when no heading
+    does. It is never looked for as text, so a block that only mentions
+    the section stays locked.
     """
     lines = draft.splitlines()
     flags = [False] * len(lines)
     if not tokens and not ranges:
         return flags
+    text_tokens: set[str] = set()
+    sections: set[tuple[int, ...]] = set()
+    for token in tokens:
+        number = section_token_number(token)
+        if number is None:
+            text_tokens.add(token)
+        else:
+            sections.add(number)
+    spans = section_spans(draft, sections)
     for block in _blocks(draft):
         block_lower = block.text.lower()
         name_lower = block.name.lower()
         named = any(
-            token in name_lower or token in block_lower for token in tokens
+            token in name_lower or token in block_lower for token in text_tokens
         ) or any(
             # 1-based inclusive (start, end) vs 0-based [block.start, block.end)
             start - 1 < block.end and block.start < end
             for start, end in ranges
+        ) or any(
+            # 0-based [start, end) vs 0-based [block.start, block.end)
+            start < block.end and block.start < end
+            for start, end in spans
         )
         if named:
             for index in range(block.start, block.end):
@@ -725,12 +978,22 @@ def enforce_pinning(
 
     # Conservation gate (#2559). Skipped under an explicit unlock — the
     # drafter asked to restructure and owns the outcome; the grant is
-    # logged, never silent.
+    # logged, never silent. A Section reference opens its section's lines
+    # to revision but names none of the tests under it (#4552): a test is
+    # let go only by its name, a range, or a block other naming reaches, so
+    # "fix Section 10.1" never licenses dropping every test 10.1 holds.
     if not unlock_reason:
+        text_tokens = {
+            token for token in current_tokens
+            if section_token_number(token) is None
+        }
         override = _conservation_override(
             previous, revised, text,
             current_tokens=current_tokens,
-            current_flags=current_flags,
+            current_flags=(
+                current_flags if len(text_tokens) == len(current_tokens)
+                else named_line_flags(previous, text_tokens, current_ranges)
+            ),
             regressions=tuple(regressions),
         )
         if override is not None:
@@ -760,7 +1023,9 @@ def _conservation_override(
 
     A test definition the previous draft held is lost when it is absent
     from the walked output and no current verdict named it — neither as a
-    token nor by flagging any of its definition lines. A test inside a range
+    token nor by flagging any of its definition lines. The caller's
+    ``current_flags`` leave Section references out (#4552), so a verdict
+    naming the section a test sits in does not name the test. A test inside a range
     the verdict names (``test_req_060 through test_req_130``) arrives here
     as a token: the caller adds ``range_named_tests`` to ``current_tokens``
     (#4545). Tier one: the

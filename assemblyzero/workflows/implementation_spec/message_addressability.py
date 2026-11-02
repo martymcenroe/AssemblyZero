@@ -36,6 +36,8 @@ from assemblyzero.workflows.implementation_spec.revision_pinning import (
     demands_additions,
     named_line_ranges,
     named_tokens,
+    section_spans,
+    section_token_number,
 )
 
 #: The three ways a complaint can stand with respect to enforcement. The
@@ -123,6 +125,10 @@ def addresses_draft(message: str, draft: str) -> Addressability:
     ``line 1`` from a quoted SyntaxError, a position inside a snippet
     rather than a draft address, which is why `named_line_ranges` requires
     the dash and why an out-of-bounds range is reported, not counted.
+
+    A Section reference token addresses the lines of the section whose
+    heading carries its number, as pinning resolves it (#4552), and never
+    matches as text.
     """
     lines = (draft or "").splitlines()
     total = len(lines)
@@ -135,7 +141,12 @@ def addresses_draft(message: str, draft: str) -> Addressability:
 
     lowered = [line.lower() for line in lines]
     token_hit = False
+    sections: set[tuple[int, ...]] = set()
     for token in tokens:
+        number = section_token_number(token)
+        if number is not None:
+            sections.add(number)
+            continue
         if len(token) < MIN_MATCH_CHARS:
             continue
         for index, line in enumerate(lowered, start=1):
@@ -144,6 +155,14 @@ def addresses_draft(message: str, draft: str) -> Addressability:
                 token_hit = True
     if token_hit:
         via.append("named_tokens")
+
+    section_hit = False
+    for start, end in section_spans(draft or "", sections):
+        for line_no in range(start + 1, end + 1):
+            matched.add(line_no)
+            section_hit = True
+    if section_hit:
+        via.append("section_headings")
 
     out_of_bounds: list[tuple[int, int]] = []
     range_hit = False

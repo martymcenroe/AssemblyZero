@@ -26,6 +26,7 @@ from assemblyzero.workflows.implementation_spec.revision_pinning import (
     enforce_pinning,
     named_line_flags,
     named_tokens,
+    section_token_number,
 )
 
 #: `nodes/__init__.py` re-exports the FUNCTION `review_spec`, which shadows
@@ -93,8 +94,20 @@ class TestRunElevensRoundEight:
     """The control and the repair, on the real artifacts."""
 
     def test_the_old_text_left_the_three_lines_locked(self) -> None:
+        """The rationale cites "the LLD's Test Scenarios (Section 10.1)".
+        Since #4552 a Section reference names the draft's section with that
+        number, and this draft's 10.1 holds the three lines, so the control
+        reads the rationale as pinning read it in that round: without the
+        Section reference, which then named nothing."""
         old_text = RATIONALE  # what review_feedback used to be
-        flags = named_line_flags(DRAFT, named_tokens(old_text, []))
+        tokens = {
+            token for token in named_tokens(old_text, [])
+            if section_token_number(token) is None
+        }
+        assert tokens != named_tokens(old_text, []), (
+            "the rationale no longer carries its Section reference"
+        )
+        flags = named_line_flags(DRAFT, tokens)
         assert not any(flags[line - 1] for line in ASSERTION_LINES), (
             "the fixture no longer reproduces the refusal"
         )
