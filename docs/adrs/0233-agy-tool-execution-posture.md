@@ -3,12 +3,12 @@
 **Date:** 2026-09-24
 **Status:** Accepted, 2026-09-24. The operator ruled #3517 (agy in both seats, both workflows) with this finding in view; the `--sandbox` flag shipped with the ADR in PR #3545, as #3516 directed, and the blast-radius statement below stands as the record.
 **Amends:** ADR 0220 (Antigravity CLI migration), finding 2, which recorded that `--sandbox` exists and nothing about what it does.
-**Amended:** 2026-09-25 (#3605, #3612, #3603). The `--sandbox` decision below is withdrawn; see the amendment before section 1. Amended again 2026-09-25 (#3623): on Windows `agy` runs inside WSL, never as `agy.exe`; see the second amendment.
+**Amended:** 2026-09-25 (#3605, #3612, #3603). The `--sandbox` decision below is withdrawn; see the amendment before section 1. Amended again 2026-09-25 (#3623): on Windows `agy` runs inside WSL, never as `agy.exe`; see the second amendment. Amended a third time 2026-11-02 (#4531): the agent takes none of the machine's `agy` customizations but its hooks file; see the third amendment.
 **Issue:** #3516 (parent #3502)
 
 ## The blast radius, stated for pointing at
 
-**Inside the workflow, every `agy` call runs as the pipeline's own agent, `assemblyzero-text`, whose definition the transport writes into the call's temporary directory: `tools: []` and `commandExecutionPolicy: off`. The model has no tool to call, so it cannot run a command, write a file, or reach the network, and neither `agy` nor Windows has anything to ask (#3612). The machine's `agy` settings play no part. `agy` still keeps its own state under `~/.gemini/antigravity-cli/`.**
+**Inside the workflow, every `agy` call runs as the pipeline's own agent, `assemblyzero-text`, whose definition the transport writes into the call's temporary directory: `tools: []` and `commandExecutionPolicy: off`. The model has no tool to call, so it cannot run a command, write a file, or reach the network, and neither `agy` nor Windows has anything to ask (#3612). The machine's `agy` settings play no part, and the agent takes the machine's hooks file and no other customization (#4531). `agy` still keeps its own state under `~/.gemini/antigravity-cli/`.**
 
 ## Amendment, 2026-09-25: the flag requested elevation, and it is withdrawn
 
@@ -33,6 +33,12 @@ The decision: on Windows the transport never runs `agy.exe`. It finds `agy` insi
 Proved 2026-09-25 at about 4:05 PM Central with one call through the new path: `agy` resolved to `/home/mcwiz/.local/bin/agy`, the prompt asked for `whoami` and a file write, and the call returned in 8.3 s with the answer "I cannot run shell commands or create files because I do not have access to any tools", with no dialog from anything.
 
 Residue, stated: when a call times out, `kill_process_tree` ends `wsl.exe` and its Windows children. The Linux `agy` normally ends with its relay, but nothing here proves it did. The PTY path is no longer reached on Windows or Linux (it needs pywinpty, so off Windows it never worked for a short prompt); its removal is #3624.
+
+## Third amendment, 2026-11-02: the agent takes no customizations but the hooks (#4531)
+
+On 2026-11-02 a 2,141-character prompt through the transport was billed 16,687 input tokens, and an empty one 16,079. The tool schemas had not come back: `agy`'s own record of the call (its conversation database, `gen_metadata`) declared one built-in tool, `manage_task`, and a 60,659-character system prompt, of which 51,319 characters were `<user_rules>`: the operator's whole `agy` rule set, `~/.gemini/config/AGENTS.md` and the files under `~/.gemini/config/rules/`. `agy` 1.4.0 gives a Markdown agent the user's rules, skills, plugins, subagents and MCP servers unless the definition says `inheritCustomizations: false`, and the section sits after the per-call workspace paths, so none of it was cached.
+
+The decision: the definition says `inheritCustomizations: false`. Measured, that switch also drops the machine's hooks, which are how the fleet's shell guard holds `agy`: the guard's PreInvocation hook stopped running, and its PreToolUse hook is what denies `manage_task`. So the definition names the hooks file again, by an absolute path the transport fills in: this process's home for a Linux `agy`, WSL's `HOME` for a WSL one. An entry `agy` cannot resolve, `~/` included, is dropped without a word, so a path that is not absolute is refused before the call, and a WSL `HOME` that cannot be read stops the call. Measured after, with `tools/agy_agent_probe.py`: an empty prompt 2,126 input tokens, the 2,141-character prompt 2,732, the system prompt 6,275 characters with no `<user_rules>` or `<skills>`, the `whoami` request refused in one turn with no tool call, and the guard's PreInvocation hook running on every call. The 2,766 figure above is the 2026-09-25 record, not today's.
 
 ## 1. Context
 

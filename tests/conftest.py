@@ -262,6 +262,21 @@ def _no_wsl_agy() -> None:
     """
 
 
+#: WSL's HOME as the stand-in reports it (#4531).
+STAND_IN_WSL_HOME = "/home/stand-in"
+
+
+@functools.lru_cache(maxsize=1)
+def _stand_in_wsl_home() -> str:
+    """WSL's HOME without running wsl.exe (#4531).
+
+    A test that gives its client a WSL stand-in agy makes a call that names the
+    hooks file under WSL's HOME. The real lookup would start wsl.exe, which
+    Ubuntu reaches through interop, so every tier answers with this instead.
+    """
+    return STAND_IN_WSL_HOME
+
+
 @pytest.fixture(autouse=True)
 def no_agy_from_the_machine(request, monkeypatch):
     """A test sees agy only when it supplies one (#4253).
@@ -286,6 +301,7 @@ def no_agy_from_the_machine(request, monkeypatch):
 
     monkeypatch.setattr(gemini_client, "_find_linux_agy", _no_linux_agy)
     monkeypatch.setattr(gemini_client, "_find_wsl_agy", _no_wsl_agy)
+    monkeypatch.setattr(gemini_client, "_wsl_home", _stand_in_wsl_home)
 
 
 @pytest.fixture(autouse=True)

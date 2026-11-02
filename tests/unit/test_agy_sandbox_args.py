@@ -51,9 +51,10 @@ def test_the_safety_args_are_empty():
 
 
 def test_the_definition_has_no_tools_and_no_command_execution():
-    front = gc.AGY_AGENT_DEFINITION.split("---")[1]
+    front = gc.agent_definition("/home/someone/.gemini/config/hooks.json").split("---")[1]
     fields = dict(
-        line.split(":", 1) for line in front.strip().splitlines() if ":" in line
+        line.split(":", 1) for line in front.strip().splitlines()
+        if ":" in line and not line.startswith(" ")
     )
     assert fields["name"].strip() == gc.AGY_AGENT_NAME == "assemblyzero-text"
     assert fields["tools"].strip() == "[]"
@@ -80,15 +81,20 @@ def test_the_stdin_path_runs_as_the_agent_written_into_its_cwd(mock_popen):
         return proc
 
     mock_popen.side_effect = popen
+    client = _client()
+    # #4531: the hooks file depends on the home agy runs in; pinned here so the
+    # test reads the same on every platform.
+    hooks_file = "/home/someone/.gemini/config/hooks.json"
+    client._agy_hooks_file = lambda: hooks_file
 
     # #3624: short and long prompts take the same path now.
-    ok, text, _err = _client()._invoke_via_cli("sys", "short prompt")
+    ok, text, _err = client._invoke_via_cli("sys", "short prompt")
 
     assert ok is True and text == "fine"
     argv = seen["argv"]
     assert argv[:5] == ["/fake/agy", "--agent", "assemblyzero-text", "--model", "gemini-3.1-pro-high"]
     assert _no_elevating_flag(argv)
-    assert seen["agent_file"] == gc.AGY_AGENT_DEFINITION
+    assert seen["agent_file"] == gc.agent_definition(hooks_file)
 
 
 @patch("assemblyzero.core.gemini_client.subprocess.Popen")
