@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import threading
+import uuid
 
 from assemblyzero.utils.process import kill_process_tree
 import time
@@ -78,6 +79,7 @@ class GeminiErrorType(Enum):
     AUTH_ERROR = "auth"  # Invalid key - Skip credential permanently
     PARSE_ERROR = "parse"  # JSON parse failure - Fail closed
     MODEL_MISMATCH = "model"  # Wrong model used - Fail closed
+    OUTPUT_LIMIT = "output_limit"  # agy cut the answer at its output limit (#4543) - Retry
     UNKNOWN = "unknown"  # Other errors - Fail closed
 
 
@@ -212,6 +214,156 @@ def agy_diagnostics(stderr: str, stdout_text: str, reply: dict | None) -> str:
         return f"{stderr}\n{stdout_text}"
     meta = {key: value for key, value in reply.items() if key != "response"}
     return f"{stderr}\n{json.dumps(meta, ensure_ascii=False)}"
+
+
+#: #4543: agy's own words, in its record of a conversation, when a model turn
+#: ran past the per-turn output token limit. agy cuts the turn, records an
+#: ``ERROR_MESSAGE`` step ("Your previous response was cut off because it
+#: exceeded the output token limit / Please continue from where you left off,
+#: keeping your response shorter / Retries remaining: 3"), sends the model one
+#: more request, and ends the call with ``status: ERROR``. The thinking tokens
+#: of a ``-high`` model count against the limit: the three drafting calls of
+#: 2026-11-02 were cut at 65,531 and 65,532 output tokens, with 7,700 to 8,500
+#: characters of visible answer written.
+AGY_OUTPUT_LIMIT_TEXT = "exceeded the output token limit"
+#: Opens the failure text of such a call; ``invoke`` classifies by it.
+AGY_OUTPUT_LIMIT_FAILURE = "agy cut the answer at its output token limit"
+#: Opens the failure text of any other envelope whose status is not SUCCESS.
+AGY_STATUS_FAILURE = "agy status "
+#: Ends that text with agy's own words, the only part ``invoke`` classifies by
+#: words: the envelope's fields but its id, usage and answer, and agy's stderr.
+AGY_WORDS_LABEL = "; agy's own words: "
+#: Where agy keeps its record of each conversation, under the home of the user
+#: agy runs as. ``transcript.jsonl`` holds one JSON object per step.
+AGY_TRANSCRIPT_RELATIVE = (
+    ".gemini/antigravity-cli/brain/{conversation_id}/.system_generated/logs/transcript.jsonl"
+)
+
+
+class AgyRecordUnreadable(Exception):
+    """agy's record of a conversation could not be read; the message says why (#4543)."""
+
+
+def agy_transcript_file(home: str, conversation_id: str) -> str:
+    """agy's record of ``conversation_id``, under ``home`` as agy itself sees it.
+
+    The id comes from agy's stdout, so it is read as a UUID before it becomes
+    part of a path; one that is not a UUID raises ``ValueError``.
+    """
+    if not _absolute(home):
+        raise ValueError(f"the home agy runs in must be an absolute path: {home!r}")
+    canonical = str(uuid.UUID(conversation_id))
+    return home.rstrip("/\\") + "/" + AGY_TRANSCRIPT_RELATIVE.format(conversation_id=canonical)
+
+
+def transcript_steps(text: str) -> list[dict]:
+    """The steps of an agy transcript, one JSON object per line; a line that is not one raises."""
+    steps = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            step = json.loads(line)
+        except ValueError as exc:
+            raise ValueError(f"line {number} of agy's transcript is not JSON: {line[:120]!r}") from exc
+        if not isinstance(step, dict):
+            raise TypeError(f"line {number} of agy's transcript is not an object: {line[:120]!r}")
+        steps.append(step)
+    return steps
+
+
+def output_limit_cuts(steps: list[dict]) -> list[int | None]:
+    """The output tokens of every model turn agy cut at its output limit (#4543).
+
+    A cut is an ``ERROR_MESSAGE`` step carrying ``AGY_OUTPUT_LIMIT_TEXT``; the
+    turn it cut is the ``PLANNER_RESPONSE`` before it, None when that turn
+    names no token count. An empty list means agy recorded no such cut.
+    """
+    cuts: list[int | None] = []
+    turn: dict | None = None
+    for step in steps:
+        kind = step.get("type")
+        if kind == "PLANNER_RESPONSE":
+            turn = step
+        elif kind == "ERROR_MESSAGE":
+            said = f"{step.get('error') or ''}\n{step.get('content') or ''}"
+            if AGY_OUTPUT_LIMIT_TEXT in said:
+                tokens = (turn or {}).get("output_tokens")
+                cuts.append(tokens if isinstance(tokens, int) else None)
+    return cuts
+
+
+def status_failure(
+    status: object, reply: dict, stderr: str, record: str, steps: list[dict] | None,
+) -> str:
+    """The failure text for an envelope whose status is not ``SUCCESS`` (#4543).
+
+    Built from what agy wrote about the call, never from the answer: agy's
+    record of the conversation, the envelope's id and usage, and then, after
+    ``AGY_WORDS_LABEL``, the envelope's other fields and agy's stderr. The
+    answer was in this text until #4543 and ``classify_agy_error`` read it, so
+    an answer that mentioned a quota or a 503 was classified as one; #4538 took
+    it out of the agent check for the same reason. ``record`` says where agy's
+    record was read, or why it was not; ``steps`` is what it held, None when it
+    was not read.
+
+    A cut at the output limit is named, with the cut turn's tokens, and the
+    answer that came with it is never handed back as a success. agy's records
+    of the three calls of 2026-11-02 show why. Each envelope's ``response``
+    opens with the text of the turn agy cut, and that turn stops mid-statement at
+    the limit; each continuation, told to "continue from where you left off",
+    began the edits again instead of finishing them. What agy returned opens
+    with a truncated answer, and nothing in the envelope marks where a second
+    attempt, if it is there, begins.
+    """
+    meta = {key: value for key, value in reply.items() if key != "response"}
+    # The id and the token counts are not words; every other field agy puts
+    # in its envelope is, with its stderr, and goes last, after the label.
+    counted = {key: meta.pop(key) for key in ("conversation_id", "usage") if key in meta}
+    envelope = json.dumps(counted, ensure_ascii=False)[:300]
+    chars = len(str(reply.get("response") or ""))
+    said = (stderr or "").strip()
+    tail = AGY_WORDS_LABEL + json.dumps(meta, ensure_ascii=False)[:300]
+    if said:
+        tail += f"; stderr: {said[-300:]}"
+    # Words first, numbers after: ``invoke`` keeps the first 100 characters of
+    # each attempt's failure, and the stage retry looks there for "503".
+    cuts = output_limit_cuts(steps or [])
+    if cuts:
+        turns = ", ".join("unrecorded" if c is None else f"{c:,}" for c in cuts)
+        return (
+            f"{AGY_OUTPUT_LIMIT_FAILURE} and had the model continue in another "
+            f"turn; the answer it returned with status {status!r} opens with the "
+            f"cut turn, so it is not one complete answer and is not used. Cut turn: "
+            f"{turns} output tokens, thinking included; answer: {chars:,} "
+            f"characters; agy's record: {record}. Envelope: {envelope}{tail}"
+        )
+    seen = (
+        "agy's record could not be read" if steps is None
+        else "agy's record shows no output-limit cut"
+    )
+    return (
+        f"{AGY_STATUS_FAILURE}{status!r} (stdin path): the answer is not used, and "
+        f"{seen}. Answer: {chars:,} characters; agy's record: {record}. "
+        f"Envelope: {envelope}{tail}"
+    )
+
+
+def failed_status(
+    status: object, reply: dict, stderr: str, record: str, steps: list[dict] | None,
+) -> tuple[bool, str, str]:
+    """The failed result of a call whose envelope status is not ``SUCCESS`` (#4543)."""
+    return False, "", status_failure(status, reply, stderr, record, steps)
+
+
+def status_failure_words(error_str: str) -> str:
+    """The part of a status failure that is agy's own words (#4543).
+
+    Its envelope's fields other than the id and the usage, and its stderr. The
+    rest of that text is a conversation id, a path and token counts, and any of
+    them can hold "429" or "503".
+    """
+    return error_str.partition(AGY_WORDS_LABEL)[2]
 
 
 #: On Windows agy runs inside WSL, never as agy.exe (#3623). The Windows build
@@ -653,6 +805,41 @@ class GeminiClient:
             return agy_hooks_file(_wsl_home())
         return agy_hooks_file(Path.home().as_posix())
 
+    def _agy_record(self, conversation_id: object) -> tuple[list[dict], str]:
+        """agy's record of one conversation: (its steps, where it was read) (#4543).
+
+        Read only for a call agy failed, to name the cause. A WSL agy keeps it
+        under WSL's HOME, read through ``wsl.exe --exec cat``. A record that
+        cannot be read raises ``AgyRecordUnreadable`` saying why; the caller
+        fails the call with that reason.
+        """
+        if not conversation_id:
+            raise AgyRecordUnreadable("the envelope names no conversation")
+        wsl = (self._agy_cli or "").startswith(AGY_WSL_PREFIX)
+        try:
+            home = _wsl_home() if wsl else Path.home().as_posix()
+            path = agy_transcript_file(home, str(conversation_id))
+        except (ValueError, RuntimeError) as exc:
+            raise AgyRecordUnreadable(
+                f"no path for conversation {conversation_id!r}: {exc}"
+            ) from exc
+        try:
+            if wsl:
+                got = subprocess.run(
+                    ["wsl.exe", "--exec", "cat", path], capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", timeout=30,
+                    check=False,
+                )
+                text, code, said = got.stdout, got.returncode, got.stderr
+            else:
+                text, code, said = Path(path).read_text(encoding="utf-8", errors="replace"), 0, ""
+            steps = transcript_steps(text)
+        except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as exc:
+            raise AgyRecordUnreadable(f"{path}: {type(exc).__name__}: {exc}") from exc
+        if code != 0:
+            raise AgyRecordUnreadable(f"{path}: cat exited {code}: {said.strip()[:200]}")
+        return steps, path
+
     def _invoke_via_cli(
         self,
         system_instruction: str,
@@ -829,10 +1016,18 @@ class GeminiClient:
             )
         if reply is not None:
             # #4199: agy's own verdict on the call. A status other than
-            # SUCCESS is a failed call, whatever text came with it.
+            # SUCCESS is a failed call, whatever text came with it. #4543: the
+            # failure says why, from agy's own record of the conversation, and
+            # carries none of the answer (see status_failure).
             status = reply.get("status")
             if status != "SUCCESS":
-                return False, "", f"agy status {status!r} (stdin path): {text[:400]}"
+                try:
+                    steps, record = self._agy_record(reply.get("conversation_id"))
+                except AgyRecordUnreadable as exc:
+                    # The call has failed either way; the failure says the
+                    # record could not be read, and why, instead of a cause.
+                    return failed_status(status, reply, stderr or "", str(exc), None)
+                return failed_status(status, reply, stderr or "", record, steps)
             text = _strip_ansi(str(reply.get("response") or "")).strip()
             if text:
                 return True, text, ""
@@ -918,8 +1113,21 @@ class GeminiClient:
                     model_verified=self.model,
                 )
 
-            classified = classify_agy_error(RuntimeError(error_str))
-            error_type = self._error_type_from_classified(classified)
+            if error_str.startswith(AGY_OUTPUT_LIMIT_FAILURE):
+                # #4543: named from agy's own record, never matched for words.
+                # Retried like any failed attempt: the cut depends on how long
+                # the model thinks, and on 2026-11-02 the same prompt, sent a
+                # third time, was answered at 60,043 output tokens.
+                error_type = GeminiErrorType.OUTPUT_LIMIT
+            else:
+                # #4543: of a status failure, only agy's stderr is words; its
+                # ids, path and token counts can hold "429" or "503".
+                words = (
+                    status_failure_words(error_str)
+                    if error_str.startswith(AGY_STATUS_FAILURE) else error_str
+                )
+                classified = classify_agy_error(RuntimeError(words))
+                error_type = self._error_type_from_classified(classified)
 
             if error_type == GeminiErrorType.UNKNOWN and "timed out" in error_str.lower():
                 error_type = GeminiErrorType.CAPACITY_EXHAUSTED
@@ -993,7 +1201,13 @@ class GeminiClient:
             success=False,
             response=None,
             raw_response=None,
-            error_type=last_error_type if budget_exhausted else GeminiErrorType.UNKNOWN,
+            # #4543: a call whose last attempt agy cut at its output limit says
+            # so in its type too, budget or no budget.
+            error_type=(
+                last_error_type
+                if budget_exhausted or last_error_type == GeminiErrorType.OUTPUT_LIMIT
+                else GeminiErrorType.UNKNOWN
+            ),
             error_message="; ".join(errors),
             attempts=total_attempts,
             duration_ms=int((time.time() - start_time) * 1000),

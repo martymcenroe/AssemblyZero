@@ -41,6 +41,9 @@ def _call(stdout: str, stderr: str = "") -> tuple[bool, str, str]:
     client = gc.GeminiClient(model="gemini-3.8-flash-high")
     client._agy_cli = "/stand-in/agy"
     client._agy_hooks_file = lambda: HOOKS
+    # #4543: a failed status reads agy's record of the conversation; never
+    # this machine's.
+    client._agy_record = MagicMock(side_effect=gc.AgyRecordUnreadable("not read in this test"))
     proc = MagicMock()
     proc.pid = 1
     proc.communicate.return_value = (stdout, stderr)
