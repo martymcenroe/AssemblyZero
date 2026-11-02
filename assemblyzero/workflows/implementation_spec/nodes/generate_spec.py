@@ -61,6 +61,7 @@ from assemblyzero.workflows.implementation_spec.nodes.retry_prompt_builder impor
 )
 from assemblyzero.workflows.implementation_spec.revision_pinning import (
     PinningMergeError,
+    PinningResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,16 +137,22 @@ def _halt(issue_number: Any, reason: str) -> dict[str, Any]:
 
 
 def _pinning_names(
-    review_feedback: str, completeness_issues: list[str]
+    review_feedback: str, completeness_issues: list[str], draft: str = ""
 ) -> tuple[set[str], tuple[tuple[int, int], ...]]:
-    """What this round's verdict and complaints name, as pinning reads them."""
+    """What this round's verdict and complaints name, as pinning reads them.
+
+    A range of numbered tests ("test_req_060 through test_req_130") names
+    every test of ``draft`` inside it, as if each were listed (#4545).
+    """
     from assemblyzero.workflows.implementation_spec.revision_pinning import (
         named_line_ranges,
         named_tokens,
+        range_named_tests,
     )
 
     return (
-        named_tokens(review_feedback, completeness_issues),
+        named_tokens(review_feedback, completeness_issues)
+        | range_named_tests(draft, review_feedback, completeness_issues),
         named_line_ranges(completeness_issues),
     )
 
@@ -153,10 +160,65 @@ def _pinning_names(
 #: Why pinning cannot run, for the halt and the raise alike.
 _PINNING_UNREADABLE = (
     "the round's verdict and completeness failures name nothing the pinning "
-    "gate can read (no backticked span, quoted phrase, test name, manifest "
-    "row id, Section reference or line range), so the revision cannot be "
+    "gate can read (no backticked span, quoted phrase, test name, range of "
+    "the draft's numbered tests, manifest row id, Section reference or line "
+    "range), so the revision cannot be "
     "held to the content they name (#2532). It used to be passed unenforced"
 )
+
+
+def _pinning_refusal(result: PinningResult, edit_count: int) -> tuple[str, str]:
+    """(halt reason, re-prompt) for edits pinning sent back unchanged (#4545).
+
+    Two gates can return the previous draft. Conservation (#2559) refuses
+    the revision entire when it removed tests no verdict named, so every
+    one of the ``edit_count`` edit blocks is refused, and the drafter must
+    be told which tests to keep. Locked-content enforcement (#2532) refuses
+    regions one at a time, and its count is the regions it restored. Each
+    message names its own gate and its own count; the conservation case was
+    reported as the locked case with a count of 0.
+    """
+    if result.conservation_event:
+        lost = ", ".join(result.conservation_lost)
+        count = len(result.conservation_lost)
+        reason = (
+            f"conservation refused the revision entire, all {edit_count} "
+            f"edit block(s): it removed {count} test(s) no verdict named "
+            f"({lost}) (#2559)"
+        )
+        context = (
+            f"Your previous edits were refused entire by the conservation "
+            f"gate (#2559): together they removed {count} test definition(s) "
+            f"that neither the feedback nor the deficiencies below name: "
+            f"{lost}. Keep every one of those tests. Remove a test only when "
+            f"the feedback names it, by its own name or inside a range of "
+            f"numbered tests it names (such as test_req_060 through "
+            f"test_req_130)."
+        )
+        return reason, context
+    if result.refusals:
+        reason = (
+            f"every edit touched locked content and was refused by pinning "
+            f"({len(result.refusals)} refusal(s))"
+        )
+        context = (
+            "Your previous edits were refused by pinning enforcement as "
+            "locked content the feedback did not name: "
+            + "; ".join(result.refusals[:4])
+            + ". Edit ONLY the content the deficiencies and feedback below "
+            "name."
+        )
+        return reason, context
+    reason = (
+        f"pinning returned the previous draft unchanged for all "
+        f"{edit_count} edit block(s) with no refusal and no conservation "
+        f"event recorded"
+    )
+    context = (
+        "Your previous edits left the spec unchanged after pinning. Edit "
+        "ONLY the content the deficiencies and feedback below name."
+    )
+    return reason, context
 
 
 def _spec_edit_halt(reason: str) -> str:
@@ -414,7 +476,9 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # to abstain and pass the revision unenforced.
     # -------------------------------------------------------------------------
     if is_revision:
-        tokens, ranges = _pinning_names(review_feedback, completeness_issues)
+        tokens, ranges = _pinning_names(
+            review_feedback, completeness_issues, existing_draft
+        )
         if not tokens and not ranges:
             return _halt(issue_number, _PINNING_UNREADABLE)
 
@@ -634,7 +698,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             # did not name are refused mechanically; the locked spans
             # carry forward byte-verbatim.
             try:
-                pinned, events = _apply_pinning(
+                pin, events = _pin_revision(
                     state, existing_draft, patched,
                     response=edit_result.response or "",
                     review_feedback=review_feedback,
@@ -644,21 +708,14 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
                 # #3585: re-prompting cannot mend the merge; halt.
                 return _halt(issue_number, f"pinning cannot hold this revision: {e}")
             pinning_events.extend(events)
+            pinned = pin.text
             if pinned == existing_draft:
-                refusals = [
-                    e for e in events if "[PINNING] refused:" in e
-                ]
-                halt_reason = (
-                    f"every edit touched locked content and was refused "
-                    f"by pinning ({len(refusals)} refusal(s))"
-                )
-                failure_context = (
-                    "Your previous edits were refused by pinning "
-                    "enforcement as locked content the feedback did not "
-                    "name: "
-                    + "; ".join(refusals[:4])
-                    + ". Edit ONLY the content the deficiencies and "
-                    "feedback below name."
+                # #4545: say which gate refused it. A conservation refusal
+                # was reported as "every edit touched locked content ...
+                # (0 refusal(s))", so the drafter never learned which tests
+                # to keep and sent the same revision three times.
+                halt_reason, failure_context = _pinning_refusal(
+                    pin, len(blocks)
                 )
                 print(
                     f"    [EDIT-SCRIPT] attempt {attempt}/"
@@ -849,23 +906,52 @@ def _apply_pinning(
     naming (#2555): "lines 81-83" addresses ``previous`` exactly — the
     checks measured that document — so the span a failure demands a change
     in is named content, never a lock refusal, never the regression class.
+
+    A range of numbered tests names each test of ``previous`` inside it
+    (#4545), in this round's naming and in the ever-named union alike.
     """
+    result, events = _pin_revision(
+        state, previous, revised,
+        response=response,
+        review_feedback=review_feedback,
+        completeness_issues=completeness_issues,
+    )
+    return result.text, events
+
+
+def _pin_revision(
+    state: ImplementationSpecState,
+    previous: str,
+    revised: str,
+    *,
+    response: str,
+    review_feedback: str,
+    completeness_issues: list[str],
+) -> tuple[PinningResult, list[str]]:
+    """``_apply_pinning`` with the whole result, for callers that must say
+    why a revision came back unchanged (#4545)."""
     from assemblyzero.workflows.implementation_spec.revision_pinning import (
         demands_additions,
         enforce_pinning,
         named_tokens,
+        range_named_tests,
         unlock_requested,
     )
 
-    current, ranges = _pinning_names(review_feedback, completeness_issues)
+    current, ranges = _pinning_names(
+        review_feedback, completeness_issues, previous
+    )
     if not current and not ranges:
         raise PinningCannotRunError(_PINNING_UNREADABLE)
 
     ever = set(current)
     for prior in state.get("review_feedback_history", []):
-        ever |= named_tokens(prior)
+        ever |= named_tokens(prior) | range_named_tests(previous, prior)
     for entry in state.get("prior_completeness_breakdown", []):
-        ever |= named_tokens("", [str(f) for f in entry.get("failures", [])])
+        failures = [str(f) for f in entry.get("failures", [])]
+        ever |= named_tokens("", failures) | range_named_tests(
+            previous, "", failures
+        )
 
     result = enforce_pinning(
         previous, revised,
@@ -903,7 +989,7 @@ def _apply_pinning(
         )
     for event in events:
         print(f"    {event}")
-    return result.text, events
+    return result, events
 
 
 # =============================================================================
