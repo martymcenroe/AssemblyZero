@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from assemblyzero.core.errors import GATE_THAT_BLOCKED
+from assemblyzero.core.errors import FRAMEWORK_UNRESOLVED, GATE_THAT_BLOCKED
 
 
 # Error types classified as transient (will resolve on their own)
@@ -431,6 +431,19 @@ def _build_recommendation(
             f"{blocked} Read the [PINNING] events and the complaint in the "
             "halt evidence before a relaunch: a relaunch puts the same draft "
             "in front of the same check."
+        )
+    elif error_type == "framework_unresolved":
+        # #4555: N0's halt when it cannot say which runner tests a file the
+        # spec names, or where. It was `unknown`.
+        reason = (error_message or "").split(FRAMEWORK_UNRESOLVED, 1)[-1].strip()
+        return (
+            "Non-transient: N0 could not say which runner tests a file the "
+            "spec names, or where it runs, so nothing was tested. If the path "
+            "the reason names is right, its project must declare the runner "
+            "(a config, a test script or the runner as a dependency) in a "
+            "directory that holds it; if the path is wrong, the spec is the "
+            "defect. A resume reads the same spec and tree and halts the same "
+            f"way until one of them changes. Reason: {reason[:400]}"
         )
     else:
         return f"Workflow {workflow} halted: {error_message[:200]}"

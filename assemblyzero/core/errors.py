@@ -308,6 +308,19 @@ GATE_THAT_BLOCKED = "Gate that blocked progress:"
 
 
 # ---------------------------------------------------------------------------
+# The run cannot say which runner tests a file, or where (#4555)
+# ---------------------------------------------------------------------------
+
+#: The marker N0 writes when the test frameworks of a run cannot be resolved
+#: (#4237): no directory that holds a test file the LLD names declares a
+#: runner, the LLD names a runner the project has nowhere, or a package.json
+#: cannot be read. Shared by the writer (testing/nodes/load_lld.py) and halt
+#: classification (halt_node.py), which gives the halt a class of its own; it
+#: was `unknown`.
+FRAMEWORK_UNRESOLVED = "[FRAMEWORK UNRESOLVED]"
+
+
+# ---------------------------------------------------------------------------
 # Capacity-signature detection (#1909)
 # ---------------------------------------------------------------------------
 

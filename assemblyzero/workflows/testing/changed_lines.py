@@ -60,6 +60,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.utils.diff_headers import git_unquoted
 from assemblyzero.utils.shell import run_command
 from assemblyzero.workflows.testing.coverage_report import (
     CoverageReportError,
@@ -166,23 +167,16 @@ def run_base_commit(repo_root: Path | str, base_branch: str, base_commit: str = 
     return min(found, key=lambda sha: found[sha])
 
 
-def _unquoted(path: str) -> str:
-    """A path as git printed it: `"..."` with C escapes when it holds a
-    character git will not print bare."""
-    if not path.startswith('"'):
-        return path
-    return (
-        path[1:-1].encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
-    )
-
-
 def _new_side_path(header: str) -> str | None:
     """The file a `+++ ` header names, or None for /dev/null (a deleted file).
-    git ends the name with a tab when it holds a space."""
+    git ends the name with a tab when it holds a space. This reads git's own
+    output, which always carries the `b/` prefix, so a name without it is an
+    error here; a spec's diff is read by `assemblyzero.utils.diff_headers`
+    (#4555), which shares git's quoting with this."""
     name = header.rstrip("\t")
     if name == "/dev/null":
         return None
-    name = _unquoted(name)
+    name = git_unquoted(name)
     if not name.startswith("b/"):
         raise ChangedLinesError(f"the diff header `+++ {header}` names no b/ path")
     return name[2:]

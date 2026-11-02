@@ -27,6 +27,7 @@ from pathlib import Path
 
 from assemblyzero.core import alert as _alert
 from assemblyzero.core.errors import (
+    FRAMEWORK_UNRESOLVED,
     RECURRENCE_UNDER_PINNING,
     AuthenticationError,
     CapacityError,
@@ -75,6 +76,11 @@ def classify_error(error_message: str) -> str:
     # quotes the unresolved complaints, whose words are not the halt's own.
     if RECURRENCE_UNDER_PINNING.lower() in msg_lower:
         return "completeness_recurrence_under_pinning"
+    # #4555: N0 cannot say which runner tests a file the LLD names, or where.
+    # It was `unknown`. Checked this early because the message quotes the
+    # paths and directories it searched, whose words are not the halt's own.
+    if FRAMEWORK_UNRESOLVED.lower() in msg_lower:
+        return "framework_unresolved"
     # #1899/#1900: a contradiction in the ISSUE's own requirements. Nothing
     # transient about it — no retry, revise cycle, or regenerated spec can
     # satisfy two criteria that specify different outcomes for the same
