@@ -446,6 +446,9 @@ class TestTheSweepIsExhaustive:
             "check_spec_tests_name_filters_can_match",
             "check_spec_tests_pass_target_lint",
             "check_spec_tests_start_js_tools_in_their_project",
+            # #4519: needs the target's own TypeScript; driven by
+            # tests/unit/test_spec_typescript_bodies.py.
+            "check_spec_typescript_tests_read_real_members",
         }
         unaccounted = exported - swept - uncovered
         assert not unaccounted, (
@@ -470,6 +473,9 @@ class TestTheSweepIsExhaustive:
             "check_spec_tests_name_filters_can_match",
             "check_spec_tests_pass_target_lint",
             "check_spec_tests_start_js_tools_in_their_project",
+            # #4519: needs the target's own TypeScript; driven by
+            # tests/unit/test_spec_typescript_bodies.py.
+            "check_spec_typescript_tests_read_real_members",
         }
         phantom = uncovered - exported
         assert not phantom, (
