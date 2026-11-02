@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.errors import FRAMEWORK_UNRESOLVED
 from assemblyzero.workflows.testing.audit import (
     create_testing_audit_dir,
     gate_log,
@@ -163,9 +164,10 @@ def resolve_coverage_target(
 def _framework_resolution_failed(issue_number: int, error: ValueError) -> dict[str, Any]:
     """N0's halt when the run cannot say which frameworks test it, or where
     (#4236, #4237). Routed to HALT, which alerts the operator; deterministic,
-    because the same tree resolves the same way on a retry."""
+    because the same tree resolves the same way on a retry. The marker gives
+    the halt its class, `framework_unresolved` (#4555)."""
     message = (
-        f"{DETERMINISTIC_FAILURE}: [N0] the test frameworks for issue "
+        f"{DETERMINISTIC_FAILURE}: [N0] {FRAMEWORK_UNRESOLVED} the test frameworks for issue "
         f"#{issue_number} could not be resolved: {error}. Nothing is tested "
         f"until the target or the LLD says which runner tests each file."
     )

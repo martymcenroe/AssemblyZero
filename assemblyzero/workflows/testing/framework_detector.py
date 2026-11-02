@@ -13,6 +13,8 @@ from collections.abc import Callable
 from enum import Enum
 from typing import NotRequired, Optional, TypedDict
 
+from assemblyzero.utils.diff_headers import with_header_paths
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,11 +167,14 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], TestFramework]] = [
 def _named_test_paths(lld_content: str, is_test_file: Callable[[str], bool]) -> list[str]:
     """Every token of the LLD that `is_test_file` calls a test file, in order.
 
-    Markdown delimiters and sentence punctuation come off first. A token
-    holding a glob character (`*.test.ts`) describes files and names none, so
-    it is not a path. Paths come back with forward slashes and no leading `./`.
+    A unified diff's file headers are read first, by `with_header_paths`
+    (#4555): `--- a/web/x.test.ts` names `web/x.test.ts`, never a file under
+    a directory named `a`, and `/dev/null` names none. Then markdown
+    delimiters and sentence punctuation come off. A token holding a glob
+    character (`*.test.ts`) describes files and names none, so it is not a
+    path. Paths come back with forward slashes and no leading `./`.
     """
-    text = lld_content or ""
+    text = with_header_paths(lld_content or "")
     for character in _PATH_DELIMITERS:
         text = text.replace(character, " ")
     found: list[str] = []
