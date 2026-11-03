@@ -36,6 +36,8 @@ picture-maker = "codex-sol"
 web-research = "codex-sol"
 # Records speech. Every model named here is recorded, so a take can be compared.
 speech = ["gemini-tts-preview", "gemini-tts", "gemini-tts-lite"]
+# The one tiny text call that says whether a Gemini API key can generate at all.
+key-check = "gemini-api-lite"
 # The live session a harness candidate is qualified with.
 harness-test = "claude-haiku"
 # Drafting that needs depth, drafting that needs speed, and small, cheap proposals.
@@ -79,6 +81,11 @@ status = "live"
 [models.gemini-tts-lite]
 provider = "gemini-api"
 id = "gemini-3.8-flash-lite-tts"
+status = "live"
+
+[models.gemini-api-lite]
+provider = "gemini-api"
+id = "gemini-3.5-flash-lite"
 status = "live"
 
 [models.claude-opus]
