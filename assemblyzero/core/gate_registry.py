@@ -611,14 +611,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.file_generation_failed", "impl", JUDGES_BUDGET, ACTION_HALT,
         "FATAL: Failed to implement",
         _s(f"{_TS}/nodes/implementation/orchestrator.py::generate_file_with_retry::raise",
-           2, 3, 4, 5),
+           2, 3, 4, 5)
+        + _s(f"{_TS}/nodes/implementation/orchestrator.py::edit_large_file::raise", 0),
         decided_in=f"{_TS}/nodes/implementation/claude_client.py::ImplementationError",
         justified_by="#2723",
         notes=(
             "a summary instead of code, no code block, or validation failed, "
             "N times; budget since #2760 (operator ruling 2026-09-04 on "
             "#2723) -- generate_file_with_retry re-prompts with the "
-            "validation error up to MAX_FILE_RETRIES and raises only after"
+            "validation error up to MAX_FILE_RETRIES and raises only after. "
+            "edit_large_file (#4683) is the same budget for a file too large "
+            "to rewrite: its edit script is retried with the reason, then raises"
         ),
     ),
     Gate(

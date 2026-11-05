@@ -111,7 +111,11 @@ the old lines carried nothing to name; and the variant again:
 tests were reported absent), #4680 (the variant in the testing workflow: N0's
 contract read only a spec's Python test functions, so N1's ratio gate counted
 the Vitest half of the suite absent; and a Vitest test titled by its criteria
-row joined on the row's tag, not the requirement its body cites).
+row joined on the row's tag, not the requirement its body cites), #4683 (N4
+asked for a large Modify file whole; the model sent the demanded function
+alone, and the size gate refused it on every attempt, so the demand could not
+be met in the form it was asked for; a large file's change is asked for as
+edits now).
 
 **The taxonomy is three-way, not two.** A complaint is *addressed* (it cites a
 line), *demands an addition* (there is no line to cite, and the #2560 exemption
