@@ -198,12 +198,19 @@ def _halt_input_unreadable(message: str) -> dict[str, Any]:
     return {"error_message": message}
 
 
-def _frameworks_with_directories(configs: list[dict]) -> dict[str, str]:
-    """`{framework: directory}` for the run record (#3707)."""
-    return {
-        str(getattr(c["framework"], "value", c["framework"])): c.get("working_directory") or "."
-        for c in configs
-    }
+def _frameworks_with_directories(configs: list[dict]) -> list[str]:
+    """Each framework with its directory, for the run record (#3707).
+
+    #4687: one entry per project, spelled as `framework_label` spells them
+    (`pytest`, `vitest (web)`). A `{framework: directory}` dict kept one
+    directory per framework, so a second Vitest project hid the first.
+    """
+    labels: list[str] = []
+    for c in configs:
+        name = str(getattr(c["framework"], "value", c["framework"]))
+        directory = c.get("working_directory") or "."
+        labels.append(name if directory == "." else f"{name} ({directory})")
+    return labels
 
 
 class WorkflowParsingError(ValueError):

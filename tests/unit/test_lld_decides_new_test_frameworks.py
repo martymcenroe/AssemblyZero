@@ -160,8 +160,8 @@ class TestR3TheLogSaysWhich:
         _log_frameworks(PYTHON_ONLY, str(target), configs, gate_only)
 
         out = capsys.readouterr().out
-        assert "scaffold, red and green: {'pytest': '.'}" in out
-        assert "full-suite gate: {'pytest': '.', 'vitest': 'web'}" in out
+        assert "scaffold, red and green: ['pytest']" in out
+        assert "full-suite gate: ['pytest', 'vitest (web)']" in out
 
 
 def _state(target: Path, test_file: str, run: dict, gate_only: dict) -> dict:

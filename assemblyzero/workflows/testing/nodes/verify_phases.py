@@ -1530,7 +1530,12 @@ def _preflight_legs(state: TestingWorkflowState, legs: list[_Leg]) -> None:
     """Every JavaScript framework of a multi-framework run can start: its
     runner exists and its project's packages are installed (#4236). Raises
     FrameworkLegError naming the framework, its directory and the cause, so
-    the phase halts before any suite runs rather than testing half the run."""
+    the phase halts before any suite runs rather than testing half the run.
+
+    #4686: a leg with no test file of this run is asked only for what running
+    its suite needs. If the run changed none of its source, the full-suite
+    gate runs it without coverage; if the run did, `_verify_green_non_pytest`
+    asks for its coverage provider before it measures, and halts there."""
     repo_root_str = state.get("repo_root", "")
     repo_root = repo_root_str or str(get_repo_root())
     for leg in legs:
@@ -1541,7 +1546,7 @@ def _preflight_legs(state: TestingWorkflowState, legs: list[_Leg]) -> None:
                 leg.framework, repo_root,
                 working_directory=leg.config.get("working_directory"),
             )
-            runner.require_dependencies()
+            runner.require_dependencies(measure_coverage=bool(leg.test_files))
         except (ValueError, OSError) as e:
             raise FrameworkLegError(
                 f"{leg.label} cannot run: {type(e).__name__}: {e}"
@@ -3874,7 +3879,9 @@ def _full_suite_gate(
                 framework, str(repo_root),
                 working_directory=(framework_config or {}).get("working_directory"),
             )
-            runner.require_dependencies()
+            # #4686: this run measures nothing, so it asks for no coverage
+            # provider, only for what running the suite needs.
+            runner.require_dependencies(measure_coverage=False)
         except (ValueError, OSError) as e:
             return _halt_full_suite_gate(
                 label, f"its runner cannot run: {type(e).__name__}: {e}", node,

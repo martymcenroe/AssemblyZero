@@ -41,8 +41,9 @@ class PlaywrightRunner(BaseTestRunner):
                 "Install Node.js from https://nodejs.org/ and ensure npx is available."
             )
 
-    def require_dependencies(self) -> None:
-        """The project's own Playwright must be installed (#4236)."""
+    def require_dependencies(self, measure_coverage: bool = True) -> None:
+        """The project's own Playwright must be installed (#4236), whether or
+        not the run measures coverage (#4686)."""
         self._require_node_package("playwright")
 
     def run_tests(
