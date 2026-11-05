@@ -108,7 +108,10 @@ empty), #2633 (the variant below), #4551 (a revised line that carries what the
 round's completeness complaint names counts as named, so the answer lands where
 the old lines carried nothing to name; and the variant again:
 `criteria_have_tests` read only Python tests, so a TypeScript target's Vitest
-tests were reported absent).
+tests were reported absent), #4680 (the variant in the testing workflow: N0's
+contract read only a spec's Python test functions, so N1's ratio gate counted
+the Vitest half of the suite absent; and a Vitest test titled by its criteria
+row joined on the row's tag, not the requirement its body cites).
 
 **The taxonomy is three-way, not two.** A complaint is *addressed* (it cites a
 line), *demands an addition* (there is no line to cite, and the #2560 exemption
