@@ -1,7 +1,7 @@
 # 0941 — Restore `gh` CLI auth using the fine-grained PAT (`llm-restricting`)
 
-> **Version:** 1.0.2
-> **Last updated:** 2026-05-29 10:40 PM Central
+> **Version:** 1.1.0
+> **Last updated:** 2026-11-05 3:20 PM Central
 > **Applies to:** Operator workstation where `gh` CLI is the day-to-day GitHub interface. The standing fine-grained PAT for this fleet is named `llm-restricting`. Its declared purpose, taken from its GitHub settings page: *"Create and manage restricted GitHub Fine-Grained Personal Access Tokens (PATs) for AI agents (Claude Code, Gemini CLI, etc.). Agents get enough permission to do their work but cannot bypass branch protection, force-push, or perform admin actions."* Tokens with admin authority are out of scope here; that path is [ADR-0216](../adrs/0216-in-process-classic-pat-decryption.md)'s in-process classic PAT.
 > **Fleet policy:** **OAuth is forbidden. Period.** `gh` runs on `llm-restricting` exclusively. If the browser-based `gh auth login` OAuth flow ever fires, that is a procedural error — see §3b.
 > **Tracking issue:** TBD — file once `gh auth` is restored (see §9 change log)
@@ -142,6 +142,24 @@ Two surfaces have no clean command-line clear and need a manual step if you used
   - If it was off going into §3c, no action needed. If it was on and you copied the PAT through it, clear before continuing.
 - **Browser download history** — only relevant if you downloaded (not copied) the PAT. Using incognito at §3a.1 avoids it.
 
+### 3e. Ubuntu (WSL): load the PAT with the no-echo script
+
+§3c and §3d are written for Git Bash on Windows. On Ubuntu, `gh` keeps its token in `~/.config/gh/hosts.yml`, not in Credential Manager, so a Windows update cannot wipe it. When `gh auth status` on Ubuntu says the token is invalid, GitHub itself has stopped honouring the value: it was regenerated or revoked. If GitHub emailed you that it revoked a token it found published, say so before going on, because that is a leak to trace, not a rotation.
+
+Git's credential helper on Ubuntu is `gh auth git-credential`, so the same load restores `git push` and `git fetch`.
+
+1. Get the current value. If you regenerated `llm-restricting` yourself, use the value GitHub showed you then. If not, regenerate it per §3a step 2, in an incognito window, and set the expiry while you are there. Regenerating invalidates the old value everywhere, so the Windows side's `gh` needs §3c as well.
+2. Do §3b: no `GitHub CLI` OAuth grant may exist.
+3. Copy the value, then in the Ubuntu terminal run:
+
+```
+bash /mnt/c/Users/mcwiz/Projects/AssemblyZero/tools/gh_load_fine_grained_pat.sh
+```
+
+It asks for the token with echo off and reports only its length and its `github_pat_` prefix. It refuses anything that is not a fine-grained token, loads it into `gh` on a pipe (never argv, the environment, a file or a here-string), confirms GitHub answers `martymcenroe`, then clears the Ubuntu clipboard (`xclip`) and the Windows clipboard (Windows PowerShell). It names any clipboard it could not clear. Clipboard history (Win+V) still needs the manual step in §3d.
+
+4. Close the incognito window.
+
 ## 4. Verification
 
 Do NOT use `gh auth status -t` to verify — the `-t` flag prints the full token value to stdout, which lands in session transcripts and shell history. Use the masked-display + API-call combination instead:
@@ -232,6 +250,7 @@ The safe-Sublime sequence is five extra steps (`hot_exit: false`, `remember_open
 
 | Version | Date | Change |
 |---------|------|--------|
+| 1.1.0 | 2026-11-05 3:20 PM Central | New §3e, the Ubuntu (WSL) path (#4682): on Ubuntu `gh` keeps its token in `~/.config/gh/hosts.yml` and git's credential helper is `gh`, so an invalid token there stops `gh` and `git push` alike. `tools/gh_load_fine_grained_pat.sh` loads the value with echo off, checks only its length and `github_pat_` prefix, hands it to `gh` on a pipe, confirms the login, and clears both clipboards. |
 | 1.0.2 | 2026-05-29 10:40 PM Central | Reframe (still patch): runbook now reflects operator-confirmed ground truth. (1) Header retitled to "Restore `gh` CLI auth using the fine-grained PAT (`llm-restricting`)" — the standing PAT is named, its declared purpose is quoted from its GitHub settings page (AI-agent restricted, no admin / branch-protection bypass capability), and the fleet policy "OAuth is forbidden. Period." is stated up front. (2) §1 rewritten: §1a names Windows 11 wiping Credential Manager as the assumed #1 trigger for needing this runbook, with the symptom signature (`gh auth status` invalid + `git fetch` credential prompt + recent Windows Update); §1b retains the OAuth-bypass threat-model explanation as the WHY for the policy in (1). (3) §2.5 rewritten around the two real long-term storage choices (GitHub itself as master via regenerate-to-recover; optional encrypted local copy). (4) §3 intro now has three entry points (have value locally / regenerate at GitHub / first-time create) instead of two. (5) §3a step 2 added — regenerate vs create-new branch. (6) §3b converted from optional "Revoke OAuth (recommended)" to mandatory "Verify no OAuth grant exists" with explicit fleet-policy rationale. (7) §3c step 6 verification command switched from `gh auth status -t` (prints full token to stdout, transcript-toxic) to `gh auth status` + `gh api user --jq .login` (masked + round-trip). (8) §4 hardened — `github_pat_` prefix is now a load-bearing STOP gate; if `gho_` or `ghp_` appears, the operator is policy-violating and must re-run §3c. Smoke tests and negative-test framing reference `llm-restricting`'s actual screenshot-confirmed scope. (9) §5 Rollback no longer offers OAuth as a fallback — only "edit `llm-restricting`'s permissions and re-run §3c" or "pivot to ADR-0216 classic PAT for genuinely admin-scope operations." (10) §6 split into §6a Re-loading (the recurring Windows-11-wipe case, no rotation paperwork required) and §6b Rotation (the periodic expiry case, references the current expiry `Mon, Jun 22 2026` from the screenshot). Tracking issue still TBD. |
 | 1.0.1 | 2026-05-29 10:05 PM Central | Patch: §3 split into "reuse existing" vs "create new" entry points so the lower-variability reuse path is explicit. §3a.1 incognito caveat clarified — only applies to the create-new path because reuse never visits the PAT one-time-display page. New §2.5 declares long-term PAT storage as a precondition the runbook does not prescribe (operator's existing pattern — GPG-encrypted file, password manager, etc.). New §3c lead-in tells the operator to retrieve the PAT from §2.5 storage. §3d expanded with how to check, view, and clear the Win+V clipboard-history ring buffer. New §6 covers rotation across both surfaces (long-term storage and `gh`'s loaded credential) and names the Windows Update–invalidated-token symptom that prompted the runbook. §7/§8/§9 renumbered (former §6/§7/§8). |
 | 1.0.0 | 2026-05-29 9:49 PM Central | New runbook. Captures the gh-OAuth-bypass-of-ADR-0216 problem and the fine-grained-PAT replacement procedure. Tracking issue TBD — `gh auth` was 401 at runbook-write time (Windows Update apparently invalidated the token); file once §3c completes and `gh issue create` works again. |
