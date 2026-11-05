@@ -91,6 +91,39 @@ def test_runbook_tree_has_the_no_review_branch():
     assert "No Review At All" in tree
 
 
+def no_review_section(text: str) -> str:
+    """The runbook's "No Review At All" section, up to the next heading."""
+    after = text.split("## No Review At All", 1)[1]
+    return after.split("\n## ", 1)[0]
+
+
+def test_no_review_section_counts_the_checks():
+    """#4562 T1: the section counts the head commit's contexts against its jobs."""
+    section = no_review_section(RUNBOOK.read_text(encoding="utf-8"))
+    assert "issue-reference" in section
+    assert "driver-provenance" in section
+    commands = "\n".join(bash_blocks(section))
+    assert "totalCount" in commands
+    assert "--json jobs" in commands
+    assert "**No more contexts than jobs:**" in section
+    assert "**More contexts than jobs:**" in section
+
+
+def test_no_review_section_needs_the_log_only_when_the_checks_are_present():
+    """#4562 T1: the operator's log is named only where pr-sentinel's checks are present."""
+    section = no_review_section(RUNBOOK.read_text(encoding="utf-8"))
+    needs_log = [line for line in section.splitlines() if "only the operator can read" in line]
+    assert needs_log
+    assert all("checks are present" in line for line in needs_log)
+
+
+def test_runbook_tree_splits_the_no_review_branch():
+    """#4562 T2: the tree's "No Review At All" branch carries both outcomes of the count."""
+    tree = decision_tree(RUNBOOK.read_text(encoding="utf-8"))
+    assert "never saw the PR" in tree
+    assert "saw it and did not" in tree
+
+
 def test_claude_md_keeps_the_archival_override():
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     assert "tools/archive_worktree_lineage.py --worktree . --issue {ID} --main-repo ." in text
