@@ -162,7 +162,7 @@ If the driver fails again at the same stage, stop and report its output (Two-Str
 
 | Symptom | Step that works | If it fails |
 |---------|-----------------|-------------|
-| Auto Review `skipped`, no review, `REVIEW_REQUIRED`, body correct, worker healthy | Rerun the merge driver once (Step 7) | Stop and report (below) |
+| Auto Review `skipped`, no review, `REVIEW_REQUIRED`, body correct, worker healthy | Rerun the merge driver once (Step 7) | Count the checks on the head commit, then stop and report (below) |
 
 **What it looks like.** The driver stops at `poll_timeout` with the PR still `blocked`. Then:
 
@@ -178,16 +178,33 @@ gh pr view {N} --repo {owner}/{repo} --json reviewDecision,reviews
 gh run list --repo {owner}/{repo} --branch {branch} --limit 3
 ```
 
-**Step that works.** Rerun the merge driver once, with the same arguments (Step 7), as the root `CLAUDE.md` route for `poll_timeout` says. It reuses the open PR and stamps its body. The stamp is an `edited` event, so pr-sentinel runs again and approves if the check passes. On 2026-10-21 one rerun was enough: the PR went `clean` three polls later and merged.
+**Step that works.** Rerun the merge driver once, with the same arguments (Step 7), as the root `CLAUDE.md` route for `poll_timeout` says. It reuses the open PR and stamps its body. When the body carries an earlier run's stamp, the rerun replaces it with its own, so the stamp always changes the body. That `edited` event is a new event, so pr-sentinel runs again and approves if the check passes. A push the branch needs anyway is a new event too. On 2026-10-21 one rerun was enough: the PR went `clean` three polls later and merged.
 
-**If the rerun also stops at `poll_timeout` with no review,** stop and report. Do not edit the body, close and reopen the PR, or push a commit to provoke the Worker. The report gives:
+Before 2026-11-04 the driver left an earlier run's stamp in place, printed `stamp: already stamped`, and made no edit. A rerun then fired no event, and a PR whose first event the Worker had missed stayed stuck through every rerun: on 2026-10-28 after a delivery the Worker never processed, and on 2026-11-02 after GitHub answered the PR's creation with a 502 but created it, stamp included.
+
+**If the rerun also stops at `poll_timeout` with no review,** find out whether the Worker ever ran on the PR. pr-sentinel posts two checks on the PR's head commit, `issue-reference` and `driver-provenance`. The agent token gets a 403 reading check names or listing check runs, but it can count the check contexts. Compare that count with the workflow jobs on the same commit, Auto Review's skipped job included:
+
+```bash
+gh pr view {N} --repo {owner}/{repo} --json headRefOid --jq .headRefOid
+gh api graphql -F owner={owner} -F name={repo} -F oid={sha} -f query='query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{statusCheckRollup{contexts(first:1){totalCount}}}}}}' --jq '.data.repository.object.statusCheckRollup.contexts.totalCount'
+gh run list --repo {owner}/{repo} --commit {sha} --json databaseId,name
+gh run view {run} --repo {owner}/{repo} --json jobs --jq '.jobs | length'
+```
+
+Run the last command once for each run the list returns, and add up the jobs.
+
+- **No more contexts than jobs:** pr-sentinel's checks are missing. The Worker never processed an event for this PR, not even the rerun's edit. On 2026-10-28 a PR in this state carried 4 contexts against 4 jobs, while a sibling PR whose head ran the same jobs carried 6. Stop and report, with both counts.
+- **More contexts than jobs:** pr-sentinel's checks are present (on a healthy PR there are exactly two more), so the Worker ran on the PR and did not approve it. Only in this case is the cause in the Worker's log, which only the operator can read. Stop and report.
+
+Either way, do not edit the body by hand, close and reopen the PR, or push a commit only to provoke the Worker. The report gives:
 
 - the PR number, its head commit, and the time it opened, in Central;
 - both driver stage lines;
 - the `reviewDecision`, review and run output above;
+- the context count and the job count on the head commit;
 - that the body and `/health` checked clean.
 
-The cause is in the Worker's log, which only the operator can read. A cause found there is tracked in its own issue. This runbook does not guess at it.
+A cause found in the Worker's log is tracked in its own issue. This runbook does not guess at it.
 
 ---
 
@@ -268,7 +285,11 @@ mergeable_state == "blocked"
 │
 └─ All above pass, Auto Review `skipped`, no review, `REVIEW_REQUIRED`
     └─→ "No Review At All": rerun the driver once (Step 7)
-        └─→ still no review: stop and report
+        └─→ still no review: count contexts against jobs on the head commit
+            ├─→ no more contexts than jobs: the Worker never saw the PR;
+            │   stop and report both counts
+            └─→ more contexts than jobs: the Worker saw it and did not
+                approve; stop and report, the cause is in its log
 
 mergeable_state == "behind"
 │
@@ -308,3 +329,4 @@ mergeable_state == "dirty"
 | 1.1 | 2026-05-27 | Added "Behind-State Recovery" section for `mergeable_state=behind`. Documents the `update-branch` API technique discovered during Hermes PR #475 unblock and persisted to Hermes `docs/lessons-learned.md` (PR #488). Decision tree extended to handle `behind`, `unstable`, `unknown`, `dirty`. Closes #1347. |
 | 1.2 | 2026-10-07 | #3803: every recovery ends in a rerun of the merge driver. Removed the hand merge, checkout, fast-forward and branch deletion from Step 7, the inline `--body` from Step 5, and the `update-branch` loop, which makes the driver's push fail. `behind` and `dirty` merge `origin/main` in the worktree. Five rows added to the banned table. |
 | 1.3 | 2026-10-21 | #4189: Auto Review was retired by #3663. Step 4 now describes pr-sentinel's approval as Cerberus; Step 6 no longer closes and reopens the PR. New section "No Review At All" for a `skipped` Auto Review with no review and a correct body, with its branch in the decision tree. |
+| 1.4 | 2026-11-04 | #4562: "No Review At All" now tells a PR the Worker never saw from one it saw but did not approve, by counting the head commit's check contexts against its workflow jobs. The operator's log is needed only when pr-sentinel's checks are present. The rerun's stamp now replaces an earlier run's stamp, so it is always an edit. The decision tree carries the split. |
