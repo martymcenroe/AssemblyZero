@@ -93,12 +93,13 @@ class JestRunner(BaseTestRunner):
             raise EnvironmentError(message)
         self._is_vitest = config["framework"] == TestFramework.VITEST
 
-    def require_dependencies(self) -> None:
+    def require_dependencies(self, measure_coverage: bool = True) -> None:
         """The project's own vitest or jest must be installed (#4236), and
         for Vitest a coverage provider, because the green phase measures
-        coverage (#4246). Jest's coverage is built in."""
+        coverage (#4246). Jest's coverage is built in. A run that measures
+        nothing, such as the full-suite gate's, needs no provider (#4686)."""
         self._require_node_package("vitest" if self._is_vitest else "jest")
-        if self._is_vitest:
+        if self._is_vitest and measure_coverage:
             self._require_one_node_module(VITEST_COVERAGE_PROVIDERS, "measure coverage")
 
     @property

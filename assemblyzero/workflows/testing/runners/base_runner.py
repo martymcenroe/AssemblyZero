@@ -182,10 +182,13 @@ class BaseTestRunner(ABC):
         declare no lint the green phase can run has none to run."""
         return None
 
-    def require_dependencies(self) -> None:
+    def require_dependencies(self, measure_coverage: bool = True) -> None:
         """Raise OSError (EnvironmentError) when this runner's project cannot
         run its tests (#4236). The base runner needs nothing beyond what its
-        constructor checked; the JavaScript runners need their packages."""
+        constructor checked; the JavaScript runners need their packages.
+
+        `measure_coverage` is False when the caller's run measures nothing,
+        so a runner asks only for what running the suite needs (#4686)."""
 
     def _require_node_package(self, binary: str) -> None:
         """Raise OSError unless `node_modules/.bin/<binary>` exists in

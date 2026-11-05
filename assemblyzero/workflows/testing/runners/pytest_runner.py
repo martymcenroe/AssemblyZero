@@ -42,9 +42,10 @@ UNFINISHED_EXIT_CODES: dict[int, str] = {
 class PytestRunner(BaseTestRunner):
     """Test runner adapter for pytest + pytest-cov."""
 
-    def require_dependencies(self) -> None:
+    def require_dependencies(self, measure_coverage: bool = True) -> None:
         """Raise OSError unless the target's own environment has pytest (#4490):
-        without it `poetry run pytest` runs the next one on PATH."""
+        without it `poetry run pytest` runs the next one on PATH. Coverage
+        needs nothing more here (#4686)."""
         require_pytest(self.project_dir)
 
     def run_tests(
