@@ -387,13 +387,23 @@ def typescript_tests(text: str, tsx: bool = False) -> list[SpecTest]:
     return tests
 
 
+def section_ten_typescript_tests(spec: str) -> list[SpecTest]:
+    """The test calls in Section 10's TypeScript fences, in spec order (#4680).
+
+    The testing workflow's contract reads these and not Section 6's planned
+    files, which restate them: counting both counts each test twice.
+    """
+    tests: list[SpecTest] = []
+    for tag, fence in _section_ten_typescript_fences(spec):
+        tests.extend(typescript_tests("\n".join(fence) + "\n", tsx=tag == "tsx"))
+    return tests
+
+
 def spec_typescript_tests(spec: str) -> list[SpecTest]:
     """Every TypeScript test the spec carries (#4551): the test calls in
     Section 10's TypeScript fences, and in the TypeScript test files Section 6
     plans (`planned_test_files`)."""
-    tests: list[SpecTest] = []
-    for tag, fence in _section_ten_typescript_fences(spec):
-        tests.extend(typescript_tests("\n".join(fence) + "\n", tsx=tag == "tsx"))
+    tests = section_ten_typescript_tests(spec)
     for path, text in planned_test_files(spec):
         tests.extend(typescript_tests(text, tsx=path.endswith(".tsx")))
     return tests

@@ -20,6 +20,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -462,6 +463,44 @@ def scenarios_from_spec_functions(
             "description": description[:200],
             "requirement_ref": _extract_requirement_ref(source),
             "test_type": _infer_test_type(fn["name"], description),
+            "mock_needed": False,
+            "assertions": [],
+        })
+    return scenarios
+
+
+def scenarios_from_spec_typescript_tests(
+    spec_content: str, requirement_ids: Collection[str] = (),
+) -> list[TestScenario]:
+    """One scenario per TypeScript test call in the spec's Section 10 (#4680).
+
+    A target with a Vitest suite beside its Python one carries both in Section
+    10, and the contract is both. Only the Python functions were read, so N1's
+    ratio gate counted half the suite and refused it. The calls are read by the
+    #4551 reader, never a second parser; `it.todo` and `.skip` are not tests.
+
+    The title is the name and the description. The REQ tag is read from the
+    call's source, the `describe` titles that hold it included: the first tag
+    in `requirement_ids`, else the first tag. A spec can title a test by its
+    criteria row (`REQ-070`) and cite the requirement (`REQ-6`) in its body,
+    and N1's coverage join needs the requirement.
+    """
+    # Imported here, as validate_completeness imports this module: the
+    # implementation_spec package's init pulls in its whole graph.
+    from assemblyzero.workflows.implementation_spec.typescript_bodies import (
+        section_ten_typescript_tests,
+    )
+
+    known = {r.upper() for r in requirement_ids}
+    scenarios: list[TestScenario] = []
+    for test in section_ten_typescript_tests(spec_content):
+        tags = _requirement_refs(test.source)
+        ref = next((t for t in tags if t.upper() in known), tags[0] if tags else "")
+        scenarios.append({
+            "name": test.title,
+            "description": test.title[:200],
+            "requirement_ref": ref,
+            "test_type": _infer_test_type(test.title, test.title),
             "mock_needed": False,
             "assertions": [],
         })
@@ -966,6 +1005,11 @@ def _extract_requirement_ref(content: str) -> str:  # pragma: no cover
     """Extract requirement reference from content."""
     match = re.search(r"REQ-[\d.]+", content)
     return match.group(0) if match else ""
+
+
+def _requirement_refs(content: str) -> list[str]:
+    """Every requirement reference in content, in order (#4680)."""
+    return re.findall(r"REQ-[\d.]+", content)
 
 
 def _infer_test_type(name: str, content: str) -> str:  # pragma: no cover
@@ -1495,12 +1539,21 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     #
     # The table path remains for specs that carry no executable functions,
     # which is why this is a preference and not a replacement.
+    #
+    # #4680: the TypeScript test calls in Section 10 are the rest of that
+    # contract. They join the scenarios N1 counts and reviews; the pytest
+    # scaffold still emits only the Python functions, from `spec_test_suite`.
     spec_test_suite = extract_spec_test_functions(lld_content)
+    python_scenarios: list[TestScenario] = []
+    typescript_scenarios: list[TestScenario] = []
     if spec_test_suite["functions"]:
-        test_scenarios = scenarios_from_spec_functions(spec_test_suite["functions"])
+        python_scenarios = scenarios_from_spec_functions(spec_test_suite["functions"])
+        typescript_scenarios = scenarios_from_spec_typescript_tests(lld_content)
+        test_scenarios = python_scenarios + typescript_scenarios
         print(
-            f"    Found {len(test_scenarios)} executable test functions in the "
-            f"spec's Section 10 — using them as the contract"
+            f"    Found {len(python_scenarios)} executable test functions and "
+            f"{len(typescript_scenarios)} TypeScript test calls in the spec's "
+            f"Section 10 — using them as the contract"
         )
         table_scenarios = parse_test_scenarios(test_plan_section)
         if len(table_scenarios) != len(test_scenarios):
@@ -1541,6 +1594,18 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
             ))
     else:
         print(f"    Found {len(requirements)} requirements (from LLD)")
+
+    # #4680: now the requirements are known, each TypeScript test joins on the
+    # tag it cites that names one of them, not on its criteria row's tag.
+    if typescript_scenarios:
+        from assemblyzero.workflows.testing.nodes.review_test_plan import (
+            extract_requirement_ids,
+        )
+
+        typescript_scenarios = scenarios_from_spec_typescript_tests(
+            lld_content, extract_requirement_ids(requirements),
+        )
+        test_scenarios = python_scenarios + typescript_scenarios
 
     # #4266: the operator's flag, else the spec's declared target, else ADR 0207.
     coverage_target, governing_target, target_source = resolve_coverage_target(
