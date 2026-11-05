@@ -81,11 +81,15 @@ from assemblyzero.workflows.implementation_spec.nodes.edit_script import (
 
 __all__ = [
     "EDIT_SCRIPT_CODE_SYSTEM_PROMPT",
+    "LARGE_FILE_CHARS",
     "EditScriptOutcome",
     "apply_edit_blocks",
+    "build_code_edit_script_draft_prompt",
     "build_code_edit_script_prompt",
     "failures_for_file",
+    "is_large_file",
     "parse_edit_blocks",
+    "previous_attempt_section",
     "should_use_edit_script",
     "unchanged_ratio",
 ]
@@ -101,6 +105,23 @@ EDIT_SCRIPT_CODE_SYSTEM_PROMPT = (
 #: anchor in it is more likely to be ambiguous. Measured against the run above:
 #: every file that regenerated in under 32s is in this class or near it.
 MIN_BYTES_FOR_EDIT_SCRIPT = 400
+
+#: A Modify file at least this large is changed by edit script on every
+#: iteration, its first draft included, and is never asked for whole (#4683).
+#: Half of N4's prompt cap (#644, `orchestrator.CODE_GEN_PROMPT_CAP`): a
+#: whole-file draft carries the file in and back out again, so a file over
+#: half the cap cannot make the round trip inside it. Measured: a 3,666-line,
+#: 171,540-byte module came back twice as its one new function, the size gate
+#: refused both, and the run halted; a 30,172-byte module was next in line.
+LARGE_FILE_CHARS = 30_000
+
+
+def is_large_file(change_type: str, existing_content: str) -> bool:
+    """Is this an existing file too large to ask for whole (#4683)?"""
+    return (
+        change_type.lower() == "modify"
+        and len(existing_content) >= LARGE_FILE_CHARS
+    )
 
 
 class EditScriptOutcome:
@@ -626,7 +647,92 @@ def build_code_edit_script_prompt(
     return "\n\n".join(sections)
 
 
-_NO_EDIT_RE = re.compile(r"^\s*NO-EDIT\s*:?\s*(?P<reason>.*)$", re.IGNORECASE)
+def build_code_edit_script_draft_prompt(
+    filepath: str,
+    existing_content: str,
+    description: str = "",
+    spec_section: str = "",
+    run_files: list[str] | None = None,
+    previous_failure: str = "",
+) -> str:
+    """Ask for the spec's change to a large file as edits, on its first draft (#4683).
+
+    The fix prompt above says tests fail; on a first draft none has run, and
+    the change to make is the spec's. So this prompt carries the file's
+    Section 6 subsection where the fix prompt carries failures, and the same
+    edit-block format, which `apply_code_edit_script` applies either way.
+    """
+    lines = existing_content.count("\n") + 1
+    sections: list[str] = [(
+        f"# Implementation Request (edit script): {filepath}\n\n"
+        f"The file below already exists and is too large to rewrite "
+        f"({lines:,} lines). Make the change the specification describes for "
+        "this file, and nothing else.\n\n"
+        "Do NOT rewrite the file. Output ONLY edit blocks in EXACTLY this "
+        "format:\n\n"
+        "<<<<<<< SEARCH\n"
+        "(exact lines copied verbatim from the CURRENT FILE below)\n"
+        "=======\n"
+        "(replacement lines)\n"
+        ">>>>>>> REPLACE\n\n"
+        "Rules:\n"
+        "1. Each SEARCH text must be copied EXACTLY from the current file "
+        "(character-for-character, including indentation) and must occur "
+        "exactly ONCE in it. Keep SEARCH as small as practical (typically "
+        "1-15 lines), and long enough to be unique.\n"
+        "2. To INSERT new code, SEARCH for the nearest existing anchor "
+        "line(s) and REPLACE with those same anchor lines plus the new code.\n"
+        "3. Emit one edit block per change. Touch NOTHING the specification "
+        "does not ask for -- code you do not name in a SEARCH block cannot "
+        "and must not change.\n"
+        "4. No preamble, no explanation, no markdown fences around the "
+        "blocks -- edit blocks only.\n"
+        "5. If the specification asks no change of THIS file, output exactly "
+        "one line and nothing else: NO-EDIT: <why>."
+    )]
+
+    if description:
+        sections.append(f"## WHAT THE CHANGE IS FOR\n\n{description}")
+
+    if spec_section:
+        sections.append(
+            "## THE SPECIFICATION FOR THIS FILE\n\n"
+            f"{spec_section}\n\n"
+            "A diff's line numbers are the spec writer's and may be out of "
+            "date. Place each change by its context lines in the CURRENT FILE."
+        )
+
+    if run_files:
+        listed = "\n".join(f"- {path}" for path in run_files)
+        sections.append(
+            "## FILES THIS RUN MAY CHANGE\n\n"
+            f"{listed}\n\n"
+            "The other files on this list are written by their own requests. "
+            "Change only this one here."
+        )
+
+    if previous_failure:
+        sections.append(previous_attempt_section(previous_failure))
+
+    sections.append(
+        f"## CURRENT FILE (the file you are patching)\n\n"
+        f"```\n{existing_content}\n```"
+    )
+
+    return "\n\n".join(sections)
+
+
+def previous_attempt_section(reason: str) -> str:
+    """What a retried edit script is told about the one before it (#4683)."""
+    return (
+        "## YOUR PREVIOUS EDIT SCRIPT COULD NOT BE USED\n\n"
+        f"```\n{reason.strip()}\n```\n\n"
+        "Copy every SEARCH text verbatim from the CURRENT FILE below, make "
+        "each one occur exactly once, and send edit blocks only."
+    )
+
+
+_NO_EDIT_RE =re.compile(r"^\s*NO-EDIT\s*:?\s*(?P<reason>.*)$", re.IGNORECASE)
 
 
 def _no_edit_reason(response: str) -> str | None:

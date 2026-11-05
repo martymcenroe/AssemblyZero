@@ -16,9 +16,12 @@ from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import 
     EDIT_SCRIPT_CODE_SYSTEM_PROMPT,
     EditScriptOutcome,
     apply_code_edit_script,
+    build_code_edit_script_draft_prompt,
     build_code_edit_script_prompt,
     failures_for_file,
     is_attributed,
+    is_large_file,
+    previous_attempt_section,
     response_is_a_regeneration,
     should_use_edit_script,
     type_declarations_for,
@@ -61,7 +64,7 @@ from .keep_passing_tests import (
     passing_test_names,
     release_spec_twins,
 )
-from .unrequested_changes import spec_hunks, unrequested_lines
+from .unrequested_changes import spec_hunks, spec_subsection, unrequested_lines
 from .parsers import (
     detect_summary_response,
     extract_code_block,
@@ -202,21 +205,8 @@ def try_edit_script_fix(
         type_declarations=type_declarations_for(filepath, scoped, repo_root),
     )
 
-    if audit_dir is not None and audit_dir.exists():
-        save_audit_file(
-            audit_dir, next_file_number(audit_dir),
-            f"prompt-editscript-{filepath.replace('/', '-')}.md", prompt,
-        )
-
     try:
-        with ProgressReporter("Calling Claude (edit script)", interval=15):
-            result = call_claude_for_file(
-                prompt, file_path=filepath, seat=seat or None,
-                # The stable system prompt describes whole-file output; a
-                # patch engine needs the opposite instruction, and mixing them
-                # is how a model ends up sending a file back.
-                system_prompt=EDIT_SCRIPT_CODE_SYSTEM_PROMPT,
-            )
+        outcome = run_edit_script(prompt, filepath, existing_content, seat, audit_dir)
     except Exception as exc:  # noqa: BLE001 - alerted; the fallback regenerates
         outcome = EditScriptOutcome(
             None, failures=[f"edit-script call failed: {type(exc).__name__}: {exc}"]
@@ -224,14 +214,51 @@ def try_edit_script_fix(
         alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
         return outcome
 
+    if outcome.code is None:
+        # An API error, a whole file sent back, no blocks, blocks that do not
+        # apply, or edits that empty the file (run_edit_script): the fallback
+        # is taken here.
+        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
+    return outcome
+
+
+def run_edit_script(
+    prompt: str,
+    filepath: str,
+    existing_content: str,
+    seat: str = "",
+    audit_dir: Path | None = None,
+) -> EditScriptOutcome:
+    """Send one edit-script prompt and apply the answer (#2407, #4683).
+
+    A call that raises propagates, because its two callers mean different
+    things by it: the fix path falls back to a rewrite
+    (`try_edit_script_fix`), and a large file is retried and then stops
+    (`edit_large_file`). Each catches it, and alerts in the handler. Every
+    other failure is an outcome whose `code` is None and whose `failures` say
+    why; the caller alerts on those too.
+    """
+    if audit_dir is not None and audit_dir.exists():
+        save_audit_file(
+            audit_dir, next_file_number(audit_dir),
+            f"prompt-editscript-{filepath.replace('/', '-')}.md", prompt,
+        )
+
+    with ProgressReporter("Calling Claude (edit script)", interval=15):
+        result = call_claude_for_file(
+            prompt, file_path=filepath, seat=seat or None,
+            # The stable system prompt describes whole-file output; a
+            # patch engine needs the opposite instruction, and mixing them
+            # is how a model ends up sending a file back.
+            system_prompt=EDIT_SCRIPT_CODE_SYSTEM_PROMPT,
+        )
+
     if isinstance(result, tuple) and len(result) == 2:
         response, api_error_raw = result
     else:
         response, api_error_raw = result, ""
     if isinstance(api_error_raw, str) and api_error_raw:
-        outcome = EditScriptOutcome(None, failures=[f"API error: {api_error_raw}"])
-        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
-        return outcome
+        return EditScriptOutcome(None, failures=[f"API error: {api_error_raw}"])
 
     if audit_dir is not None and audit_dir.exists():
         save_audit_file(
@@ -240,18 +267,147 @@ def try_edit_script_fix(
         )
 
     if response_is_a_regeneration(response or ""):
-        outcome = EditScriptOutcome(
+        return EditScriptOutcome(
             None, failures=["model returned a whole file instead of edit blocks"]
         )
-        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
-        return outcome
 
-    outcome = apply_code_edit_script(response or "", existing_content)
-    if outcome.code is None:
-        # No blocks, blocks that do not apply, or edits that empty the file
-        # (edit_script_fix.apply_code_edit_script): the fallback is taken here.
-        alert.alert_operator(**_patch_fallback(filepath, outcome, repo, issue))
-    return outcome
+    return apply_code_edit_script(response or "", existing_content)
+
+
+def _large_file_failed(
+    filepath: str, outcome: EditScriptOutcome, repo: str, issue: int | None,
+    consequence: str,
+) -> dict:
+    """The alert record for a large file's edit script N4 could not use (#4683)."""
+    return {
+        "what": f"the edit script for the large file {filepath} could not be used",
+        "where": f"{_WHERE} edit_large_file (testing workflow, N4)",
+        "cause": "; ".join(outcome.failures) or "no edit blocks in response",
+        "consequence": consequence,
+        "repo": repo,
+        "issue": issue,
+    }
+
+
+def edit_large_file(
+    filepath: str,
+    existing_content: str,
+    failure_context: str,
+    description: str = "",
+    spec_text: str = "",
+    seat: str = "",
+    audit_dir: Path | None = None,
+    repo: str = "",
+    issue: int | None = None,
+    run_files: list[str] | None = None,
+    repo_root: Path | None = None,
+    planned_paths: list[str] | None = None,
+    leave_unchanged_on_failure: bool = False,
+) -> EditScriptOutcome:
+    """Change a large file by edit script, retried, and never rewritten whole (#4683).
+
+    `is_large_file` decides which files come here. A first draft (no
+    ``failure_context``) asks for the change the spec's Section 6 subsection
+    describes for this file; a fix asks for the failures, as
+    `try_edit_script_fix` does. The patched file must pass
+    `validate_code_response` against the file it patches, so the size gate
+    (#587), the syntax check and the schema-keyword check hold for it as they
+    hold for a rewrite.
+
+    An attempt that cannot be used is retried with its reason, up to
+    MAX_FILE_RETRIES. There is no rewrite to fall back to: asked for a file
+    this size, a model sends back a fragment, which the size gate refuses.
+    When no attempt holds, a test file in a fix iteration
+    (``leave_unchanged_on_failure``) is left as it is, as #2866 rules for every
+    test file, and the operator is alerted. Any other file stops N4 with an
+    ImplementationError that names every attempt's reason.
+    """
+    scoped = failures_for_file(failure_context, filepath) if failure_context else ""
+    section = spec_subsection(spec_text, filepath)
+    reasons: list[str] = []
+    for attempt in range(1, MAX_FILE_RETRIES + 1):
+        previous = reasons[-1] if reasons else ""
+        if failure_context:
+            prompt = build_code_edit_script_prompt(
+                filepath=filepath,
+                existing_content=existing_content,
+                failure_context=scoped,
+                spec_excerpt=section,
+                run_files=run_files,
+                type_declarations=type_declarations_for(filepath, scoped, repo_root),
+            )
+            if previous:
+                prompt += "\n\n" + previous_attempt_section(previous)
+        else:
+            prompt = build_code_edit_script_draft_prompt(
+                filepath=filepath,
+                existing_content=existing_content,
+                description=description,
+                spec_section=section,
+                run_files=run_files,
+                previous_failure=previous,
+            )
+
+        try:
+            outcome = run_edit_script(prompt, filepath, existing_content, seat, audit_dir)
+        except Exception as exc:  # noqa: BLE001 - alerted; retried, then stops below
+            outcome = EditScriptOutcome(
+                None, failures=[f"edit-script call failed: {type(exc).__name__}: {exc}"]
+            )
+            alert.alert_operator(**_large_file_failed(
+                filepath, outcome, repo, issue,
+                f"attempt {attempt} of {MAX_FILE_RETRIES} is lost; another is "
+                f"made while any remain, and N4 stops when none holds (#4683)",
+            ))
+
+        if outcome.ok and outcome.no_edit is None:
+            validation = validate_code_response(
+                outcome.code, filepath, existing_content,
+                repo_root=str(repo_root) if repo_root else "",
+                planned_paths=planned_paths,
+                spec_text=spec_text,
+            )
+            if isinstance(validation, tuple):
+                valid, validation_error = validation
+            else:
+                valid = bool(validation)
+                validation_error = "" if valid else "Unknown validation error"
+            if not valid:
+                outcome = EditScriptOutcome(
+                    None, blocks=outcome.blocks,
+                    failures=[f"Validation failed: {validation_error}"],
+                )
+
+        if outcome.ok:
+            print(f"        {outcome.describe()} (large file, #4683)")
+            return outcome
+        reason = "; ".join(outcome.failures) or "no edit blocks in response"
+        reasons.append(reason)
+        print(
+            f"        [LARGE-FILE {attempt}/{MAX_FILE_RETRIES}] edit script "
+            f"not used: {reason[:200]}"
+        )
+
+    failed = EditScriptOutcome(None, failures=reasons)
+    if leave_unchanged_on_failure:
+        alert.alert_operator(**_large_file_failed(
+            filepath, failed, repo, issue,
+            f"{filepath} is left as it is this iteration: a test file is not "
+            f"rewritten on a failed patch (#2866), and a file this large is "
+            f"never rewritten (#4683)",
+        ))
+        return failed
+    emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+    raise ImplementationError(
+        filepath=filepath,
+        reason=(
+            f"Edit script failed after {MAX_FILE_RETRIES} attempts on a file "
+            f"too large to rewrite ({len(existing_content):,} characters, "
+            f"#4683): "
+            + " | ".join(f"attempt {n}: {r}" for n, r in enumerate(reasons, 1))
+        ),
+        response_preview=None,
+    )
 
 
 def generate_file_with_retry(
@@ -1124,39 +1280,45 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         if notice:
             print(f"        [PATH] {notice}")
 
-        # Build prompt for this single file
-        prompt = build_single_file_prompt(
-            filepath=filepath,
-            file_spec=file_spec,
-            lld_content=lld_content,
-            completed_files=completed_files,
-            repo_root=repo_root,
-            test_content=test_content,
-            # Issue #498: Use structured failure summary (targeted) over raw output (noisy)
-            previous_error=revision_error_context,
-            path_enforcement_section=path_enforcement_section,
-            context_content=state.get("context_content", ""),
-            repo_structure=repo_structure,
-        )
+        # #4683: a file too large to ask for whole is changed by edit script on
+        # every iteration, its first draft included (edit_large_file below).
+        # The whole-file prompts are not built for it: nothing would send them.
+        large = is_large_file(change_type, edit_script_content)
+        prompt = pruned_prompt = ""
+        if not large:
+            # Build prompt for this single file
+            prompt = build_single_file_prompt(
+                filepath=filepath,
+                file_spec=file_spec,
+                lld_content=lld_content,
+                completed_files=completed_files,
+                repo_root=repo_root,
+                test_content=test_content,
+                # Issue #498: Use structured failure summary (targeted) over raw output (noisy)
+                previous_error=revision_error_context,
+                path_enforcement_section=path_enforcement_section,
+                context_content=state.get("context_content", ""),
+                repo_structure=repo_structure,
+            )
 
-        # Issue #588: Pruned prompt for retries (no completed_files context)
-        pruned_prompt = build_single_file_prompt(
-            filepath=filepath,
-            file_spec=file_spec,
-            lld_content=lld_content,
-            completed_files=[],  # <-- PRUNED
-            repo_root=repo_root,
-            test_content=test_content,
-            previous_error=revision_error_context,
-            path_enforcement_section=path_enforcement_section,
-            context_content=state.get("context_content", ""),
-            repo_structure=repo_structure,
-        )
+            # Issue #588: Pruned prompt for retries (no completed_files context)
+            pruned_prompt = build_single_file_prompt(
+                filepath=filepath,
+                file_spec=file_spec,
+                lld_content=lld_content,
+                completed_files=[],  # <-- PRUNED
+                repo_root=repo_root,
+                test_content=test_content,
+                previous_error=revision_error_context,
+                path_enforcement_section=path_enforcement_section,
+                context_content=state.get("context_content", ""),
+                repo_structure=repo_structure,
+            )
 
-        # Issue #644: Enforce prompt size cap — use pruned prompt if full exceeds cap
-        if len(prompt) > CODE_GEN_PROMPT_CAP:
-            print(f"        [PRUNE] Prompt {len(prompt):,} -> {len(pruned_prompt):,} chars (cap: {CODE_GEN_PROMPT_CAP:,})")
-            prompt = pruned_prompt
+            # Issue #644: Enforce prompt size cap — use pruned prompt if full exceeds cap
+            if len(prompt) > CODE_GEN_PROMPT_CAP:
+                print(f"        [PRUNE] Prompt {len(prompt):,} -> {len(pruned_prompt):,} chars (cap: {CODE_GEN_PROMPT_CAP:,})")
+                prompt = pruned_prompt
 
         # #2407: a fix asks for EDITS, not a rebirth. Measured in
         # run-issue1-090001: stingray.py drafted from nothing in 15.9s, then
@@ -1189,7 +1351,42 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             continue
 
         code = None
-        if should_use_edit_script(
+        if large:
+            outcome = edit_large_file(
+                filepath=filepath,
+                existing_content=edit_script_content,
+                failure_context=revision_error_context,
+                description=file_spec.get("description", ""),
+                spec_text=lld_content,
+                seat=select_seat_for_file(filepath, 0, False),
+                audit_dir=audit_dir if audit_dir.exists() else None,
+                repo=str(repo_root),
+                issue=state.get("issue_number"),
+                run_files=run_files,
+                repo_root=repo_root,
+                planned_paths=planned_paths,
+                # #2866, as below: a test file a fix cannot patch stays as it is.
+                leave_unchanged_on_failure=bool(revision_error_context) and (
+                    filepath.replace("\\", "/").split("/")[0] in ("tests", "test")
+                ),
+            )
+            code = outcome.code
+            if outcome.no_edit is not None:
+                declined.append((filepath, outcome.no_edit))
+            if code is None:
+                # Only that test file comes back without code; edit_large_file
+                # raises for every other file.
+                kept = _read_or_stop(
+                    target_path, "a test file left as it is, the context for later files"
+                )
+                print(
+                    "        [LARGE-FILE] patch failed on a test file; left "
+                    "unchanged (#2866, #4683)"
+                )
+                completed_files.append((filepath, kept))
+                written_paths.append(str(target_path))
+                continue
+        elif should_use_edit_script(
             change_type, edit_script_content, revision_error_context
         ):
             outcome = try_edit_script_fix(

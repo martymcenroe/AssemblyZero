@@ -112,6 +112,33 @@ def spec_hunks(spec_content: str) -> dict[str, list[Hunk]]:
     return {path: hunks for path, hunks in out.items() if hunks}
 
 
+def spec_subsection(spec_content: str, path: str) -> str:
+    """`path`'s Section 6 subsection as written, heading included, or "" (#4683).
+
+    From its `### 6.N `path`` heading to the next `### ` or `## ` heading
+    outside a fence: the prose and the diffs together, which is what a large
+    file's edit-script draft is asked to carry out. Fences are tracked line by
+    line, as `spec_hunks` tracks them.
+    """
+    out: list[str] = []
+    in_section = in_fence = taking = False
+    for line in spec_content.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+        elif not in_fence and line.startswith("## "):
+            if taking:
+                break
+            in_section = line[3:].lstrip().startswith("6.")
+        elif not in_fence and in_section and line.startswith("### "):
+            if taking:
+                break
+            heading = _HEADING.match(line)
+            taking = heading is not None and heading.group(1).strip() == path
+        if taking:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
 def _locate(hunk: Hunk, base: list[str]) -> tuple[int, int] | None:
     """Where in the base this hunk's base side sits, as [start, end), or None
     when it cannot be found. Anchored on the longest run of its lines the base
