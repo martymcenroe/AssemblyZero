@@ -59,6 +59,13 @@ from .claude_client import (
     call_claude_for_file,
 )
 from .context import estimate_context_tokens
+from .decline_routing import (
+    decline_note,
+    declines_outside_plan_text,
+    exercised_sources,
+    files_named,
+    is_test_path,
+)
 from .keep_passing_tests import (
     keep_passing_tests_as_written,
     passing_test_names,
@@ -144,6 +151,7 @@ _STALL_FAILURE_QUOTE_CHARS = 1500
 
 def _nothing_changed(
     iteration: int, failure: str, declined: list[tuple[str, str]], issue_number: int,
+    outside_plan: list[tuple[str, str]] = (),
 ) -> str:
     """What a revision that changed no file has to say (#4515, #4514).
 
@@ -167,6 +175,7 @@ def _nothing_changed(
         f"N4 changed no file on iteration {iteration}, so the next test run "
         f"will repeat this failure.{points_at_spec}"
         + (f" {reasons}." if reasons else "")
+        + (f" {declines_outside_plan_text(outside_plan)}" if outside_plan else "")
         + f" The failure: {quoted}"
     )
 
@@ -1128,9 +1137,79 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 "test body; every file receives the whole failure set"
             )
 
+    loop_paths = [spec["path"] for spec in files_to_modify]
+    # #4694 R1: a failed assertion is attributed by its frame, which is the
+    # test file. When every file the failures name is a test file, the code
+    # under test is the planned source those tests import, and #2851's skip
+    # must not keep it from the edit.
+    if attributed_paths and all(is_test_path(p) for p in attributed_paths):
+        exercised = exercised_sources(attributed_paths, loop_paths, repo_root) - attributed_paths
+        if exercised:
+            print(
+                "    [N4] the failures name only test file(s); the planned "
+                "source file(s) they import are offered the edit too: "
+                + ", ".join(sorted(exercised)) + " (#4694)"
+            )
+            attributed_paths |= exercised
+
+    # #4694 R2: a file a NO-EDIT named after this loop had already passed it
+    # gets the failure, with the decline's reason, first in this iteration.
+    # routed maps a planned path to (the declining file, its reason).
+    routed: dict[str, tuple[str, str]] = {}
+    if revision_error_context:
+        for path, (who, why) in (state.get("declined_routes") or {}).items():
+            if path in loop_paths:
+                routed[path] = (who, why)
+    if routed:
+        files_to_modify = sorted(files_to_modify, key=lambda s: s["path"] not in routed)
+        if attributed_paths:
+            attributed_paths |= set(routed)
+        print(
+            "    [N4] last iteration's NO-EDIT named "
+            + ", ".join(sorted(routed))
+            + " as where the fix belongs; offered the failure first (#4694)"
+        )
+    processed: set[str] = set()
+    next_routes: dict[str, tuple[str, str]] = {}
+    outside_plan: list[tuple[str, str]] = []
+
+    def _route_decline(declining: str, reason: str) -> None:
+        """Send a NO-EDIT's failure to the planned file it names (#4694 R2, R3)."""
+        inside, outside = files_named(reason, loop_paths)
+        for path in inside:
+            if path == declining:
+                continue
+            if path in processed:
+                next_routes[path] = (declining, reason)
+                print(
+                    f"        [N4] the decline names {path}, already passed this "
+                    f"iteration; it gets this failure first next iteration (#4694)"
+                )
+            else:
+                routed[path] = (declining, reason)
+                if attributed_paths:
+                    attributed_paths.add(path)
+                print(
+                    f"        [N4] the decline names {path}; it gets this "
+                    f"failure and the reason this iteration (#4694)"
+                )
+        for name in outside:
+            if (declining, name) not in outside_plan:
+                outside_plan.append((declining, name))
+            print(
+                f"        [N4] the decline names {name}, which is not in the "
+                f"plan, so this run cannot change it (#4694)"
+            )
+
     for i, file_spec in enumerate(files_to_modify):
         filepath = file_spec["path"]
         change_type = file_spec.get("change_type", "Add")
+        processed.add(filepath)
+        # The failure this file is shown: the iteration's corpus, led by a
+        # routed decline's reason when one named this file (#4694 R2).
+        file_error_context = revision_error_context
+        if revision_error_context and filepath in routed:
+            file_error_context = decline_note(*routed[filepath]) + revision_error_context
 
         if freeze_tests and filepath.replace("\\", "/").startswith("tests/"):
             target_path = repo_root / filepath
@@ -1295,7 +1374,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 repo_root=repo_root,
                 test_content=test_content,
                 # Issue #498: Use structured failure summary (targeted) over raw output (noisy)
-                previous_error=revision_error_context,
+                previous_error=file_error_context,
                 path_enforcement_section=path_enforcement_section,
                 context_content=state.get("context_content", ""),
                 repo_structure=repo_structure,
@@ -1309,7 +1388,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 completed_files=[],  # <-- PRUNED
                 repo_root=repo_root,
                 test_content=test_content,
-                previous_error=revision_error_context,
+                previous_error=file_error_context,
                 path_enforcement_section=path_enforcement_section,
                 context_content=state.get("context_content", ""),
                 repo_structure=repo_structure,
@@ -1355,7 +1434,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             outcome = edit_large_file(
                 filepath=filepath,
                 existing_content=edit_script_content,
-                failure_context=revision_error_context,
+                failure_context=file_error_context,
                 description=file_spec.get("description", ""),
                 spec_text=lld_content,
                 seat=select_seat_for_file(filepath, 0, False),
@@ -1373,6 +1452,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             code = outcome.code
             if outcome.no_edit is not None:
                 declined.append((filepath, outcome.no_edit))
+                _route_decline(filepath, outcome.no_edit)
             if code is None:
                 # Only that test file comes back without code; edit_large_file
                 # raises for every other file.
@@ -1387,12 +1467,12 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 written_paths.append(str(target_path))
                 continue
         elif should_use_edit_script(
-            change_type, edit_script_content, revision_error_context
+            change_type, edit_script_content, file_error_context
         ):
             outcome = try_edit_script_fix(
                 filepath=filepath,
                 existing_content=edit_script_content,
-                failure_context=revision_error_context,
+                failure_context=file_error_context,
                 seat=select_seat_for_file(filepath, 0, False),
                 system_prompt=stable_system_prompt,
                 audit_dir=audit_dir if audit_dir.exists() else None,
@@ -1405,6 +1485,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             code = outcome.code
             if outcome.no_edit is not None:
                 declined.append((filepath, outcome.no_edit))
+                _route_decline(filepath, outcome.no_edit)
 
             # #2866: a failed patch on a planned TEST file is not a licence to
             # rewrite it. On boostgauge #4 the fallback below regenerated a
@@ -1523,7 +1604,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     if revision_error_context and not files_changed:
         nothing_changed = _nothing_changed(
             iteration_count, revision_error_context, declined,
-            state.get("issue_number", 0),
+            state.get("issue_number", 0), outside_plan,
         )
         print("    [STAGNANT] " + advised("impl.stagnation.nothing_changed", nothing_changed))
 
@@ -1573,6 +1654,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         "node_costs": node_costs,  # Issue #511
         "nothing_changed": nothing_changed,
         "unrequested_changes": unrequested,
+        # #4694: declines whose named file this loop had already passed, for
+        # the next iteration to offer first; and declines that named a file
+        # outside the plan, for the halt to report.
+        "declined_routes": next_routes,
+        "declines_outside_plan": outside_plan,
     }
 
 
