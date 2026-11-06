@@ -477,8 +477,21 @@ class TestTheSymbolCheck:
         "    def go(self):\n        self.frobnicate_now()"
     )
 
-    def test_3439_an_unresolvable_stdlib_base_is_named_at_error(self, capsys):
-        check = vc.check_api_symbols_exist(_fence(self.BASE), ["unrelated"], "")
+    def test_4690_an_unresolvable_base_that_hides_a_call_cannot_check(self, capsys):
+        """#4690 T2: `frobnicate_now` would be judged, and the blind base hid
+        it, so the check could not run. It used to pass with a note (#3439)."""
+        with pytest.raises(CannotCheck) as raised:
+            vc.check_api_symbols_exist(_fence(self.BASE), ["unrelated"], "")
+        assert "ctypes.NoSuchBase" in str(raised.value)
+        assert "frobnicate_now" in str(raised.value)
+        err = capsys.readouterr().err
+        assert "ERROR [N3]" in err and "ctypes.NoSuchBase" in err
+
+    def test_4690_an_unresolvable_base_that_hides_nothing_is_named_at_error(self, capsys):
+        """#4690 T3 (#3439 kept): no call on the class, so nothing went unjudged."""
+        spec = _fence("import ctypes\n\nclass Thing(ctypes.NoSuchBase):\n    x = 1")
+        check = vc.check_api_symbols_exist(spec, ["unrelated"], "")
+        assert check["passed"]
         assert "ctypes.NoSuchBase" in check["details"]
         err = capsys.readouterr().err
         assert "ERROR [N3]" in err and "ctypes.NoSuchBase" in err
