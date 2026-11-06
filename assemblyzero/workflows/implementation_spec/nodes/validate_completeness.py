@@ -36,6 +36,7 @@ import subprocess
 import sys
 import textwrap
 import tomllib
+import types
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
@@ -4059,6 +4060,23 @@ def _resolve_stdlib_class(dotted: str) -> type | _BaseResolutionFailure | None:
             obj = getattr(obj, part)
     except (ImportError, AttributeError, ValueError) as exc:
         return _BaseResolutionFailure(dotted, f"{type(exc).__name__}: {exc}")
+    if not isinstance(obj, type) and callable(getattr(obj, "__mro_entries__", None)):
+        # #4690: `typing.TypedDict` and `typing.NamedTuple` are functions that
+        # hand a subclass its real base through `__mro_entries__` (PEP 560).
+        # The surface a subclass inherits is the probe's: a TypedDict probe is
+        # a dict, a NamedTuple probe a tuple with `_asdict`. Building a class
+        # from a standard-library base runs only the standard library.
+        try:
+            # A class statement puts `__module__` in the namespace and
+            # `new_class` does not; NamedTuple's metaclass reads it.
+            obj = types.new_class(
+                "_InheritedSurfaceProbe", (obj,),
+                exec_body=lambda ns: ns.setdefault("__module__", __name__),
+            )
+        except (TypeError, KeyError, AttributeError, ValueError, RuntimeError) as exc:
+            return _BaseResolutionFailure(
+                dotted, f"a subclass of it could not be built: {type(exc).__name__}: {exc}"
+            )
     if not isinstance(obj, type):
         return _BaseResolutionFailure(
             dotted, f"it names a {type(obj).__name__}, not a class"
@@ -4071,6 +4089,7 @@ def _inherited_surfaces(
     import_modules: dict[str, str],
     spec_classes: set[str],
     unresolved_bases: list[str] | None = None,
+    blind_classes: set[str] | None = None,
 ) -> dict[str, set[str] | None]:
     """What each spec-defined class inherits from bases the target repo does
     not own (#2839).
@@ -4085,7 +4104,9 @@ def _inherited_surfaces(
 
     A standard-library base this host cannot resolve also abstains, and is
     printed at ERROR and appended to ``unresolved_bases`` when one is given
-    (#3585).
+    (#3585). Such a class, and every spec class derived from it, is added to
+    ``blind_classes`` when one is given (#4690): a call on it went unjudged
+    because the checker failed, not because the base is foreign.
     """
     surfaces: dict[str, set[str] | None] = {}
 
@@ -4100,6 +4121,8 @@ def _inherited_surfaces(
                     continue
                 inherited = surface_of(root, seen | {cls})
                 if inherited is None:
+                    if blind_classes is not None and root in blind_classes:
+                        blind_classes.add(cls)
                     result = None
                     break
                 result |= inherited
@@ -4118,6 +4141,8 @@ def _inherited_surfaces(
                 )
                 if unresolved_bases is not None:
                     unresolved_bases.append(named)
+                if blind_classes is not None:
+                    blind_classes.add(cls)
                 result = None
                 break
             if resolved is None:
@@ -4195,6 +4220,7 @@ def _flag_calls(
     first_party_tops: frozenset[str] = frozenset(),
     importable: Callable[[list[str]], set[str]] | None = None,
     unresolved_bases: list[str] | None = None,
+    unjudged_calls: list[str] | None = None,
 ) -> dict[str, list[str]]:
     """Judge every collected call against the target repo's symbol table.
 
@@ -4211,6 +4237,10 @@ def _flag_calls(
             root as foreign — see the note on the foreign-root set below.
         unresolved_bases: When given, collects each standard-library base of
             a spec class that this host could not resolve (#3585).
+        unjudged_calls: When given, collects each call site that went
+            unjudged only because its class has such a base (#4690). A call
+            on a class with a foreign base is not collected: that abstention
+            is by design (#2839), not the checker failing.
     """
     # #1948: three universes the target repo's symbol table has no authority
     # over — the phase-5 kill was this check rejecting Pillow's documented API
@@ -4405,8 +4435,9 @@ def _flag_calls(
         for cls, base in fence.bases:
             class_bases.setdefault(cls, []).append(base)
         import_modules.update(dict(fence.import_modules))
+    blind_classes: set[str] = set()
     inherited = _inherited_surfaces(
-        class_bases, import_modules, spec_classes, unresolved_bases
+        class_bases, import_modules, spec_classes, unresolved_bases, blind_classes
     )
     instance_class: dict[str, str] = {}
     for bound, source in assignments:
@@ -4461,6 +4492,16 @@ def _flag_calls(
             )
             if owner is not None and owner in inherited:
                 surface = inherited[owner]
+                if (
+                    surface is None
+                    and owner in blind_classes
+                    and unjudged_calls is not None
+                    and call.method not in _API_SYMBOL_ALLOWLIST
+                    and call.method not in _BUILTIN_TYPE_METHODS
+                ):
+                    # #4690: the checker failed on this class's base, so a call
+                    # it would otherwise have judged was not judged.
+                    unjudged_calls.append(call.site)
                 if surface is None or call.method in surface:
                     continue
             # #2526: a method every Python object of a builtin type carries is
@@ -4640,11 +4681,24 @@ def check_api_symbols_exist(
 
     first_party_tops = _first_party_tops_for(repo_root_str)
     unresolved_bases: list[str] = []
+    unjudged_calls: list[str] = []
     flagged = _flag_calls(
         scan.facts, symbol_set, first_party_tops,
         importable=_importable_probe_for(repo_root_str),
         unresolved_bases=unresolved_bases,
+        unjudged_calls=unjudged_calls,
     )
+
+    if unjudged_calls:
+        # #4690: a standard-library base this host could not resolve hid calls
+        # the check exists to judge. That is the check failing to run, as when
+        # N1 gathers no symbols (#3585) -- never a pass with a note.
+        sites = ", ".join(f"`{site}`" for site in unjudged_calls[:5])
+        more = f" (and {len(unjudged_calls) - 5} more)" if len(unjudged_calls) > 5 else ""
+        raise CompletenessCannotCheck(
+            f"api_symbols_exist cannot judge {len(unjudged_calls)} call(s) "
+            f"({sites}{more}): {'; '.join(unresolved_bases[:5])}"
+        )
 
     if flagged and not symbol_set and (first_party_tops or not repo_root_str):
         # #3585: the calls need the repo's symbols and N1 gathered none, from
