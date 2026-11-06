@@ -52,6 +52,9 @@ from assemblyzero.workflows.testing.coverage_report import (
     read_coverage_py_report,
 )
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
+from assemblyzero.workflows.testing.nodes.implementation.decline_routing import (
+    declines_outside_plan_text,
+)
 from assemblyzero.workflows.testing.nodes.implementation.keep_passing_tests import (
     align_spec_twins,
     passing_test_names,
@@ -4524,9 +4527,18 @@ def _verify_red_non_pytest(
 
 
 def _with_the_stall(message: str, state: TestingWorkflowState) -> str:
-    """The iteration cap's reason, with why N4's last pass changed nothing (#4515)."""
+    """The iteration cap's reason, with why N4's last pass changed nothing (#4515).
+
+    #4694 R3: a NO-EDIT that named a file outside the plan is reported here
+    too, file by file, whether or not the last pass changed anything; the
+    stall text already carries it when it did not.
+    """
     stall = state.get("nothing_changed", "")
-    return f"{message}. {stall}" if stall else message
+    reason = f"{message}. {stall}" if stall else message
+    outside = state.get("declines_outside_plan") or []
+    if outside and not stall:
+        reason = f"{reason}. {declines_outside_plan_text(outside)}"
+    return reason
 
 
 def _first_compiler_error(output: str) -> str:
