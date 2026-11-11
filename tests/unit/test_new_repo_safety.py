@@ -215,6 +215,20 @@ _FAKE_GPG = (
     "(os.environ.get('GPG_TTY', ''), os.isatty(0)))\n"
 )
 
+# A stand-in for gpg-connect-agent, which the named passphrase box asks first
+# (#4701). It keeps what it was told, in the file named here, and answers
+# with a passphrase in hex.
+_FAKE_AGENT = (
+    "import sys\n"
+    "heard = sys.stdin.read()\n"
+    "open(%r, 'w').write(heard)\n"
+    "for line in heard.splitlines():\n"
+    "    if line.startswith('OPTION'):\n"
+    "        sys.stdout.write('OK\\n')\n"
+    "    elif line.startswith('GET_PASSPHRASE'):\n"
+    "        sys.stdout.write('OK 7479706564\\n')\n"
+)
+
 # What new_repo.py does: detach stdin first, then open the PAT session.
 _DETACH_THEN_DECRYPT = (
     "import sys\n"
@@ -238,6 +252,10 @@ class TestGpgFindsTheTerminal:
         gpg = bin_dir / "gpg"
         gpg.write_text(f"#!{sys.executable}\n{_FAKE_GPG}", encoding="utf-8")
         gpg.chmod(0o755)
+        agent = bin_dir / "gpg-connect-agent"
+        agent.write_text(f"#!{sys.executable}\n{_FAKE_AGENT % str(tmp_path / 'agent-heard')}",
+                         encoding="utf-8")
+        agent.chmod(0o755)
         script = tmp_path / "run.py"
         script.write_text(_DETACH_THEN_DECRYPT % str(TOOLS_DIR), encoding="utf-8")
         secret = tmp_path / "classic-pat.gpg"
@@ -263,6 +281,8 @@ class TestGpgFindsTheTerminal:
         assert result.returncode == 0, result.stderr
         assert f"GPG_TTY={name} " in result.stdout, result.stdout
         assert "STDIN_IS_TTY=False" in result.stdout, "#1806: gpg's stdin stays the null device"
+        heard = (tmp_path / "agent-heard").read_text(encoding="utf-8")
+        assert f"OPTION ttyname={name}\n" in heard, "#4701: the named box is drawn on his terminal"
 
     def test_no_terminal_records_nothing(self, tmp_path):
         result = self._run(tmp_path, subprocess.DEVNULL)

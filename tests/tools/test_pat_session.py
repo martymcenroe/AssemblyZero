@@ -24,6 +24,14 @@ import _pat_session  # noqa: E402
 FAKE_PAT = "ghp_fake_classic_pat_for_testing_only"
 
 
+@pytest.fixture(autouse=True)
+def typed_passphrase(monkeypatch):
+    """The named passphrase box (#4701) stands in for the operator: gpg-agent
+    is never asked here; the box's own tests are in
+    tests/unit/test_pat_session_named_prompt.py."""
+    monkeypatch.setattr(_pat_session, "_ask_passphrase", lambda text, error, name: b"typed")
+
+
 def _make_completed_process(stdout: str = "", stderr: str = "", returncode: int = 0):
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
