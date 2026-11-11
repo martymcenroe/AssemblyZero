@@ -24,4 +24,14 @@ On `main`, each changed test writes into its fake root: the discovery trace on #
 
 ## Full suite
 
-FULL_SUITE
+`poetry run pytest -q --tb=short` in Ubuntu on this branch after the merge of `main` (60ee3fd3): 15001 passed, 18 failed, 66 skipped, 93 deselected, 7 xfailed, in 30 min 0 s. Neither guard reported anything. Every failure is in a file this branch does not touch, and each also fails on unchanged `main` (6b119a45) in the primary checkout:
+
+- 16 in `tests/test_auto_reviewer_wait_loop.py` (tracked in #4528);
+- `tests/integration/test_orchestrator_graph.py::TestOrchestrateFullPipeline::test_full_pipeline_success` (tracked in #4529);
+- `tests/test_universal_claude_md.py::test_adr_references_resolve` (tracked in #3730).
+
+The guard test files after the merge (`test_fake_root_guard.py`, `test_drive_root_guard.py`, `test_home_state_guard.py`): 49 passed.
+
+## On Windows
+
+Not run here. On the next Windows run of the suite, the hook refuses any write into `C:\tmp`, `C:\dev` or the other roots and the session fails naming each test and path.
