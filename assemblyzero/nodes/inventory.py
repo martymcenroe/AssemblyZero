@@ -30,6 +30,12 @@ def update_inventory_node(state: dict[str, Any]) -> dict[str, Any]:
     which dirtied audit worktrees and blocked the dependabot review
     tool's cleanup step (#1155). Callers that genuinely want to scan
     cwd must now pass repo_path=Path.cwd() explicitly.
+
+    A repo_path that is not an existing directory raises ValueError too
+    (#4703): the write builds docs/ with mkdir(parents=True), so the node
+    used to create the whole path. On Windows a test's
+    "/path/that/does/not/exist" resolved to C:\\path\\that\\does\\not\\exist
+    and was rewritten on every run.
     """
     print("[Inventory] Starting documentation inventory scan...")
 
@@ -48,6 +54,12 @@ def update_inventory_node(state: dict[str, Any]) -> dict[str, Any]:
             "The previous default of '.' silently scanned and wrote to "
             "the caller's cwd, which dirtied worktrees and broke "
             "cleanup-by-removal (#1155). Pass an explicit Path."
+        )
+    if not Path(repo_path_str).is_dir():
+        raise ValueError(
+            f"update_inventory_node: repo_path {repo_path_str} is not a "
+            "directory. The node writes docs/0003-file-inventory.md under "
+            "it and would build the whole path to do so (#4703)."
         )
 
     try:
