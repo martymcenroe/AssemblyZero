@@ -121,12 +121,7 @@ def _no_prompt_advice() -> str:
             "gpg-agent could not start its pinentry dialog. Restart the agent "
             "with `gpgconf --kill gpg-agent` and run this again."
         )
-    terminal = os.environ.get("GPG_TTY")
-    if not terminal and os.isatty(0):
-        try:
-            terminal = os.ttyname(0)
-        except OSError:
-            pass
+    terminal = _terminal()
     if not terminal:
         return (
             "This run has no terminal, so a terminal pinentry has nowhere to "
@@ -141,6 +136,124 @@ def _no_prompt_advice() -> str:
     )
 
 
+def _terminal() -> str | None:
+    """The terminal the passphrase box is drawn in: GPG_TTY, else stdin's.
+
+    new_repo.py records GPG_TTY before it detaches stdin (#4179), so the
+    name survives the detach. None when the run has no terminal.
+    """
+    terminal = os.environ.get("GPG_TTY")
+    if not terminal and os.isatty(0):
+        try:
+            terminal = os.ttyname(0)
+        except OSError:
+            pass
+    return terminal or None
+
+
+def _box_text(secret_name: str, path: Path, reason: str | None) -> str:
+    """What the passphrase box says: the secret's name first, then its file (#4701).
+
+    gpg's own box for a passphrase-only file says only "Please enter the
+    passphrase for decryption.", so this module asks gpg-agent for the
+    passphrase itself, with these words in the box. Copied from a working
+    prompt in a private tool. Names and paths only, never secret material.
+    """
+    text = f"{secret_name}\n\nThe passphrase for the file {path}."
+    if reason:
+        text += f"\n\nFor: {reason.rstrip('.')}."
+    return text
+
+
+def _assuan(text: str) -> str:
+    """`text` as one argument of an Assuan command: %, + and control characters percent-escaped, spaces as +."""
+    escaped = "".join(f"%{ord(c):02X}" if c in "%+" or ord(c) < 0x20 else c for c in text)
+    return escaped.replace(" ", "+")
+
+
+def _ask_passphrase(text: str, error: str | None, secret_name: str) -> bytes:
+    """The passphrase, asked in gpg's own pinentry box with `text` in it (#4701).
+
+    GET_PASSPHRASE to gpg-agent, cache id X so nothing is cached. The
+    agent's answer, the passphrase in hex, stays in this process. On a retry
+    `error` is shown above the box's text.
+    """
+    lines = []
+    terminal = _terminal() if sys.platform != "win32" else None
+    if terminal:
+        lines += [f"OPTION ttyname={terminal}", f"OPTION ttytype={os.environ.get('TERM', 'xterm')}"]
+    lines.append(
+        f"GET_PASSPHRASE X {_assuan(error) if error else 'X'} {_assuan('Passphrase:')} {_assuan(text)}"
+    )
+    answer = subprocess.run(
+        ["gpg-connect-agent"],
+        input="\n".join(lines) + "\n/bye\n",
+        capture_output=True,
+        text=True,
+        timeout=GPG_TIMEOUT_S,
+        check=False,
+    )
+    for line in answer.stdout.splitlines():
+        if line.startswith("OK ") and line[3:].strip():
+            try:
+                return bytes.fromhex(line[3:].strip())
+            except ValueError:
+                break
+        if line.startswith("ERR"):
+            _stop_if_no_prompt(line, secret_name)
+            if "cancel" in line.lower():
+                # Cancel in the box = the operator declined. No retry.
+                raise RuntimeError("decrypt declined by operator (pinentry cancelled)")
+            raise RuntimeError(
+                f"the passphrase box for the {secret_name} answered: {line.split(' ', 2)[-1]}"
+            )
+    raise RuntimeError(f"gpg-agent gave no passphrase for the {secret_name}")
+
+
+def _run_gpg(path: Path, passphrase: bytes) -> subprocess.CompletedProcess:
+    """gpg decrypting `path`, the passphrase on a pipe of its own: never argv, the environment or a file (#4701)."""
+    command = ["gpg", "--batch", "--quiet", "--pinentry-mode", "loopback", "--no-symkey-cache"]
+    if sys.platform == "win32":
+        return subprocess.run(
+            [*command, "--passphrase-fd", "0", "--decrypt", str(path)],
+            input=passphrase.decode("utf-8"),
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=GPG_TIMEOUT_S,
+            check=False,
+        )
+    read_end, write_end = os.pipe()
+    try:
+        os.write(write_end, passphrase)
+    finally:
+        os.close(write_end)
+    try:
+        return subprocess.run(
+            [*command, "--passphrase-fd", str(read_end), "--decrypt", str(path)],
+            pass_fds=(read_end,),
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=GPG_TIMEOUT_S,
+            check=False,
+        )
+    finally:
+        os.close(read_end)
+
+
+def _decrypt_once(
+    secret_name: str, path: Path, reason: str | None, error: str | None,
+) -> subprocess.CompletedProcess:
+    """One try: the named box asks, then gpg decrypts with what was typed."""
+    return _run_gpg(path, _ask_passphrase(_box_text(secret_name, path, reason), error, secret_name))
+
+
+def _wrong_passphrase(attempt: int) -> str:
+    """The line the next box shows above its text after a failed try."""
+    return f"That passphrase did not open it (try {attempt} of {MAX_GPG_ATTEMPTS})."
+
+
 def _announce_decrypt(
     secret_name: str,
     path: Path,
@@ -150,9 +263,8 @@ def _announce_decrypt(
 ) -> None:
     """Print to stderr WHICH secret pinentry is about to ask for (#1853).
 
-    The console is the reliable surface for this: gpg symmetric decryption
-    offers no dependable lever on the pinentry dialog's own text, so the
-    operator's cue has to arrive before the dialog appears.
+    Since #4701 the box itself names the secret and its file (_box_text);
+    this banner adds the reason and the attempt above it.
 
     Deliberately ASCII-only -- this prints into Git Bash, cmd, and Windows
     Terminal, and box-drawing characters do not survive all three.
@@ -172,7 +284,7 @@ def _announce_decrypt(
     """
     bar = "=" * 64
     print(bar, file=sys.stderr)
-    print("PASSPHRASE NEEDED -- pinentry is about to prompt", file=sys.stderr)
+    print(f"PASSPHRASE NEEDED -- a box named \"{secret_name}\" is about to ask", file=sys.stderr)
     print(f"  secret   : {secret_name}", file=sys.stderr)
     print(f"  file     : {path}", file=sys.stderr)
     if reason:
@@ -223,15 +335,10 @@ def classic_pat_session(
             f"(macOS: pbpaste. Linux: xclip -selection clipboard -o.)"
         )
 
-    last_stderr = ""
+    last_stderr, error = "", None
     for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
         _announce_decrypt(SECRET_CLASSIC_PAT, pat_path, reason, attempt, MAX_GPG_ATTEMPTS)
-        result = subprocess.run(
-            ["gpg", "--quiet", "--decrypt", str(pat_path)],
-            capture_output=True,
-            text=True,
-            timeout=GPG_TIMEOUT_S,
-        )
+        result = _decrypt_once(SECRET_CLASSIC_PAT, pat_path, reason, error)
         if result.returncode == 0:
             pat = result.stdout.strip()
             try:
@@ -241,6 +348,7 @@ def classic_pat_session(
             return
         last_stderr = result.stderr.strip()
         _stop_if_no_prompt(last_stderr, SECRET_CLASSIC_PAT)
+        error = _wrong_passphrase(attempt)
         if attempt < MAX_GPG_ATTEMPTS:
             print(
                 f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
@@ -324,15 +432,10 @@ def cerberus_pem_session(
             f"  rm ~/Downloads/cerberus.pem"
         )
 
-    last_stderr = ""
+    last_stderr, error = "", None
     for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
         _announce_decrypt(SECRET_CERBERUS_PEM, pem_path, reason, attempt, MAX_GPG_ATTEMPTS)
-        result = subprocess.run(
-            ["gpg", "--quiet", "--decrypt", str(pem_path)],
-            capture_output=True,
-            text=True,
-            timeout=GPG_TIMEOUT_S,
-        )
+        result = _decrypt_once(SECRET_CERBERUS_PEM, pem_path, reason, error)
         if result.returncode == 0:
             pem = result.stdout.strip()
             try:
@@ -342,6 +445,7 @@ def cerberus_pem_session(
             return
         last_stderr = result.stderr.strip()
         _stop_if_no_prompt(last_stderr, SECRET_CERBERUS_PEM)
+        error = _wrong_passphrase(attempt)
         if attempt < MAX_GPG_ATTEMPTS:
             print(
                 f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
@@ -416,15 +520,10 @@ def pr_sentinel_app_session(
             f"  rm <app>.private-key.pem"
         )
 
-    last_stderr = ""
+    last_stderr, error = "", None
     for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
         _announce_decrypt(SECRET_PR_SENTINEL_APP, bundle_path, reason, attempt, MAX_GPG_ATTEMPTS)
-        result = subprocess.run(
-            ["gpg", "--quiet", "--decrypt", str(bundle_path)],
-            capture_output=True,
-            text=True,
-            timeout=GPG_TIMEOUT_S,
-        )
+        result = _decrypt_once(SECRET_PR_SENTINEL_APP, bundle_path, reason, error)
         if result.returncode == 0:
             bundle = result.stdout.strip()
             try:
@@ -439,6 +538,7 @@ def pr_sentinel_app_session(
             raise RuntimeError(
                 "decrypt declined by operator (pinentry cancelled)"
             )
+        error = _wrong_passphrase(attempt)
         if attempt < MAX_GPG_ATTEMPTS:
             print(
                 f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
@@ -488,15 +588,10 @@ def gpg_secret_session(
     if not path.exists():
         raise FileNotFoundError(f"{secret_name} not found at {path}.")
 
-    last_stderr = ""
+    last_stderr, error = "", None
     for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
         _announce_decrypt(secret_name, path, reason, attempt, MAX_GPG_ATTEMPTS)
-        result = subprocess.run(
-            ["gpg", "--quiet", "--decrypt", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=GPG_TIMEOUT_S,
-        )
+        result = _decrypt_once(secret_name, path, reason, error)
         if result.returncode == 0:
             value = result.stdout.strip()
             try:
@@ -506,6 +601,7 @@ def gpg_secret_session(
             return
         last_stderr = result.stderr.strip()
         _stop_if_no_prompt(last_stderr, secret_name)
+        error = _wrong_passphrase(attempt)
         if attempt < MAX_GPG_ATTEMPTS:
             print(
                 f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",

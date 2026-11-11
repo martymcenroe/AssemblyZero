@@ -26,6 +26,15 @@ _FAKE_GPG_NO_TERMINAL = (
     "sys.exit(2)\n"
 )
 
+# A stand-in for gpg-connect-agent, which asks for the passphrase in the
+# named box first (#4701): it answers the way gpg-agent does when its
+# pinentry has no terminal.
+_FAKE_AGENT_NO_TERMINAL = (
+    "import sys\n"
+    "sys.stdin.read()\n"
+    "sys.stdout.write('ERR 83918950 Inappropriate ioctl for device <Pinentry>\\n')\n"
+)
+
 _REPORT_REFUSAL = (
     "import sys\n"
     "from pathlib import Path\n"
@@ -50,6 +59,9 @@ class TestNoPromptAdvice:
         gpg = bin_dir / "gpg"
         gpg.write_text(f"#!{sys.executable}\n{_FAKE_GPG_NO_TERMINAL}", encoding="utf-8")
         gpg.chmod(0o755)
+        agent = bin_dir / "gpg-connect-agent"
+        agent.write_text(f"#!{sys.executable}\n{_FAKE_AGENT_NO_TERMINAL}", encoding="utf-8")
+        agent.chmod(0o755)
         script = tmp_path / "run.py"
         script.write_text(_REPORT_REFUSAL % str(TOOLS_DIR), encoding="utf-8")
         secret = tmp_path / "classic-pat.gpg"
@@ -64,7 +76,7 @@ class TestNoPromptAdvice:
         )
 
         assert result.returncode == 0, result.stderr
-        assert "Inappropriate ioctl" in result.stdout, "the fake gpg must have run"
+        assert "Inappropriate ioctl" in result.stdout, "the agent's own words must reach the operator"
         assert "This run has no terminal" in result.stdout
         assert "Git Bash" not in result.stdout
 
@@ -90,13 +102,17 @@ class TestGpgOutputStaysOffTheTerminal:
     def test_every_decrypt_captures_gpg_output(self, tmp_path, monkeypatch, session):
         secret_file = tmp_path / "secret.gpg"
         secret_file.write_bytes(b"fake gpg blob")
-        # mock-ok: subprocess boundary; gpg would raise a real pinentry prompt.
-        run_mock = mock.Mock(return_value=subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="value", stderr=""))
+        # mock-ok: subprocess boundary. The named box's gpg-agent call (#4701),
+        # then gpg; a real agent would open a real pinentry.
+        run_mock = mock.Mock(side_effect=[
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="OK 7479706564\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="value", stderr=""),
+        ])
         monkeypatch.setattr(_pat_session.subprocess, "run", run_mock)
 
         with session(secret_file):
             pass
 
-        assert run_mock.call_count == 1
-        assert run_mock.call_args.kwargs["capture_output"] is True
+        assert run_mock.call_count == 2
+        for call in run_mock.call_args_list:
+            assert call.kwargs["capture_output"] is True

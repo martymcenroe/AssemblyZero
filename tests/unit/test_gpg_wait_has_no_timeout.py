@@ -35,14 +35,20 @@ def _fake_gpg():
 def test_t1_every_session_waits_for_the_passphrase_without_a_limit(tmp_path, monkeypatch, session):
     secret_file = tmp_path / "secret.gpg"
     secret_file.write_bytes(b"fake gpg blob")
-    run_mock = _fake_gpg()
+    # mock-ok: subprocess boundary. First the named box (#4701), answered by
+    # gpg-agent with the passphrase in hex, then gpg itself.
+    run_mock = mock.Mock(side_effect=[
+        subprocess.CompletedProcess(args=[], returncode=0, stdout="OK 7479706564\n", stderr=""),
+        subprocess.CompletedProcess(args=[], returncode=0, stdout="value", stderr=""),
+    ])
     monkeypatch.setattr(_pat_session.subprocess, "run", run_mock)
 
     with session(secret_file):
         pass
 
-    assert run_mock.call_count == 1
-    assert run_mock.call_args.kwargs["timeout"] is None
+    assert run_mock.call_count == 2
+    for call in run_mock.call_args_list:
+        assert call.kwargs["timeout"] is None
 
 
 def test_t2_verify_encrypted_secret_waits_without_a_limit(tmp_path, monkeypatch):

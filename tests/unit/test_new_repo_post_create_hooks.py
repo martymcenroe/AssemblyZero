@@ -85,6 +85,7 @@ class TestGpgSecretSession:
     def test_yields_value_and_announces_the_callers_name(self, tmp_path, monkeypatch, capsys):
         blob = tmp_path / "token.gpg"
         blob.write_bytes(b"fake gpg blob")
+        monkeypatch.setattr(_pat_session, "_ask_passphrase", lambda text, error, name: b"typed")
         monkeypatch.setattr(
             _pat_session.subprocess, "run",
             mock.Mock(return_value=subprocess.CompletedProcess(
