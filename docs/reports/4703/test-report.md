@@ -17,4 +17,10 @@ Not run here: Windows interop is off in this Ubuntu session. On the next Windows
 
 ## Full suite
 
-Pending; recorded in the next commit.
+`poetry run pytest -q --tb=short` in Ubuntu on this branch: 14976 passed, 18 failed, 66 skipped, 93 deselected, 7 xfailed, in 27 min 10 s. Every failure is in a file this branch does not touch, and each is already failing on `main` and tracked:
+
+- 16 in `tests/test_auto_reviewer_wait_loop.py`: the workflow step they read is gone from `auto-reviewer.yml` on `main` (#4528).
+- `tests/integration/test_orchestrator_graph.py::TestOrchestrateFullPipeline::test_full_pipeline_success`: the graph recursion limit (#4529, #3737).
+- `tests/test_universal_claude_md.py::test_adr_references_resolve`: another repository's ADR numbers read as this one's (#3730).
+
+One test from each group was run on `main` (6b119a45) in the primary checkout: 3 failed, the same three.
