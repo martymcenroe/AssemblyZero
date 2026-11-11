@@ -174,6 +174,8 @@ Cerberus secrets are deployed automatically by the script when you pass the requ
 
 The script also deploys `auto-reviewer.yml`, configures branch protection, and verifies all of the above end-to-end against origin (per #1200 + #1202). The `pr-sentinel/issue-reference` check is provided fleet-wide by the Cloudflare Worker (per #938 / #939), not by a per-repo workflow file.
 
+A new repository gets no workflow that runs its tests or a linter on GitHub, and none is added after (#4712). The operator's order of 2026-11-11: "shut it off fleet-wide. i simply do NOT understand why i ever did it. and even AZ. why take the extra time and tokens." The tests run on his machine before a branch lands; a GitHub job repeating them takes runner time and holds every merge. `tests/unit/test_new_repo_no_test_workflow.py` fails if the script starts writing one.
+
 ### 1a. PyPI Pending-Publisher Registration (If `release.yml` Shipped)
 
 When `--lang python` (default) and not `--no-pypi`, the script ships `.github/workflows/release.yml` for tag-triggered PyPI publish via OIDC Trusted Publisher. The first `git push origin v0.1.0` will fail at the publish step unless you complete the one-time browser registration first. The script surfaces a reminder in its final output (per #1201); the full procedure is in [runbook 0934](0934-pypi-trusted-publisher-setup.md). Opt out of this entirely with `--no-pypi` if the repo will not publish.
@@ -302,3 +304,4 @@ The script automates all of this in one command.
 | 2.7 | 2026-06-10 | #1334 + #1563 — script now generates `.github/dependabot.yml` at creation time (step 11c2; ecosystems detected by marker-file presence plus `github-actions` always; rides the initial commit) so #1331's enablement actually emits version-update PRs, and creates `data-g/` (git-tracked source-of-truth data) alongside the fleet-ignored `data/`. Added file-table rows and directory-tree entries for both. |
 | 2.8 | 2026-10-07 | #4137: a new repo gets no hook of its own; `.claude/settings.json` is `{}` and the `secret-file-guard.sh` row is gone, because the guard is registered centrally (#3684). #4135: Git Bash is the place to run the script; on Ubuntu the decrypt cannot prompt, by #1806's design, and the script now stops at once. |
 | 2.9 | 2026-10-21 | #4179: the operator runs the script from WSL. It records the terminal in `GPG_TTY` before detaching stdin, so `pinentry-curses` prompts in that terminal. Supersedes 2.8's Git Bash instruction. |
+| 2.10 | 2026-11-11 | #4712: a new repository gets no GitHub test or lint workflow, by the operator's order of that day; a unit test holds the scaffolder to it. |
