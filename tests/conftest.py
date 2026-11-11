@@ -58,15 +58,17 @@ def pytest_configure(config):
 
 
 def pytest_sessionstart(session):
-    """Remember the operator's home state (#3531) and the telemetry logs of the
-    checkout and the start directory (#4161, #4202) before any test runs, and
-    arm the refusal of every write into a fake absolute root (#4706)."""
-    from tests import fake_root_guard
+    """Remember the operator's home state (#3531), the telemetry logs of the
+    checkout and the start directory (#4161, #4202), and the placeholder
+    folders off the drive root (#4705) before any test runs, and arm the
+    refusal of every write into a fake absolute root (#4706)."""
+    from tests import drive_root_guard, fake_root_guard
     from tests.checkout_telemetry_guard import GUARDED_FILES
     from tests.home_state_guard import snapshot
 
     session.config._home_state_before = snapshot()
     session.config._checkout_telemetry_before = snapshot(GUARDED_FILES)
+    session.config._drive_root_before = drive_root_guard.snapshot()
     fake_root_guard.install()
 
 
@@ -85,22 +87,26 @@ def pytest_runtest_logfinish(nodeid, location):
 
 def pytest_sessionfinish(session, exitstatus):
     """Fail the session if any test wrote into the operator's home state
-    (#3531), the checkout's telemetry logs (#4161) or a fake absolute root
-    (#4706).
+    (#3531), the checkout's telemetry logs (#4161), a placeholder folder off
+    the drive root (#4705), or a fake absolute root (#4706).
 
     The autouse fixtures below redirect every writer this repository knows
     about. This is the check on that knowledge: a new writer, or a test that
     reaches the real paths some other way, fails the run it first appears in,
     with the paths named, rather than filling the operator's resume directory,
-    audit log and telemetry until someone opens them.
+    audit log and telemetry until someone opens them. The drive-root folders
+    are where a placeholder such as "/fake/repo" lands on Windows, which
+    Linux CI never sees.
     """
+    from tests import drive_root_guard
     from tests.checkout_telemetry_guard import GUARDED_FILES
     from tests.home_state_guard import changes, snapshot
 
     guards = (
         (
             "_home_state_before",
-            (),
+            snapshot,
+            changes,
             (
                 "FAIL: the suite wrote into the operator's home state (#3531). "
                 "Redirect the writer through tests/home_state_guard.redirect:"
@@ -108,20 +114,30 @@ def pytest_sessionfinish(session, exitstatus):
         ),
         (
             "_checkout_telemetry_before",
-            (GUARDED_FILES,),
+            lambda: snapshot(GUARDED_FILES),
+            changes,
             (
                 "FAIL: the suite wrote into the telemetry logs of the checkout or "
                 "of the directory it started in (#4161, #4202). "
                 "Redirect the writer through tests/checkout_telemetry_guard.redirect:"
             ),
         ),
+        (
+            "_drive_root_before",
+            drive_root_guard.snapshot,
+            drive_root_guard.changes,
+            (
+                "FAIL: the suite wrote into a placeholder folder off the drive "
+                "root (#4705). Give the test a path under tmp_path:"
+            ),
+        ),
     )
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-    for attribute, paths, headline in guards:
+    for attribute, take_snapshot, compare, headline in guards:
         before = getattr(session.config, attribute, None)
         if before is None:
             continue
-        lines = changes(before, snapshot(*paths))
+        lines = compare(before, take_snapshot())
         if not lines:
             continue
         if reporter is not None:

@@ -32,6 +32,10 @@ from assemblyzero.workflows.orchestrator.state import (
     default_assemblyzero_root,
 )
 
+# For the tests that only compute paths. A test that runs a stage gives it a
+# target under tmp_path instead (#4704): on Windows "/fake/projects/Chiron" is
+# C:\fake\projects\Chiron, which an earlier run created, so the spec stage
+# took it for a checkout and added a lineage folder there on every run.
 EXTERNAL = str(Path("/fake/projects/Chiron"))
 AZ_ROOT = str(Path("/fake/projects/AssemblyZero"))
 
@@ -61,9 +65,15 @@ def _capturing_graph(captured: dict, return_value: dict):
     return graph
 
 
-def _external_state():
+def _external_target(tmp_path: Path) -> Path:
+    """A target repo under tmp_path that, like the old placeholder on Linux,
+    does not exist: the stages must still thread it (#4704)."""
+    return tmp_path / "projects" / "Chiron"
+
+
+def _external_state(target: Path):
     return create_initial_state(
-        5, get_default_config(), target_repo=EXTERNAL, assemblyzero_root=AZ_ROOT
+        5, get_default_config(), target_repo=str(target), assemblyzero_root=AZ_ROOT
     )
 
 
@@ -98,20 +108,21 @@ def test_triage_threads_target_repo(mock_detect, mock_fetch, tmp_path):
 
 @patch("assemblyzero.workflows.requirements.graph.create_requirements_graph")
 @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
-def test_lld_threads_target_repo(mock_detect, mock_create_graph):
+def test_lld_threads_target_repo(mock_detect, mock_create_graph, tmp_path):
     mock_detect.return_value = {k: None for k in ("triage", "lld", "spec", "impl", "pr")}
     captured: dict = {}
     mock_create_graph.return_value = _capturing_graph(captured, {"lld_path": "", "review_verdict": ""})
+    target = _external_target(tmp_path)
 
-    run_lld_stage(_external_state())
+    run_lld_stage(_external_state(target))
 
-    assert captured["target_repo"] == EXTERNAL
+    assert captured["target_repo"] == str(target)
     assert captured["assemblyzero_root"] == AZ_ROOT
 
 
 @patch("assemblyzero.workflows.implementation_spec.graph.create_implementation_spec_graph")
 @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
-def test_spec_threads_repo_root(mock_detect, mock_create_graph):
+def test_spec_threads_repo_root(mock_detect, mock_create_graph, tmp_path):
     mock_detect.return_value = {k: None for k in ("triage", "lld", "spec", "impl", "pr")}
     captured: dict = {}
     # create_implementation_spec_graph returns a CompiledStateGraph (already
@@ -125,11 +136,12 @@ def test_spec_threads_repo_root(mock_detect, mock_create_graph):
         return {"spec_path": ""}
     app.invoke.side_effect = _invoke
     mock_create_graph.return_value = app
+    target = _external_target(tmp_path)
 
-    run_spec_stage(_external_state())
+    run_spec_stage(_external_state(target))
 
     # implementation_spec graph names the target `repo_root`, not `target_repo`
-    assert captured["repo_root"] == EXTERNAL
+    assert captured["repo_root"] == str(target)
     assert captured["assemblyzero_root"] == AZ_ROOT
 
 
@@ -138,20 +150,21 @@ def test_spec_threads_repo_root(mock_detect, mock_create_graph):
 @patch("assemblyzero.workflows.orchestrator.stages.provision_worktree", return_value=[])
 @patch("assemblyzero.workflows.testing.graph.build_testing_workflow")
 @patch("assemblyzero.workflows.orchestrator.stages.run_command")
-def test_impl_carves_worktree_from_target(mock_run, mock_create_graph, _no_provisioning):
+def test_impl_carves_worktree_from_target(mock_run, mock_create_graph, _no_provisioning, tmp_path):
     captured: dict = {}
     mock_create_graph.return_value = _capturing_graph(captured, {"error_message": ""})
+    target = _external_target(tmp_path)
 
-    run_impl_stage(_external_state())
+    run_impl_stage(_external_state(target))
 
     # git worktree add must run against the target repo via `-C <target>`
     add_calls = [c for c in mock_run.call_args_list if "worktree" in c.args[0]]
     assert len(add_calls) == 1, "expected exactly one git worktree add"
     argv = add_calls[0].args[0]
-    assert argv[:3] == ["git", "-C", EXTERNAL], f"worktree not carved from target: {argv}"
+    assert argv[:3] == ["git", "-C", str(target)], f"worktree not carved from target: {argv}"
 
     # #2077: under the target repo's gitignored data/, not beside it.
-    expected_wt = str(Path(EXTERNAL) / "data" / "worktrees" / "5")
+    expected_wt = str(target / "data" / "worktrees" / "5")
     assert expected_wt in argv, f"worktree path is not under target data/: {argv}"
     assert "issue-5" in argv  # branch
 
@@ -162,7 +175,7 @@ def test_impl_carves_worktree_from_target(mock_run, mock_create_graph, _no_provi
     # main and issue-N"). original_repo_root stays as the target so the
     # load_lld.py:815 fallback (Issue #380) can still find the LLD on main.
     assert captured["repo_root"] == expected_wt
-    assert captured["original_repo_root"] == EXTERNAL
+    assert captured["original_repo_root"] == str(target)
     assert captured["worktree_path"] == expected_wt
 
 
