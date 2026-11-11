@@ -371,18 +371,33 @@ class TestGracefulFailure:
     """Tests for graceful failure behavior."""
 
     def test_nonexistent_repo_path(self, tmp_path):
-        """T060: Non-existent repo_path should not crash."""
-        state = {"repo_path": "/path/that/does/not/exist"}
-        result = update_inventory_node(state)
+        """T060, #4703: a repo_path that does not exist raises, naming it, and
+        nothing is built there.
 
-        # Should not throw exception
-        assert isinstance(result, dict)
-        assert "inventory_updated" in result
-        assert "inventory_entries_added" in result
-        assert "errors" in result
-        # With no docs dir, there are no files to scan, so it either
-        # succeeds with 0 entries or fails gracefully with an error
-        assert result["inventory_entries_added"] >= 0
+        This test used to pass "/path/that/does/not/exist" and accept any
+        result. Linux refused the write at the filesystem root, but on Windows
+        the path resolved to C:\\path\\that\\does\\not\\exist, which the node
+        created and rewrote on every run.
+        """
+        missing = tmp_path / "no-such-repo"
+        state = {"repo_path": str(missing)}
+
+        with pytest.raises(ValueError, match="no-such-repo"):
+            update_inventory_node(state)
+
+        assert not missing.exists(), (
+            f"the node built {missing}, a repo that was never there"
+        )
+
+    def test_repo_path_that_is_a_file_raises(self, tmp_path):
+        """#4703: a file is not a repo; the node writes nothing beside it."""
+        not_a_repo = tmp_path / "README.md"
+        not_a_repo.write_text("# not a repo\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="not a directory"):
+            update_inventory_node({"repo_path": str(not_a_repo)})
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["README.md"]
 
     def test_missing_repo_path_key_raises_value_error(self, tmp_path):
         """Regression test for #1155: missing repo_path must raise instead
