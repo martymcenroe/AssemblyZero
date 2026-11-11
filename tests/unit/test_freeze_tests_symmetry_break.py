@@ -12,6 +12,7 @@ had its chance -- it used to halt on the first repeat, before anything new
 could happen.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -20,11 +21,21 @@ from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phas
 
 pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
+#: #4706: the state's repository, under each test's own tmp_path. N5 clears
+#: its coverage report and snapshots its best iteration under repo_root, and
+#: the old "/tmp/repo" was C:\tmp\repo on Windows.
+_REPO = {"root": ""}
+
+
+@pytest.fixture(autouse=True)
+def _repo_under_tmp_path(tmp_path, monkeypatch):
+    monkeypatch.setitem(_REPO, "root", str(tmp_path / "repo"))
+
 
 def _state(**overrides):
     base = {
         "test_files": ["/tmp/t.py"],
-        "repo_root": "/tmp/repo",
+        "repo_root": _REPO["root"],
         "audit_dir": "",
         "file_counter": 0,
         "issue_number": 2,
@@ -32,7 +43,7 @@ def _state(**overrides):
         "max_iterations": 5,
         "coverage_target": 95,
         # #3585: N5 halts when nothing names a coverage target.
-        "implementation_files": ["/tmp/repo/pkg/mod.py"],
+        "implementation_files": [str(Path(_REPO["root"]) / "pkg" / "mod.py")],
         "skip_e2e": True,
         "previous_coverage": -1.0,
         "previous_passed": -1,

@@ -3,7 +3,6 @@
 Issue #381: Tests T270, T280 from LLD Section 10.0.
 """
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -21,34 +20,36 @@ from assemblyzero.workflows.testing.nodes.scaffold_tests import (
 class TestDetermineTestFilePath:
     """Tests for determine_test_file_path with framework config."""
 
-    def test_t270_playwright_creates_spec_ts(self):
+    def test_t270_playwright_creates_spec_ts(self, tmp_path):
         """T270: scaffold_tests uses correct file extension for Playwright."""
         config = get_framework_config(TestFramework.PLAYWRIGHT)
-        repo_root = Path("/tmp/test_project")
+        # #4706: determine_test_file_path makes the file's folder, so the repo
+        # is under tmp_path; "/tmp/test_project" was C:\tmp\... on Windows.
+        repo_root = tmp_path / "test_project"
         path = determine_test_file_path(56, [], repo_root, framework_config=config)
         assert path.suffix == ".ts"
         assert ".spec.ts" in str(path)
 
-    def test_t280_pytest_creates_test_py(self):
+    def test_t280_pytest_creates_test_py(self, tmp_path):
         """T280: scaffold_tests uses correct file extension for pytest."""
         # Without framework_config, should use default behavior
-        repo_root = Path("/tmp/test_project")
+        repo_root = tmp_path / "test_project"  # #4706
         # Pass None for framework_config to use default pytest behavior
         path = determine_test_file_path(200, [], repo_root, framework_config=None)
         # Default behavior varies, but should not have .ts extension
         assert ".spec.ts" not in str(path)
 
-    def test_jest_creates_test_ts(self):
+    def test_jest_creates_test_ts(self, tmp_path):
         """Jest framework creates .test.ts files."""
         config = get_framework_config(TestFramework.JEST)
-        repo_root = Path("/tmp/test_project")
+        repo_root = tmp_path / "test_project"  # #4706
         path = determine_test_file_path(100, [], repo_root, framework_config=config)
         assert ".test.ts" in str(path)
 
-    def test_vitest_creates_test_ts(self):
+    def test_vitest_creates_test_ts(self, tmp_path):
         """Vitest framework creates .test.ts files."""
         config = get_framework_config(TestFramework.VITEST)
-        repo_root = Path("/tmp/test_project")
+        repo_root = tmp_path / "test_project"  # #4706
         path = determine_test_file_path(100, [], repo_root, framework_config=config)
         assert ".test.ts" in str(path)
 

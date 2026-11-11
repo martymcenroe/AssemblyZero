@@ -59,17 +59,34 @@ def pytest_configure(config):
 
 def pytest_sessionstart(session):
     """Remember the operator's home state (#3531) and the telemetry logs of the
-    checkout and the start directory (#4161, #4202) before any test runs."""
+    checkout and the start directory (#4161, #4202) before any test runs, and
+    arm the refusal of every write into a fake absolute root (#4706)."""
+    from tests import fake_root_guard
     from tests.checkout_telemetry_guard import GUARDED_FILES
     from tests.home_state_guard import snapshot
 
     session.config._home_state_before = snapshot()
     session.config._checkout_telemetry_before = snapshot(GUARDED_FILES)
+    fake_root_guard.install()
+
+
+def pytest_runtest_logstart(nodeid, location):
+    """Name the running test in the fake-root guard's record (#4706)."""
+    from tests import fake_root_guard
+
+    fake_root_guard.enter(nodeid)
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    from tests import fake_root_guard
+
+    fake_root_guard.leave()
 
 
 def pytest_sessionfinish(session, exitstatus):
     """Fail the session if any test wrote into the operator's home state
-    (#3531) or the checkout's telemetry logs (#4161).
+    (#3531), the checkout's telemetry logs (#4161) or a fake absolute root
+    (#4706).
 
     The autouse fixtures below redirect every writer this repository knows
     about. This is the check on that knowledge: a new writer, or a test that
@@ -113,6 +130,10 @@ def pytest_sessionfinish(session, exitstatus):
             for line in lines:
                 reporter.write_line("  " + line)
         session.exitstatus = 1
+
+    from tests import fake_root_guard
+
+    fake_root_guard.fail_session_on_leaks(session)
 
 
 _MODULE_SNAPSHOT_KEYS = [
