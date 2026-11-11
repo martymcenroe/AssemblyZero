@@ -30,12 +30,24 @@ variable inside the `with classic_pat_session()` block, is consumed by
      gotcha 3 -- the Contents API stores bytes verbatim, so submitting a
      CRLF-checked-out file flips the whole file's line endings on origin).
   3. Create the branch from main.
-  4. PUT the workflow file at its destination on that branch.
+  4. PUT the workflow file at its destination on that branch, unless the branch
+     already holds exactly the staged text (#4699): a rerun then adds no commit
+     and starts no second run.
   5. DELETE the staged copy on the same branch, so the repo does not carry two
      versions that can drift (--keep-staged opts out).
   6. Open a PR ("Closes #<issue>"), WAIT for the workflow run to CONCLUDE, and
      report it.
   7. Squash-merge, then delete the remote branch. Local git is never touched.
+
+The wait in step 6 has two parts (#4699). A run must APPEAR within forty polls
+fifteen seconds apart, about ten minutes; if none does, the run did not start.
+Once a run is seen, the wait does not end on a poll count: it lasts until the
+run completes, polling less often as it goes, bounded only by a six-hour
+ceiling, GitHub's own limit for a job on a hosted runner. A full test run in a
+large repository takes ten to twelve minutes, and the first version of this
+wait reported such a run, still going, as one that never started. Ctrl-C ends
+the wait; a run seen and not finished is then reported as still running, with
+its URL, and a rerun of the same command waits on it again.
 
 Step 6 deliberately waits rather than merging as soon as GitHub reports
 `unstable`. A PR that *installs* a check is the first real exercise of that
@@ -73,7 +85,9 @@ import argparse
 import base64
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 import requests
 
@@ -85,8 +99,29 @@ DEFAULT_OWNER = "martymcenroe"
 HTTP_TIMEOUT_S = 30
 MERGE_POLL_ATTEMPTS = 30
 MERGE_POLL_SLEEP_S = 10
+# The budget for a run to APPEAR, and only that (#4699).
 CHECK_POLL_ATTEMPTS = 40
 CHECK_POLL_SLEEP_S = 15
+# Once a run is seen: the interval grows from 15 s by half again each poll, to
+# a cap, and the wait is bounded only by GitHub's six-hour limit on a job on a
+# hosted runner. A run that finishes 12 minutes after it is seen costs 14 polls.
+RUN_POLL_START_S = 15
+RUN_POLL_FACTOR = 1.5
+RUN_POLL_CAP_S = 60
+RUN_WAIT_CEILING_S = 6 * 60 * 60
+
+
+class WaitResult(NamedTuple):
+    """How the wait for a workflow run ended (#4699).
+
+    `conclusion` is GitHub's conclusion for a completed run, "no_run" when no
+    run appeared within the appearance budget, or "in_progress" when a run was
+    seen and had not completed when the wait ended (Ctrl-C, or the ceiling).
+    `url` is the run's page whenever a run was seen.
+    """
+
+    conclusion: str
+    url: str | None = None
 
 
 def _headers(pat: str) -> dict[str, str]:
@@ -185,8 +220,17 @@ def ensure_branch(pat: str, cfg: argparse.Namespace, sha: str) -> None:
     print(f"  created branch {cfg.branch} @ {sha[:8]}")
 
 
-def put_workflow(pat: str, cfg: argparse.Namespace, content: str) -> None:
+def put_workflow(pat: str, cfg: argparse.Namespace, content: str) -> bool:
+    """Commit `content` at the destination on the branch; False when no commit was needed.
+
+    A rerun after a stopped wait finds the branch already holding the staged
+    text. A PUT then would add a commit and start a second run of the workflow
+    for nothing, so it is skipped (#4699).
+    """
     existing = get_file(pat, cfg, cfg.workflow, cfg.branch)
+    if existing and base64.b64decode(existing["content"]).decode("utf-8") == content:
+        print(f"  {cfg.workflow} on {cfg.branch} already holds the staged text -- no commit")
+        return False
     payload: dict[str, object] = {
         "message": f"ci: {_verb(cfg)} {Path(cfg.workflow).name} (Closes #{cfg.issue})",
         "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
@@ -202,6 +246,7 @@ def put_workflow(pat: str, cfg: argparse.Namespace, content: str) -> None:
     )
     r.raise_for_status()
     print(f"  committed {cfg.workflow} on {cfg.branch}")
+    return True
 
 
 def delete_staged(pat: str, cfg: argparse.Namespace) -> None:
@@ -296,8 +341,29 @@ def workflow_name(content: str, override: str | None) -> str:
     )
 
 
-def wait_for_workflow(pat: str, cfg: argparse.Namespace, sha: str, name: str) -> str:
-    """Wait for the named WORKFLOW run on `sha` and return its conclusion.
+def latest_run(pat: str, cfg: argparse.Namespace, sha: str, name: str) -> dict | None:
+    """The newest run of the named WORKFLOW on `sha`, or None if there is none yet."""
+    r = requests.get(
+        _repo_url(cfg, "actions/runs"),
+        params={"head_sha": sha, "per_page": 50},
+        headers=_headers(pat),
+        timeout=HTTP_TIMEOUT_S,
+    )
+    r.raise_for_status()
+    runs = [w for w in r.json().get("workflow_runs", []) if w.get("name") == name]
+    return max(runs, key=lambda w: w["created_at"]) if runs else None
+
+
+def wait_for_workflow(
+    pat: str,
+    cfg: argparse.Namespace,
+    sha: str,
+    name: str,
+    *,
+    sleep: Callable[[float], None] | None = None,
+    clock: Callable[[], float] | None = None,
+) -> WaitResult:
+    """Wait for the named WORKFLOW run on `sha` and return how the wait ended.
 
     Uses /actions/runs rather than /commits/{sha}/check-runs for two reasons
     (#1913): check runs are keyed by job name, not workflow name; and the
@@ -305,29 +371,100 @@ def wait_for_workflow(pat: str, cfg: argparse.Namespace, sha: str, name: str) ->
     this one does not, which is what forced the original diagnosis onto this
     endpoint anyway.
 
-    Returns the conclusion string, or "no_run" if no run for this workflow and
-    commit appeared within the poll budget. Never raises on a red result -- a
-    failing check is information the caller acts on, not an error here.
+    Two waits, with different bounds (#4699). Until a run appears, the budget
+    is CHECK_POLL_ATTEMPTS polls; exhausting it returns "no_run", which then
+    truly means no run started. Once a run is seen, no poll count ends the
+    wait: it returns the run's conclusion when it completes, or "in_progress"
+    with the run's URL if the ceiling passes or the operator presses Ctrl-C.
+    The first version had one budget for both, and reported a run still going
+    after ten minutes as "no_run".
+
+    Never raises on a red result -- a failing check is information the caller
+    acts on, not an error here. A Ctrl-C before any run appears propagates.
     """
-    for i in range(1, CHECK_POLL_ATTEMPTS + 1):
-        r = requests.get(
-            _repo_url(cfg, "actions/runs"),
-            params={"head_sha": sha, "per_page": 50},
-            headers=_headers(pat),
-            timeout=HTTP_TIMEOUT_S,
-        )
-        r.raise_for_status()
-        runs = [w for w in r.json().get("workflow_runs", []) if w.get("name") == name]
-        if not runs:
-            print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: no run for this commit yet")
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    seen: dict | None = None
+    try:
+        for i in range(1, CHECK_POLL_ATTEMPTS + 1):
+            run = latest_run(pat, cfg, sha, name)
+            if run is None:
+                print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: no run for this commit yet")
+                sleep(CHECK_POLL_SLEEP_S)
+                continue
+            seen = run
+            if run["status"] == "completed":
+                print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: {run['conclusion']}")
+                return WaitResult(run["conclusion"] or "unknown", run.get("html_url"))
+            print(f"  {name}: run seen, {run['status']} -- {run.get('html_url')}")
+            break
         else:
-            latest = max(runs, key=lambda w: w["created_at"])
-            if latest["status"] == "completed":
-                print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: {latest['conclusion']}")
-                return latest["conclusion"] or "unknown"
-            print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: {latest['status']}")
-        time.sleep(CHECK_POLL_SLEEP_S)
-    return "no_run"
+            return WaitResult("no_run")
+
+        started = clock()
+        deadline = started + RUN_WAIT_CEILING_S
+        interval: float = RUN_POLL_START_S
+        while (left := deadline - clock()) > 0:
+            sleep(min(interval, left))
+            interval = min(interval * RUN_POLL_FACTOR, RUN_POLL_CAP_S)
+            run = latest_run(pat, cfg, sha, name) or seen
+            seen = run
+            minutes = int((clock() - started) // 60)
+            if run["status"] == "completed":
+                print(f"  {name}: {run['conclusion']} after {minutes} min")
+                return WaitResult(run["conclusion"] or "unknown", run.get("html_url"))
+            print(f"  {name}: {run['status']}, {minutes} min since it was seen")
+        return WaitResult("in_progress", seen.get("html_url"))
+    except KeyboardInterrupt:
+        if seen is None:
+            raise
+        print(f"\n  stopped by Ctrl-C while `{name}` was still running")
+        return WaitResult("in_progress", seen.get("html_url"))
+
+
+def report_wait(
+    result: WaitResult, cfg: argparse.Namespace, name: str, num: int, target: str
+) -> bool:
+    """Say how the wait ended; True only when the merge may go ahead.
+
+    A run still in progress never merges, --merge-on-red included: there is no
+    result yet to override (#4699).
+    """
+    conclusion = result.conclusion
+    if conclusion == "success":
+        print("  green on its first run.")
+        return True
+    if conclusion == "in_progress":
+        print(
+            f"  Workflow `{name}` is STILL RUNNING: it started and has not finished.\n"
+            f"    {result.url}\n"
+            f"  Nothing is merged. The branch and PR #{num} are untouched. Rerun this\n"
+            f"  same command to wait on it again: the branch already holds the\n"
+            f"  workflow, so the rerun adds no commit and starts no second run.",
+            file=sys.stderr,
+        )
+        return False
+    if conclusion == "no_run":
+        print(
+            f"  No `{name}` run appeared for this commit within the poll budget.\n"
+            f"  This means the run did not START -- it does NOT mean the workflow\n"
+            f"  passed or failed. Check that Actions is enabled and the trigger\n"
+            f"  matches. The branch and PR #{num} exist and are untouched.",
+            file=sys.stderr,
+        )
+        return False
+    if cfg.merge_on_red:
+        print(f"  Workflow `{name}` concluded `{conclusion}`; merging anyway (--merge-on-red).")
+        return True
+    print(
+        f"  Workflow `{name}` concluded `{conclusion}`. NOT merging.\n"
+        f"  The workflow landed on the branch and PR #{num} is open, so the\n"
+        f"  failure is visible and fixable there. Inspect the failing job with:\n"
+        f"    gh run list --repo {target} --branch {cfg.branch}\n"
+        f"  Re-run with --merge-on-red to override.",
+        file=sys.stderr,
+    )
+    return False
 
 
 def wait_mergeable(pat: str, cfg: argparse.Namespace, num: int) -> bool:
@@ -425,6 +562,8 @@ def main() -> int:
         print(f"  staged   : {'kept' if cfg.keep_staged else 'removed in the same PR'}")
         print(f"  header   : {'stripped' if cfg.strip_header_comment else 'preserved'}")
         print(f"  PR       : Closes #{cfg.issue}, waits for workflow `{cfg.check or '<parsed from the file>'}`")
+        print(f"  wait     : up to {CHECK_POLL_ATTEMPTS * CHECK_POLL_SLEEP_S // 60} min for the run to appear, "
+              f"then until it finishes (Ctrl-C stops the wait; nothing merges)")
         print(f"  on red   : {'merge anyway' if cfg.merge_on_red else 'stop and report'}")
         return 0
 
@@ -450,28 +589,8 @@ def main() -> int:
 
         name = workflow_name(content, cfg.check)
         print(f"Waiting for workflow `{name}` on PR #{num} ...")
-        conclusion = wait_for_workflow(pat, cfg, head_sha(pat, cfg, num), name)
-
-        if conclusion == "success":
-            print("  green on its first run.")
-        elif conclusion == "no_run":
-            print(
-                f"  No `{name}` run appeared for this commit within the poll budget.\n"
-                f"  This means the run did not START -- it does NOT mean the workflow\n"
-                f"  passed or failed. Check that Actions is enabled and the trigger\n"
-                f"  matches. The branch and PR #{num} exist and are untouched.",
-                file=sys.stderr,
-            )
-            return 1
-        elif not cfg.merge_on_red:
-            print(
-                f"  Workflow `{name}` concluded `{conclusion}`. NOT merging.\n"
-                f"  The workflow landed on the branch and PR #{num} is open, so the\n"
-                f"  failure is visible and fixable there. Inspect the failing job with:\n"
-                f"    gh run list --repo {target} --branch {cfg.branch}\n"
-                f"  Re-run with --merge-on-red to override.",
-                file=sys.stderr,
-            )
+        result = wait_for_workflow(pat, cfg, head_sha(pat, cfg, num), name)
+        if not report_wait(result, cfg, name, num, target):
             return 1
 
         if not wait_mergeable(pat, cfg, num):
