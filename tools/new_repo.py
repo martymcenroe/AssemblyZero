@@ -1736,6 +1736,13 @@ def create_github_workflows(project_path: Path, enable_pypi: bool = True) -> Non
     gates on context "pr-sentinel / issue-reference" (the Worker's check
     name), set by configure_branch_protection().
 
+    No workflow that runs tests or a linter, by the operator's order of
+    2026-11-11 (#4712): "shut it off fleet-wide. i simply do NOT understand
+    why i ever did it. and even AZ. why take the extra time and tokens." A
+    repository's tests run on his machine before a branch lands; a GitHub
+    job repeating them takes runner time and holds every merge.
+    tests/unit/test_new_repo_no_test_workflow.py holds this.
+
     Args:
         project_path: Path to the project root.
         enable_pypi: When True (default), also deploy release.yml. When
