@@ -1,0 +1,49 @@
+# Test report: #4706
+
+Run in Ubuntu (WSL) in the worktree's own poetry environment.
+
+## The guard's own tests
+
+`tests/unit/test_fake_root_guard.py` (new, 25 tests):
+
+- what counts as a write: write modes of `open` and the flags of `os.open`, `mkdir`, `remove`, both ends of a rename, a copy's destination only; reads and listing events are not;
+- which paths are leaks: inside a root and the root itself; not a path that only shares a prefix (`fakeroot` against `fake`); `/dev/null` itself is not, below it is; an allowed store inside a root is not; a relative path or a file descriptor is never judged;
+- the roots on each platform: Ubuntu watches the named folders and leaves its `/tmp` and `/dev` alone; Windows watches all of `/tmp` and `/dev`;
+- the suite runs armed: the suite's own hook watches this machine's roots and refuses a probe raised with `sys.audit`, which touches no file whether the hook is armed or not (marked `windows_paths`, so the Windows job runs it too);
+- end to end: a child pytest whose guard watches a folder under `tmp_path` runs a test that writes there and swallows the refusal; the session exits 1, names the test and the path, the test itself passes, and the file never exists. A child that only reads the root exits 0.
+
+They cannot pass before the change: the module did not exist.
+
+## Fails before, passes after
+
+On `main`, each changed test writes into its fake root: the discovery trace on #4706 lists 131 writes under `/tmp/repo` from the nine N5 test files, 2 under `/tmp/audit` and 4 under `/tmp/test_project`. With the guard armed and the tests unchanged, `test_exit_code_verify_phases.py` gives 7 failed, 17 passed: the refusal of `/tmp/repo/report.json` halts N5. With the change, the eight N5 files that gained the fixture, run with `test_cov_target_resolution.py`, gave 103 passed, and the guard reported nothing.
+
+## Targeted
+
+`test_collection_failure_is_named.py`, `test_scaffold_tests_multifw.py`, `test_issue_161.py` and `test_inventory_node.py` (this branch's earlier version of T060, since replaced by `main`'s): 53 passed, before the merge of `main`.
+
+## Full suite
+
+`poetry run pytest -q --tb=short` in Ubuntu on this branch after the merge of `main` (60ee3fd3): 15001 passed, 18 failed, 66 skipped, 93 deselected, 7 xfailed, in 30 min 0 s. Neither guard reported anything. Every failure is in a file this branch does not touch, and each also fails on unchanged `main` (6b119a45) in the primary checkout:
+
+- 16 in `tests/test_auto_reviewer_wait_loop.py` (tracked in #4528);
+- `tests/integration/test_orchestrator_graph.py::TestOrchestrateFullPipeline::test_full_pipeline_success` (tracked in #4529);
+- `tests/test_universal_claude_md.py::test_adr_references_resolve` (tracked in #3730).
+
+The guard test files after the merge (`test_fake_root_guard.py`, `test_drive_root_guard.py`, `test_home_state_guard.py`): 49 passed.
+
+### After the second merge of `main`
+
+`main` moved to 0922ca16, which carries PR #4718 (the telemetry buffer, the hourglass and the triage brief, see #4708 and #4709) and the CI shutoff of the `test` job (see #4711). The merge (11a24fae) was clean; `tests/conftest.py` keeps both sides.
+
+`poetry run pytest -q --tb=short` in Ubuntu on 11a24fae: 15089 passed, 18 failed, 66 skipped, 93 deselected, 7 xfailed, in 36 min 54 s. Neither guard reported anything. The 18 failures are the same 18 node ids listed above, and the same 18 ids run on unchanged `main` (0922ca16) in the primary checkout gave 18 failed.
+
+`ruff check .`: 2625 on 11a24fae and 2625 on `main` (0922ca16); `tests/fake_root_guard.py`, `tests/unit/test_fake_root_guard.py` and `tests/conftest.py` have none.
+
+### The CI failure on the earlier head
+
+The `test` job of run 43093805521 (head 9b0b6270) ended in failure at 2:32 PM Central, and no test failed in it: unit 14436 passed, integration 65 passed, e2e 19 passed, adversarial 1 skipped. The failing step was `Upload coverage report` (`actions/upload-artifact@v7`), which got an HTML page or an `upstream connect` error from GitHub's artifact service on all five attempts and stopped with `Failed to CreateArtifact`.
+
+## On Windows
+
+Not run here. On the next Windows run of the suite, the hook refuses any write into `C:\tmp`, `C:\dev` or the other roots and the session fails naming each test and path.

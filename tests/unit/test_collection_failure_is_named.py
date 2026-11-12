@@ -100,16 +100,19 @@ class TestQuietWhenThereIsNothingToSay:
 
 
 class TestItReachesTheHalt:
-    def test_the_error_message_carries_the_detail(self):
+    def test_the_error_message_carries_the_detail(self, tmp_path):
         """stdout is not enough -- the halt payload is what the orchestrator
         reports, and it said 'unknown'."""
         from unittest.mock import patch
 
         from assemblyzero.workflows.testing.nodes import verify_phases
 
+        # #4706: N5 clears its coverage report under repo_root, so the repo is
+        # under tmp_path; the old "/tmp/repo" was C:\tmp\repo on Windows.
+        repo = tmp_path / "repo"
         state = {
             "test_files": ["/tmp/t.py"],
-            "repo_root": "/tmp/repo",
+            "repo_root": str(repo),
             "audit_dir": "",
             "file_counter": 0,
             "issue_number": 2,
@@ -117,7 +120,7 @@ class TestItReachesTheHalt:
             "max_iterations": 5,
             "coverage_target": 95,
             # #3585: N5 halts when nothing names a coverage target.
-            "implementation_files": ["/tmp/repo/pkg/mod.py"],
+            "implementation_files": [str(repo / "pkg" / "mod.py")],
             "skip_e2e": True,
         }
         result_stub = {
