@@ -230,7 +230,10 @@ def no_live_model_calls(request, monkeypatch):
 def home_state_stays_out_of_home(tmp_path, monkeypatch):
     """Every test's halt snapshots, resume contracts and audit lines land
     under its own tmp_path, never under ~/.assemblyzero/workflow_state or
-    ~/.claude/assemblyzero/workflow-audit.jsonl (#3531).
+    ~/.claude/assemblyzero/workflow-audit.jsonl (#3531), and so do its
+    buffered telemetry events and its DEATH age meter and history, never
+    under ~/.assemblyzero/telemetry-buffer or ~/.claude/assemblyzero/hourglass
+    (#4708).
 
     Autouse and unconditional, for the reason `no_live_model_calls` gives:
     the tests that polluted the operator's home were written by people who

@@ -3,8 +3,11 @@
 Issue #305: End-to-End Orchestration Workflow (Issue → Code)
 """
 
+import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from assemblyzero.workflows.orchestrator.config import get_default_config
 from assemblyzero.workflows.orchestrator.stages import (
@@ -17,6 +20,29 @@ from assemblyzero.workflows.orchestrator.stages import (
 from assemblyzero.workflows.orchestrator.state import (
     create_initial_state,
 )
+
+#: The system's temporary directory, read at import, before any test here
+#: redirects it (#4709).
+SYSTEM_TEMP = Path(tempfile.gettempdir())
+
+
+@pytest.fixture(autouse=True)
+def temp_files_stay_under_tmp_path(tmp_path, monkeypatch):
+    """Every temporary file a test here makes lands under its own tmp_path
+    (#4709).
+
+    ``_fetch_issue_body_to_temp_brief`` writes the triage brief with
+    ``tempfile.mkstemp`` and nothing removes it. Four tests here call it for
+    real, and each run left an ``orchestrator-issue-<N>-*.md`` in the system's
+    temporary directory: ``/tmp`` on Ubuntu, ``AppData\\Local\\Temp`` on
+    Windows. Pointing ``tempfile.tempdir`` at the test's own directory sends
+    the brief where pytest keeps and prunes it. Autouse for the whole module,
+    so a new test that reaches the writer is covered without asking.
+    """
+    temp = tmp_path / "system-temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    return temp
 
 
 class TestShouldSkipStage:
@@ -1186,3 +1212,36 @@ class TestFetchIssueBriefWithSummary:
         detail_idx = content.index("## Issue detail")
         body_idx = content.index(issue_body)
         assert detail_idx < body_idx, "## Issue detail heading must precede the body text"
+
+
+class TestTriageBriefStaysOutOfTheSystemTemp:
+    """#4709 T1: the triage brief a test makes lands under its tmp_path, and
+    the system's temporary directory gains no ``orchestrator-issue-*.md``.
+    Fails if the module's autouse redirect is removed."""
+
+    @patch("assemblyzero.workflows.orchestrator.stages._synthesize_brief_summary")
+    @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
+    def test_the_brief_lands_under_tmp_path_and_not_in_the_system_temp(
+        self, mock_subprocess, mock_synthesize, tmp_path,
+    ):
+        import json as _json
+
+        from assemblyzero.workflows.orchestrator.stages import (
+            _fetch_issue_body_to_temp_brief,
+        )
+
+        gh = MagicMock()
+        gh.returncode = 0
+        gh.stdout = _json.dumps({"title": "Title", "body": "Body."})
+        gh.stderr = ""
+        mock_subprocess.return_value = gh
+        mock_synthesize.return_value = ""
+        pattern = "orchestrator-issue-4709-*.md"
+        before = set(SYSTEM_TEMP.glob(pattern))
+
+        temp_path, err = _fetch_issue_body_to_temp_brief(4709, str(tmp_path))
+
+        assert not err, err
+        assert Path(temp_path).is_relative_to(tmp_path), temp_path
+        assert Path(temp_path).name.startswith("orchestrator-issue-4709-")
+        assert set(SYSTEM_TEMP.glob(pattern)) == before
