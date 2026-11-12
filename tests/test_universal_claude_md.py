@@ -17,24 +17,31 @@ tracked in #1309). They cover regex-checkable reference integrity:
 The universal lives outside the AssemblyZero repo, so the tests skip
 when the file isn't at the expected path (e.g. CI without operator's
 machine layout). They run locally and surface drift before the operator
-hits it in real use.
+hits it in real use. The checkers take the text as an argument, so
+`tests/unit/test_universal_claude_md_checkers.py` runs them on fixtures in
+the unit tier, which CI runs (#4733, #3730).
 """
 from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from assemblyzero.core import seats
 from assemblyzero.core.projects_root import PROJECTS, spellings
 
 # #3609: derived from where this checkout sits, never spelled.
 PROJECTS_ROOT = PROJECTS
 UNIVERSAL_PATH = PROJECTS_ROOT / "CLAUDE.md"
 AZ_RUNBOOKS = PROJECTS_ROOT / "AssemblyZero" / "docs" / "runbooks"
-AZ_ADRS = PROJECTS_ROOT / "AssemblyZero" / "docs" / "adrs"
 AZ_STANDARDS = PROJECTS_ROOT / "AssemblyZero" / "docs" / "standards"
+# #3730: an ADR number counts as this repository's only when the text names
+# no other repository for it.
+DEFAULT_ADR_REPO = "AssemblyZero"
 
 pytestmark = pytest.mark.skipif(
     not UNIVERSAL_PATH.exists(),
@@ -84,8 +91,8 @@ def _resolve_relative(path_str: str) -> Path:
     return PROJECTS_ROOT / path_str
 
 
-def _resolve_home(path_str: str) -> Path:
-    return Path(str(path_str).replace("~", str(Path.home()), 1))
+def _resolve_home(path_str: str, home: Path | None = None) -> Path:
+    return Path(str(path_str).replace("~", str(home or Path.home()), 1))
 
 
 def _resolve_abs(path_str: str) -> Path:
@@ -93,12 +100,41 @@ def _resolve_abs(path_str: str) -> Path:
     return PROJECTS_ROOT / path_str.replace("\\", "/")
 
 
-def test_file_path_references_resolve(universal_text: str) -> None:
-    """Every backticked file path referenced in universal CLAUDE.md must exist."""
+@dataclass(frozen=True)
+class StateFile:
+    """A `~/.claude/` file the law names whose absence is a normal state (#4733).
+
+    Its presence proves nothing about the reference, so the check reads the
+    code that owns the file: the reference is right while the owner still
+    names the same basename.
+    """
+
+    reason: str
+    owner: str
+    owner_name: Callable[[], str]
+
+
+#: #4733: closed, one entry per reason, never a pattern, because a pattern
+#: would also excuse a real missing file. Every `~/.claude/` path not listed
+#: here must exist.
+STATE_FILES: dict[str, StateFile] = {
+    "~/.claude/claude-spend.lock": StateFile(
+        reason=(
+            "exists only while the operator has the spend lock thrown "
+            "(tools/claude_spend_lock.py throws and lifts it); lifted is its normal state"
+        ),
+        owner="assemblyzero/core/seats.py LOCK_NAME",
+        owner_name=lambda: seats.LOCK_NAME,
+    ),
+}
+
+
+def find_unresolved_file_paths(text: str, home: Path | None = None) -> list[str]:
+    """One line per backticked file path in `text` that does not resolve."""
     missing: list[str] = []
     seen: set[str] = set()
 
-    for m in RE_RELATIVE_PATH.finditer(universal_text):
+    for m in RE_RELATIVE_PATH.finditer(text):
         p = m.group(1)
         if p in seen:
             continue
@@ -106,15 +142,24 @@ def test_file_path_references_resolve(universal_text: str) -> None:
         if not _resolve_relative(p).exists():
             missing.append(f"  - `{p}` (expected at {_resolve_relative(p)})")
 
-    for m in RE_HOME_CLAUDE.finditer(universal_text):
+    for m in RE_HOME_CLAUDE.finditer(text):
         p = m.group(1)
         if p in seen:
             continue
         seen.add(p)
-        if not _resolve_home(p).exists():
-            missing.append(f"  - `{p}` (expected at {_resolve_home(p)})")
+        state_file = STATE_FILES.get(p)
+        if state_file is not None:
+            owned = state_file.owner_name()
+            if Path(p).name != owned:
+                missing.append(
+                    f"  - `{p}` is a state file, but its owner, {state_file.owner}, "
+                    f"now names `{owned}`"
+                )
+            continue
+        if not _resolve_home(p, home).exists():
+            missing.append(f"  - `{p}` (expected at {_resolve_home(p, home)})")
 
-    for m in RE_ABS_PATH.finditer(universal_text):
+    for m in RE_ABS_PATH.finditer(text):
         p = m.group(1)
         if p in seen:
             continue
@@ -122,6 +167,12 @@ def test_file_path_references_resolve(universal_text: str) -> None:
         if not _resolve_abs(p).exists():
             missing.append(f"  - `{p}`")
 
+    return missing
+
+
+def test_file_path_references_resolve(universal_text: str) -> None:
+    """Every backticked file path referenced in universal CLAUDE.md must exist."""
+    missing = find_unresolved_file_paths(universal_text)
     if missing:
         pytest.fail(
             f"{len(missing)} file path reference(s) don't resolve:\n"
@@ -137,6 +188,9 @@ def test_file_path_references_resolve(universal_text: str) -> None:
 RE_RUNBOOK_NUM = re.compile(r"runbook[s]?\s+(\d{4})", re.IGNORECASE)
 # `ADR-NNNN` or `ADR NNNN`
 RE_ADR_NUM = re.compile(r"\bADR[-\s](\d{4})\b", re.IGNORECASE)
+# #3730: `Projects/<Repo>/docs/adrs/NNNN-`, the text naming the repository an
+# ADR number belongs to. The repository is read from the text, never listed here.
+RE_ADR_PATH = re.compile(r"\bProjects/([A-Za-z0-9_.\-]+)/docs/adrs/(\d{4})-")
 # `standard NNNN`
 RE_STANDARD_NUM = re.compile(r"standard[s]?\s+(\d{4})", re.IGNORECASE)
 
@@ -165,16 +219,57 @@ def test_runbook_references_resolve(universal_text: str) -> None:
         )
 
 
-def test_adr_references_resolve(universal_text: str) -> None:
+def _line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def find_unresolved_adr_references(
+    text: str, projects_root: Path = PROJECTS_ROOT
+) -> list[str]:
+    """One line per `ADR-NNNN` in `text` that cannot be placed or does not resolve (#3730).
+
+    An ADR number belongs to the repository a `Projects/<Repo>/docs/adrs/NNNN-`
+    path anywhere in the text names for it. A number the text names in no
+    repository counts as DEFAULT_ADR_REPO's. A number named in two repositories
+    cannot be placed. Every failure names the lines that cite the number.
+    """
+    named: dict[str, set[str]] = {}
+    for m in RE_ADR_PATH.finditer(text):
+        named.setdefault(m.group(2), set()).add(m.group(1))
+
+    cited: dict[str, list[int]] = {}
+    for m in RE_ADR_NUM.finditer(text):
+        cited.setdefault(m.group(1), []).append(_line_of(text, m.start()))
+
     missing: list[str] = []
-    seen: set[str] = set()
-    for m in RE_ADR_NUM.finditer(universal_text):
-        n = m.group(1)
-        if n in seen:
+    for n, lines in cited.items():
+        where = "line " + ", ".join(str(line) for line in lines)
+        repos = sorted(named.get(n, ()))
+        if len(repos) > 1:
+            missing.append(
+                f"  - ADR-{n} ({where}): the text names it in {', '.join(repos)}, "
+                "so it cannot be placed"
+            )
             continue
-        seen.add(n)
-        if not _doc_exists(AZ_ADRS, n):
-            missing.append(f"  - ADR-{n} (no `{n}-*.md` at {AZ_ADRS})")
+        repo = repos[0] if repos else DEFAULT_ADR_REPO
+        adrs = projects_root / repo / "docs" / "adrs"
+        if _doc_exists(adrs, n):
+            continue
+        if repos:
+            missing.append(
+                f"  - ADR-{n} ({where}): no `{n}-*.md` at {adrs}, the repository "
+                "the text names for it"
+            )
+        else:
+            missing.append(
+                f"  - ADR-{n} ({where}): the text names no repository for it, and "
+                f"{DEFAULT_ADR_REPO} has no `{n}-*.md` at {adrs}"
+            )
+    return missing
+
+
+def test_adr_references_resolve(universal_text: str) -> None:
+    missing = find_unresolved_adr_references(universal_text)
     if missing:
         pytest.fail(
             f"{len(missing)} ADR reference(s) don't resolve:\n"
