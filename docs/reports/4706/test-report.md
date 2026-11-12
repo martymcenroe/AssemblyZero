@@ -32,6 +32,18 @@ On `main`, each changed test writes into its fake root: the discovery trace on #
 
 The guard test files after the merge (`test_fake_root_guard.py`, `test_drive_root_guard.py`, `test_home_state_guard.py`): 49 passed.
 
+### After the second merge of `main`
+
+`main` moved to 0922ca16, which carries PR #4718 (the telemetry buffer, the hourglass and the triage brief, see #4708 and #4709) and the CI shutoff of the `test` job (see #4711). The merge (11a24fae) was clean; `tests/conftest.py` keeps both sides.
+
+`poetry run pytest -q --tb=short` in Ubuntu on 11a24fae: 15089 passed, 18 failed, 66 skipped, 93 deselected, 7 xfailed, in 36 min 54 s. Neither guard reported anything. The 18 failures are the same 18 node ids listed above, and the same 18 ids run on unchanged `main` (0922ca16) in the primary checkout gave 18 failed.
+
+`ruff check .`: 2625 on 11a24fae and 2625 on `main` (0922ca16); `tests/fake_root_guard.py`, `tests/unit/test_fake_root_guard.py` and `tests/conftest.py` have none.
+
+### The CI failure on the earlier head
+
+The `test` job of run 43093805521 (head 9b0b6270) ended in failure at 2:32 PM Central, and no test failed in it: unit 14436 passed, integration 65 passed, e2e 19 passed, adversarial 1 skipped. The failing step was `Upload coverage report` (`actions/upload-artifact@v7`), which got an HTML page or an `upstream connect` error from GitHub's artifact service on all five attempts and stopped with `Failed to CreateArtifact`.
+
 ## On Windows
 
 Not run here. On the next Windows run of the suite, the hook refuses any write into `C:\tmp`, `C:\dev` or the other roots and the session fails naming each test and path.
