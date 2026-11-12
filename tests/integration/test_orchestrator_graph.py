@@ -56,6 +56,11 @@ def mock_all_stages():
     runners = {
         "triage": make_mock_runner("triage", "issue-brief.md"),
         "lld": make_mock_runner("lld", "305-lld.md"),
+        # #4529: the visual stage (#2518) sits between lld and spec in STAGE_ORDER.
+        # Without its runner here the graph looped to GraphRecursionError; it now
+        # raises MissingStageRunnerError, and tests/unit/test_orchestrator_stage_runners.py
+        # holds STAGE_RUNNERS and STAGE_ORDER to the same set.
+        "visual": make_mock_runner("visual", "visual"),
         "spec": make_mock_runner("spec", "impl-spec.md"),
         "impl": make_mock_runner("impl", "../AssemblyZero-305"),
         "pr": make_mock_runner("pr", "https://github.com/test/pull/1"),

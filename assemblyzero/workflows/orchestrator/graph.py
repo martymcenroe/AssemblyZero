@@ -72,6 +72,15 @@ class ConcurrentOrchestrationError(RuntimeError):
     """Raised when orchestration is already running for an issue."""
 
 
+class MissingStageRunnerError(RuntimeError):
+    """Raised when the current stage has no runner in STAGE_RUNNERS (#4529).
+
+    The node used to return ``{}`` for such a stage. State then never changed,
+    ``_route_after_stage`` sent the graph back to ``run_stage``, and the run
+    looped until LangGraph's recursion limit, an error that names no stage.
+    """
+
+
 def _init_node(state: OrchestrationState) -> dict[str, Any]:
     """Initialize orchestration: detect artifacts, set start time."""
     now = datetime.now(tz=timezone.utc).isoformat()
@@ -107,8 +116,16 @@ def _record_stage_entry(state: OrchestrationState, stage: str) -> None:
 def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
     """Execute the current stage with retry logic."""
     current_stage = state.get("current_stage", "done")
-    if current_stage == "done" or current_stage not in STAGE_RUNNERS:
+    if current_stage == "done":
         return {}
+    if current_stage not in STAGE_RUNNERS:
+        # #4529: returning {} here left the state unchanged, so the router sent
+        # the graph straight back to this node until GraphRecursionError.
+        raise MissingStageRunnerError(
+            f"Stage '{current_stage}' has no runner. STAGE_RUNNERS holds "
+            f"{sorted(STAGE_RUNNERS)}; every stage in STAGE_ORDER "
+            f"({STAGE_ORDER}) needs one."
+        )
 
     config = state.get("config", {})
     max_retries = config.get("max_stage_retries", 3)
