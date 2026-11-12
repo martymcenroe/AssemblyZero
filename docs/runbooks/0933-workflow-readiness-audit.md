@@ -56,7 +56,6 @@ For the target repo at `{target}`:
 | `pyproject.toml` | Present, with a `[project]` or `[tool.poetry]` table of its own: one that only configures tools gives the run no environment, and it halts by name (#4490) | File |
 | Test runner | `pytest` and `pytest-cov` are both declared in the dev dependencies. Read the declaration: `poetry run pytest --version` proves nothing, because with no pytest installed it runs the next one on `PATH` and still succeeds. Without `pytest-cov` the run halts at coverage (#4490) | File |
 | Branch protection on `main` | Required reviews + required check `pr-sentinel / issue-reference` | API (may need classic PAT) |
-| Cerberus secrets | `REVIEWER_APP_ID` + `REVIEWER_APP_PRIVATE_KEY` set | API (write-only — verify by attempting auto-review) |
 | Issue labels | At minimum `lld`, `implementation` per #1061 | API |
 | Gemini credentials | `~/.config/gemini/credentials.json` accessible | File |
 | Working tree | `git status --short` empty (or noted) | Run |

@@ -1,8 +1,8 @@
 # 0901 - New Project Setup
 
 **Category:** Runbook / Operational Procedure
-**Version:** 2.9
-**Last Updated:** 2026-10-21
+**Version:** 2.11
+**Last Updated:** 2026-11-11
 
 ---
 
@@ -33,18 +33,18 @@ Initialize a new project with the canonical AssemblyZero structure, enabling:
 
 ## Quick Start (Automated)
 
-> **`--cerberus-pem` is required** for any invocation that creates a GitHub repo (#1206). Download the .pem first from https://github.com/settings/apps/cerberus-az > Private keys > Generate, then pass its path to the script. The only override is `--no-github` (local scaffold only). Full procedure in [0927](0927-new-repo-human-checklist.md#4-deploy-cerberus-secrets-if-needed).
+> **No Cerberus PEM is needed (#4724).** The pr-sentinel Worker approves every new repo's PRs as Cerberus with its own copy of the key, and the per-repo Cerberus secrets are read by nothing since Auto Review's retirement (#3663). `--cerberus-pem` was required from #1206 until #4724; it and `--cerberus-pem-gpg` are optional now, for restoring Auto Review only. See [0927 §4](0927-new-repo-human-checklist.md#4-cerberus-no-per-repo-step-since-4724).
 
 ### Create a New Private Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject
 ```
 
 ### Create a Public Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject --public --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject --public
 ```
 
 ### Create Local Only (No GitHub)
@@ -141,7 +141,7 @@ MyNewProject/
 
 ```
 usage: new_repo.py [-h] [--public] [--audit] [--no-github]
-                         [--license {polyform,mit}] --cerberus-pem PATH
+                         [--license {polyform,mit}] [--cerberus-pem PATH]
                          [--lang {python,none}] [--no-pypi]
                          name
 
@@ -151,11 +151,11 @@ positional arguments:
 options:
   --public         Create public repository (default: private)
   --audit          Audit existing structure, don't create
-  --no-github      Skip GitHub repository creation (local only). Implies no --cerberus-pem requirement.
+  --no-github      Skip GitHub repository creation (local only). Cannot combine with a PEM flag.
   --license {polyform,mit}  License type (default: polyform)
-  --cerberus-pem PATH       REQUIRED for GitHub-creating invocations (#1206). Cerberus App
-                            .pem path; deploys per-repo Actions secrets. Script exits 1
-                            with .pem-acquisition guide if missing.
+  --cerberus-pem PATH       OPTIONAL (#4724; required by #1206 until then). Cerberus App
+                            .pem path; deploys the per-repo REVIEWER_APP_* secrets, which
+                            nothing reads since Auto Review's retirement. Omit it.
   --lang {python,none}      Language bootstrap (default: python — Poetry init + pytest +
                             PyPI scaffold via #1074)
   --no-pypi                 Opt-out of PyPI publishing scaffold. Suppresses release.yml
@@ -167,9 +167,9 @@ options:
 
 ## Post-Setup Steps
 
-### 1. Cerberus Secrets (Automated via `--cerberus-pem`)
+### 1. Cerberus (Nothing To Do)
 
-Cerberus secrets are deployed automatically by the script when you pass the required `--cerberus-pem PATH` flag (per #1206). The flag is mandatory for GitHub-creating invocations — the script exits 1 with a .pem-acquisition guide if you forget it. The only human steps are the browser-only ones: downloading the .pem before the script run, and revoking the key in the App UI after. See [0927 §4](0927-new-repo-human-checklist.md#4-deploy-cerberus-secrets-if-needed) for the full procedure.
+A new repo needs no Cerberus secret (#4724). The pr-sentinel Worker approves its PRs as Cerberus with its own copy of the App key, and the per-repo `REVIEWER_APP_*` secrets are read by nothing since Auto Review's retirement (#3663). The script deploys them only when `--cerberus-pem` or `--cerberus-pem-gpg` is passed, which matters only if Auto Review is restored. Never revoke the Cerberus key on the App page except in a rotation: the Worker signs with it. See [0927 §4](0927-new-repo-human-checklist.md#4-cerberus-no-per-repo-step-since-4724) and runbook 0939.
 
 The script also configures branch protection and verifies all of the above end-to-end against origin (per #1200 + #1202). The `pr-sentinel/issue-reference` check is provided fleet-wide by the Cloudflare Worker (per #938 / #939), not by a per-repo workflow file, and the Worker approves as Cerberus once that check passes. The script writes no Auto Review caller (`auto-reviewer.yml`): the reusable workflow it called is retired (#3663), and the caller only ever ran a skipped job (#4719).
 
@@ -304,3 +304,4 @@ The script automates all of this in one command.
 | 2.8 | 2026-10-07 | #4137: a new repo gets no hook of its own; `.claude/settings.json` is `{}` and the `secret-file-guard.sh` row is gone, because the guard is registered centrally (#3684). #4135: Git Bash is the place to run the script; on Ubuntu the decrypt cannot prompt, by #1806's design, and the script now stops at once. |
 | 2.9 | 2026-10-21 | #4179: the operator runs the script from WSL. It records the terminal in `GPG_TTY` before detaching stdin, so `pinentry-curses` prompts in that terminal. Supersedes 2.8's Git Bash instruction. |
 | 2.10 | 2026-11-11 | #4712: a new repository gets no GitHub test or lint workflow, by the operator's order of that day; a unit test holds the scaffolder to it. |
+| 2.11 | 2026-11-11 | #4724: no Cerberus PEM is needed. Nothing reads the per-repo `REVIEWER_APP_*` secrets since Auto Review's retirement, so `new_repo.py` no longer requires `--cerberus-pem` (#1206) or falls back to `~/.secrets/cerberus-pem.gpg` (#1543). Quick Start examples drop the flag. |

@@ -4,13 +4,19 @@
 THIS SCRIPT MUST BE RUN BY THE USER, NOT BY AN AGENT.
 Uses an in-process classic PAT (ADR-0216).
 
-A repo is auto-merge-ready iff BOTH are true:
+A repo is auto-merge-ready iff its branch protection is strict
+(>=1 review, status checks required, enforce_admins, no force pushes).
 
-  1. Branch protection is strict
-       (>=1 review, status checks required, enforce_admins, no force pushes)
-  2. Actions secrets contain REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
+The Actions secrets REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY were a
+dimension until #4724. Nothing reads them any more: their only readers were
+the Auto Review caller and the reusable workflow it calls, whose only job is
+`if: false` (#3663). The pr-sentinel Worker approves as Cerberus with its own
+copy of the key (CERBERUS_PRIVATE_KEY_B64). The readers were searched on
+#4724. The secrets are still reported in the TSV
+(`actions_secrets_complete`) for visibility, and never factor into the
+verdict.
 
-The Auto Review caller (.github/workflows/auto-reviewer.yml) was dimension 2
+The Auto Review caller (.github/workflows/auto-reviewer.yml) was a dimension
 until #4719. The reusable workflow it calls is retired (#3663: every job
 `if: false`) and the pr-sentinel Worker approves as Cerberus, so the caller
 is being removed fleet-wide and a repository without it is ready. Its
@@ -53,7 +59,8 @@ GITHUB_USER = "martymcenroe"
 GH_API = "https://api.github.com"
 HTTP_TIMEOUT_S = 30
 WORKFLOW_PATH = ".github/workflows/auto-reviewer.yml"
-REQUIRED_SECRETS = {"REVIEWER_APP_ID", "REVIEWER_APP_PRIVATE_KEY"}
+# Reported, never required (#4724): nothing reads these since Auto Review's retirement.
+CERBERUS_SECRETS = {"REVIEWER_APP_ID", "REVIEWER_APP_PRIVATE_KEY"}
 DEFAULT_OUTPUT = Path("audit_fleet_auto_merge_readiness_results.tsv")
 
 
@@ -180,7 +187,7 @@ def check_secrets(repo: str, scope: str, pat: str) -> tuple[bool | None, str | N
     if code != 200 or not isinstance(body, dict):
         return None, f"{scope}/secrets GET {code}"
     present = {s["name"] for s in body.get("secrets", [])}
-    return REQUIRED_SECRETS.issubset(present), None
+    return CERBERUS_SECRETS.issubset(present), None
 
 
 def audit_one(repo_obj: dict, pat: str) -> RepoReadiness:
@@ -207,14 +214,11 @@ def audit_one(repo_obj: dict, pat: str) -> RepoReadiness:
     has_wf, err = check_workflow(name, default, pat)
     r.workflow_present = None if err else has_wf
 
-    # 3. Actions secrets
+    # 3. Actions secrets -- reported in the TSV but NOT a failure (#4724):
+    # nothing reads them since Auto Review's retirement. A lookup error
+    # leaves the column blank and changes no verdict.
     has_act, err = check_secrets(name, "actions", pat)
-    r.actions_secrets_complete = has_act
-    if err:
-        r.error = err
-        return r
-    if not has_act:
-        r.failures.append("actions_secrets_incomplete")
+    r.actions_secrets_complete = None if err else has_act
 
     # 4. Dependabot secrets -- reported in TSV but NOT a failure per #1131.
     # Cerberus skips dependabot PRs at the workflow level; this scope is
