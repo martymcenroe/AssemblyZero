@@ -6,6 +6,10 @@ files for fixture issue 4242 from two days earlier, and 46,308 of the
 59,609 lines in `~/.claude/assemblyzero/workflow-audit.jsonl` named a target
 under the OS temp directory. Nothing in `conftest.py` redirected either
 path, so isolation was left to each test.
+
+#4708 added the two a write trace found on 2026-11-11: the telemetry buffer
+under `~/.assemblyzero/telemetry-buffer` and DEATH's hourglass state under
+`~/.claude/assemblyzero/hourglass`.
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+import pytest
 
 from tests import home_state_guard as guard
 
@@ -84,6 +90,76 @@ class TestEveryBindingIsRedirected:
         assert halt_node.STATE_DIR == mine
 
 
+class TestTheTracedWritersAreRedirected:
+    """#4708 R1: the telemetry buffer and DEATH's hourglass state land under
+    the test's own directory. A trace of every write of a full run found 50
+    telemetry appends from 16 test files and a history.json written by
+    test_report_flow_completes, none of them redirected."""
+
+    def test_the_traced_bindings_point_under_tmp_path(self, tmp_path):
+        from assemblyzero.telemetry import emitter
+        from assemblyzero.workflows.death import age_meter, hourglass
+
+        for binding in (
+            emitter._BUFFER_DIR,
+            hourglass.HISTORY_PATH,
+            age_meter.AGE_METER_STATE_PATH,
+            *age_meter.load_age_meter_state.__defaults__,
+            *age_meter.save_age_meter_state.__defaults__,
+        ):
+            assert Path(binding).is_relative_to(tmp_path), binding
+
+    def test_a_telemetry_event_lands_under_tmp_path_and_not_in_the_real_buffer(
+        self, tmp_path, monkeypatch
+    ):
+        """T1: no DynamoDB client, so the event goes to the buffer, which is
+        this test's own."""
+        from assemblyzero.telemetry import emitter
+
+        monkeypatch.setenv("ASSEMBLYZERO_TELEMETRY", "1")
+        monkeypatch.setattr(emitter, "_dynamo_client", None)
+        monkeypatch.setattr(emitter, "_dynamo_init_attempted", True)
+        before = guard.snapshot(guard.TRACED_PATHS)
+
+        emitter.emit("test.home_state_4708", repo="AssemblyZero")
+
+        buffered = list((tmp_path / "home-state" / "telemetry-buffer").glob("*.jsonl"))
+        assert len(buffered) == 1, buffered
+        assert '"test.home_state_4708"' in buffered[0].read_text(encoding="utf-8")
+        assert guard.snapshot(guard.TRACED_PATHS) == before
+
+    def test_death_rest_writes_its_history_and_meter_under_tmp_path(self, tmp_path):
+        """The rest node saves the age meter by its default path and appends
+        to HISTORY_PATH; neither is patched here, so both go where the
+        autouse fixture sent them."""
+        from assemblyzero.workflows.death.hourglass import _node_rest
+
+        before = guard.snapshot(guard.TRACED_PATHS)
+        _node_rest({
+            "trigger": "summon",
+            "mode": "report",
+            "codebase_root": str(tmp_path),
+            "age_meter": {
+                "current_score": 55,
+                "threshold": 50,
+                "last_death_visit": None,
+                "last_computed": "2026-02-17T12:30:00Z",
+                "weighted_issues": [],
+                "age_number": 3,
+            },
+            "drift_report": None,
+            "reconciliation_report": None,
+            "step": "rest",
+            "errors": [],
+            "confirmed": False,
+        })
+
+        hourglass_dir = tmp_path / "home-state" / "hourglass"
+        assert (hourglass_dir / "history.json").is_file()
+        assert (hourglass_dir / "age_meter.json").is_file()
+        assert guard.snapshot(guard.TRACED_PATHS) == before
+
+
 class TestTheSessionGuard:
     """Requirement 2: the session compares the real paths before and after,
     and fails when anything under them was added, removed or rewritten."""
@@ -93,6 +169,26 @@ class TestTheSessionGuard:
             Path.home() / ".assemblyzero" / "workflow_state",
             Path.home() / ".claude" / "assemblyzero" / "workflow-audit.jsonl",
         )
+
+    def test_the_traced_paths_are_the_two_4708_names_and_the_snapshot_watches_all(self):
+        """#4708 T2: the session snapshot includes the telemetry buffer and the
+        hourglass directory beside the two #3531 paths."""
+        import inspect
+
+        assert guard.TRACED_PATHS == (
+            Path.home() / ".assemblyzero" / "telemetry-buffer",
+            Path.home() / ".claude" / "assemblyzero" / "hourglass",
+        )
+        assert guard.WATCHED_PATHS == guard.GUARDED_PATHS + guard.TRACED_PATHS
+        default = inspect.signature(guard.snapshot).parameters["paths"].default
+        assert default == guard.WATCHED_PATHS
+
+    def test_the_traced_bindings_are_remembered_before_the_redirect(self):
+        real = guard.real_bindings()
+
+        assert real["TELEMETRY_BUFFER_DIR"] == guard.TRACED_PATHS[0]
+        assert real["HISTORY_PATH"] == guard.TRACED_PATHS[1] / "history.json"
+        assert real["AGE_METER_STATE_PATH"] == guard.TRACED_PATHS[1] / "age_meter.json"
 
     def test_a_missing_root_contributes_nothing(self, tmp_path):
         assert guard.snapshot((tmp_path / "absent",)) == {}
@@ -175,3 +271,51 @@ class TestTheSessionGuard:
         assert "1 passed" in result.stdout, result.stdout
         assert "wrote into the operator's home state" in result.stdout, result.stdout
         assert "testing-1.json" in result.stdout, result.stdout
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            (".assemblyzero", "telemetry-buffer", "2026-11-11.jsonl"),
+            (".claude", "assemblyzero", "hourglass", "history.json"),
+        ],
+        ids=["telemetry-buffer", "hourglass"],
+    )
+    def test_a_session_that_writes_a_traced_path_fails_with_it_named(
+        self, tmp_path, relative
+    ):
+        """#4708 R2, end to end: a test that appends to the telemetry buffer
+        or writes the hourglass history by the raw path, bypassing every
+        binding, fails the session. The two leaks the trace found would fail
+        the run that brought either one back."""
+        home = tmp_path / "home"
+        home.mkdir()
+        suite = tmp_path / "suite"
+        suite.mkdir()
+        (suite / "conftest.py").write_text(textwrap.dedent(f"""
+            import sys
+            sys.path.insert(0, {str(ROOT)!r})
+            from tests.conftest import pytest_sessionfinish, pytest_sessionstart  # noqa: F401
+            """), encoding="utf-8")
+        (suite / "test_writes.py").write_text(textwrap.dedent(f"""
+            from pathlib import Path
+
+            def test_writes_by_the_raw_path():
+                target = Path.home().joinpath(*{list(relative)!r})
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with open(target, "a", encoding="utf-8") as handle:
+                    handle.write("{{}}\\n")
+            """), encoding="utf-8")
+        env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+        env["PYTHONPATH"] = str(ROOT)
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", str(suite), "--rootdir", str(suite),
+             "-p", "no:cacheprovider", "-q"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=env, cwd=str(suite), timeout=300, check=False,
+        )
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "1 passed" in result.stdout, result.stdout
+        assert "wrote into the operator's home state" in result.stdout, result.stdout
+        assert relative[-1] in result.stdout, result.stdout
