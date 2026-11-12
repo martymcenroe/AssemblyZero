@@ -614,34 +614,12 @@ def test_cerberus_secrets(repo: str) -> TestResult:
                       actual, passed, duration_s=time.time() - t0)
 
 
-def test_workflow_files(repo: str) -> TestResult:
-    """T09: Required workflow files should exist with correct permissions."""
-    t0 = time.time()
-    issues = []
-
-    for wf_name in ["pr-sentinel.yml", "auto-reviewer.yml"]:
-        rc, output = run_gh(
-            "api", f"repos/{repo}/contents/.github/workflows/{wf_name}",
-            "--jq", ".content",
-        )
-        if rc != 0:
-            issues.append(f"{wf_name}: missing")
-            continue
-
-        # Decode and check for permissions block
-        import base64
-        try:
-            content = base64.b64decode(output.strip().strip('"')).decode()
-            if "permissions:" not in content:
-                issues.append(f"{wf_name}: missing permissions block")
-        except Exception:
-            issues.append(f"{wf_name}: cannot decode")
-
-    passed = len(issues) == 0
-    actual = "All present with permissions" if passed else "; ".join(issues)
-    return TestResult("T09", "Workflow files present",
-                      "pr-sentinel.yml + auto-reviewer.yml with permissions",
-                      actual, passed, duration_s=time.time() - t0)
+# T09 (workflow files present) is retired (#4719). It required two per-repo
+# workflows and both are gone: pr-sentinel.yml, whose check the pr-sentinel
+# Worker posts (tools/fleet_delete_pr_sentinel.py removes the legacy file),
+# and the Auto Review caller auto-reviewer.yml, whose reusable workflow is
+# `if: false` (#3663) and which the fleet is removing. A repository is meant
+# to carry neither, so no infrastructure test asks for a workflow file.
 
 
 def run_local_tests(repo: str, dry_run: bool = False) -> list[TestResult]:
@@ -662,10 +640,6 @@ def run_local_tests(repo: str, dry_run: bool = False) -> list[TestResult]:
 
     print(f"  T08: Cerberus secrets on {repo}...")
     results.append(test_cerberus_secrets(repo))
-    print(f"    {'PASS' if results[-1].passed else 'FAIL'}: {results[-1].actual}")
-
-    print(f"  T09: Workflow files on {repo}...")
-    results.append(test_workflow_files(repo))
     print(f"    {'PASS' if results[-1].passed else 'FAIL'}: {results[-1].actual}")
 
     if dry_run:

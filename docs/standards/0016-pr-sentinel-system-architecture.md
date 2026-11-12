@@ -157,7 +157,7 @@ Two things follow that matter more than the answer:
 | Property | Value |
 |----------|-------|
 | Location | `martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml` |
-| Caller | `.github/workflows/auto-reviewer.yml` in each repo (deployed by `deploy_auto_reviewer_workflow.py`) |
+| Caller | `.github/workflows/auto-reviewer.yml` in each repo. Retired: the reusable workflow is `if: false` (#3663), `new_repo.py` writes no caller and its deploy and upgrade tools are removed (#4719), and the fleet removes the callers with `tools/land_workflow_plan.py`'s delete action (#4721) |
 | Default required checks input | `"issue-reference"` |
 | Match strategy | **Substring:** `select(.name \| contains("issue-reference"))` |
 | Approval identity | Cerberus-AZ GitHub App (via `REVIEWER_APP_ID` + `REVIEWER_APP_PRIVATE_KEY` secrets) |
@@ -249,7 +249,7 @@ Used for fleet-wide operations that require elevated access. Always scripted, al
 
 | Script | Purpose | Required Scopes |
 |--------|---------|----------------|
-| `deploy_auto_reviewer_workflow.py` | Deploy the caller workflow to repos missing it | `repo` + `workflow` |
+| `land_workflow_plan.py` | Land a plan of workflow replacements and removals across many repos under one unlock; its delete action removes the retired Auto Review callers (#4721) | `repo` + `workflow` |
 | `fix_branch_protections.py` | Set protection on unprotected repos | `repo` + `admin:repo_hook` + `read:org` |
 | `merge_sentinel_permissions_prs.py` | Merge workflow permission fix PRs | `repo` |
 | `github_protection_audit.py` | Audit branch protection fleet-wide | `repo` + `admin:repo_hook` + `read:org` (audit mode) |

@@ -848,17 +848,13 @@ class TestMainLocalWorkflow:
 # Pillar 1 — Required --cerberus-pem (#1206) + GitHub-side verification (#1200, #1202)
 # ===========================================================================
 
-import base64 as _base64  # noqa: E402
-
 from new_repo import (  # noqa: E402
-    _CANONICAL_AUTO_REVIEWER_CALLER,
     _mint_github_app_jwt,
     _parse_sentinel_app_bundle,
     run_pr_sentinel_check,
     verify_branch_protection_on_origin,
     verify_pr_sentinel_installation,
     verify_repo_settings_on_origin,
-    verify_workflow_content_on_origin,
 )
 
 
@@ -1005,48 +1001,6 @@ class TestVerifyRepoSettings:
         ok, msg = verify_repo_settings_on_origin("owner", "repo", "pat")
         assert ok is False
         assert "has_wiki" in msg
-
-
-class TestVerifyWorkflowContent:
-    """T298-T299: verify_workflow_content_on_origin — the #1193 regression test."""
-
-    @patch("new_repo._request_with_retry")
-    def test_T298_pass_when_content_matches_canonical(self, mock_req):
-        """Origin content == _CANONICAL_AUTO_REVIEWER_CALLER → (True, ...)."""
-        encoded = _base64.b64encode(
-            _CANONICAL_AUTO_REVIEWER_CALLER.encode("utf-8")
-        ).decode("ascii")
-        mock_resp = FakeResponse(200, payload={"content": encoded})
-        mock_req.return_value = mock_resp
-        ok, msg = verify_workflow_content_on_origin("owner", "repo", "pat")
-        assert ok is True
-
-    @patch("new_repo._request_with_retry")
-    def test_T299_fail_when_old_format_signature(self, mock_req):
-        """Origin content uses OLD caller format → (False, ...). The #1193 failure mode.
-
-        OLD format: `name: auto-reviewer` (lowercase), no permissions: block,
-        no with: required_checks input, secrets: inherit. Reusable workflow
-        fails with startup_failure.
-        """
-        old_format = (
-            "name: auto-reviewer\n"
-            "\n"
-            "on:\n"
-            "  pull_request:\n"
-            "    types: [opened, synchronize, reopened]\n"
-            "\n"
-            "jobs:\n"
-            "  review:\n"
-            "    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main\n"
-            "    secrets: inherit\n"
-        )
-        encoded = _base64.b64encode(old_format.encode("utf-8")).decode("ascii")
-        mock_resp = FakeResponse(200, payload={"content": encoded})
-        mock_req.return_value = mock_resp
-        ok, msg = verify_workflow_content_on_origin("owner", "repo", "pat")
-        assert ok is False
-        assert "differs from canonical" in msg
 
 
 class TestVerifyPrSentinelInstallation:

@@ -11,7 +11,7 @@ If you did NOT pass `--pypi` when creating the repo, this runbook does not apply
 ## Prerequisites
 
 - Repo created via `tools/new_repo.py <name> --pypi`.
-- The script's output should include `Created auto-reviewer.yml + release.yml (PyPI publish on tag)`.
+- The script's output should include `Created release.yml (PyPI publish on tag)`.
 - `pyproject.toml` in the repo has `[tool.poetry.scripts]` and `[tool.poetry.urls]` blocks populated. Verify with `grep -A3 "tool.poetry.scripts" pyproject.toml`.
 - `.github/workflows/release.yml` exists and uses `environment: pypi` (this is the default; don't edit unless you know what you're doing).
 - A PyPI account at https://pypi.org/. If you don't have one, register first.

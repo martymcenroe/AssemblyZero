@@ -31,6 +31,14 @@ here: the plan is the only source of them, and it lives where the staged copies 
 `skipped` when every job in the file is `if: false`, `success` otherwise. Other keys are
 ignored, so a plan may carry its own notes.
 
+A file entry may instead remove a workflow (#4721):
+
+    {"workflow": ".github/workflows/<file>.yml", "action": "delete",
+     "base_blob": "<git blob sha of the live workflow being removed>"}
+
+A delete entry carries no `staged` and no `expect`; an entry without `action` replaces.
+A plan whose every entry is a delete needs no `source`. One target may mix the two.
+
 ## What one run does, per target, in plan order
 
   1. Reads each live workflow on the target's `main` and each staged copy from the
@@ -47,6 +55,13 @@ ignored, so a plan may carry its own notes.
      the head, then a squash merge and the branch's deletion. A run that does not
      conclude as the plan says stops the run and leaves the pull request open, unless
      --merge-on-red is given; a run still going or never started stops it always.
+
+A delete entry is done when its file is absent on `main`. Otherwise its live blob must
+be the plan's `base_blob`, or the run stops before anything is written to the target.
+Its commit is a Contents-API DELETE of that blob on the target's branch. No run is
+waited for (a deleted workflow starts none of its own); the pull request must still
+reach a mergeable state. After the merge `main` is read back, and a file still there
+stops the run.
 
 Before any write, every target's repository is read: a target whose default branch is
 not `main` stops the run, and so does a plan whose reason names a private target while
@@ -69,6 +84,12 @@ child, and its heap is readable while the PAT is in scope.
     poetry run python tools/land_workflow_plan.py --plan <path to plan.json> --apply
 
 `--only <repo>` (repeatable) limits the run to those targets of the plan.
+
+`--max-targets N` lands at most N targets that are not already done, then stops with a
+summary and exit 0; a rerun of the same command goes on from there. Before the passphrase
+is asked for, `--apply` prints how many targets it will land at most and the
+contributions that adds (two per landed target: the pull request and its squash commit),
+so a run can be sized to the day's contribution budget. The dry run prints the same.
 """
 
 from __future__ import annotations
@@ -89,8 +110,12 @@ import land_staged_workflow as lsw
 from _pat_session import classic_pat_session
 
 EXPECTS = ("success", "skipped")
+ACTIONS = ("replace", "delete")
 BLOB = re.compile(r"^[0-9a-f]{40}$")
 TITLE_MAX = 256
+#: What one landed target adds to the day's GitHub contribution count: the pull request,
+#: and the squash commit on `main`. The branch's own commits never reach `main`.
+CONTRIBUTIONS_PER_TARGET = 2
 
 
 class PlanError(SystemExit):
@@ -105,20 +130,47 @@ class LandingStop(Exception):
         self.repo, self.step, self.message = repo, step, message
 
 
+def is_delete(f: dict) -> bool:
+    return f.get("action") == "delete"
+
+
+def _validate_file(fw: str, f: object) -> None:
+    if not isinstance(f, dict):
+        raise PlanError(f"{fw}: not an object")
+    action = f.get("action", "replace")
+    if action not in ACTIONS:
+        raise PlanError(f"{fw}: `action` is {action!r}, not one of {ACTIONS}")
+    if action == "delete":
+        for key in ("staged", "expect"):
+            if key in f:
+                raise PlanError(f"{fw}: a delete entry carries `{key}`; it takes only "
+                                "`workflow` and `base_blob`")
+        required: tuple[str, ...] = ("workflow", "base_blob")
+    else:
+        required = ("staged", "workflow", "base_blob", "expect")
+    for key in required:
+        if not isinstance(f.get(key), str) or not f[key]:
+            raise PlanError(f"{fw}: `{key}` is missing")
+    wf = f["workflow"]
+    if not wf.startswith(".github/workflows/") or not wf.endswith((".yml", ".yaml")):
+        raise PlanError(f"{fw}: `workflow` is not a file under .github/workflows/")
+    if not BLOB.match(f["base_blob"]):
+        raise PlanError(f"{fw}: `base_blob` is not a 40-character git blob sha")
+    if action == "replace" and f["expect"] not in EXPECTS:
+        raise PlanError(f"{fw}: `expect` is {f['expect']!r}, not one of {EXPECTS}")
+
+
 def validate_plan(plan: object) -> dict:
-    """Return the plan if it is well formed; raise PlanError naming the first fault."""
+    """Return the plan if it is well formed; raise PlanError naming the first fault.
+
+    `source` is required while any entry replaces a workflow, since the staged copies
+    live there; a plan whose every entry is a delete needs none (#4721).
+    """
     if not isinstance(plan, dict):
         raise PlanError("plan: the top level is not an object")
-    source = plan.get("source")
-    if not isinstance(source, dict) or not isinstance(source.get("repo"), str) or not source["repo"]:
-        raise PlanError("plan: `source.repo` is missing")
-    source.setdefault("ref", "main")
     reason = plan.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         raise PlanError("plan: `reason` is missing")
-    if source["repo"].lower() in reason.lower():
-        raise PlanError("plan: `reason` names the source repository, and every target's "
-                        "pull request body carries it")
     targets = plan.get("targets")
     if not isinstance(targets, list) or not targets:
         raise PlanError("plan: `targets` is missing or empty")
@@ -140,21 +192,20 @@ def validate_plan(plan: object) -> dict:
         workflows: set[str] = set()
         for j, f in enumerate(files):
             fw = f"{where} ({t['repo']}) files[{j}]"
-            if not isinstance(f, dict):
-                raise PlanError(f"{fw}: not an object")
-            for key in ("staged", "workflow", "base_blob", "expect"):
-                if not isinstance(f.get(key), str) or not f[key]:
-                    raise PlanError(f"{fw}: `{key}` is missing")
-            wf = f["workflow"]
-            if not wf.startswith(".github/workflows/") or not wf.endswith((".yml", ".yaml")):
-                raise PlanError(f"{fw}: `workflow` is not a file under .github/workflows/")
-            if wf in workflows:
-                raise PlanError(f"{fw}: {wf} appears twice")
-            workflows.add(wf)
-            if not BLOB.match(f["base_blob"]):
-                raise PlanError(f"{fw}: `base_blob` is not a 40-character git blob sha")
-            if f["expect"] not in EXPECTS:
-                raise PlanError(f"{fw}: `expect` is {f['expect']!r}, not one of {EXPECTS}")
+            _validate_file(fw, f)
+            if f["workflow"] in workflows:
+                raise PlanError(f"{fw}: {f['workflow']} appears twice")
+            workflows.add(f["workflow"])
+    needs_source = any(not is_delete(f) for t in targets for f in t["files"])
+    source = plan.get("source")
+    if source is None and not needs_source:
+        return plan
+    if not isinstance(source, dict) or not isinstance(source.get("repo"), str) or not source["repo"]:
+        raise PlanError("plan: `source.repo` is missing")
+    source.setdefault("ref", "main")
+    if source["repo"].lower() in reason.lower():
+        raise PlanError("plan: `reason` names the source repository, and every target's "
+                        "pull request body carries it")
     return plan
 
 
@@ -175,22 +226,43 @@ def target_cfg(owner: str, target: dict, merge_on_red: bool) -> SimpleNamespace:
     )
 
 
-def pr_title(workflows: list[str], issue: int) -> str:
-    names = ", ".join(Path(w).name for w in workflows)
-    title = f"ci: update {names} (Closes #{issue})"
+def pr_title(workflows: list[str], issue: int, removed: list[str] | tuple = ()) -> str:
+    parts = []
+    if workflows:
+        parts.append("update " + ", ".join(Path(w).name for w in workflows))
+    if removed:
+        parts.append("remove " + ", ".join(Path(w).name for w in removed))
+    title = f"ci: {'; '.join(parts)} (Closes #{issue})"
     if len(title) > TITLE_MAX:
-        title = f"ci: update {len(workflows)} workflows (Closes #{issue})"
+        verb = "change" if workflows and removed else ("update" if workflows else "remove")
+        title = f"ci: {verb} {len(workflows) + len(removed)} workflows (Closes #{issue})"
     return title
 
 
-def pr_body(reason: str, workflows: list[str], issue: int) -> str:
+_PAT_NOTE = (
+    "Landed via the classic-PAT Contents API (ADR-0216) because the fine-grained PAT every "
+    "agent session uses cannot push under `.github/workflows/` -- it lacks the `workflow` "
+    "scope, and that exclusion is load-bearing. "
+)
+
+
+def pr_body(reason: str, workflows: list[str], issue: int,
+            removed: list[str] | tuple = ()) -> str:
     changed = "\n".join(f"- `{w}`" for w in workflows)
+    if not removed:
+        return (
+            f"Closes #{issue}\n\n{reason.strip()}\n\nChanged:\n\n{changed}\n\n" + _PAT_NOTE
+            + "Each file was built from the live blob on `main` that the plan names, and the "
+            "lander refuses a file whose `main` has moved since.\n"
+        )
+    gone = "\n".join(f"- `{w}`" for w in removed)
     return (
-        f"Closes #{issue}\n\n{reason.strip()}\n\nChanged:\n\n{changed}\n\n"
-        "Landed via the classic-PAT Contents API (ADR-0216) because the fine-grained PAT every "
-        "agent session uses cannot push under `.github/workflows/` -- it lacks the `workflow` "
-        "scope, and that exclusion is load-bearing. Each file was built from the live blob on "
-        "`main` that the plan names, and the lander refuses a file whose `main` has moved since.\n"
+        f"Closes #{issue}\n\n{reason.strip()}\n\n"
+        + (f"Changed:\n\n{changed}\n\n" if workflows else "")
+        + f"Removed:\n\n{gone}\n\n" + _PAT_NOTE
+        + "Each file is changed or removed at the live blob on `main` that the plan names, "
+        "the lander refuses a file whose `main` has moved since, and it reads `main` back "
+        "after the merge to confirm each removed file is gone.\n"
     )
 
 
@@ -273,12 +345,24 @@ def land_target(
     wait = wait or lsw.wait_for_workflow
     repo = target["repo"]
     cfg = target_cfg(owner, target, merge_on_red)
-    src = SimpleNamespace(owner=owner, repo=plan["source"]["repo"])
-    ref = plan["source"]["ref"]
+    source = plan.get("source")
+    src = SimpleNamespace(owner=owner, repo=source["repo"]) if source else None
+    ref = source["ref"] if source else None
     pending: list[tuple[dict, str]] = []
+    deletes: list[dict] = []
     for f in target["files"]:
         cfg.workflow = f["workflow"]
         live_rec = lsw.get_file(pat, cfg, f["workflow"], "main")
+        if is_delete(f):
+            if live_rec is None:
+                print(f"  {f['workflow']}: already absent on main")
+                continue
+            if live_rec["sha"] != f["base_blob"]:
+                raise LandingStop(repo, "base", (
+                    f"{f['workflow']} on main is blob {live_rec['sha'][:10]}, not the plan's "
+                    f"{f['base_blob'][:10]}: main moved after the plan was made. Re-read it."))
+            deletes.append(f)
+            continue
         if live_rec is None:
             raise LandingStop(repo, "read", f"{f['workflow']} is not on main")
         copy = read_copy(pat, src, f["staged"], ref, repo)
@@ -290,7 +374,7 @@ def land_target(
                 f"{f['workflow']} on main is blob {live_rec['sha'][:10]}, not the plan's "
                 f"{f['base_blob'][:10]}: main moved after the copy was made. Restage it."))
         pending.append((f, copy))
-    if not pending:
+    if not pending and not deletes:
         return "already"
     names = [lsw.workflow_name(copy, None) for _, copy in pending]
     if len(set(names)) != len(names):
@@ -300,11 +384,15 @@ def land_target(
     for f, copy in pending:
         cfg.workflow = f["workflow"]
         lsw.put_workflow(pat, cfg, copy)
+    for f in deletes:
+        remove_workflow(pat, cfg, f)
     workflows = [f["workflow"] for f, _ in pending]
-    num = open_pr(pat, cfg, pr_title(workflows, cfg.issue),
-                  pr_body(plan["reason"], workflows, cfg.issue))
+    removed = [f["workflow"] for f in deletes]
+    num = open_pr(pat, cfg, pr_title(workflows, cfg.issue, removed),
+                  pr_body(plan["reason"], workflows, cfg.issue, removed))
 
-    sha = lsw.head_sha(pat, cfg, num)
+    # A removed workflow starts no run of its own, so only replaced ones are waited for.
+    sha = lsw.head_sha(pat, cfg, num) if pending else None
     for (f, _), name in zip(pending, names):
         print(f"  waiting for workflow `{name}` on PR #{num} ...")
         result = wait(pat, cfg, sha, name)
@@ -318,7 +406,38 @@ def land_target(
         raise LandingStop(repo, "merge", f"PR #{num} did not reach a mergeable state")
     lsw.merge_pr(pat, cfg, num)
     lsw.delete_branch(pat, cfg)
+    for wf in removed:
+        if lsw.get_file(pat, cfg, wf, "main") is not None:
+            raise LandingStop(repo, "verify", (
+                f"{wf} is still on main after PR #{num} merged; the removal did not land."))
+        print(f"  {wf}: confirmed absent on main")
     return "landed"
+
+
+def remove_workflow(pat: str, cfg: SimpleNamespace, f: dict) -> bool:
+    """Delete one workflow on the target's branch; False when the branch already lacks it.
+
+    A rerun after a stop finds the branch already without the file, and a second DELETE
+    would fail, so it is skipped, as `put_workflow` skips an identical PUT.
+    """
+    wf = f["workflow"]
+    on_branch = lsw.get_file(pat, cfg, wf, cfg.branch)
+    if on_branch is None:
+        print(f"  {wf} already absent on {cfg.branch} -- no commit")
+        return False
+    if on_branch["sha"] != f["base_blob"]:
+        raise LandingStop(cfg.repo, "delete", (
+            f"{wf} on {cfg.branch} is blob {on_branch['sha'][:10]}, not the plan's "
+            f"{f['base_blob'][:10]}: the branch holds another version. Nothing is removed."))
+    r = lsw.requests.delete(
+        lsw._repo_url(cfg, f"contents/{wf}"), headers=lsw._headers(pat),
+        timeout=lsw.HTTP_TIMEOUT_S,
+        json={"message": f"ci: remove {Path(wf).name} (Closes #{cfg.issue})",
+              "sha": f["base_blob"], "branch": cfg.branch},
+    )
+    r.raise_for_status()
+    print(f"  removed {wf} on {cfg.branch}")
+    return True
 
 
 def select(plan: dict, only: list[str] | None) -> list[dict]:
@@ -332,15 +451,43 @@ def select(plan: dict, only: list[str] | None) -> list[dict]:
     return [t for t in targets if t["repo"] in only]
 
 
-def dry_run(plan: dict, targets: list[dict], owner: str, merge_on_red: bool) -> int:
+def budget(targets: list[dict], max_targets: int | None) -> tuple[int, int]:
+    """(targets this run lands at most, the contributions that adds at most).
+
+    A target already done is skipped and not counted, so a run lands at most
+    `max_targets` of them, and every target when no cap is given.
+    """
+    most = len(targets) if max_targets is None else min(len(targets), max_targets)
+    return most, CONTRIBUTIONS_PER_TARGET * most
+
+
+def print_budget(targets: list[dict], max_targets: int | None) -> None:
+    most, contributions = budget(targets, max_targets)
+    cap = "" if max_targets is None else f" (--max-targets {max_targets})"
+    print(f"  will land: at most {most} of {len(targets)} target(s){cap}; a target "
+          "already done is skipped and not counted")
+    print(f"  adds     : at most {contributions} contributions ({CONTRIBUTIONS_PER_TARGET} "
+          "per landed target: the pull request and its squash commit)")
+
+
+def dry_run(plan: dict, targets: list[dict], owner: str, merge_on_red: bool,
+            max_targets: int | None = None) -> int:
     print("DRY-RUN -- no credentials requested, no writes performed.\n")
-    src = plan["source"]
-    print(f"  source   : {owner}/{src['repo']} @ {src['ref']} (staged copies)")
+    src = plan.get("source")
+    if src:
+        print(f"  source   : {owner}/{src['repo']} @ {src['ref']} (staged copies)")
+    else:
+        print("  source   : none (every entry is a delete)")
     print(f"  targets  : {len(targets)}, files: {sum(len(t['files']) for t in targets)}")
-    print(f"  on red   : {'merge anyway' if merge_on_red else 'stop the run'}\n")
+    print(f"  on red   : {'merge anyway' if merge_on_red else 'stop the run'}")
+    print_budget(targets, max_targets)
+    print()
     for t in targets:
         print(f"  {owner}/{t['repo']}  PR closes #{t['issue']}  branch ci/staged-workflow-{t['issue']}")
         for f in t["files"]:
+            if is_delete(f):
+                print(f"      delete {f['workflow']} base {f['base_blob'][:10]}")
+                continue
             print(f"      {f['workflow']}  <- {f['staged']}  base {f['base_blob'][:10]}  "
                   f"expects `{f['expect']}`")
     return 0
@@ -352,12 +499,19 @@ def run(
     owner: str,
     merge_on_red: bool,
     *,
-    session: Callable = classic_pat_session,
+    max_targets: int | None = None,
+    session: Callable | None = None,
     land: Callable[..., str] = land_target,
 ) -> int:
+    session = session or classic_pat_session
     landed: list[str] = []
     already: list[str] = []
     current = "preflight"
+    capped = False
+
+    # Printed before the session opens, so before the passphrase is asked for.
+    print(f"Landing a workflow plan across {len(targets)} target(s).")
+    print_budget(targets, max_targets)
 
     def stopped(exc: BaseException) -> None:
         done = len(landed) + len(already)
@@ -370,6 +524,9 @@ def run(
         try:
             preflight(pat, plan, targets, owner)
             for t in targets:
+                if max_targets is not None and len(landed) >= max_targets:
+                    capped = True
+                    break
                 current = t["repo"]
                 print(f"\n{owner}/{t['repo']} (#{t['issue']}) ...")
                 outcome = land(pat, plan, t, owner, merge_on_red)
@@ -381,8 +538,21 @@ def run(
         except Exception as exc:
             stopped(exc)
             raise
+    if capped:
+        done = len(landed) + len(already)
+        print(f"\nStopped at --max-targets {max_targets}: landed {len(landed)}, already "
+              f"landed {len(already)}, not reached {len(targets) - done} of {len(targets)}. "
+              "Rerun the same command to go on; landed targets are skipped.")
+        return 0
     print(f"\nDone: landed {len(landed)}, already landed {len(already)}, of {len(targets)}.")
     return 0
+
+
+def _positive(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be 1 or more, not {value}")
+    return value
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -394,6 +564,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     help="Merge when a run ends other than the plan expects. Default: stop.")
     ap.add_argument("--only", action="append", default=None, metavar="REPO",
                     help="Limit the run to this target of the plan (repeatable).")
+    ap.add_argument("--max-targets", type=_positive, default=None, metavar="N",
+                    help="Land at most N targets not already done, then stop; a rerun "
+                         "goes on from there.")
     ap.add_argument("--owner", default=lsw.DEFAULT_OWNER)
     return ap.parse_args(argv)
 
@@ -403,8 +576,8 @@ def main(argv: list[str] | None = None) -> int:
     plan = load_plan(args.plan)
     targets = select(plan, args.only)
     if not args.apply:
-        return dry_run(plan, targets, args.owner, args.merge_on_red)
-    return run(plan, targets, args.owner, args.merge_on_red)
+        return dry_run(plan, targets, args.owner, args.merge_on_red, args.max_targets)
+    return run(plan, targets, args.owner, args.merge_on_red, max_targets=args.max_targets)
 
 
 if __name__ == "__main__":

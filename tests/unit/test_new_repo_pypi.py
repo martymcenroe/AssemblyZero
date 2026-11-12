@@ -80,18 +80,16 @@ def test_pyproject_pypi_block_handles_underscored_module():
 
 
 def test_create_github_workflows_writes_release_yml_when_pypi_enabled(tmp_path: Path):
-    """With enable_pypi=True (default), release.yml is deployed alongside auto-reviewer.yml."""
+    """With enable_pypi=True (default), release.yml is deployed (#1074)."""
     create_github_workflows(tmp_path, enable_pypi=True)
     workflows = tmp_path / ".github" / "workflows"
-    assert (workflows / "auto-reviewer.yml").exists()
     assert (workflows / "release.yml").exists()
 
 
 def test_create_github_workflows_skips_release_yml_when_pypi_disabled(tmp_path: Path):
-    """With enable_pypi=False, only auto-reviewer.yml is deployed."""
+    """With enable_pypi=False, no release.yml is deployed."""
     create_github_workflows(tmp_path, enable_pypi=False)
     workflows = tmp_path / ".github" / "workflows"
-    assert (workflows / "auto-reviewer.yml").exists()
     assert not (workflows / "release.yml").exists()
 
 

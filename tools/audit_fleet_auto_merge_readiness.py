@@ -4,12 +4,18 @@
 THIS SCRIPT MUST BE RUN BY THE USER, NOT BY AN AGENT.
 Uses an in-process classic PAT (ADR-0216).
 
-A repo is auto-merge-ready iff ALL THREE are true:
+A repo is auto-merge-ready iff BOTH are true:
 
   1. Branch protection is strict
        (>=1 review, status checks required, enforce_admins, no force pushes)
-  2. .github/workflows/auto-reviewer.yml exists on the default branch
-  3. Actions secrets contain REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
+  2. Actions secrets contain REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
+
+The Auto Review caller (.github/workflows/auto-reviewer.yml) was dimension 2
+until #4719. The reusable workflow it calls is retired (#3663: every job
+`if: false`) and the pr-sentinel Worker approves as Cerberus, so the caller
+is being removed fleet-wide and a repository without it is ready. Its
+presence is still reported in the TSV (`workflow_present`) for visibility,
+and never factors into the verdict.
 
 Dimension 4 (Dependabot-scope secrets) was originally included but
 DROPPED per #1131. Cerberus is the agent fence -- it gates PRs created
@@ -195,14 +201,11 @@ def audit_one(repo_obj: dict, pat: str) -> RepoReadiness:
     if not is_strict:
         r.failures.append("branch_protection_not_strict")
 
-    # 2. Workflow file
+    # 2. The retired Auto Review caller -- reported in the TSV but NOT a
+    # failure (#4719). A lookup error leaves the column blank and changes
+    # no verdict, as with the Dependabot scope below.
     has_wf, err = check_workflow(name, default, pat)
-    r.workflow_present = has_wf
-    if err:
-        r.error = err
-        return r
-    if not has_wf:
-        r.failures.append("auto_reviewer_yml_missing")
+    r.workflow_present = None if err else has_wf
 
     # 3. Actions secrets
     has_act, err = check_secrets(name, "actions", pat)
