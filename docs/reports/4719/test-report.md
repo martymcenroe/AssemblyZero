@@ -27,7 +27,7 @@ Run in Ubuntu (WSL) in the worktree, with the worktree's own poetry environment.
 
 ## Each new test fails when its change is reverted
 
-The five implementation files were stashed by name, so the code went back to `origin/main` while the new tests stayed. A placeholder `tools/deploy_auto_reviewer_workflow.py` stood for the restored tool. The new and changed tests were then run: 31 failed, 56 passed. Every new test failed except two, and neither has a change of its own to revert:
+The five implementation files were stashed by name, so the code went back to `origin/main` while the new tests stayed. A placeholder `tools/deploy_auto_reviewer_workflow.py` stood for the restored tool. The new and changed tests were then run: 31 failed, 56 passed. The 31 are 28 of the 30 new tests and the 3 changed tests that assert the new contract (the multiple-failure count in `test_fleet_readiness.py` and the two workflow-list cases in `test_new_repo_no_test_workflow.py`). The other two new tests passed, and neither has a change of its own to revert:
 
 - `TestRepositoryWithoutTheCaller::test_exits_zero` pins behaviour the Cerberus audit already had.
 - `TestDeletePlan::test_a_plan_with_any_replace_entry_still_needs_source` guards the new condition from the other side, and the old code required `source` always.
@@ -40,4 +40,8 @@ The changed areas (`test_land_workflow_plan.py`, `test_land_staged_workflow.py`,
 
 ## Full suite
 
-Recorded in the following commit, after `origin/main` is merged into the branch.
+`pytest -q` on this branch, with `origin/main` at 924cb594 merged in: 15050 passed, 18 failed, 66 skipped, 93 deselected, 7 xfailed, in 33 min 22 s. No failure comes from this branch. The 18 are the ones that fail the same way on unchanged `main`, each tracked:
+
+- 16 in `tests/test_auto_reviewer_wait_loop.py` (see #4528);
+- `tests/integration/test_orchestrator_graph.py::TestOrchestrateFullPipeline::test_full_pipeline_success` (see #4529, #3737);
+- `tests/test_universal_claude_md.py::test_adr_references_resolve` (see #3730).
