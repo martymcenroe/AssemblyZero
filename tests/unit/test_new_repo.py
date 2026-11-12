@@ -845,7 +845,8 @@ class TestMainLocalWorkflow:
 
 
 # ===========================================================================
-# Pillar 1 — Required --cerberus-pem (#1206) + GitHub-side verification (#1200, #1202)
+# Pillar 1 — Optional --cerberus-pem (#4724, was required by #1206) +
+# GitHub-side verification (#1200, #1202)
 # ===========================================================================
 
 from new_repo import (  # noqa: E402
@@ -858,27 +859,32 @@ from new_repo import (  # noqa: E402
 )
 
 
-class TestCerberusPemRequired:
-    """T290-T292: --cerberus-pem is REQUIRED for new GitHub repos (#1206).
+class TestCerberusPemOptional:
+    """T290-T292: --cerberus-pem is OPTIONAL for new GitHub repos (#4724).
 
-    The DEFAULT_CERBERUS_PEM_GPG patch in T290 forces the default-PEM-fallback
-    branch (#1543) to miss, so the test continues to exercise the exit-1 path
-    even on a developer machine that has the real encrypted PEM at the
-    canonical location.
+    #1206 required it, because the Auto Review caller signed Cerberus's
+    approval with the per-repo secrets the PEM deploys. Auto Review is retired
+    (#3663) and nothing else reads them: the pr-sentinel Worker approves with
+    its own copy of the key. The #1543 fallback to ~/.secrets/cerberus-pem.gpg
+    is gone with the gate. The full GitHub-path run without a PEM is in
+    tests/unit/test_cerberus_after_auto_review.py.
     """
 
-    @patch("new_repo.DEFAULT_CERBERUS_PEM_GPG",
-           Path("/nonexistent-for-T290/cerberus-pem.gpg"))
     @patch("new_repo.config")
-    def test_T290_missing_pem_without_no_github_exits_one(self, mock_config, tmp_path):
-        """Without --cerberus-pem and without --no-github, exit 1 BEFORE any creation."""
+    def test_T290_missing_pem_without_no_github_proceeds_to_creation(self, mock_config, tmp_path):
+        """Without a PEM flag and without --no-github, main hands off to creation with no PEM."""
         _setup_config_mock(mock_config, tmp_path)
-        with patch("sys.argv", ["new_repo.py", "RequiredTest"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 1
-        # Pre-flight must exit BEFORE creating the local directory.
-        assert not (tmp_path / "RequiredTest").exists()
+        seen = {}
+
+        def record(project_path, args, github_user):
+            seen["args"] = args
+
+        with patch("new_repo.get_github_username", return_value="owner"), \
+                patch("new_repo._create_repo", side_effect=record), \
+                patch("sys.argv", ["new_repo.py", "OptionalTest"]):
+            main()  # should NOT exit
+        assert seen["args"].cerberus_pem is None
+        assert seen["args"].cerberus_pem_gpg is None
 
     @patch("new_repo.config")
     @patch("new_repo.run_command")
@@ -902,25 +908,24 @@ class TestCerberusPemRequired:
             assert exc_info.value.code == 1
 
     @patch("new_repo.config")
-    def test_T292b_default_gpg_fallback_used_when_neither_flag_passed(
+    def test_T292b_no_default_gpg_fallback_when_neither_flag_passed(
             self, mock_config, tmp_path, capsys):
-        """When neither flag passed AND DEFAULT_CERBERUS_PEM_GPG exists → fallback fires (#1543).
+        """An encrypted PEM at the canonical path is NOT picked up by itself (#4724).
 
-        Uses an invalid name so the script exits AFTER the fallback prints its
-        confirmation line but BEFORE any GitHub creation logic is reached.
+        Uses an invalid name so the script exits at validate_name, which runs
+        after the place the #1543 fallback used to print its confirmation line.
         """
         _setup_config_mock(mock_config, tmp_path)
-        fake_pem = tmp_path / "fake-cerberus-pem.gpg"
-        fake_pem.write_bytes(b"fake encrypted blob")
-        with patch("new_repo.DEFAULT_CERBERUS_PEM_GPG", fake_pem):
-            # "bad/name" fails validate_name's regex, exiting 1 — but AFTER the
-            # default-fallback block, so the confirmation line still prints.
-            with patch("sys.argv", ["new_repo.py", "bad/name"]):
-                with pytest.raises(SystemExit):
-                    main()
+        home = tmp_path / "home"
+        (home / ".secrets").mkdir(parents=True)
+        (home / ".secrets" / "cerberus-pem.gpg").write_bytes(b"fake encrypted blob")
+        with patch("new_repo.Path.home", return_value=home), \
+                patch("sys.argv", ["new_repo.py", "bad/name"]), \
+                pytest.raises(SystemExit):
+            main()
         captured = capsys.readouterr().out
-        assert "Using Cerberus PEM:" in captured
-        assert str(fake_pem) in captured
+        assert "Using Cerberus PEM:" not in captured
+        assert "cerberus-pem.gpg" not in captured
 
 
 class TestVerifyBranchProtection:
@@ -1545,10 +1550,11 @@ class TestCerberusPostDeployAdvice:
         script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
         assert "#134" in content
-        # The #1536 anchor must be near the `elif cerberus_status == \"OK\":`
-        # branch (within a few hundred chars BEFORE the branch text — the
-        # anchor comment introduces the conditional).
-        branch_loc = content.find('elif cerberus_status == "OK":')
+        # The #1536 anchor must be near the `if cerberus_status == \"OK\":`
+        # branch (within a few hundred chars of the branch text — the
+        # anchor comment introduces the conditional). It was an `elif` until
+        # #4724 removed the manual-steps branch before it.
+        branch_loc = content.find('if cerberus_status == "OK":')
         anchor = content.find("#1536")
         assert branch_loc != -1 and anchor != -1
         delta = branch_loc - anchor

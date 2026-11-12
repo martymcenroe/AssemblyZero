@@ -106,12 +106,10 @@ class SchemaValidationError(Exception):
 # Default schema location: co-located with standard 0009
 _DEFAULT_SCHEMA_PATH = Path(__file__).parent.parent / "docs" / "standards" / "0009-structure-schema.json"
 
-# Canonical location for the encrypted Cerberus App private key per
-# ADR-0216 / runbook 0927. When neither --cerberus-pem nor --cerberus-pem-gpg
-# is passed, main() falls back to this path so repeat invocations don't need
-# to retype the flag every time. Tests patch this constant to a non-existent
-# path to exercise the missing-PEM error branch (#1543).
-DEFAULT_CERBERUS_PEM_GPG = Path.home() / ".secrets" / "cerberus-pem.gpg"
+# No default Cerberus PEM (#4724). The per-repository Cerberus secrets are read
+# by nothing since Auto Review's retirement (#3663), so a run decrypts and
+# deploys a PEM only when --cerberus-pem or --cerberus-pem-gpg names one. The
+# #1543 fallback to ~/.secrets/cerberus-pem.gpg is gone with the #1206 gate.
 
 # Canonical location for the encrypted pr-sentinel App credential bundle
 # (App ID on line 1, private-key PEM after), used by the installation
@@ -2630,12 +2628,12 @@ def _deploy_cerberus(
 
     print()
     print("  KEEP THE APP KEY ACTIVE -- do NOT revoke it (#134).")
-    print("    The REVIEWER_APP_PRIVATE_KEY secret this run just deployed is")
-    print("    only usable while its PUBLIC half stays registered on the App.")
-    print("    Revoking removes that registration, so GitHub rejects the JWT,")
-    print("    no installation token is issued, and Cerberus never approves --")
-    print("    in this repo and in every other repo holding the same key.")
-    print("    To rotate: runbook 0939 (deploy new, audit, THEN revoke old).")
+    print("    Nothing reads the secret just deployed since Auto Review's")
+    print("    retirement (#4724), but the pr-sentinel Worker signs Cerberus's")
+    print("    approvals with the App key it was given. Revoking that key on the")
+    print("    App page makes GitHub reject the Worker's JWT, and Cerberus")
+    print("    approves no PR in any repo. To rotate: runbook 0939 (put the new")
+    print("    key in the Worker, see Cerberus approve a PR, THEN revoke the old).")
 
     return "OK"
 
@@ -2756,23 +2754,27 @@ Examples:
         "--cerberus-pem",
         metavar="PATH",
         default=None,
-        help="Path to PLAINTEXT Cerberus App .pem file. After deploy the "
-             "script DELETES this file. Single-use; for repeat/multi-repo "
-             "creation, use --cerberus-pem-gpg instead (encrypted at rest, "
-             "decrypted in-process per ADR-0216, no plaintext on disk). "
-             "When omitted, runbook 0927 step 4 is printed as manual fallback."
+        help="OPTIONAL. Path to a PLAINTEXT Cerberus App .pem file whose key "
+             "is deployed as the per-repo REVIEWER_APP_* secrets. Nothing "
+             "reads those secrets since Auto Review's retirement (#4724), so "
+             "a new repo needs no PEM; this exists only for restoring Auto "
+             "Review. After deploy the script DELETES this file. Prefer "
+             "--cerberus-pem-gpg (encrypted at rest, decrypted in-process "
+             "per ADR-0216)."
     )
     parser.add_argument(
         "--cerberus-pem-gpg",
         metavar="PATH",
         default=None,
-        help="Path to GPG-ENCRYPTED Cerberus App .pem file (typically "
-             "~/.secrets/cerberus-pem.gpg per ADR-0216 / runbook 0927). "
-             "Decrypted in-process via cerberus_pem_session(); never written "
-             "to plaintext disk. Pinentry prompts per gpg-agent TTL. The "
-             "encrypted blob is NOT deleted -- reuse it across as many "
-             "new-repo invocations as you need, then revoke the key in the "
-             "browser when done (#1254)."
+        help="OPTIONAL. Path to a GPG-ENCRYPTED Cerberus App .pem file "
+             "(typically ~/.secrets/cerberus-pem.gpg per ADR-0216 / runbook "
+             "0927) whose key is deployed as the per-repo REVIEWER_APP_* "
+             "secrets. Nothing reads those since Auto Review's retirement "
+             "(#4724), and the script no longer falls back to this path when "
+             "the flag is omitted. Decrypted in-process via "
+             "cerberus_pem_session(); never written to plaintext disk. The "
+             "encrypted blob is NOT deleted, and the key stays active on the "
+             "App page: the pr-sentinel Worker signs with it (#134, #1254)."
     )
     parser.add_argument(
         "--sentinel-app-gpg",
@@ -2851,39 +2853,14 @@ Examples:
               "creation (cannot be combined with --no-github)")
         sys.exit(1)
 
-    # A Cerberus PEM source is REQUIRED when creating a GitHub repo (#1206).
-    # Without Cerberus secrets the new repo's PRs sit blocked indefinitely
-    # because branch protection requires 1 approving review and the
-    # auto-reviewer workflow can't authenticate without the App secrets.
-    # Catching this at the CLI gate keeps the failure loud and pre-creation,
-    # not silent and only-visible-on-first-PR. Audit mode is exempt — it
-    # only inspects an existing project, never creates anything.
-    #
-    # When neither flag was passed, fall back to the canonical encrypted-PEM
-    # location (#1543). Repeat invocations don't need to retype the flag.
-    # The default is only applied when neither flag was explicitly passed,
-    # so the mutual-exclusion check above still catches both-flags-passed.
-    if (not args.cerberus_pem and not args.cerberus_pem_gpg
-            and not args.no_github and not args.audit
-            and DEFAULT_CERBERUS_PEM_GPG.exists()):
-        args.cerberus_pem_gpg = str(DEFAULT_CERBERUS_PEM_GPG)
-        print(f"Using Cerberus PEM: {DEFAULT_CERBERUS_PEM_GPG} "
-              "(encrypted, in-process decryption)")
-
-    if (not args.cerberus_pem and not args.cerberus_pem_gpg
-            and not args.no_github and not args.audit):
-        print(f"ERROR: Cerberus encrypted PEM not found at {DEFAULT_CERBERUS_PEM_GPG}")
-        print()
-        print("The new-repo workflow needs a Cerberus App key to wire up auto-approval.")
-        print("Without it, every PR on the new repo sits blocked waiting for a review.")
-        print()
-        print("Options:")
-        print("  - Encrypted key elsewhere?  --cerberus-pem-gpg /path/to/cerberus-pem.gpg")
-        print("  - One-shot plaintext?       --cerberus-pem /path/to/cerberus.pem")
-        print("  - First-time setup?         See docs/runbooks/0927-new-repo-human-checklist.md#4")
-        print()
-        print("Override: --no-github (skip GitHub repo entirely; local scaffold only).")
-        sys.exit(1)
+    # No Cerberus PEM is required (#4724). The #1206 gate refused a GitHub
+    # repo without one, because the Auto Review caller signed Cerberus's
+    # approval with the per-repo REVIEWER_APP_* secrets. Auto Review is
+    # retired (#3663) and nothing else reads those secrets: the pr-sentinel
+    # Worker approves as Cerberus with its own copy of the key. So a run
+    # without a PEM flag deploys no Cerberus secret, and the #1543 fallback
+    # to ~/.secrets/cerberus-pem.gpg, which asked for a passphrase to deploy
+    # a secret nothing reads, is gone too.
 
     # Validate name
     valid, error = validate_name(args.name)
@@ -3874,19 +3851,10 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("  # those violate ADR-0216 (PAT in env block / globally-")
             print("  # visible gh storage). The fine-grained PAT is sufficient")
             print("  # for this push; if it isn't, the problem is elsewhere.")
-    if (args.cerberus_pem is None and args.cerberus_pem_gpg is None
-            and not args.no_github):
-        print()
-        print("  # Cerberus secrets (manual):")
-        print("  #   Without secrets, PRs pass pr-sentinel but are never auto-approved.")
-        print("  #   1. https://github.com/settings/apps/cerberus-az > Private keys > Generate")
-        print("  #   2. poetry run python tools/deploy_cerberus_secrets.py /path/to/downloaded.pem")
-        print("  #   3. Delete the .pem. Do NOT revoke the key -- the deployed")
-        print("  #      secret depends on it staying active (#134).")
-        print("  #   See runbook 0927 step 4 for full procedure.")
-        print("  #   OR re-run this script with --cerberus-pem PATH (single-shot)")
-        print("  #   or --cerberus-pem-gpg PATH (reusable, encrypted at rest).")
-    elif cerberus_status == "OK":
+    # A run without a PEM flag prints no manual secret-deploy steps any more
+    # (#4724): nothing reads those secrets, and the pr-sentinel Worker
+    # approves the new repo's PRs as Cerberus with no per-repo setup.
+    if cerberus_status == "OK":
         # #134 supersedes the #1536 split. That split branched on "did a
         # plaintext .pem survive this run", and told the --cerberus-pem flow to
         # revoke because none did. Revocation does not retire an on-disk copy.
@@ -3908,11 +3876,11 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("  # The plaintext .pem was deleted by the script.")
         else:  # args.cerberus_pem_gpg is not None
             print(f"  # Encrypted PEM preserved at {args.cerberus_pem_gpg} for reuse.")
-        print("  # KEEP THE APP KEY ACTIVE -- do NOT revoke it. The secret just")
-        print("  # deployed works only while the key's public half stays")
-        print("  # registered on the App page; revoking breaks Cerberus here and")
-        print("  # in every other repo holding it.")
-        print("  # To rotate: runbook 0939 -- deploy new, audit, THEN revoke old.")
+        print("  # KEEP THE APP KEY ACTIVE -- do NOT revoke it while the")
+        print("  # pr-sentinel Worker signs Cerberus's approvals with it;")
+        print("  # revoking it then stops Cerberus approving in every repo.")
+        print("  # To rotate: runbook 0939 -- put the new key in the Worker, see")
+        print("  # Cerberus approve a PR, THEN revoke the old key.")
 
     # The internal function uses `no_pypi` (legacy parameter name); compute
     # it as "did the operator OPT IN via --pypi?" -- false = no_pypi=True =

@@ -147,11 +147,60 @@ def test_audit_one_repo_with_no_default_branch_unknown():
     mock_get.assert_not_called()
 
 
+def test_audit_one_repo_without_the_cerberus_secrets_is_ready():
+    """#4724: nothing reads REVIEWER_APP_ID or REVIEWER_APP_PRIVATE_KEY since
+    Auto Review's retirement. A repo with strict protection and neither
+    secret, in either scope, is READY, and the secrets' absence is still
+    reported in its column."""
+    repo = {"name": "no-secrets", "defaultBranchRef": {"name": "main"}}
+
+    def fake_get(url, pat):
+        if "/protection" in url:
+            return 200, _strict_protection_body()
+        if "/contents/.github/workflows/auto-reviewer.yml" in url:
+            return 404, None
+        if "/actions/secrets" in url or "/dependabot/secrets" in url:
+            return 200, {"secrets": []}
+        return 200, {}
+
+    with patch.object(audit, "_api_get", side_effect=fake_get):
+        r = audit.audit_one(repo, "pat")
+
+    assert r.verdict == "READY"
+    assert r.failures == []
+    assert r.error is None
+    assert r.actions_secrets_complete is False
+    assert r.dependabot_secrets_complete is False
+
+
+def test_audit_one_secrets_lookup_error_changes_no_verdict():
+    """#4724: the secrets are informational, so an error reading them leaves
+    the column blank instead of turning the repo UNKNOWN."""
+    repo = {"name": "flaky-secrets", "defaultBranchRef": {"name": "main"}}
+
+    def fake_get(url, pat):
+        if "/protection" in url:
+            return 200, _strict_protection_body()
+        if "/contents/.github/workflows/auto-reviewer.yml" in url:
+            return 404, None
+        if "/actions/secrets" in url or "/dependabot/secrets" in url:
+            return 403, {"message": "Resource not accessible"}
+        return 200, {}
+
+    with patch.object(audit, "_api_get", side_effect=fake_get):
+        r = audit.audit_one(repo, "pat")
+
+    assert r.verdict == "READY"
+    assert r.error is None
+    assert r.actions_secrets_complete is None
+
+
 def test_audit_one_accumulates_multiple_failures():
     """A repo can fail multiple dimensions; we report all of them.
 
-    Post-#1131: only 3 dimensions count as readiness failures. Dependabot
-    scope is reported but not in failures."""
+    Post-#4724 only branch protection counts as a readiness failure. The
+    caller (#4719), the Actions secrets (#4724) and the Dependabot scope
+    (#1131) are reported but not in failures."""
     repo = {"name": "x", "defaultBranchRef": {"name": "main"}}
 
     def fake_get(url, pat):
@@ -169,10 +218,10 @@ def test_audit_one_accumulates_multiple_failures():
         r = audit.audit_one(repo, "pat")
 
     assert r.verdict == "NOT_READY"
-    # 2 readiness failures (protection, actions-secrets). The caller is
-    # reported but NOT in failures (#4719), and so is Dependabot-scope (#1131).
-    assert sorted(r.failures) == ["actions_secrets_incomplete", "branch_protection_not_strict"]
-    assert "dependabot_secrets_incomplete" not in r.failures
+    assert r.failures == ["branch_protection_not_strict"]
+    assert r.workflow_present is False
+    assert r.actions_secrets_complete is False
+    assert r.dependabot_secrets_complete is False
 
 
 def test_audit_tsv_row_includes_all_four_dims():

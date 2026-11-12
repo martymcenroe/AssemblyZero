@@ -1,18 +1,18 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 7.0
-**Last Updated:** 2026-10-21
+**Version:** 8.0
+**Last Updated:** 2026-11-11
 
 ---
 
 ## Purpose
 
-The human steps when creating a new repo. Most of the work is automated by `new_repo.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, initial push, and (with `--cerberus-pem`) the Cerberus secrets deploy.
+The human steps when creating a new repo. Most of the work is automated by `new_repo.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files and initial push. No Cerberus key is needed: the pr-sentinel Worker approves every new repo's PRs as Cerberus with its own copy of the key, and the per-repo Cerberus secrets are read by nothing since Auto Review's retirement (#3663, #4724). `--cerberus-pem` and `--cerberus-pem-gpg` are optional and deploy those secrets only if you ask, which matters only if Auto Review is restored.
 
 Post-#1000 + #1007 (both landed 2026-04-22), the script needs **no environment-variable prefix**, even when `--cerberus-pem` is used. The classic PAT stays encrypted at rest (`~/.secrets/classic-pat.gpg`), the script decrypts it inline only when a specific API call needs admin/workflow/secrets scope, and the PAT lives only in the Python process heap — never in the env block.
 
-The human handles only what the script genuinely can't: the one-time gpg encryption of the classic PAT, the gpg passphrase prompt (one per secret decrypted), and downloading the Cerberus `.pem` from the browser. The Cerberus key stays active after deploying; rotation is runbook 0939.
+The human handles only what the script genuinely can't: the one-time gpg encryption of the classic PAT and the gpg passphrase prompt (one per secret decrypted). The Cerberus key stays active on the App page, because the Worker signs with it; rotation is runbook 0939.
 
 ---
 
@@ -46,7 +46,7 @@ With `default-cache-ttl 0`, gpg prompts for the passphrase every decryption (ins
 
 **Encrypt the Cerberus App private key** (recommended for any repeat use):
 
-The first time you generate a Cerberus `.pem`, encrypt it and delete the plaintext immediately. After that, the encrypted blob is reusable across as many repo creations as you want against the same active App key. **Do NOT revoke the key after deploying** — every repo's `REVIEWER_APP_PRIVATE_KEY` Actions secret depends on it remaining active. Periodic key rotation is its own procedure — see [runbook 0939](0939-cerberus-key-rotation.md).
+The first time you generate a Cerberus `.pem`, encrypt it and delete the plaintext immediately. `tools/cerberus_worker_key.py` reads the encrypted blob to put the key in the pr-sentinel Worker, and a new repo needs nothing from it (#4724). **Do NOT revoke the key after deploying** — the Worker signs every Cerberus approval with it. Periodic key rotation is its own procedure — see [runbook 0939](0939-cerberus-key-rotation.md).
 
 #### Hygiene surfaces (audit gate)
 
@@ -107,7 +107,7 @@ Surfaces touched: filesystem + clipboard + editor cache + browser history. **Not
 
 #### After encryption (both patterns)
 
-The encrypted file lives at `~/.secrets/cerberus-pem.gpg` and is consumed via `cerberus_pem_session()` in `tools/_pat_session.py` (the parallel of `classic_pat_session()`, same ADR-0216 threat model). Decryption happens only inside the Python process's heap when `new_repo.py --cerberus-pem-gpg` runs — no plaintext PEM ever appears on disk after this one-time step (#1254).
+The encrypted file lives at `~/.secrets/cerberus-pem.gpg` and is consumed via `cerberus_pem_session()` in `tools/_pat_session.py` (the parallel of `classic_pat_session()`, same ADR-0216 threat model). Decryption happens only inside the Python process's heap, when `tools/cerberus_worker_key.py` runs (or `new_repo.py --cerberus-pem-gpg`, if you ask for the optional per-repo secrets) — no plaintext PEM ever appears on disk after this one-time step (#1254).
 
 #### Three independent copies of the key (read this once)
 
@@ -115,13 +115,15 @@ After encryption + deploy, the same key exists in three places:
 
 1. **App-side public-half registration** — on https://github.com/settings/apps/cerberus-az → Private keys. Used by GitHub to verify JWTs signed by the corresponding private key.
 2. **Operator-side encrypted blob** — `~/.secrets/cerberus-pem.gpg`. Offline copy enabling re-deploy without regenerating.
-3. **Per-repo Actions secret** — `REVIEWER_APP_PRIVATE_KEY` in each repo. The bytes `auto-reviewer.yml` reads at run time to sign JWTs.
+3. **The pr-sentinel Worker's secret** — `CERBERUS_PRIVATE_KEY_B64`, put there by `tools/cerberus_worker_key.py`. The bytes the Worker signs its JWT with before it approves a PR.
 
-**Revoking the key on the App page (copy 1) makes copies 2 and 3 useless** — GitHub no longer accepts JWTs signed by it. Every repo's auto-approval silently breaks the next time a PR opens.
+A per-repo Actions secret `REVIEWER_APP_PRIVATE_KEY` may also hold the key, from when Auto Review ran. Nothing reads it since Auto Review's retirement (#3663, #4724).
 
-The previous version of this runbook told operators to revoke right after deploying. **That was wrong** (per unleashed#658). The right pattern: keep the key active on the App for as long as it's deployed in any repo. When you want to rotate, follow [runbook 0939](0939-cerberus-key-rotation.md) — deploy the new key fleet-wide, audit via `tools/audit_cerberus_health.py`, THEN revoke the old key.
+**Revoking the key on the App page (copy 1) makes copies 2 and 3 useless** — GitHub no longer accepts JWTs signed by it. Cerberus then approves no PR in any repo.
 
-You CAN safely `rm ~/.secrets/cerberus-pem.gpg` at any time (deletes only your offline copy; the GitHub-side copies remain functional). Keep it if you want to re-deploy without regenerating.
+The previous version of this runbook told operators to revoke right after deploying. **That was wrong** (per unleashed#658). The right pattern: keep the key active on the App for as long as the Worker holds it. When you want to rotate, follow [runbook 0939](0939-cerberus-key-rotation.md) — put the new key in the Worker, see Cerberus approve a PR, THEN revoke the old key.
+
+You CAN safely `rm ~/.secrets/cerberus-pem.gpg` at any time (deletes only your offline copy; the Worker's copy remains functional). Keep it if you want to re-deploy without regenerating.
 
 ---
 
@@ -131,47 +133,20 @@ You CAN safely `rm ~/.secrets/cerberus-pem.gpg` at any time (deletes only your o
 
 **Run it in a WSL terminal on Ubuntu, or in Git Bash on Windows 11.** In Git Bash, pinentry is a dialog with its own window. On Ubuntu it is `pinentry-curses`, which draws its box in the terminal the script was started from. The script detaches its standard input so that no passphrase can reach it (#1806), but first records the terminal's name in `GPG_TTY`, so pinentry-curses can still open that terminal and read the passphrase itself (#4179). Started from cron, a background job or a pipe, it has no terminal, and it stops at the first decrypt and says so.
 
-**Recommended path — `--cerberus-pem-gpg` (encrypted at rest, reusable):**
+From the AssemblyZero checkout:
 
 ```bash
-cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo.py {name} \
-    --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg [--public]
+poetry run python tools/new_repo.py {name} [--public]
 ```
 
-This requires the one-time gpg-encrypt of the Cerberus `.pem` (see "One-time setup" above). The decrypted key only ever lives in the Python heap during the script's run; nothing plaintext touches disk. **You can run this same invocation for as many new repos as you want against the same encrypted blob.** Keep the App-side key active as long as any repo holds it (do NOT revoke per "Three independent copies" above). When you want to rotate the key, follow [runbook 0939](0939-cerberus-key-rotation.md).
+**No Cerberus PEM is needed (#4724).** The pr-sentinel Worker approves the new repo's PRs as Cerberus with its own copy of the key, and the per-repo secrets a PEM would deploy are read by nothing since Auto Review's retirement (#3663). #1206 used to refuse a GitHub repo without `--cerberus-pem` or `--cerberus-pem-gpg`, and #1543 picked up `~/.secrets/cerberus-pem.gpg` by itself; both are gone. The two flags remain, optional and mutually exclusive, for deploying the per-repo secrets if Auto Review is ever restored. Neither combines with `--no-github`.
 
-**Legacy / single-shot path — `--cerberus-pem` (plaintext, deleted after deploy):**
-
-```bash
-cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo.py {name} --cerberus-pem PATH [--public]
-```
-
-The script reads the plaintext `.pem`, deploys, then unlinks the file. Fine for occasional one-off repo creation; for any repeat use the gpg path is strictly better (security + ergonomics).
-
-Either `--cerberus-pem-gpg` OR `--cerberus-pem` is **required** when creating a GitHub repo (#1206) — Cerberus auto-approval is part of the new-repo contract, and without the secrets every PR sits blocked. The only override is `--no-github` (local scaffold only, skips the GitHub side entirely). The two flags are mutually exclusive.
-
-With gpg-agent at `default-cache-ttl 0` (ADR-0216), pinentry asks once for each secret the run decrypts: the classic PAT, and the Cerberus PEM when `--cerberus-pem-gpg` is used. The script handles the rest.
+With gpg-agent at `default-cache-ttl 0` (ADR-0216), pinentry asks once for each secret the run decrypts: the classic PAT, the pr-sentinel App bundle when `~/.secrets/pr-sentinel-app.gpg` exists (for the installation check), and the Cerberus PEM only when a PEM flag is passed. The script handles the rest.
 
 **Defaults the script picks unless you override:**
 - **License**: PolyForm Noncommercial 1.0.0. Pass `--license mit` if you want MIT instead.
 - **Visibility**: private. Pass `--public` to override.
-- **Cerberus secrets**: deployed when `--cerberus-pem PATH` is provided (required for new GitHub repos per #1206 — see [Cerberus](#what-cerberus-is-and-why-you-want-it) below).
-
-**Before running the script**, download the `.pem`:
-
-1. Go to <https://github.com/settings/apps/cerberus-az> → **Private keys**
-2. Click **Generate a private key** — the browser downloads a `.pem` file (typically to `C:\Users\mcwiz\Downloads\`)
-3. Pass that path to `--cerberus-pem` in **Git Bash Unix-style**:
-   ```bash
-   poetry run python tools/new_repo.py MyNewRepo --private \
-     --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.2026-04-22.private-key.pem
-   ```
-   MSYS translates `/c/Users/...` → `C:\Users\...` before `python.exe` sees argv, so pathlib handles it correctly. Windows-style `'C:\Users\mcwiz\Downloads\foo.pem'` also works if single-quoted (or with escaped backslashes), but the Unix-style form matches every other path example in this runbook.
-4. Full walkthrough (deploy + delete local `.pem`; key stays active on App page) is in [Section 4](#4-deploy-cerberus-secrets-if-needed) below.
-
-*Why you have to do this manually:* the GitHub App management API does not expose programmatic key generation or revocation — both are browser-only.
+- **Cerberus secrets**: not deployed. They are deployed only when `--cerberus-pem PATH` or `--cerberus-pem-gpg PATH` is passed, and nothing reads them (#4724; see [Cerberus](#what-cerberus-is-and-why-you-want-it) below).
 
 **What the script does under the hood (post-#1000 + #1007):**
 
@@ -186,7 +161,7 @@ With gpg-agent at `default-cache-ttl 0` (ADR-0216), pinentry asks once for each 
 | 18 | **Configure branch protection** via PUT | In-process classic PAT |
 | 19 | **Create canonical labels** (`implementation`, `lld`) | In-process classic PAT |
 | 20 | **Enable Dependabot** (security_and_analysis PATCH + vulnerability-alerts PUT + automated-security-fixes PUT) | In-process classic PAT (#1331) |
-| — | **Cerberus secrets** (if `--cerberus-pem` passed): sealed-box encrypt + PUT | In-process classic PAT (#1007) |
+| — | **Cerberus secrets** (only if a PEM flag is passed; optional since #4724): sealed-box encrypt + PUT | In-process classic PAT (#1007) |
 
 Steps in **bold** require classic-PAT scopes. The PAT never enters the env block or subprocess argv — privileged calls share one `classic_pat_session()`, so the classic PAT's passphrase is asked for once per run.
 
@@ -201,7 +176,7 @@ The script handles all of the following automatically:
 - **Python project bootstrap**: `pyproject.toml`, `poetry.lock`, `pytest`+`pytest-cov` in dev deps, `[tool.pytest.ini_options]` for deterministic test discovery, `tests/conftest.py` for `src/` import path. Pass `--lang none` to skip for non-Python projects. (#1058)
 - **Canonical labels**: `implementation` and `lld` on the GitHub repo (#1061)
 - **Per-repo `CLAUDE.md` (lean shape per ADR 0219)**: `## Project Identifiers` block plus a project-type-specific `## Project-Specific Context` stub. The scaffolded file is intentionally short (~15-25 lines) and ADDITIVE only — no merge-sequence / branch-protection / PR-rules content; those live in the auto-loaded universal `CLAUDE.md`. Pass `--project-type {minimal,python,chrome-extension,pypi,cf-worker,web}` to pick the stub; default `minimal` is a pure TODO block. Per-repo drift is auditable via `tools/lint_per_repo_claude_md.py` (#1290). See [ADR 0219](../adrs/0219-claude-md-division-of-responsibility.md) for the full division-of-responsibility rule. (#1258, #1291, #1266)
-- Cerberus secrets deploy (if `--cerberus-pem` supplied)
+- Cerberus secrets deploy, only if `--cerberus-pem` or `--cerberus-pem-gpg` is supplied; nothing reads those secrets (#4724)
 - **Generate `.github/dependabot.yml`** (#1334): version-update config written at creation time (script step 11c2). Ecosystems are detected by marker-file presence (`pyproject.toml`→pip, `package.json`→npm, `Dockerfile`→docker) plus `github-actions` always. It rides the initial commit (non-workflow file, so no workflow scope). This is the half that makes #1331's settings-level enablement emit *version-update* PRs — without the yml, only *security* PRs fire.
 - **Create `data-g/`** (#1563): a git-tracked source-of-truth data directory with a README explaining the split. `data/` is ignored fleet-wide (ephemeral session artifacts); `data-g/` holds authoritative data the global ignore does not match, so it survives a machine wipe.
 - **Enable Dependabot at repo settings level** (#1331): PATCH `security_and_analysis.dependabot_security_updates`, PUT `/vulnerability-alerts`, PUT `/automated-security-fixes`. Without this step the `.github/dependabot.yml` generated above is inert on private repos — Dependabot defaults to disabled and no PRs emit. The defect was confirmed 2026-05-26 on a private decorative-deps fixture repo (yml in place, 65 decorative deps pinned to ~12-18mo old versions, zero PRs after 11+ hours). The tool `tools/enable_dependabot.py` can also be run standalone to backfill existing repos.
@@ -216,7 +191,7 @@ All privileged paths now route through in-process classic PAT (#964 + #1000 + #1
 gh auth login -h github.com -p https   # paste classic PAT
 
 cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo.py {name} [--public] [--cerberus-pem PATH]
+poetry run python tools/new_repo.py {name} [--public]
 
 gh auth login -h github.com -p https   # paste fine-grained PAT back — do this immediately
 ```
@@ -231,7 +206,7 @@ After #1000, the script no longer needs `GH_TOKEN` for the git push — workflow
 
 Net effect: **no `GH_TOKEN` env-block exposure for any invocation, including `--cerberus-pem`**. After #1037, the Cerberus secret-set path also runs through the in-process classic PAT, so there is no remaining condition under which `GH_TOKEN` would need to be in the env block.
 
-### 4. Deploy Cerberus secrets (Cerberus = your auto-approver)
+### 4. Cerberus (no per-repo step since #4724)
 
 #### What Cerberus is and why you want it
 
@@ -241,69 +216,25 @@ End-to-end PR flow on every repo:
 
 1. You open a PR. Branch protection requires (a) a passing `pr-sentinel / issue-reference` check from the Cloudflare Worker, and (b) at least one approving review.
 2. **pr-sentinel** (Cloudflare Worker, fleet-wide) reads the PR body, checks for `Closes #N` (linked to an open issue) or `No-Issue: ...` exemption. If valid, it posts a check-success.
-3. **Cerberus-AZ** (this GitHub App) listens for that check-success. If the PR is yours, Cerberus posts an approving review using its own GitHub identity. Branch protection now has its review.
-4. Tests pass → all gates green → `gh pr merge --squash` succeeds.
+3. **In the same request, the Worker approves the PR as Cerberus-AZ** (#3663), signing with its own copy of the App key, `CERBERUS_PRIVATE_KEY_B64`. Branch protection now has its review. Dependabot PRs are never approved this way.
+4. The PR is mergeable.
 
-**Without Cerberus secrets on the new repo:** step 3 silently fails. Your PRs sit in `mergeable_state: blocked` because there's no approving review. You'd have to manually click Approve via the UI on every PR (ugly) or run a fleet-wide secret-deploy after-the-fact (also annoying).
+**A new repo needs no Cerberus secret.** The approval in step 3 used to come from the Auto Review caller workflow, which read the per-repo secrets `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`. Auto Review is retired (#3663, #4719), and nothing reads those secrets any more; the readers were searched on #4724.
 
-#### Why secrets are per-repo, and what the .pem actually is
+#### Where the key lives
 
 Cerberus-AZ is fleet-installed at the App level — one click in App settings ("All repositories"), and the App has access to every repo you own automatically. **You don't need to install the App per-repo.**
 
-But for Cerberus to authenticate to GitHub at PR-review time, the App's RSA private key has to be present in the repo as two Actions secrets: `REVIEWER_APP_ID` (the App ID, fixed) and `REVIEWER_APP_PRIVATE_KEY` (a fresh private key you generate). The auto-reviewer workflow reads those secrets at job-time, signs a JWT, and acts as Cerberus.
+The Worker signs as Cerberus with the App's private key, which `tools/cerberus_worker_key.py` puts in the Worker from `~/.secrets/cerberus-pem.gpg` (see "Three independent copies of the key" above). Keep that key active on the App page; rotation is [runbook 0939](0939-cerberus-key-rotation.md).
 
-The `.pem` is the App's private key, downloaded from <https://github.com/settings/apps/cerberus-az>. It is **single-use**:
+#### Only if Auto Review is restored: the per-repo secrets
 
-1. **Generate** in browser → `.pem` lands in `Downloads/` (browser-only; App management API doesn't expose this)
-2. **Deploy** via `--cerberus-pem PATH` → script encrypts the key with the repo's public key (libsodium sealed-box), PUTs it as a GitHub Actions secret, deletes the .pem on disk
-3. **Revoke** in browser → that specific key is invalidated server-side (browser-only too)
+Auto Review's reusable workflow is retired by an `if: false` that can be put back (its header says how). If it ever is, its callers need the per-repo secrets again, and two tools deploy them. Neither is part of creating a repo today. **`--cerberus-pem` was REQUIRED on new GitHub repos from #1206 until #4724**; it is optional now.
 
-After step 3 the secret value lives in GitHub Actions encrypted storage. The local .pem is gone. The Cerberus App can still authenticate using OTHER active keys you generate later, so revoking this one is safe.
+- **One new repo:** pass `--cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg` (or `--cerberus-pem PATH`, a plaintext `.pem` the script deletes after the deploy) to `new_repo.py`. The script deploys both secrets to the new repo only and verifies they landed.
+- **Many repos, or one already created:** from the AssemblyZero checkout, `poetry run python tools/deploy_cerberus_secrets.py --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg [--all | --repo NAME]`, and look for `OK` next to each repo.
 
-#### Why this is an option, not always-on
-
-The script can't auto-do steps 1 and 3 (browser-only). It needs a flag to know whether YOU did step 1 and where you put the .pem. That's what `--cerberus-pem PATH` is for.
-
-**`--cerberus-pem` is REQUIRED on new GitHub repos (#1206).** The script exits 1 with the .pem-acquisition guide if you forget it. The only way to skip Cerberus deploy is `--no-github` (local scaffold only). For repos already created without the flag, the fallback path below (standalone `tools/deploy_cerberus_secrets.py`) still applies.
-
-Two procedural variants follow — **preferred** (integrated into `new_repo.py`, what `--cerberus-pem` does) or **fallback** (standalone fleet-wide script when you want to deploy to many repos at once).
-
-#### Preferred: pass `--cerberus-pem PATH` to `new_repo.py`
-
-When you invoke `new_repo.py` with the flag, the script handles steps 3-5 below automatically after the repo is created:
-
-1. Go to https://github.com/settings/apps/cerberus-az > Private keys
-2. Click **Generate a private key** — browser downloads a `.pem` file
-3. Run the setup script with the flag (re-using the same invocation if this is the first time):
-   ```bash
-   cd /c/Users/mcwiz/Projects/AssemblyZero
-   poetry run python tools/new_repo.py MyNewRepo --cerberus-pem /c/Users/mcwiz/Downloads/THE-FILE.pem
-   ```
-   The script deploys both secrets to ONLY the new repo, verifies they landed via `gh api`, then deletes the local `.pem` file.
-4. **Keep the key active on the App page** — the deployed Actions secret depends on it remaining active. Do NOT revoke. When you want to rotate the key, follow [runbook 0939](0939-cerberus-key-rotation.md).
-
-#### Fallback: standalone fleet-wide script
-
-Use this path if the new repo was already created (without the flag) or if you want to deploy to multiple repos at once.
-
-1. Go to https://github.com/settings/apps/cerberus-az > Private keys
-2. Click **Generate a private key** — browser downloads a `.pem` file
-3. Deploy to all repos:
-   ```bash
-   cd /c/Users/mcwiz/Projects/AssemblyZero
-   poetry run python tools/deploy_cerberus_secrets.py /c/Users/mcwiz/Downloads/THE-FILE.pem
-   ```
-4. **Verify:** Look for `OK` next to your new repo name in the output.
-5. **Delete the .pem file immediately:**
-   ```bash
-   rm /c/Users/mcwiz/Downloads/THE-FILE.pem
-   ```
-6. **Keep the App-side key active.** The deployed Actions secrets depend on it. **Do NOT revoke after deploy** — revoking removes the public-half registration on the App page, and every repo's secret becomes unusable (GitHub rejects JWTs signed by the revoked key). Per `unleashed#658` / runbook 0939, the only safe time to revoke is during a structured rotation: deploy a NEW key fleet-wide, audit via `tools/audit_cerberus_health.py`, THEN revoke the old.
-7. **Done.** Secrets deployed, local `.pem` deleted, App-side key still active.
-
-**What happens without secrets:** PRs pass pr-sentinel but don't get auto-approved. You can merge manually via the GitHub UI until secrets are deployed.
-
-**To rotate the key later:** see [runbook 0939](0939-cerberus-key-rotation.md). The procedure is deploy-new → audit → revoke-old, never deploy-then-revoke.
+Either way, **do NOT revoke the key after deploying**: the Worker signs with it too. Per `unleashed#658` / runbook 0939, the only safe time to revoke is during a structured rotation: put the new key where it signs, see Cerberus approve a PR, THEN revoke the old.
 
 ### 5. Create wiki (if needed)
 
@@ -336,13 +267,12 @@ These all happen without any per-repo human intervention:
 |-----------|-------------------|
 | Cerberus-AZ app access | Fleet-wide installation ("All repositories") — new repos are covered instantly |
 | pr-sentinel check (Cloudflare Worker) | Receives webhooks for all repos, authenticates with its own stored credentials |
-| Auto-reviewer workflow file | Uploaded by setup script via Contents API (#1000) — in-process classic PAT |
+| Cerberus approval | The same Worker approves as Cerberus with its own copy of the key (#3663); no per-repo secret (#4724) and no workflow file (#4719) |
 | Repo settings | PATCHed by setup script — in-process classic PAT (#964 Phase A) |
 | Branch protection | PUT by setup script — in-process classic PAT (#964 Phase A) |
 | Directory structure + configs | Created by setup script |
-| Cerberus secrets deploy | Handled by the script when `--cerberus-pem PATH` is passed |
 
-The **per-repo human steps** are: running the script in Git Bash, entering the gpg passphrase for each secret the run decrypts, downloading the Cerberus `.pem` if `--cerberus-pem` is used (never revoke the key after deploying; rotation is runbook 0939), and optional wiki/domain setup.
+The **per-repo human steps** are: running the script, entering the gpg passphrase for each secret the run decrypts, and optional wiki/domain setup. No Cerberus `.pem` is needed (#4724); the key stays active on the App page because the Worker signs with it (rotation is runbook 0939).
 
 ---
 
@@ -381,3 +311,4 @@ The **per-repo human steps** are: running the script in Git Bash, entering the g
 | 2026-06-10 | v6.8: #1334 + #1563 — script now generates `.github/dependabot.yml` at creation time (step 11c2; ecosystems by marker-file presence — `pyproject.toml`→pip, `package.json`→npm, `Dockerfile`→docker — plus `github-actions` always; non-workflow file, rides the initial commit). This is the version-update half that complements #1331's settings-level enablement — without the yml, only security PRs fire. Also creates `data-g/` (git-tracked source-of-truth data) with a README explaining the split vs the fleet-ignored `data/`. Updated the under-the-hood table (step 12) and the "handles automatically" list. |
 | 2026-10-08 | v6.9: #4141, after PR #4138. Run the script in Git Bash on Windows 11; on Ubuntu the decrypt cannot prompt (#1806, #4135). No hook is installed in a new repo, and `.claude/settings.json` is `{}` (#4137). `[SUCCESS]` and exit 0 only when every step succeeded; otherwise `[FAILED]`, an alert and exit 1 (#4136). Passphrase lines corrected for `default-cache-ttl 0`: one prompt per secret decrypted. The stale "revoke the Cerberus key when done" in the human-steps line is removed (#1295). |
 | 2026-10-21 | v7.0: #4179. The operator runs the script from WSL. It records the terminal in `GPG_TTY` before detaching stdin, so `pinentry-curses` prompts in that terminal. Supersedes v6.9's Git Bash instruction. |
+| 2026-11-11 | v8.0: #4724. No Cerberus PEM is needed: nothing reads the per-repo `REVIEWER_APP_*` secrets since Auto Review's retirement (#3663), and the pr-sentinel Worker approves as Cerberus with its own copy of the key. #1206's PEM requirement and #1543's default PEM are removed from `new_repo.py`; the PEM flags stay optional, for restoring Auto Review. Section 4 now describes the Worker's approval. #4723: the per-repo Cerberus health audit is retired, so rotation points at runbook 0939's Worker procedure. The stale "Auto-reviewer workflow file" row of "What's Automatic" is replaced. |

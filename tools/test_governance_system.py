@@ -589,29 +589,13 @@ def test_worker_health() -> TestResult:
                       actual, passed, duration_s=time.time() - t0)
 
 
-def test_cerberus_secrets(repo: str) -> TestResult:
-    """T08: Cerberus secrets should exist on the repo."""
-    t0 = time.time()
-    rc, output = run_gh("secret", "list", "--repo", repo)
-    if rc != 0:
-        return TestResult("T08", "Cerberus secrets present",
-                          "REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY",
-                          f"Cannot list secrets: {output[:100]}", False,
-                          duration_s=time.time() - t0)
-
-    has_app_id = "REVIEWER_APP_ID" in output
-    has_key = "REVIEWER_APP_PRIVATE_KEY" in output
-    passed = has_app_id and has_key
-    missing = []
-    if not has_app_id:
-        missing.append("REVIEWER_APP_ID")
-    if not has_key:
-        missing.append("REVIEWER_APP_PRIVATE_KEY")
-
-    actual = "Both present" if passed else f"Missing: {', '.join(missing)}"
-    return TestResult("T08", "Cerberus secrets present",
-                      "REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY",
-                      actual, passed, duration_s=time.time() - t0)
+# T08 (Cerberus secrets present) is retired (#4724). It required the
+# per-repository Actions secrets REVIEWER_APP_ID and REVIEWER_APP_PRIVATE_KEY,
+# and nothing reads them any more: their only readers were the Auto Review
+# caller and the reusable workflow it calls, whose only job is `if: false`
+# (#3663). The pr-sentinel Worker approves as Cerberus with its own copy of the
+# key (CERBERUS_PRIVATE_KEY_B64, put there by tools/cerberus_worker_key.py),
+# which no per-repository check can see. The readers were searched on #4724.
 
 
 # T09 (workflow files present) is retired (#4719). It required two per-repo
@@ -636,10 +620,6 @@ def run_local_tests(repo: str, dry_run: bool = False) -> list[TestResult]:
 
     print("  T07: Worker health check...")
     results.append(test_worker_health())
-    print(f"    {'PASS' if results[-1].passed else 'FAIL'}: {results[-1].actual}")
-
-    print(f"  T08: Cerberus secrets on {repo}...")
-    results.append(test_cerberus_secrets(repo))
     print(f"    {'PASS' if results[-1].passed else 'FAIL'}: {results[-1].actual}")
 
     if dry_run:

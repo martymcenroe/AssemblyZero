@@ -290,7 +290,7 @@ Full audit data: `data/branch-protection-audit.csv` (machine-local since #2170 �
 | Naked `#N` format | Worker check fails, Actions check fails | `Closes` keyword missing | Add `Closes` prefix |
 | Dependabot PR stuck | Check suite queued forever | Worker skips without creating check run | Fixed in #749 — Worker now creates passing check for dependabot |
 | Auto-reviewer timeout | PR not approved after 10 min | Required check not found by substring match | Verify check run name contains `issue-reference` |
-| Missing Cerberus secrets | Auto-reviewer workflow fails | `REVIEWER_APP_ID` or `REVIEWER_APP_PRIVATE_KEY` not set | Run `deploy_cerberus_secrets.py` |
+| Missing Cerberus secrets | None since Auto Review's retirement (#3663) | `REVIEWER_APP_ID` or `REVIEWER_APP_PRIVATE_KEY` not set; nothing reads them (#4724) | Nothing to fix. A PR the Worker does not approve points at the Worker's own `CERBERUS_*` secrets: runbook 0939 |
 | Wrong context in branch protection | Check passes but protection not satisfied | Context name doesn't match any posted check | Fix via classic PAT (see scripts in section 4) |
 | `new_repo.py` sets wrong context | New repos have mismatched protection | Script sets `pr-sentinel` instead of `pr-sentinel / issue-reference` | Known bug, tracked in #748/#883 |
 | Squash merge drops PR body | Issue not auto-closed after merge | Commit message lacks `Closes #N` | Tracked in #851 — commit messages must also contain the reference |
