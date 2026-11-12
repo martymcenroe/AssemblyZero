@@ -26,7 +26,11 @@ def _help(tool: str) -> str:
 
     # UTF-8 on the pipe: the LLD tool's --retry-policy help carries a "→",
     # which a cp1252 pipe cannot encode (a separate, older defect).
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    # Telemetry off (#4708): the tools wrap main() in track_tool, whose
+    # tool.start lands before argparse exits, and a child process never sees
+    # the autouse redirect, so each --help appended to the real
+    # ~/.assemblyzero/telemetry-buffer.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "ASSEMBLYZERO_TELEMETRY": "0"}
     result = subprocess.run(
         [sys.executable, str(TOOLS / tool), "--help"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
