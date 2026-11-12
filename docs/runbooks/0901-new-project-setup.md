@@ -73,7 +73,7 @@ MyNewProject/
 │   └── gemini-prompts/
 ├── .github/
 │   ├── dependabot.yml          # version-update config (ecosystems by detection + github-actions)
-│   └── workflows/              # auto-reviewer.yml + release.yml (if --lang python and not --no-pypi)
+│   └── workflows/              # release.yml, only with --pypi (no Auto Review caller, #4719)
 ├── data/                       # Ephemeral data (git-ignored fleet-wide)
 ├── data-g/                     # Git-tracked source-of-truth data (see data-g/README.md)
 ├── docs/
@@ -119,7 +119,6 @@ MyNewProject/
 | `LICENSE` | PolyForm Noncommercial 1.0.0 (default; pass `--license mit` for MIT) |
 | `.gitignore` | Standard ignore patterns |
 | `.unleashed.json` | Unleashed wrapper configuration (model, effort, onboard settings) |
-| `.github/workflows/auto-reviewer.yml` | Cerberus auto-approval caller workflow |
 | `.github/workflows/release.yml` | Tag-triggered PyPI publish via OIDC Trusted Publisher (created when `--lang python` and not `--no-pypi`; needs runbook 0934 pending-publisher registration before first tag push) |
 | `.github/dependabot.yml` | Dependabot version-update config; ecosystems detected from project markers (`pyproject.toml`→pip, `package.json`→npm, `Dockerfile`→docker) plus `github-actions` always (#1334) |
 | `data-g/README.md` | Git-tracked source-of-truth data directory; counterpart to the fleet-ignored `data/` (#1563) |
@@ -172,7 +171,7 @@ options:
 
 Cerberus secrets are deployed automatically by the script when you pass the required `--cerberus-pem PATH` flag (per #1206). The flag is mandatory for GitHub-creating invocations — the script exits 1 with a .pem-acquisition guide if you forget it. The only human steps are the browser-only ones: downloading the .pem before the script run, and revoking the key in the App UI after. See [0927 §4](0927-new-repo-human-checklist.md#4-deploy-cerberus-secrets-if-needed) for the full procedure.
 
-The script also deploys `auto-reviewer.yml`, configures branch protection, and verifies all of the above end-to-end against origin (per #1200 + #1202). The `pr-sentinel/issue-reference` check is provided fleet-wide by the Cloudflare Worker (per #938 / #939), not by a per-repo workflow file.
+The script also configures branch protection and verifies all of the above end-to-end against origin (per #1200 + #1202). The `pr-sentinel/issue-reference` check is provided fleet-wide by the Cloudflare Worker (per #938 / #939), not by a per-repo workflow file, and the Worker approves as Cerberus once that check passes. The script writes no Auto Review caller (`auto-reviewer.yml`): the reusable workflow it called is retired (#3663), and the caller only ever ran a skipped job (#4719).
 
 A new repository gets no workflow that runs its tests or a linter on GitHub, and none is added after (#4712). The operator's order of 2026-11-11: "shut it off fleet-wide. i simply do NOT understand why i ever did it. and even AZ. why take the extra time and tokens." The tests run on his machine before a branch lands; a GitHub job repeating them takes runner time and holds every merge. `tests/unit/test_new_repo_no_test_workflow.py` fails if the script starts writing one.
 

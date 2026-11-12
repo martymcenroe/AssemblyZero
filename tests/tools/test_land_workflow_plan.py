@@ -344,3 +344,271 @@ class TestRun:
         assert [t["repo"] for t in lwp.select(plan, ["beta"])] == ["beta"]
         with pytest.raises(lwp.PlanError):
             lwp.select(copy.deepcopy(plan), ["delta"])
+
+
+# --- T5: the delete action, --max-targets and the contribution count (#4721) ----------
+
+CALLER = ".github/workflows/auto-reviewer.yml"
+CALLER_TEXT = ("name: Auto Review\non:\n  pull_request:\njobs:\n  auto-review:\n"
+               "    uses: o/r/.github/workflows/auto-reviewer.yml@main\n")
+CALLER_BLOB = "d" * 40
+
+
+def delete_target(repo: str, issue: int, blob: str = CALLER_BLOB) -> dict:
+    return {"repo": repo, "issue": issue, "files": [
+        {"workflow": CALLER, "action": "delete", "base_blob": blob}]}
+
+
+def delete_plan(*targets: dict) -> dict:
+    """The shape the fleet half writes: no `source`, delete entries only."""
+    return {"reason": "Removes the retired Auto Review caller.",
+            "targets": list(targets) or [delete_target("alpha", 7)]}
+
+
+class MergingGitHub(FakeGitHub):
+    """FakeGitHub plus what a delete needs.
+
+    A new branch starts from main's files, a Contents-API DELETE removes a file on a
+    branch (and must name the blob the branch holds), and a squash merge carries the
+    branch's removals to main, unless `merge_lands` is False, which stands for a merge
+    whose change never reached main.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.removed: dict[tuple[str, str], list[str]] = {}
+        self.merge_lands = True
+        self.calls: list[tuple[str, str]] = []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.calls.append(("GET", url))
+        return super().get(url, params=params, headers=headers, timeout=timeout)
+
+    def post(self, url, headers=None, json=None, timeout=None):
+        if m := re.fullmatch(rf"{API}/([^/]+)/git/refs", url):
+            repo, branch = m.group(1), json["ref"].removeprefix("refs/heads/")
+            for (r, ref, path), rec in list(self.files.items()):
+                if r == repo and ref == "main":
+                    self.files.setdefault((repo, branch, path), rec)
+        return super().post(url, headers=headers, json=json, timeout=timeout)
+
+    def put(self, url, headers=None, json=None, timeout=None):
+        if self.merge_lands and (m := re.fullmatch(rf"{API}/([^/]+)/pulls/(\d+)/merge", url)):
+            for (repo, _branch), paths in self.removed.items():
+                if repo == m.group(1):
+                    for path in paths:
+                        self.files.pop((repo, "main", path), None)
+        return super().put(url, headers=headers, json=json, timeout=timeout)
+
+    def delete(self, url, headers=None, json=None, timeout=None):
+        if m := re.fullmatch(rf"{API}/([^/]+)/contents/(.+)", url):
+            repo, path = m.group(1), m.group(2)
+            key = (repo, json["branch"], path)
+            assert json["sha"] == self.files[key][1], "DELETE names a blob the branch does not hold"
+            del self.files[key]
+            self.removed.setdefault((repo, json["branch"]), []).append(path)
+            self.writes.append(("remove", f"{repo}:{path}"))
+            return Resp({}, 200)
+        return super().delete(url, headers=headers, json=json, timeout=timeout)
+
+
+@pytest.fixture
+def mgh(monkeypatch):
+    fake = MergingGitHub()
+    monkeypatch.setattr(lsw, "requests", SimpleNamespace(
+        get=fake.get, post=fake.post, put=fake.put, delete=fake.delete))
+    monkeypatch.setattr(lsw.time, "sleep", lambda s: None)
+    return fake
+
+
+def live_caller(gh: FakeGitHub, repo: str, blob: str = CALLER_BLOB) -> None:
+    gh.put_file(repo, "main", CALLER, CALLER_TEXT, blob)
+
+
+class TestDeletePlan:
+    def test_the_fleet_halfs_plan_validates_without_source(self, tmp_path):  # T5g
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps({
+            "reason": "Removes the retired Auto Review caller.",
+            "targets": [{"repo": "alpha", "issue": 7, "files": [
+                {"workflow": CALLER, "action": "delete", "base_blob": CALLER_BLOB}]}],
+        }), encoding="utf-8")
+        plan = lwp.load_plan(path)
+        assert "source" not in plan and plan["targets"][0]["files"][0]["action"] == "delete"
+
+    def test_a_plan_with_any_replace_entry_still_needs_source(self):
+        with pytest.raises(lwp.PlanError, match="source.repo"):
+            lwp.validate_plan(delete_plan(delete_target("alpha", 7), target("beta", 9)))
+
+    @pytest.mark.parametrize("extra", [{"staged": "docs/x.yml"}, {"expect": "skipped"}])
+    def test_a_delete_entry_carrying_a_replace_key_is_refused(self, extra):
+        plan = delete_plan()
+        plan["targets"][0]["files"][0].update(extra)
+        with pytest.raises(lwp.PlanError, match=f"carries `{next(iter(extra))}`"):
+            lwp.validate_plan(plan)
+
+    @pytest.mark.parametrize("key, value, needle", [
+        ("action", "rename", "action"),
+        ("base_blob", "abc", "base_blob"),
+        ("workflow", "docs/x.yml", ".github/workflows/"),
+    ])
+    def test_a_bad_delete_entry_is_refused_by_name(self, key, value, needle):
+        plan = delete_plan()
+        plan["targets"][0]["files"][0][key] = value
+        with pytest.raises(lwp.PlanError) as e:
+            lwp.validate_plan(plan)
+        assert needle in str(e.value)
+
+
+class TestDeleteTarget:
+    def test_a_file_absent_on_main_is_already(self, mgh):  # T5a
+        plan = lwp.validate_plan(delete_plan())
+        assert lwp.land_target("pat", plan, plan["targets"][0], "o", False) == "already"
+        assert mgh.writes == []
+
+    def test_a_moved_blob_stops_with_no_write(self, mgh):  # T5b
+        live_caller(mgh, "alpha", blob="e" * 40)
+        plan = lwp.validate_plan(delete_plan())
+        with pytest.raises(lwp.LandingStop) as e:
+            lwp.land_target("pat", plan, plan["targets"][0], "o", False)
+        assert e.value.step == "base" and gh_writes(mgh) == []
+
+    def test_a_delete_opens_one_pr_merges_and_deletes_the_branch(self, mgh):  # T5c
+        live_caller(mgh, "alpha")
+        plan = lwp.validate_plan(delete_plan())
+
+        def no_wait(*a, **k):
+            raise AssertionError("waited for a run of a removed workflow")
+
+        assert lwp.land_target("pat", plan, plan["targets"][0], "o", False, wait=no_wait) == "landed"
+        assert gh_writes(mgh) == ["branch", "remove", "pr", "merge", "delete-branch"]
+        assert len(mgh.prs["alpha"]) == 1
+        pr = mgh.prs["alpha"][0]
+        assert pr["title"] == "ci: remove auto-reviewer.yml (Closes #7)"
+        assert pr["body"].startswith("Closes #7\n") and f"Removed:\n\n- `{CALLER}`" in pr["body"]
+        assert ("alpha", "main", CALLER) not in mgh.files
+        assert not any("/actions/runs" in url for _, url in mgh.calls)
+
+    def test_a_read_back_that_still_finds_the_file_stops_the_run(self, mgh):  # T5d
+        live_caller(mgh, "alpha")
+        mgh.merge_lands = False
+        plan = lwp.validate_plan(delete_plan())
+        with pytest.raises(lwp.LandingStop) as e:
+            lwp.land_target("pat", plan, plan["targets"][0], "o", False)
+        assert e.value.step == "verify" and "still on main" in e.value.message
+
+    def test_a_mixed_target_lands_in_one_pr_and_waits_only_for_the_replaced_file(self, mgh):
+        stage(mgh, "alpha")
+        live_caller(mgh, "alpha")
+        files = [{"staged": "docs/ci/alpha/tests.yml", "workflow": ".github/workflows/tests.yml",
+                  "base_blob": BLOB, "expect": "skipped"},
+                 {"workflow": CALLER, "action": "delete", "base_blob": CALLER_BLOB}]
+        plan = lwp.validate_plan(plan_for(target("alpha", 7, files)))
+        waited: list[str] = []
+
+        def wait(pat, cfg, sha, name):
+            waited.append(name)
+            return lsw.WaitResult("skipped")
+
+        assert lwp.land_target("pat", plan, plan["targets"][0], "o", False, wait=wait) == "landed"
+        assert waited == ["Tests"]
+        assert gh_writes(mgh) == ["branch", "commit", "remove", "pr", "merge", "delete-branch"]
+        assert mgh.prs["alpha"][0]["title"] == "ci: update tests.yml; remove auto-reviewer.yml (Closes #7)"
+
+    def test_a_branch_left_without_the_file_by_an_earlier_run_takes_no_second_delete(self, mgh):
+        live_caller(mgh, "alpha")  # on main; the branch an earlier run left already lacks it
+        plan = lwp.validate_plan(delete_plan())
+        cfg = lwp.target_cfg("o", plan["targets"][0], False)
+        assert lwp.remove_workflow("pat", cfg, plan["targets"][0]["files"][0]) is False
+        assert mgh.writes == []
+
+
+def gh_writes(gh: FakeGitHub) -> list[str]:
+    return [w[0] for w in gh.writes]
+
+
+class TestDeleteRun:
+    def _fleet(self, gh: FakeGitHub, *repos: str) -> None:
+        for repo in repos:
+            live_caller(gh, repo)
+
+    def test_a_rerun_after_a_stop_skips_the_done_targets(self, mgh, capsys):  # T5e
+        self._fleet(mgh, "alpha", "gamma")
+        live_caller(mgh, "beta", blob="e" * 40)
+        plan = lwp.validate_plan(delete_plan(
+            delete_target("alpha", 7), delete_target("beta", 9), delete_target("gamma", 11)))
+        assert lwp.run(plan, plan["targets"], "o", False, session=Session()) == 1
+        assert [w[1] for w in mgh.writes if w[0] == "merge"] == ["alpha"]
+
+        live_caller(mgh, "beta")  # the cause is fixed
+        mgh.writes.clear()
+        assert lwp.run(plan, plan["targets"], "o", False, session=Session()) == 0
+        assert [w[1] for w in mgh.writes if w[0] == "merge"] == ["beta", "gamma"]
+        assert not any(w[1].startswith("alpha") for w in mgh.writes)
+        assert "landed 2, already landed 1, of 3" in capsys.readouterr().out
+
+    def test_max_targets_two_lands_exactly_two(self, mgh, capsys):  # T5f
+        self._fleet(mgh, "alpha", "beta", "gamma", "delta")
+        plan = lwp.validate_plan(delete_plan(*(delete_target(r, i) for r, i in
+                                               (("alpha", 7), ("beta", 9), ("gamma", 11), ("delta", 13)))))
+        assert lwp.run(plan, plan["targets"], "o", False, max_targets=2, session=Session()) == 0
+        assert [w[1] for w in mgh.writes if w[0] == "merge"] == ["alpha", "beta"]
+        out = capsys.readouterr().out
+        assert "Stopped at --max-targets 2: landed 2, already landed 0, not reached 2 of 4" in out
+
+        mgh.writes.clear()
+        assert lwp.run(plan, plan["targets"], "o", False, max_targets=2, session=Session()) == 0
+        assert [w[1] for w in mgh.writes if w[0] == "merge"] == ["gamma", "delta"]
+
+    def test_already_done_targets_do_not_count_toward_the_cap(self, mgh):
+        self._fleet(mgh, "gamma")
+        mgh.repos.update({r: {"private": True, "default_branch": "main"} for r in ("alpha", "beta")})
+        plan = lwp.validate_plan(delete_plan(
+            delete_target("alpha", 7), delete_target("beta", 9), delete_target("gamma", 11)))
+        assert lwp.run(plan, plan["targets"], "o", False, max_targets=1, session=Session()) == 0
+        assert [w[1] for w in mgh.writes if w[0] == "merge"] == ["gamma"]
+
+    def test_max_targets_must_be_positive(self):
+        assert lwp.parse_args(["--plan", "p.json", "--max-targets", "3"]).max_targets == 3
+        with pytest.raises(SystemExit):
+            lwp.parse_args(["--plan", "p.json", "--max-targets", "0"])
+
+    def test_apply_prints_the_count_before_the_passphrase(self, mgh, capsys, tmp_path, monkeypatch):
+        self._fleet(mgh, "alpha", "beta", "gamma")
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps(delete_plan(
+            delete_target("alpha", 7), delete_target("beta", 9), delete_target("gamma", 11))),
+            encoding="utf-8")
+        before_passphrase: list[str] = []
+
+        class Ctx:
+            def __enter__(self):
+                before_passphrase.append(capsys.readouterr().out)
+                return "pat"
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(lwp, "classic_pat_session", lambda reason=None: Ctx())
+        assert lwp.main(["--plan", str(path), "--apply", "--max-targets", "2", "--owner", "o"]) == 0
+        assert len(before_passphrase) == 1
+        out = before_passphrase[0]
+        assert "will land: at most 2 of 3 target(s) (--max-targets 2)" in out
+        assert "adds     : at most 4 contributions" in out
+
+    def test_the_dry_run_prints_delete_lines_and_the_count(self, tmp_path, monkeypatch, capsys):
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps(delete_plan(delete_target("alpha", 7), delete_target("beta", 9))),
+                        encoding="utf-8")
+
+        def refuse(*a, **k):
+            raise AssertionError("the dry run asked for the PAT")
+
+        monkeypatch.setattr(lwp, "classic_pat_session", refuse)
+        monkeypatch.setattr(lwp, "run", refuse)
+        assert lwp.main(["--plan", str(path)]) == 0
+        out = capsys.readouterr().out
+        assert out.count(f"delete {CALLER} base {CALLER_BLOB[:10]}") == 2
+        assert "source   : none (every entry is a delete)" in out
+        assert "will land: at most 2 of 2 target(s)" in out
+        assert "adds     : at most 4 contributions" in out

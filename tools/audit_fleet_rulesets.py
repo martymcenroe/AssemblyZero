@@ -55,7 +55,7 @@ from pathlib import Path
 GITHUB_USER = "martymcenroe"
 HTTP_TIMEOUT_S = 30
 DEFAULT_OUTPUT = Path("audit_fleet_rulesets_results.tsv")
-REPO_ADMIN_ROLE_ID = 5  # GitHub repository admin role (matches deploy_auto_reviewer_workflow.py)
+REPO_ADMIN_ROLE_ID = 5  # GitHub repository admin role (the ruleset bypass actor id)
 
 # Rule types that, when present in a ruleset targeting the default branch,
 # block direct push via Contents API. Used for the blocks_direct_push flag.

@@ -156,3 +156,30 @@ class TestClassify:
         runs = [_run("success", 10)]
         status = classify("myrepo", runs, days=7)
         assert status.classification == UNKNOWN
+
+
+class TestRepositoryWithoutTheCaller:
+    """#4719: the Auto Review caller is retired and being removed fleet-wide.
+    A repository without it is NOT_DEPLOYED, its runs are never read, and the
+    audit exits 0."""
+
+    def _no_caller(self, monkeypatch):
+        import audit_cerberus_health as ach
+
+        def runs_must_not_be_read(repo):
+            raise AssertionError("read the runs of a repository without the caller")
+
+        monkeypatch.setattr(ach, "auto_reviewer_yml_present", lambda repo: False)
+        monkeypatch.setattr(ach, "recent_auto_review_runs", runs_must_not_be_read)
+        return ach
+
+    def test_exits_zero(self, monkeypatch, capsys):
+        ach = self._no_caller(monkeypatch)
+        assert ach.main(["--repo", "no-caller"]) == 0
+
+    def test_is_reported_as_expected_not_as_a_failure(self, monkeypatch, capsys):
+        ach = self._no_caller(monkeypatch)
+        assert ach.main(["--repo", "no-caller", "--include-not-deployed"]) == 0
+        out = capsys.readouterr().out
+        assert "NOT_DEPLOYED (1)" in out
+        assert "retired Auto Review caller" in out and "not a failure" in out

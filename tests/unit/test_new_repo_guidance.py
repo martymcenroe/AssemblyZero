@@ -1,9 +1,8 @@
-"""Guidance the new-repo path prints, and the caller template it deploys.
+"""Guidance the new-repo path prints.
 
-Two defects that shipped for months without failing anything, because neither
-is about behaviour. One was operator-facing prose. The other was a duplicated
-constant. Nothing executes prose and nothing compares duplicates, so nothing
-caught either.
+A defect that shipped for months without failing anything, because it is not
+about behaviour: operator-facing prose. Nothing executes prose, so nothing
+caught it.
 
 DEPLOY-THEN-REVOKE (#134)
 -------------------------
@@ -17,27 +16,18 @@ repo holding the same key.
 Runbook 0927 was corrected and the script was not, so the two contradicted each
 other, and the script is the copy the operator actually reads at 10pm.
 
-CALLER-TEMPLATE DRIFT (#1193)
------------------------------
-deploy_auto_reviewer_workflow.py carried its own copy of the auto-reviewer
-caller YAML. It went stale: pre-`workflow_call` format, no `with:` inputs,
-`secrets: inherit` instead of the named secrets the reusable workflow declares
-as required. Every repo it touched got a workflow that died at startup.
-
-The copy is now gone -- it imports the constant from new_repo.py -- and this
-asserts they cannot diverge again.
+The caller-template drift (#1193) this file also guarded went with the caller
+itself: the scaffolder writes no Auto Review caller, and the tool that deployed
+one is removed (#4719).
 """
 import re
 import sys
 from pathlib import Path
 
-import pytest
-
 TOOLS = Path(__file__).resolve().parents[2] / "tools"
 sys.path.insert(0, str(TOOLS))
 
 NEW_REPO_SRC = (TOOLS / "new_repo.py").read_text(encoding="utf-8")
-DEPLOY_SRC = (TOOLS / "deploy_auto_reviewer_workflow.py").read_text(encoding="utf-8")
 
 
 class TestNoDeployThenRevoke:
@@ -70,35 +60,3 @@ class TestNoDeployThenRevoke:
         # either way, which is what makes revoking destructive.
         assert "belt-and-" not in NEW_REPO_SRC
         assert "no on-disk credential to retire" not in NEW_REPO_SRC
-
-
-class TestCallerTemplateHasOneDefinition:
-    def test_deploy_tool_imports_rather_than_redefines(self):
-        assert "_CANONICAL_AUTO_REVIEWER_CALLER" in DEPLOY_SRC
-        assert not re.search(r"^CALLER_WORKFLOW\s*=\s*[\"']", DEPLOY_SRC, re.MULTILINE), \
-            "deploy tool redefines the caller instead of importing it (#1193)"
-
-    def test_the_two_modules_agree_by_identity(self):
-        new_repo = pytest.importorskip("new_repo")
-        deploy = pytest.importorskip("deploy_auto_reviewer_workflow")
-        assert deploy.CALLER_WORKFLOW is new_repo._CANONICAL_AUTO_REVIEWER_CALLER
-
-    def test_the_canonical_caller_matches_the_reusable_workflow_contract(self):
-        new_repo = pytest.importorskip("new_repo")
-        caller = new_repo._CANONICAL_AUTO_REVIEWER_CALLER
-        # The reusable workflow declares workflow_call with a required_checks
-        # input and two REQUIRED secrets. `secrets: inherit` does not satisfy
-        # a declared-secrets contract -- that mismatch is what produced
-        # startup_failure in 0s on every PR.
-        assert "workflows/auto-reviewer.yml@main" in caller
-        assert "required_checks" in caller
-        assert "REVIEWER_APP_ID" in caller
-        assert "REVIEWER_APP_PRIVATE_KEY" in caller
-        assert "secrets: inherit" not in caller
-
-    def test_docstring_does_not_carry_a_third_copy(self):
-        # The module docstring used to quote the YAML, and the quote went stale
-        # alongside the code copy. A transcribed example is a copy nothing
-        # tests and everyone trusts.
-        head = DEPLOY_SRC.split('"""')[1] if '"""' in DEPLOY_SRC else ""
-        assert "secrets: inherit" not in head

@@ -64,20 +64,24 @@ def running_test_jobs(workflow_text: str) -> list[str]:
     return found
 
 
+def _written(project: Path) -> list[Path]:
+    workflows = project / ".github" / "workflows"
+    return sorted(workflows.iterdir()) if workflows.is_dir() else []
+
+
 @pytest.mark.parametrize("enable_pypi, expected", [
-    (True, ["auto-reviewer.yml", "release.yml"]),
-    (False, ["auto-reviewer.yml"]),
+    (True, ["release.yml"]),
+    (False, []),
 ])
 def test_the_scaffolder_writes_only_the_known_workflows(tmp_path: Path, enable_pypi, expected):
     create_github_workflows(tmp_path, enable_pypi=enable_pypi)
-    written = sorted(p.name for p in (tmp_path / ".github" / "workflows").iterdir())
-    assert written == expected
+    assert [p.name for p in _written(tmp_path)] == expected
 
 
 @pytest.mark.parametrize("enable_pypi", [True, False])
 def test_no_workflow_the_scaffolder_writes_runs_a_test_or_lint_job(tmp_path: Path, enable_pypi):
     create_github_workflows(tmp_path, enable_pypi=enable_pypi)
-    for wf in (tmp_path / ".github" / "workflows").iterdir():
+    for wf in _written(tmp_path):
         assert running_test_jobs(wf.read_text(encoding="utf-8")) == [], wf.name
 
 

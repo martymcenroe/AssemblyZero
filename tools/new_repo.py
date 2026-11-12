@@ -1688,46 +1688,18 @@ def create_python_project(
     return True
 
 
-# Canonical auto-reviewer.yml caller content. Single source of truth used
-# by both create_github_workflows() (write at creation time) and
-# verify_workflow_content_on_origin() (post-setup verification). Lifted
-# to module scope so both paths compare against the same bytes — the
-# #1193 failure mode was exactly this kind of divergent-template drift.
-_CANONICAL_AUTO_REVIEWER_CALLER = '''\
-name: Auto Review
-
-# Caller workflow: invokes the reusable auto-reviewer from AssemblyZero.
-# Requires Cerberus secrets (REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY).
-# Deploy secrets fleet-wide: poetry run python tools/deploy_cerberus_secrets.py
-
-on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-
-permissions:
-  pull-requests: write
-  checks: read
-
-jobs:
-  auto-review:
-    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
-    with:
-      required_checks: "issue-reference"
-    secrets:
-      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
-      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
-'''
-
-
 def create_github_workflows(project_path: Path, enable_pypi: bool = True) -> None:
-    """Create GitHub Actions workflow files for PR governance + PyPI release.
+    """Create the GitHub Actions workflow files a new repository carries.
 
-    Deploys two workflows by default:
-    - auto-reviewer.yml: calls the reusable auto-reviewer from AssemblyZero
-      to approve PRs after pr-sentinel passes (requires Cerberus secrets).
+    One workflow at most:
     - release.yml (#1074): tag-triggered, OIDC-auth to PyPI, runs poetry
-      build + poetry publish. Skipped when enable_pypi is False.
+      build + poetry publish. Written only when enable_pypi is True.
+
+    No Auto Review caller (`auto-reviewer.yml`) is written (#4719). The
+    reusable workflow it called is retired (#3663: every job `if: false`),
+    and the pr-sentinel Worker approves as Cerberus once `issue-reference`
+    passes, so the caller only ever ran a skipped job.
+    tests/unit/test_new_repo_no_auto_review_caller.py holds this.
 
     pr-sentinel check is posted by the Cloudflare Worker (pr-sentinel-mm
     GitHub App, installed in "All repositories" mode fleet-wide). The
@@ -1745,19 +1717,12 @@ def create_github_workflows(project_path: Path, enable_pypi: bool = True) -> Non
 
     Args:
         project_path: Path to the project root.
-        enable_pypi: When True (default), also deploy release.yml. When
-                     False, only auto-reviewer.yml is written. Mirrors the
-                     --no-pypi flag wired through main().
+        enable_pypi: When True (default), deploy release.yml. When False,
+                     no workflow file is written and .github/workflows/ is
+                     not created. Mirrors the --no-pypi flag wired through
+                     main().
     """
     workflows_dir = project_path / ".github" / "workflows"
-    workflows_dir.mkdir(parents=True, exist_ok=True)
-
-    # newline="" disables Python's Windows LF→CRLF translation. The
-    # workflow file lands on disk with LF — same as every other repo
-    # in the fleet, and matches what the Contents API upload sends.
-    (workflows_dir / "auto-reviewer.yml").write_text(
-        _CANONICAL_AUTO_REVIEWER_CALLER, encoding="utf-8", newline="",
-    )
 
     # release.yml (#1074): tag-triggered PyPI publish via OIDC Trusted
     # Publisher. The first tag push only succeeds AFTER the human runs
@@ -1804,7 +1769,10 @@ jobs:
         # No password / token — OIDC Trusted Publisher handles auth.
 '''
         # #2274: the workflow builds on the version the fleet runs, not on a
-        # floor no machine has.
+        # floor no machine has. newline="" disables Python's Windows LF→CRLF
+        # translation, so the file lands with LF, matching what the Contents
+        # API upload sends.
+        workflows_dir.mkdir(parents=True, exist_ok=True)
         (workflows_dir / "release.yml").write_text(
             release_yml.replace(_PYTHON_CI_SENTINEL, FLEET_PYTHON_CI),
             encoding="utf-8",
@@ -1814,7 +1782,7 @@ jobs:
 
 # Dependabot version-update ecosystems, detected by marker-file presence.
 # (marker filename, package-ecosystem, ecosystem label). github-actions is
-# always added on top -- every scaffolded repo ships at least one workflow.
+# always added on top, so a workflow added later is covered from the start.
 _DEPENDABOT_ECOSYSTEMS: list[tuple[str, str, str]] = [
     ("pyproject.toml", "pip", "python"),
     ("package.json", "npm", "javascript"),
@@ -1829,8 +1797,8 @@ def ecosystems_for_markers(present_markers: set[str]) -> list[tuple[str, str]]:
     (detect_dependabot_ecosystems, which checks a local checkout) and the
     API-based fleet backfill (tools/generate_dependabot_yml.py, #1569, which
     probes marker existence over the GitHub Contents API). Order follows
-    _DEPENDABOT_ECOSYSTEMS; github-actions is always appended last because
-    every fleet repo ships at least the auto-reviewer workflow.
+    _DEPENDABOT_ECOSYSTEMS; github-actions is always appended last, so a
+    workflow added later is covered from the start.
     """
     ecosystems = [
         (eco, label)
@@ -1845,8 +1813,8 @@ def detect_dependabot_ecosystems(project_path: Path) -> list[tuple[str, str]]:
     """Return the (package-ecosystem, label) pairs that apply to project_path.
 
     Detection is by marker-file presence (pyproject.toml -> pip, package.json
-    -> npm, Dockerfile -> docker). github-actions is always appended last
-    because every scaffolded repo ships at least the auto-reviewer workflow.
+    -> npm, Dockerfile -> docker). github-actions is always appended last,
+    so a workflow added later is covered from the start.
     Keeping detection file-based (not arg-based) lets the fleet-backfill
     follow-up reuse this logic against existing repos via
     ecosystems_for_markers().
@@ -2209,7 +2177,6 @@ def _deploy_workflows_via_contents_api(
         uploaded (HTTP < 300). count is the number of files uploaded.
         If the workflows directory is missing or empty, returns (True, 0).
     """
-    import base64
     workflows_dir = project_path / ".github" / "workflows"
     if not workflows_dir.exists():
         return True, 0
@@ -2446,38 +2413,6 @@ def verify_repo_settings_on_origin(
     if failures:
         return False, "; ".join(failures)
     return True, "squash-only, no wiki/projects, delete-branch-on-merge"
-
-
-def verify_workflow_content_on_origin(
-    github_user: str, repo_name: str, pat: str,
-) -> tuple[bool, str]:
-    """Verify .github/workflows/auto-reviewer.yml on origin matches canonical.
-
-    Catches the #1193 failure mode: file exists but content is wrong (e.g.,
-    the OLD caller format that triggers startup_failure). Byte-for-byte
-    compare against the same constant that create_github_workflows() writes,
-    after CRLF normalization (Contents API stores bytes verbatim).
-    """
-    try:
-        resp = _request_with_retry(
-            "GET",
-            f"{_GH_API}/repos/{github_user}/{repo_name}/contents/.github/workflows/auto-reviewer.yml",
-            pat,
-        )
-    except requests.RequestException as e:
-        return False, f"network: {e}"
-    if resp.status_code == 404:
-        return False, "auto-reviewer.yml not present on origin"
-    if resp.status_code != 200:
-        return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
-    encoded = (resp.json().get("content") or "").replace("\n", "")
-    try:
-        content = base64.b64decode(encoded).decode("utf-8")
-    except (ValueError, UnicodeDecodeError) as e:
-        return False, f"could not decode content: {e}"
-    if content.replace("\r\n", "\n") == _CANONICAL_AUTO_REVIEWER_CALLER:
-        return True, "content matches canonical NEW format"
-    return False, "content differs from canonical (#1193 failure mode)"
 
 
 def _parse_sentinel_app_bundle(bundle: str) -> tuple[str, str]:
@@ -3346,13 +3281,13 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     else:
         print("\n11b2. SKIPPED Python bootstrap (--lang none)")
 
-    # Step 11c: Create GitHub Actions workflows (PR governance + release)
+    # Step 11c: Create GitHub Actions workflows (PyPI release only; #4719)
     print("\n11c. Creating GitHub Actions workflows...")
     create_github_workflows(project_path, enable_pypi=enable_pypi)
     if enable_pypi:
-        print("  Created auto-reviewer.yml + release.yml (PyPI publish on tag)")
+        print("  Created release.yml (PyPI publish on tag)")
     else:
-        print("  Created auto-reviewer.yml (Cerberus auto-approval caller)")
+        print("  No workflow files (PyPI publishing is off)")
 
     # Step 11c2: Create .github/dependabot.yml (#1334). Step 20 enables
     # Dependabot at the API level (alerts + security updates); without this
@@ -3383,8 +3318,14 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 12b: If skipping GitHub, commit workflows locally as a second
     # commit so the local repo is complete. With GitHub in play, workflow
     # files stay untracked locally until `git pull` brings them back after
-    # the Contents API upload (step 16 below).
-    if args.no_github:
+    # the Contents API upload (step 16 below). A repository with no workflow
+    # file (#4719: PyPI off) has nothing to add, and `git add` of a missing
+    # path would fail the run.
+    workflows_dir = project_path / ".github" / "workflows"
+    has_workflows = workflows_dir.is_dir() and any(
+        p.is_file() for p in workflows_dir.iterdir()
+    )
+    if args.no_github and has_workflows:
         run_command(["git", "add", ".github/workflows"], cwd=project_path)
         run_command(
             ["git", "commit", "-m", "chore: add GitHub Actions workflows"],
@@ -3797,16 +3738,6 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         gh_checks_passed += 1
                     else:
                         print(f"  [FAIL] Repo settings: {msg}")
-
-                    gh_checks_total += 1
-                    ok, msg = verify_workflow_content_on_origin(
-                        github_user, args.name, pat,
-                    )
-                    if ok:
-                        print(f"  [PASS] auto-reviewer.yml: {msg}")
-                        gh_checks_passed += 1
-                    else:
-                        print(f"  [FAIL] auto-reviewer.yml: {msg}")
 
                     if args.cerberus_pem or args.cerberus_pem_gpg:
                         gh_checks_total += 1

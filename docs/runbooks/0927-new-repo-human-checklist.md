@@ -193,10 +193,10 @@ Steps in **bold** require classic-PAT scopes. The PAT never enters the env block
 The script handles all of the following automatically:
 - Local directory structure + all config files
 - GitHub repo creation (case preserved from the input name; #1533) + initial push of non-workflow files
-- Workflow file upload via Contents API (one PUT per file)
+- Workflow file upload via Contents API (one PUT per file; only `release.yml`, and only with `--pypi`)
 - Repo settings: wiki disabled, projects disabled, squash-only merge, delete branch on merge
 - Branch protection: require PR (1 review), block force push, block deletion, enforce_admins, pr-sentinel check
-- PR governance workflow (`auto-reviewer.yml` — pr-sentinel check comes from the Cloudflare Worker fleet-wide)
+- No PR governance workflow: the pr-sentinel check and the Cerberus approval both come from the Cloudflare Worker fleet-wide, and the retired Auto Review caller (`auto-reviewer.yml`) is no longer written (#4719)
 - `.unleashed.json`, and `.claude/settings.json` as `{}`. No hook is installed in the repo: the machine-wide managed settings register every security hook centrally (#3684, #4137)
 - **Python project bootstrap**: `pyproject.toml`, `poetry.lock`, `pytest`+`pytest-cov` in dev deps, `[tool.pytest.ini_options]` for deterministic test discovery, `tests/conftest.py` for `src/` import path. Pass `--lang none` to skip for non-Python projects. (#1058)
 - **Canonical labels**: `implementation` and `lld` on the GitHub repo (#1061)

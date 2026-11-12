@@ -17,6 +17,10 @@ re-deploy first; otherwise the revoke silently breaks them.
 Read-only. Uses gh CLI's fine-grained PAT for all calls. No classic PAT,
 no pinentry, no secrets touched.
 
+A repository without the caller (.github/workflows/auto-reviewer.yml) is
+NOT_DEPLOYED and never fails the run (#4719): the Auto Review caller is
+retired and being removed fleet-wide.
+
 Issue: martymcenroe/AssemblyZero#1284
 Related: unleashed#658 (architectural finding)
 """
@@ -233,8 +237,8 @@ def print_report(report: AuditReport, days: int) -> None:
     print(f"  UNKNOWN ({report.count(UNKNOWN)}): no recent observation; "
           "trigger a synthetic PR (separate tool) to verify before rotation")
     if report.count(NOT_DEPLOYED) and report.count(NOT_DEPLOYED) > 0:
-        print(f"  NOT_DEPLOYED ({report.count(NOT_DEPLOYED)}): no auto-reviewer.yml; "
-              "out of scope for Cerberus key rotation")
+        print(f"  NOT_DEPLOYED ({report.count(NOT_DEPLOYED)}): no auto-reviewer.yml, "
+              "the retired Auto Review caller (#4719); expected, and not a failure")
 
 
 def main(argv: list[str] | None = None) -> int:
