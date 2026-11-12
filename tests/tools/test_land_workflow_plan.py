@@ -612,3 +612,122 @@ class TestDeleteRun:
         assert "source   : none (every entry is a delete)" in out
         assert "will land: at most 2 of 2 target(s)" in out
         assert "adds     : at most 4 contributions" in out
+
+
+# --- #4725: a target whose issue lives in another repository ---------------------------
+
+#: Every closing directive GitHub honours (the fleet's pre-flight check 2).
+DIRECTIVE = re.compile(
+    r"\b(close[sd]?|fix(es|ed)?|resolve[sd]?)\s*:?\s*([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#[0-9]+",
+    re.IGNORECASE)
+
+
+def homed(t: dict, home: str = "home") -> dict:
+    t["issue_repo"] = home
+    return t
+
+
+def record_messages(monkeypatch, fake: FakeGitHub) -> list[str]:
+    """Route the fake's Contents-API PUT and DELETE through a recorder of commit messages."""
+    messages: list[str] = []
+
+    def put(url, headers=None, json=None, timeout=None):
+        if "/contents/" in url:
+            messages.append(json["message"])
+        return fake.put(url, headers=headers, json=json, timeout=timeout)
+
+    def delete(url, headers=None, json=None, timeout=None):
+        if "/contents/" in url:
+            messages.append(json["message"])
+        return fake.delete(url, headers=headers, json=json, timeout=timeout)
+
+    monkeypatch.setattr(lsw, "requests", SimpleNamespace(
+        get=fake.get, post=fake.post, put=put, delete=delete))
+    return messages
+
+
+def directives(text: str) -> list[str]:
+    return [m.group(0) for m in DIRECTIVE.finditer(text)]
+
+
+class TestIssueRepo:
+    def test_a_target_naming_its_issue_repo_validates(self):  # T1
+        plan = lwp.validate_plan(delete_plan(homed(delete_target("alpha", 7)), delete_target("beta", 9)))
+        assert plan["targets"][0]["issue_repo"] == "home" and "issue_repo" not in plan["targets"][1]
+
+    @pytest.mark.parametrize("value, needle", [
+        ("", "is not a repository name"),
+        (12, "is not a repository name"),
+        (None, "is not a repository name"),
+        ("ho me", "is not a repository name"),
+        ("o/home", "is a name, not owner/name"),
+    ])
+    def test_a_bad_issue_repo_is_refused_by_name(self, value, needle):  # T1
+        with pytest.raises(lwp.PlanError) as e:
+            lwp.validate_plan(delete_plan(homed(delete_target("alpha", 7), value)))
+        assert "`issue_repo`" in str(e.value) and needle in str(e.value)
+
+    def test_the_reference_names_the_home_only_when_one_is_given(self):
+        assert lwp.closes_ref("o", delete_target("alpha", 7)) == "#7"
+        assert lwp.closes_ref("o", homed(delete_target("alpha", 7))) == "o/home#7"
+
+    def test_a_delete_closes_the_issue_in_its_home_with_one_directive(self, mgh, monkeypatch):  # T2, T4
+        live_caller(mgh, "alpha")
+        messages = record_messages(monkeypatch, mgh)
+        plan = lwp.validate_plan(delete_plan(homed(delete_target("alpha", 7))))
+        assert lwp.land_target("pat", plan, plan["targets"][0], "o", False) == "landed"
+        assert len(mgh.prs["alpha"]) == 1
+        pr = mgh.prs["alpha"][0]
+        assert pr["title"] == "ci: remove auto-reviewer.yml (Closes o/home#7)"
+        assert pr["body"].startswith("Closes o/home#7\n")
+        assert directives(pr["body"]) == ["Closes o/home#7"]
+        assert directives(pr["title"]) == ["Closes o/home#7"]
+        assert pr["head"] == "ci/staged-workflow-7"
+        assert messages == ["ci: remove auto-reviewer.yml (Closes o/home#7)"]
+        assert ("alpha", "main", CALLER) not in mgh.files
+
+    def test_the_long_title_fallback_keeps_the_home_reference(self):  # T3
+        workflows = [f".github/workflows/{'w' * 40}{i}.yml" for i in range(8)]
+        assert lwp.pr_title(workflows, "o/home#7") == "ci: update 8 workflows (Closes o/home#7)"
+        assert lwp.pr_title([], "o/home#7", workflows) == "ci: remove 8 workflows (Closes o/home#7)"
+
+    def test_a_replaced_workflow_commit_closes_the_issue_in_its_home(self, gh, monkeypatch):  # T4
+        stage(gh, "alpha")
+        messages = record_messages(monkeypatch, gh)
+        plan = lwp.validate_plan(plan_for(homed(target("alpha", 7))))
+        assert lwp.land_target("pat", plan, plan["targets"][0], "o", False) == "landed"
+        pr = gh.prs["alpha"][0]
+        assert pr["title"] == "ci: update tests.yml (Closes o/home#7)"
+        assert directives(pr["body"]) == ["Closes o/home#7"]
+        assert messages == ["ci: update tests.yml (Closes o/home#7)"]
+
+    def test_a_target_without_issue_repo_still_closes_its_own_issue(self, mgh, monkeypatch):  # T6
+        live_caller(mgh, "alpha")
+        messages = record_messages(monkeypatch, mgh)
+        plan = lwp.validate_plan(delete_plan())
+        assert lwp.land_target("pat", plan, plan["targets"][0], "o", False) == "landed"
+        pr = mgh.prs["alpha"][0]
+        assert pr["title"] == "ci: remove auto-reviewer.yml (Closes #7)"
+        assert directives(pr["body"]) == ["Closes #7"]
+        assert messages == ["ci: remove auto-reviewer.yml (Closes #7)"]
+
+    def test_the_single_repository_lander_still_closes_its_own_issue(self):  # T6
+        cfg = SimpleNamespace(issue=7)
+        assert lsw._closes(cfg) == "#7"
+        cfg.closes = "o/home#7"
+        assert lsw._closes(cfg) == "o/home#7"
+
+    def test_the_dry_run_names_the_home(self, tmp_path, monkeypatch, capsys):  # T5
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps(delete_plan(homed(delete_target("alpha", 7)),
+                                               delete_target("beta", 9))), encoding="utf-8")
+
+        def refuse(*a, **k):
+            raise AssertionError("the dry run asked for the PAT")
+
+        monkeypatch.setattr(lwp, "classic_pat_session", refuse)
+        monkeypatch.setattr(lwp, "run", refuse)
+        assert lwp.main(["--plan", str(path), "--owner", "o"]) == 0
+        out = capsys.readouterr().out
+        assert "o/alpha  PR closes o/home#7  branch ci/staged-workflow-7" in out
+        assert "o/beta  PR closes #9  branch ci/staged-workflow-9" in out

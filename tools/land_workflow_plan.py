@@ -31,6 +31,15 @@ here: the plan is the only source of them, and it lives where the staged copies 
 `skipped` when every job in the file is `if: false`, `success` otherwise. Other keys are
 ignored, so a plan may carry its own notes.
 
+A target whose issues live in another repository (its own GitHub issues are turned off)
+names that repository in `issue_repo`, a name and not `owner/name` (#4725):
+
+    {"repo": "<target>", "issue": 12, "issue_repo": "<repository holding issue 12>", ...}
+
+Its pull request's title and body, and the commits on its branch, then carry
+`Closes <owner>/<issue_repo>#<issue>` in place of `Closes #<issue>`. Nothing else changes:
+the branch is still `ci/staged-workflow-<issue>`, in the target.
+
 A file entry may instead remove a workflow (#4721):
 
     {"workflow": ".github/workflows/<file>.yml", "action": "delete",
@@ -112,6 +121,7 @@ from _pat_session import classic_pat_session
 EXPECTS = ("success", "skipped")
 ACTIONS = ("replace", "delete")
 BLOB = re.compile(r"^[0-9a-f]{40}$")
+REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 TITLE_MAX = 256
 #: What one landed target adds to the day's GitHub contribution count: the pull request,
 #: and the squash commit on `main`. The branch's own commits never reach `main`.
@@ -186,6 +196,12 @@ def validate_plan(plan: object) -> dict:
         seen.add(t["repo"])
         if not isinstance(t.get("issue"), int) or isinstance(t["issue"], bool) or t["issue"] <= 0:
             raise PlanError(f"{where} ({t['repo']}): `issue` is not a positive integer")
+        if "issue_repo" in t:
+            home = t["issue_repo"]
+            if isinstance(home, str) and "/" in home:
+                raise PlanError(f"{where} ({t['repo']}): `issue_repo` is a name, not owner/name")
+            if not isinstance(home, str) or not REPO_NAME.match(home):
+                raise PlanError(f"{where} ({t['repo']}): `issue_repo` is not a repository name")
         files = t.get("files")
         if not isinstance(files, list) or not files:
             raise PlanError(f"{where} ({t['repo']}): `files` is missing or empty")
@@ -217,25 +233,44 @@ def load_plan(path: Path) -> dict:
     return validate_plan(plan)
 
 
+def closes_ref(owner: str, target: dict) -> str:
+    """What the target's pull request closes: `#<issue>`, or `<owner>/<issue_repo>#<issue>`
+    for a target whose issues live in another repository (#4725)."""
+    home = target.get("issue_repo")
+    return f"{owner}/{home}#{target['issue']}" if home else f"#{target['issue']}"
+
+
+def _ref(issue: int | str) -> str:
+    """An issue number becomes `#<n>`; a reference from `closes_ref()` is kept as it is."""
+    return issue if isinstance(issue, str) else f"#{issue}"
+
+
 def target_cfg(owner: str, target: dict, merge_on_red: bool) -> SimpleNamespace:
-    """The attribute bag the single-repository lander's functions read."""
+    """The attribute bag the single-repository lander's functions read.
+
+    `closes` is the reference every commit and the pull request close; the single-repository
+    lander's `put_workflow` reads it in place of `#<issue>`.
+    """
     return SimpleNamespace(
         owner=owner, repo=target["repo"], issue=target["issue"],
+        closes=closes_ref(owner, target),
         branch=f"ci/staged-workflow-{target['issue']}", workflow=None,
         replace=True, keep_staged=True, merge_on_red=merge_on_red, check=None,
     )
 
 
-def pr_title(workflows: list[str], issue: int, removed: list[str] | tuple = ()) -> str:
+def pr_title(workflows: list[str], issue: int | str, removed: list[str] | tuple = ()) -> str:
+    """`issue` is the issue number, or a reference from `closes_ref()`."""
+    ref = _ref(issue)
     parts = []
     if workflows:
         parts.append("update " + ", ".join(Path(w).name for w in workflows))
     if removed:
         parts.append("remove " + ", ".join(Path(w).name for w in removed))
-    title = f"ci: {'; '.join(parts)} (Closes #{issue})"
+    title = f"ci: {'; '.join(parts)} (Closes {ref})"
     if len(title) > TITLE_MAX:
         verb = "change" if workflows and removed else ("update" if workflows else "remove")
-        title = f"ci: {verb} {len(workflows) + len(removed)} workflows (Closes #{issue})"
+        title = f"ci: {verb} {len(workflows) + len(removed)} workflows (Closes {ref})"
     return title
 
 
@@ -246,18 +281,20 @@ _PAT_NOTE = (
 )
 
 
-def pr_body(reason: str, workflows: list[str], issue: int,
+def pr_body(reason: str, workflows: list[str], issue: int | str,
             removed: list[str] | tuple = ()) -> str:
+    """`issue` is the issue number, or a reference from `closes_ref()`."""
+    ref = _ref(issue)
     changed = "\n".join(f"- `{w}`" for w in workflows)
     if not removed:
         return (
-            f"Closes #{issue}\n\n{reason.strip()}\n\nChanged:\n\n{changed}\n\n" + _PAT_NOTE
+            f"Closes {ref}\n\n{reason.strip()}\n\nChanged:\n\n{changed}\n\n" + _PAT_NOTE
             + "Each file was built from the live blob on `main` that the plan names, and the "
             "lander refuses a file whose `main` has moved since.\n"
         )
     gone = "\n".join(f"- `{w}`" for w in removed)
     return (
-        f"Closes #{issue}\n\n{reason.strip()}\n\n"
+        f"Closes {ref}\n\n{reason.strip()}\n\n"
         + (f"Changed:\n\n{changed}\n\n" if workflows else "")
         + f"Removed:\n\n{gone}\n\n" + _PAT_NOTE
         + "Each file is changed or removed at the live blob on `main` that the plan names, "
@@ -388,8 +425,8 @@ def land_target(
         remove_workflow(pat, cfg, f)
     workflows = [f["workflow"] for f, _ in pending]
     removed = [f["workflow"] for f in deletes]
-    num = open_pr(pat, cfg, pr_title(workflows, cfg.issue, removed),
-                  pr_body(plan["reason"], workflows, cfg.issue, removed))
+    num = open_pr(pat, cfg, pr_title(workflows, cfg.closes, removed),
+                  pr_body(plan["reason"], workflows, cfg.closes, removed))
 
     # A removed workflow starts no run of its own, so only replaced ones are waited for.
     sha = lsw.head_sha(pat, cfg, num) if pending else None
@@ -432,7 +469,7 @@ def remove_workflow(pat: str, cfg: SimpleNamespace, f: dict) -> bool:
     r = lsw.requests.delete(
         lsw._repo_url(cfg, f"contents/{wf}"), headers=lsw._headers(pat),
         timeout=lsw.HTTP_TIMEOUT_S,
-        json={"message": f"ci: remove {Path(wf).name} (Closes #{cfg.issue})",
+        json={"message": f"ci: remove {Path(wf).name} (Closes {cfg.closes})",
               "sha": f["base_blob"], "branch": cfg.branch},
     )
     r.raise_for_status()
@@ -483,7 +520,8 @@ def dry_run(plan: dict, targets: list[dict], owner: str, merge_on_red: bool,
     print_budget(targets, max_targets)
     print()
     for t in targets:
-        print(f"  {owner}/{t['repo']}  PR closes #{t['issue']}  branch ci/staged-workflow-{t['issue']}")
+        print(f"  {owner}/{t['repo']}  PR closes {closes_ref(owner, t)}  "
+              f"branch ci/staged-workflow-{t['issue']}")
         for f in t["files"]:
             if is_delete(f):
                 print(f"      delete {f['workflow']} base {f['base_blob'][:10]}")
@@ -528,7 +566,7 @@ def run(
                     capped = True
                     break
                 current = t["repo"]
-                print(f"\n{owner}/{t['repo']} (#{t['issue']}) ...")
+                print(f"\n{owner}/{t['repo']} ({closes_ref(owner, t)}) ...")
                 outcome = land(pat, plan, t, owner, merge_on_red)
                 (landed if outcome == "landed" else already).append(t["repo"])
                 print(f"  {outcome}")

@@ -198,6 +198,12 @@ def _verb(cfg: argparse.Namespace) -> str:
     return "update" if getattr(cfg, "replace", False) else "add"
 
 
+def _closes(cfg: argparse.Namespace) -> str:
+    """What a commit closes: `#<issue>`, unless the caller set `cfg.closes` to a reference
+    into another repository (the plan lander's `issue_repo`, #4725)."""
+    return getattr(cfg, "closes", None) or f"#{cfg.issue}"
+
+
 def main_sha(pat: str, cfg: argparse.Namespace) -> str:
     r = requests.get(
         _repo_url(cfg, "git/ref/heads/main"), headers=_headers(pat), timeout=HTTP_TIMEOUT_S
@@ -232,7 +238,7 @@ def put_workflow(pat: str, cfg: argparse.Namespace, content: str) -> bool:
         print(f"  {cfg.workflow} on {cfg.branch} already holds the staged text -- no commit")
         return False
     payload: dict[str, object] = {
-        "message": f"ci: {_verb(cfg)} {Path(cfg.workflow).name} (Closes #{cfg.issue})",
+        "message": f"ci: {_verb(cfg)} {Path(cfg.workflow).name} (Closes {_closes(cfg)})",
         "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
         "branch": cfg.branch,
     }
