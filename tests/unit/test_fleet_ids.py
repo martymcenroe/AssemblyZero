@@ -72,9 +72,11 @@ def test_the_file_says_it_is_generated() -> None:
 
 
 def test_the_programs_that_need_the_ids_read_them() -> None:
-    """R3: the three programs that used to hard-code an App ID now take it from fleet_ids."""
+    """R3: the programs that used to hard-code an App ID now take it from fleet_ids.
+
+    The third, the per-repo Cerberus secret deploy tool, is retired (#4728).
+    """
     for rel, key in (("tools/cerberus_worker_key.py", "cerberus_app_id"),
-                     ("tools/deploy_cerberus_secrets.py", "cerberus_app_id"),
                      ("tools/sentinel_migrate.py", "pr_sentinel_app_id")):
         assert f'fleet_ids.get("{key}")' in (ROOT / rel).read_text(encoding="utf-8"), rel
 

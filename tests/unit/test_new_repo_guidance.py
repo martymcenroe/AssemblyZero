@@ -16,6 +16,11 @@ repo holding the same key.
 Runbook 0927 was corrected and the script was not, so the two contradicted each
 other, and the script is the copy the operator actually reads at 10pm.
 
+Since #4728 the script deploys no Cerberus key at all (nothing reads the
+per-repo secrets), so it prints no post-deploy advice. The keep-active rule
+still binds, because the pr-sentinel Worker signs with the App key, and its
+home is the rotation runbook 0939, where the operator meets the Revoke button.
+
 The caller-template drift (#1193) this file also guarded went with the caller
 itself: the scaffolder writes no Auto Review caller, and the tool that deployed
 one is removed (#4719).
@@ -47,12 +52,19 @@ class TestNoDeployThenRevoke:
         hits = self.IMPERATIVE.findall(NEW_REPO_SRC)
         assert not hits, f"deploy-then-revoke instruction present: {hits}"
 
-    def test_the_keep_active_warning_is_actually_printed(self):
-        # The inverse assertion. Deleting the bad advice without replacing it
-        # would pass the test above and leave the operator with no guidance at
-        # the exact moment they are looking at a Revoke button.
-        assert "do NOT revoke" in NEW_REPO_SRC or "Do NOT revoke" in NEW_REPO_SRC
-        assert "0939" in NEW_REPO_SRC, "must point at the rotation runbook"
+    def test_the_keep_active_rule_survives_in_the_rotation_runbook(self):
+        # The inverse assertion. Deleting the bad advice without keeping the
+        # rule would pass the test above and leave the operator with no
+        # guidance at the exact moment they are looking at a Revoke button.
+        # Since #4728 that moment is a rotation, never a new repo.
+        runbook = (TOOLS.parent / "docs" / "runbooks"
+                   / "0939-cerberus-key-rotation.md").read_text(encoding="utf-8")
+        assert "deploy → observe → revoke" in runbook
+        assert "Do NOT revoke K1 yet." in runbook
+
+    def test_the_scaffolder_deploys_no_key_so_gives_no_deploy_advice(self):
+        assert "Cerberus secrets deployed and verified" not in NEW_REPO_SRC
+        assert "cerberus_status" not in NEW_REPO_SRC
 
     def test_advice_does_not_branch_on_which_pem_flow_ran(self):
         # The superseded #1536 split told the plaintext flow to revoke because

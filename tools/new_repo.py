@@ -43,12 +43,6 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from assemblyzero_config import _spellings, config
 
-# Cerberus secret deploy helpers (used by --cerberus-pem flag)
-try:
-    from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
-except ImportError:
-    sys.path.insert(0, str(Path(__file__).parent))
-
 # Dependabot enablement (#1331) — runs at step 20, inside the same
 # classic_pat_session as steps 13-19 so it shares the in-process PAT.
 try:
@@ -56,7 +50,6 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from enable_dependabot import enable_dependabot_for_repo
-    from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
 
 # #2182: npm manifest inspection, shared so the enabling side and any later
 # audit agree on what "has a runnable test script" means.
@@ -77,7 +70,6 @@ try:
     from _pat_session import (
         PinentryUnavailable,
         classic_pat_session,
-        cerberus_pem_session,
         pr_sentinel_app_session,
     )
 except ImportError:
@@ -85,7 +77,6 @@ except ImportError:
     from _pat_session import (
         PinentryUnavailable,
         classic_pat_session,
-        cerberus_pem_session,
         pr_sentinel_app_session,
     )
 
@@ -106,10 +97,11 @@ class SchemaValidationError(Exception):
 # Default schema location: co-located with standard 0009
 _DEFAULT_SCHEMA_PATH = Path(__file__).parent.parent / "docs" / "standards" / "0009-structure-schema.json"
 
-# No default Cerberus PEM (#4724). The per-repository Cerberus secrets are read
-# by nothing since Auto Review's retirement (#3663), so a run decrypts and
-# deploys a PEM only when --cerberus-pem or --cerberus-pem-gpg names one. The
-# #1543 fallback to ~/.secrets/cerberus-pem.gpg is gone with the #1206 gate.
+# No Cerberus PEM at all (#4724, #4728). The per-repository Cerberus secrets
+# are read by nothing since Auto Review's retirement (#3663), so the scaffolder
+# deploys none: the --cerberus-pem and --cerberus-pem-gpg flags went with the
+# retired Cerberus deploy tool, whose helpers they called, and the #1543
+# fallback to ~/.secrets/cerberus-pem.gpg went with the #1206 gate.
 
 # Canonical location for the encrypted pr-sentinel App credential bundle
 # (App ID on line 1, private-key PEM after), used by the installation
@@ -2553,91 +2545,6 @@ def run_pr_sentinel_check(
     return ("pass" if ok else "fail"), msg
 
 
-def _deploy_cerberus(
-    repo_name: str,
-    pem_content: str,
-    pat: str,
-    *,
-    source_path: Path | None = None,
-) -> str:
-    """Deploy Cerberus secrets to a single repo.
-
-    Deploys REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY to the specified
-    repo via in-process classic PAT (sealed-box encrypted per GitHub's
-    secrets API), then verifies they landed. (#1007)
-
-    Args:
-        repo_name: The new repo name (lowercased, owner-less).
-        pem_content: PEM contents as a string. Already loaded from
-            disk (--cerberus-pem flow) or decrypted in-process via
-            cerberus_pem_session() (--cerberus-pem-gpg flow).
-        pat: Classic PAT from classic_pat_session() — consumed by
-            deploy_to_repo / verify_secrets, never placed in env.
-        source_path: If provided, the plaintext file at this path is
-            unlinked after successful verification (legacy
-            --cerberus-pem flow). If None, no file is unlinked --
-            used by --cerberus-pem-gpg, which has nothing plaintext
-            on disk to delete (#1254).
-
-    Returns a short status string for the summary table.
-    """
-    print("\n" + "=" * 60)
-    print("CERBERUS SECRETS DEPLOY")
-    print("=" * 60)
-
-    if "PRIVATE KEY" not in pem_content:
-        print("  ERROR: PEM contents do not look like a private key.")
-        return "INVALID_PEM"
-
-    print(f"  Target repo: {repo_name}")
-    if source_path is not None:
-        print(f"  Source:      {source_path.name} (plaintext, "
-              f"will be deleted after deploy)")
-    else:
-        print("  Source:      gpg-decrypted in-process "
-              "(no plaintext on disk; encrypted blob preserved)")
-    print(f"  Key length:  {len(pem_content)} chars")
-
-    ok, failed = deploy_to_repo(repo_name, pem_content, pat)
-    if not ok:
-        print(f"  FAILED to deploy: {', '.join(failed)}")
-        if source_path is not None:
-            print("  .pem file NOT deleted -- retry manually:")
-            print(f"    poetry run python tools/deploy_cerberus_secrets.py {source_path}")
-        return f"FAILED: {', '.join(failed)}"
-    print("  Secrets set.")
-
-    ok, missing = verify_secrets(repo_name, pat)
-    if not ok:
-        print(f"  WARNING: verification failed; missing {missing}")
-        if source_path is not None:
-            print("  .pem file NOT deleted -- investigate before deleting.")
-        return f"UNVERIFIED: {', '.join(missing)}"
-    print("  Secrets verified on GitHub (both REVIEWER_APP_ID and REVIEWER_APP_PRIVATE_KEY present).")
-
-    if source_path is not None:
-        try:
-            source_path.unlink()
-            print(f"  .pem file deleted: {source_path}")
-        except OSError as e:
-            print(f"  WARNING: could not delete .pem file: {e}")
-            print(f"  DELETE MANUALLY: {source_path}")
-    else:
-        print("  (gpg-encrypted PEM preserved at "
-              "the path you provided; reuse it for additional repos.)")
-
-    print()
-    print("  KEEP THE APP KEY ACTIVE -- do NOT revoke it (#134).")
-    print("    Nothing reads the secret just deployed since Auto Review's")
-    print("    retirement (#4724), but the pr-sentinel Worker signs Cerberus's")
-    print("    approvals with the App key it was given. Revoking that key on the")
-    print("    App page makes GitHub reject the Worker's JWT, and Cerberus")
-    print("    approves no PR in any repo. To rotate: runbook 0939 (put the new")
-    print("    key in the Worker, see Cerberus approve a PR, THEN revoke the old).")
-
-    return "OK"
-
-
 def read_post_create_hooks(list_path: Path = DEFAULT_POST_CREATE_HOOKS) -> list[Path]:
     """Return the hook module paths listed in the operator's hook file (#3588).
 
@@ -2751,32 +2658,6 @@ Examples:
         help="License type (default: polyform)"
     )
     parser.add_argument(
-        "--cerberus-pem",
-        metavar="PATH",
-        default=None,
-        help="OPTIONAL. Path to a PLAINTEXT Cerberus App .pem file whose key "
-             "is deployed as the per-repo REVIEWER_APP_* secrets. Nothing "
-             "reads those secrets since Auto Review's retirement (#4724), so "
-             "a new repo needs no PEM; this exists only for restoring Auto "
-             "Review. After deploy the script DELETES this file. Prefer "
-             "--cerberus-pem-gpg (encrypted at rest, decrypted in-process "
-             "per ADR-0216)."
-    )
-    parser.add_argument(
-        "--cerberus-pem-gpg",
-        metavar="PATH",
-        default=None,
-        help="OPTIONAL. Path to a GPG-ENCRYPTED Cerberus App .pem file "
-             "(typically ~/.secrets/cerberus-pem.gpg per ADR-0216 / runbook "
-             "0927) whose key is deployed as the per-repo REVIEWER_APP_* "
-             "secrets. Nothing reads those since Auto Review's retirement "
-             "(#4724), and the script no longer falls back to this path when "
-             "the flag is omitted. Decrypted in-process via "
-             "cerberus_pem_session(); never written to plaintext disk. The "
-             "encrypted blob is NOT deleted, and the key stays active on the "
-             "App page: the pr-sentinel Worker signs with it (#134, #1254)."
-    )
-    parser.add_argument(
         "--sentinel-app-gpg",
         metavar="PATH",
         default=None,
@@ -2830,13 +2711,6 @@ Examples:
 
     args = parser.parse_args()
 
-    # --cerberus-pem and --cerberus-pem-gpg are mutually exclusive
-    if args.cerberus_pem and args.cerberus_pem_gpg:
-        print("ERROR: --cerberus-pem and --cerberus-pem-gpg are mutually exclusive.")
-        print("Pick one: --cerberus-pem PATH (plaintext, deleted after) OR "
-              "--cerberus-pem-gpg PATH (encrypted at rest, reusable).")
-        sys.exit(1)
-
     # --pypi and --no-pypi are mutually exclusive (#1269)
     if args.pypi and args.no_pypi:
         print("ERROR: --pypi and --no-pypi are mutually exclusive.")
@@ -2847,20 +2721,13 @@ Examples:
         print("NOTE: --no-pypi is deprecated -- this is now the default. "
               "The flag is a no-op; remove it from your invocation. (#1269)")
 
-    # Cerberus deploy requires --no-github not set (need the repo to deploy to)
-    if (args.cerberus_pem or args.cerberus_pem_gpg) and args.no_github:
-        print("ERROR: --cerberus-pem / --cerberus-pem-gpg requires GitHub repo "
-              "creation (cannot be combined with --no-github)")
-        sys.exit(1)
-
-    # No Cerberus PEM is required (#4724). The #1206 gate refused a GitHub
-    # repo without one, because the Auto Review caller signed Cerberus's
-    # approval with the per-repo REVIEWER_APP_* secrets. Auto Review is
-    # retired (#3663) and nothing else reads those secrets: the pr-sentinel
-    # Worker approves as Cerberus with its own copy of the key. So a run
-    # without a PEM flag deploys no Cerberus secret, and the #1543 fallback
-    # to ~/.secrets/cerberus-pem.gpg, which asked for a passphrase to deploy
-    # a secret nothing reads, is gone too.
+    # No Cerberus PEM is taken (#4724, #4728). The #1206 gate refused a
+    # GitHub repo without one, because the Auto Review caller signed
+    # Cerberus's approval with the per-repo REVIEWER_APP_* secrets. Auto
+    # Review is retired (#3663) and nothing else reads those secrets: the
+    # pr-sentinel Worker approves as Cerberus with its own copy of the key.
+    # So the scaffolder deploys no Cerberus secret, and argparse refuses the
+    # --cerberus-pem and --cerberus-pem-gpg flags that used to deploy one.
 
     # Validate name
     valid, error = validate_name(args.name)
@@ -3113,7 +2980,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # create call, which 422s) is too late: by then a fresh initial commit
     # exists locally, its history is unrelated to the live remote, the push is
     # rejected, and every downstream step gated on that push -- workflow
-    # upload, repo settings, the Cerberus secret deploy -- silently skips. The
+    # upload, repo settings, Dependabot, the post-create hooks -- silently skips. The
     # visible symptom is a missing second pinentry prompt, which reads as a
     # broken security flow when the real fault is scaffolding over a live repo.
     if not args.no_github:
@@ -3143,9 +3010,9 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print(f"Private: {existing.get('private', 'unknown')}")
             print()
             print("Scaffolding now would build a fresh initial commit whose history")
-            print("is unrelated to that repo. The push would be rejected, and the")
-            print("Cerberus secret deploy would be skipped because it is gated on a")
-            print("successful push -- leaving a local directory that can never push.")
+            print("is unrelated to that repo. The push would be rejected, and every")
+            print("step gated on a successful push would be skipped -- leaving a")
+            print("local directory that can never push.")
             print()
             print("Clone the existing repo instead:")
             print(f"  gh repo clone {github_user}/{args.name}")
@@ -3315,7 +3182,6 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     workflows_deployed = False
     repo_settings_ok = False
     protection_ok = False
-    cerberus_status: str | None = None
     # Why the classic-PAT session never opened, when it did not (#4136). Set,
     # it replaces the push-failure advice, whose causes were not the cause.
     pat_failure: str | None = None
@@ -3458,7 +3324,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("GITHUB REMOTE (single classic-PAT session per ADR-0216)")
         print("=" * 60)
         print("\n  All elevated operations -- repo create, workflow upload,")
-        print("  repo settings, branch protection, Cerberus deploy, and")
+        print("  repo settings, branch protection, Dependabot, hooks, and")
         print("  GitHub-side verification -- run inside ONE classic_pat_session().")
         print("  Single pinentry prompt; the PAT lives only in this Python")
         print("  process's heap and is removed programmatically when the block")
@@ -3638,44 +3504,9 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                               f"{github_user}/{args.name} --apply` "
                               "after diagnosing.")
 
-                # Cerberus secrets deploy. Inside the same with-block so it
-                # shares `pat` -- no extra pinentry. cerberus_pem_session
-                # (if --cerberus-pem-gpg) is nested separately because it
-                # decrypts a different encrypted blob with a different
-                # passphrase.
-                if (github_created and push_succeeded
-                        and (args.cerberus_pem or args.cerberus_pem_gpg)):
-                    if args.cerberus_pem:
-                        pem_source_path = Path(args.cerberus_pem)
-                        try:
-                            pem_content = pem_source_path.read_text(
-                                encoding="utf-8"
-                            ).strip()
-                            cerberus_status = _deploy_cerberus(
-                                args.name, pem_content, pat,
-                                source_path=pem_source_path,
-                            )
-                        except FileNotFoundError as e:
-                            print(f"\n  WARNING: source PEM file not found: {e}")
-                            cerberus_status = "PEM_NOT_FOUND"
-                    else:  # args.cerberus_pem_gpg
-                        pem_gpg_path = Path(args.cerberus_pem_gpg)
-                        try:
-                            with cerberus_pem_session(pem_gpg_path) as pem_content:
-                                cerberus_status = _deploy_cerberus(
-                                    args.name, pem_content, pat,
-                                    source_path=None,
-                                )
-                        except FileNotFoundError as e:
-                            print(f"\n  WARNING: encrypted PEM not configured: {e}")
-                            cerberus_status = "PEM_GPG_NOT_CONFIGURED"
-                        except RuntimeError as e:
-                            print(f"\n  WARNING: PEM gpg decrypt failed: {e}")
-                            cerberus_status = "PEM_GPG_FAILED"
-
                 # Post-create hooks (#3588). Same with-block, so they share
                 # `pat` in-process; a hook that needs its own secret decrypts
-                # it with its own pinentry prompt, like the Cerberus PEM.
+                # it with its own pinentry prompt.
                 if github_created and push_succeeded:
                     hook_paths = read_post_create_hooks()
                     print("\n" + "=" * 60)
@@ -3715,18 +3546,6 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         gh_checks_passed += 1
                     else:
                         print(f"  [FAIL] Repo settings: {msg}")
-
-                    if args.cerberus_pem or args.cerberus_pem_gpg:
-                        gh_checks_total += 1
-                        secrets_ok, missing = verify_secrets(
-                            args.name, pat,
-                        )
-                        if secrets_ok:
-                            print("  [PASS] Cerberus secrets present "
-                                  "(REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY)")
-                            gh_checks_passed += 1
-                        else:
-                            print(f"  [FAIL] Cerberus secrets missing: {missing}")
 
                     # pr-sentinel installation check -- requires the App's
                     # OWN credential (JWT); GitHub refuses /user/installations
@@ -3796,8 +3615,6 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print(f"  Push:               {'OK' if push_succeeded else 'FAILED'}")
         print(f"  Repo settings:      {'OK' if repo_settings_ok else 'FAILED — configure manually'}")
         print(f"  Branch protection:  {'OK' if protection_ok else 'FAILED — configure manually or re-run with classic PAT'}")
-        if cerberus_status is not None:
-            print(f"  Cerberus secrets:   {cerberus_status}")
         for hook_path, hook_status in hook_results:
             print(f"  Hook {hook_path.stem}: {hook_status}")
         if any(s.startswith("FAILED") for _, s in hook_results):
@@ -3811,7 +3628,6 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         push_succeeded=push_succeeded,
         repo_settings_ok=repo_settings_ok,
         protection_ok=protection_ok,
-        cerberus_status=cerberus_status,
         hook_results=hook_results,
         gh_checks=(gh_checks_passed, gh_checks_total),
     )
@@ -3851,36 +3667,9 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("  # those violate ADR-0216 (PAT in env block / globally-")
             print("  # visible gh storage). The fine-grained PAT is sufficient")
             print("  # for this push; if it isn't, the problem is elsewhere.")
-    # A run without a PEM flag prints no manual secret-deploy steps any more
-    # (#4724): nothing reads those secrets, and the pr-sentinel Worker
-    # approves the new repo's PRs as Cerberus with no per-repo setup.
-    if cerberus_status == "OK":
-        # #134 supersedes the #1536 split. That split branched on "did a
-        # plaintext .pem survive this run", and told the --cerberus-pem flow to
-        # revoke because none did. Revocation does not retire an on-disk copy.
-        # It removes the PUBLIC half registered on the App, so GitHub can no
-        # longer validate a JWT signed by that key -- and the
-        # REVIEWER_APP_PRIVATE_KEY secret this run just deployed becomes dead
-        # bytes. No installation token, no approving review, mergeable_state
-        # stuck at blocked, in this repo and every other one holding the key.
-        #
-        # The question is not "is a plaintext file left on disk". It is "is
-        # this key deployed anywhere", and after either flow the answer is yes,
-        # because deploying it is the point of the run. So the advice no longer
-        # branches: keep the key active either way. Runbook 0927 reached the
-        # same conclusion (per unleashed#658) and this brings the script into
-        # line with it -- the two had been contradicting each other.
-        print()
-        print("  # Cerberus secrets deployed and verified.")
-        if args.cerberus_pem is not None:
-            print("  # The plaintext .pem was deleted by the script.")
-        else:  # args.cerberus_pem_gpg is not None
-            print(f"  # Encrypted PEM preserved at {args.cerberus_pem_gpg} for reuse.")
-        print("  # KEEP THE APP KEY ACTIVE -- do NOT revoke it while the")
-        print("  # pr-sentinel Worker signs Cerberus's approvals with it;")
-        print("  # revoking it then stops Cerberus approving in every repo.")
-        print("  # To rotate: runbook 0939 -- put the new key in the Worker, see")
-        print("  # Cerberus approve a PR, THEN revoke the old key.")
+    # No Cerberus secret is deployed, so none is reported (#4724, #4728):
+    # nothing reads those secrets, and the pr-sentinel Worker approves the new
+    # repo's PRs as Cerberus with no per-repo setup.
 
     # The internal function uses `no_pypi` (legacy parameter name); compute
     # it as "did the operator OPT IN via --pypi?" -- false = no_pypi=True =
@@ -3918,7 +3707,6 @@ def failed_steps(
     push_succeeded: bool,
     repo_settings_ok: bool,
     protection_ok: bool,
-    cerberus_status: str | None,
     hook_results: list[tuple[Path, str]],
     gh_checks: tuple[int, int],
 ) -> list[str]:
@@ -3941,8 +3729,6 @@ def failed_steps(
         failed.append("repo settings")
     if not protection_ok:
         failed.append("branch protection")
-    if cerberus_status is not None and cerberus_status != "OK":
-        failed.append(f"Cerberus secrets ({cerberus_status})")
     for hook_path, hook_status in hook_results:
         if hook_status.startswith("FAILED"):
             failed.append(f"hook {hook_path.stem}")
