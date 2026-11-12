@@ -1,3 +1,15 @@
+# THE TEST JOBS IN THIS FILE ARE OFF, by the operator's order of 2026-11-11 (#4711): "shut it off fleet-wide. i simply
+# do NOT understand why i ever did it. and even AZ. why take the extra time and tokens. somehow i think it got turned
+# on and i had no idea why or how or when". Each one named below carries `if: false`, so GitHub starts no runner for
+# it, bills nothing and reports it `skipped`; the tests run on the operator's machine before a branch lands. GitHub
+# counts a skipped required check as passed, so branch protection is unchanged and a pull request still merges on
+# pr-sentinel and Cerberus, which run apart from this file. Triggers, steps and every other job are kept as they were.
+#
+# Off: test.
+#
+# To turn one back on: delete its `if: false` line (where the line ends `# was: <condition>`, put that condition back
+# as its `if:`), stage the file, and land it with AssemblyZero's tools/land_staged_workflow.py.
+
 # CI Workflow - every test tier on every push/PR
 # Issues #325, #116, #225, #2283, #4208
 #
@@ -31,6 +43,7 @@ concurrency:
 
 jobs:
   test:
+    if: false
     runs-on: ubuntu-latest
 
     steps:
