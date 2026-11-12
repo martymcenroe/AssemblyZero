@@ -82,6 +82,10 @@ The first failure stops the whole run with a non-zero exit, naming the target an
 step, and says how many targets landed, how many were already landed and how many were
 not landed (the fleet rule: a failure stops the run and says so).
 
+Every step that waits prints a line before it starts (#4729): the plan's reading, the
+passphrase, the opened PAT, each target of the pre-read as `[i/N]`, and each file's
+reads. stdout is line-buffered, so the lines reach a pipe or a log as they are printed.
+
 ## Usage
 
 RUN THIS YOURSELF in your own shell -- never via an agent's Bash tool, per the
@@ -332,10 +336,18 @@ def repo_facts(pat: str, owner: str, repo: str) -> dict:
 
 
 def preflight(pat: str, plan: dict, targets: list[dict], owner: str) -> None:
-    """Every target's repository is read before any write (see the module docstring)."""
+    """Every target's repository is read before any write (see the module docstring).
+
+    One line per target, begun before its request and finished with what it read (#4729):
+    a plan of many targets is that many sequential calls, and a loop that prints nothing
+    cannot be told from a hung one.
+    """
     private, public = [], []
-    for t in targets:
+    for i, t in enumerate(targets, 1):
+        print(f"  [{i}/{len(targets)}] {owner}/{t['repo']} ...", end="", flush=True)
         facts = repo_facts(pat, owner, t["repo"])
+        print(f" default branch {facts.get('default_branch')}, "
+              f"{'private' if facts.get('private') else 'public'}")
         if facts.get("default_branch") != "main":
             raise LandingStop(t["repo"], "preflight",
                               f"default branch is {facts.get('default_branch')!r}, not main")
@@ -389,6 +401,9 @@ def land_target(
     deletes: list[dict] = []
     for f in target["files"]:
         cfg.workflow = f["workflow"]
+        # Printed before the reads, which are network calls (#4729).
+        print(f"  {f['workflow']}: reading main"
+              + (" ..." if is_delete(f) else " and the staged copy ..."), flush=True)
         live_rec = lsw.get_file(pat, cfg, f["workflow"], "main")
         if is_delete(f):
             if live_rec is None:
@@ -550,6 +565,7 @@ def run(
     # Printed before the session opens, so before the passphrase is asked for.
     print(f"Landing a workflow plan across {len(targets)} target(s).")
     print_budget(targets, max_targets)
+    print("Asking for the classic PAT's passphrase next.", flush=True)
 
     def stopped(exc: BaseException) -> None:
         done = len(landed) + len(already)
@@ -560,6 +576,10 @@ def run(
 
     with session(reason=f"land a workflow plan across {len(targets)} repositories") as pat:
         try:
+            # The decrypt prints nothing once the passphrase is typed, and the pre-read
+            # that follows is one network call per target (#4729).
+            print(f"\nThe classic PAT is open. Reading the {len(targets)} target repositories "
+                  "(default branch, visibility) before any write:", flush=True)
             preflight(pat, plan, targets, owner)
             for t in targets:
                 if max_targets is not None and len(landed) >= max_targets:
@@ -609,10 +629,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+def line_buffered_stdout() -> None:
+    """Send each printed line on at once, to a terminal, a pipe or a log (#4729).
+
+    Python block-buffers stdout that is not a terminal, so under `| tee` the progress
+    lines arrived after the passphrase banner on stderr, or only at exit.
+    """
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(line_buffering=True)
+
+
 def main(argv: list[str] | None = None) -> int:
+    line_buffered_stdout()
     args = parse_args(argv)
+    print(f"Reading the plan {args.plan} ...", flush=True)
     plan = load_plan(args.plan)
     targets = select(plan, args.only)
+    print(f"  plan     : {len(plan['targets'])} target(s), "
+          f"{sum(len(t['files']) for t in plan['targets'])} file(s); {len(targets)} selected")
     if not args.apply:
         return dry_run(plan, targets, args.owner, args.merge_on_red, args.max_targets)
     return run(plan, targets, args.owner, args.merge_on_red, max_targets=args.max_targets)

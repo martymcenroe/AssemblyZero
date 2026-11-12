@@ -731,3 +731,172 @@ class TestIssueRepo:
         out = capsys.readouterr().out
         assert "o/alpha  PR closes o/home#7  branch ci/staged-workflow-7" in out
         assert "o/beta  PR closes #9  branch ci/staged-workflow-9" in out
+
+
+# --- #4729: a line before every step that waits, so a run is never silent -------------
+
+
+class Timeline:
+    """stdout, every GitHub call and the session's entry, in the order they happen.
+
+    It stands in for `sys.stdout`, so every `print` of both landers lands here, and the
+    fake GitHub below appends each call to the same list. A test can then ask what was
+    printed between one network call and the next.
+    """
+
+    def __init__(self):
+        self.events: list[tuple[str, str]] = []
+
+    def write(self, text: str) -> int:
+        if text:
+            self.events.append(("out", text))
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def reconfigure(self, **kwargs) -> None:
+        self.events.append(("reconfigure", json.dumps(kwargs, sort_keys=True)))
+
+    def index(self, kind: str) -> int:
+        return next(i for i, (k, _) in enumerate(self.events) if k == kind)
+
+    def calls(self) -> list[tuple[int, str]]:
+        return [(i, v) for i, (k, v) in enumerate(self.events) if k == "net"]
+
+    def printed(self, start: int, end: int) -> str:
+        return "".join(v for k, v in self.events[start:end] if k == "out")
+
+    def said_before(self, i: int) -> str:
+        """What was printed after the network call before event `i`, and before `i`."""
+        start = max((j + 1 for j, _ in self.calls() if j < i), default=0)
+        return self.printed(start, i)
+
+
+@pytest.fixture
+def timeline(monkeypatch):
+    tl, fake = Timeline(), MergingGitHub()
+
+    def recorded(method: str, call):
+        def go(url, params=None, **kwargs):
+            ref = (params or {}).get("ref")
+            tl.events.append(("net", f"{method} {url}" + (f"?ref={ref}" if ref else "")))
+            return call(url, params=params, **kwargs) if method == "GET" else call(url, **kwargs)
+        return go
+
+    monkeypatch.setattr(lsw, "requests", SimpleNamespace(
+        get=recorded("GET", fake.get), post=recorded("POST", fake.post),
+        put=recorded("PUT", fake.put), delete=recorded("DELETE", fake.delete)))
+    monkeypatch.setattr(lsw.time, "sleep", lambda s: None)
+    return tl, fake
+
+
+def watch_stdout(monkeypatch, tl: Timeline) -> None:
+    """Point stdout at the timeline. Called in the test body: pytest puts its own capture
+    stream back on `sys.stdout` when the test starts, over anything a fixture set."""
+    monkeypatch.setattr(sys, "stdout", tl)
+
+
+class TimedSession:
+    """A session that marks on the timeline the moment it yields the PAT."""
+
+    def __init__(self, tl: Timeline):
+        self.tl = tl
+
+    def __call__(self, reason=None):
+        tl = self.tl
+
+        class Ctx:
+            def __enter__(self):
+                tl.events.append(("session", "entered"))
+                return "pat"
+
+            def __exit__(self, *exc):
+                return False
+
+        return Ctx()
+
+
+class TestProgress:
+    def test_each_target_is_announced_before_its_pre_read(self, timeline, monkeypatch):  # T1
+        tl, gh = timeline
+        watch_stdout(monkeypatch, tl)
+        for repo in ("alpha", "beta", "gamma"):
+            stage(gh, repo)
+        plan = lwp.validate_plan(plan_for(target("alpha", 7), target("beta", 9), target("gamma", 11)))
+        assert lwp.run(plan, plan["targets"], "o", False, session=TimedSession(tl)) == 0
+        pre_reads = [(i, v) for i, v in tl.calls() if re.fullmatch(rf"GET {API}/[^/?]+", v)]
+        assert [v.rsplit("/", 1)[1] for _, v in pre_reads] == ["alpha", "beta", "gamma"]
+        for n, (i, v) in enumerate(pre_reads, 1):
+            repo = v.rsplit("/", 1)[1]
+            assert f"[{n}/3] o/{repo}" in tl.said_before(i), (
+                f"the pre-read of {repo} ran before any line named it")
+        entered, first_call = tl.index("session"), tl.calls()[0][0]
+        assert entered < first_call
+        opened = tl.printed(entered, first_call)
+        assert "classic PAT is open" in opened and "3 target repositories" in opened
+
+    def test_the_pre_read_line_ends_with_what_it_read(self, timeline, monkeypatch):  # T1
+        tl, gh = timeline
+        watch_stdout(monkeypatch, tl)
+        stage(gh, "alpha")
+        gh.repos["alpha"]["private"] = False
+        plan = lwp.validate_plan(plan_for())
+        assert lwp.run(plan, plan["targets"], "o", False, session=TimedSession(tl)) == 0
+        out = tl.printed(0, len(tl.events))
+        assert "  [1/1] o/alpha ... default branch main, public\n" in out
+
+    def test_each_file_is_announced_before_its_first_read(self, timeline, monkeypatch):  # T2
+        tl, gh = timeline
+        watch_stdout(monkeypatch, tl)
+        stage(gh, "alpha")
+        live_caller(gh, "beta")
+        plan = lwp.validate_plan(plan_for(target("alpha", 7), delete_target("beta", 9)))
+        assert lwp.run(plan, plan["targets"], "o", False, session=TimedSession(tl)) == 0
+        first_main_read: dict[str, int] = {}
+        for i, v in tl.calls():
+            if m := re.fullmatch(rf"GET {API}/(alpha|beta)/contents/(.+)\?ref=main", v):
+                first_main_read.setdefault(m.group(2), i)
+        assert set(first_main_read) == {".github/workflows/tests.yml", CALLER}
+        for workflow, i in first_main_read.items():
+            assert workflow in tl.said_before(i), (
+                f"{workflow} was read on main before any line named it")
+        said = tl.printed(0, len(tl.events))
+        assert ".github/workflows/tests.yml: reading main and the staged copy ..." in said
+        assert f"{CALLER}: reading main ..." in said
+
+    def test_main_names_the_plan_and_counts_before_the_passphrase(  # T3, T4
+            self, timeline, tmp_path, monkeypatch):
+        tl, gh = timeline
+        watch_stdout(monkeypatch, tl)
+        stage(gh, "alpha")
+        stage(gh, "beta")
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps(plan_for(target("alpha", 7), target("beta", 9))),
+                        encoding="utf-8")
+        monkeypatch.setattr(lwp, "classic_pat_session", TimedSession(tl))
+        assert lwp.main(["--plan", str(path), "--apply", "--only", "beta", "--owner", "o"]) == 0
+        assert tl.events[0] == ("reconfigure", '{"line_buffering": true}'), (
+            "stdout was not line-buffered before the first line")
+        before = tl.printed(0, tl.index("session"))
+        lines = before.splitlines()
+        assert lines[0] == f"Reading the plan {path} ..."
+        assert lines[1] == "  plan     : 2 target(s), 2 file(s); 1 selected"
+        assert "passphrase" in lines[-1].lower()
+
+    def test_the_dry_run_names_the_plan_and_counts_first(self, timeline, tmp_path, monkeypatch):  # T3
+        tl, _ = timeline
+        watch_stdout(monkeypatch, tl)
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps(plan_for()), encoding="utf-8")
+
+        def refuse(*a, **k):
+            raise AssertionError("the dry run asked for the PAT")
+
+        monkeypatch.setattr(lwp, "classic_pat_session", refuse)
+        assert lwp.main(["--plan", str(path)]) == 0
+        lines = tl.printed(0, len(tl.events)).splitlines()
+        assert lines[:3] == [f"Reading the plan {path} ...",
+                             "  plan     : 1 target(s), 1 file(s); 1 selected",
+                             "DRY-RUN -- no credentials requested, no writes performed."]
+        assert tl.calls() == []
