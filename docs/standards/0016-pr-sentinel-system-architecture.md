@@ -160,7 +160,7 @@ Two things follow that matter more than the answer:
 | Caller | `.github/workflows/auto-reviewer.yml` in each repo. Retired: the reusable workflow is `if: false` (#3663), `new_repo.py` writes no caller and its deploy and upgrade tools are removed (#4719), and the fleet removes the callers with `tools/land_workflow_plan.py`'s delete action (#4721) |
 | Default required checks input | `"issue-reference"` |
 | Match strategy | **Substring:** `select(.name \| contains("issue-reference"))` |
-| Approval identity | Cerberus-AZ GitHub App (via `REVIEWER_APP_ID` + `REVIEWER_APP_PRIVATE_KEY` secrets) |
+| Approval identity | Cerberus-AZ GitHub App (via `REVIEWER_APP_ID` + `REVIEWER_APP_PRIVATE_KEY` secrets). Nothing reads those per-repo secrets now (#4724); `tools/fleet_remove_cerberus_secrets.py` removes them and nothing deploys them (#4728) |
 | Timeout | 10 minutes (30 attempts x 20s) |
 
 **Why substring matching:** Issue #742 discovered that the Cloudflare Worker posts check runs named `pr-sentinel / issue-reference`. Exact matching on `pr-sentinel` failed because the actual name contains a `/`. The fix was to match on the substring `issue-reference`, which matches both the Worker's check run name and the GitHub Actions job name.
