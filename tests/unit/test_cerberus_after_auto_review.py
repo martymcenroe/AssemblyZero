@@ -6,8 +6,9 @@ copy of the App key. So:
 
 - #4724: the per-repository secrets `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` have no
   reader left (the search is recorded on #4724). `new_repo.py` creates a repository without a
-  Cerberus PEM, and a test here fails the moment any workflow other than the two retired Auto
-  Review files starts reading either secret again, because then they are required again.
+  Cerberus PEM (since #4728 it takes none), and a test here fails the moment any workflow
+  other than the two retired Auto Review files starts reading either secret again, because
+  then they are required again.
 - #4723: `tools/audit_cerberus_health.py` judged each repository's key by its Auto Review
   runs. With no reader, a per-repository key has no health to observe, so the audit is
   retired with its tests, and no live document sends anyone to it.
@@ -141,9 +142,9 @@ def _run_main(tmp_path: Path, argv: list[str]):
         patch("new_repo.verify_branch_protection_on_origin", return_value=(True, "ok")),
         patch("new_repo.verify_repo_settings_on_origin", return_value=(True, "ok")),
         patch("new_repo.run_pr_sentinel_check", return_value=("skip", "not in a test")),
-        patch("new_repo.cerberus_pem_session", _must_not_run("the Cerberus PEM decrypt")),
-        patch("new_repo.deploy_to_repo", _must_not_run("the Cerberus secret deploy")),
-        patch("new_repo.verify_secrets", _must_not_run("the Cerberus secret check")),
+        # new_repo imports no Cerberus PEM decrypt or deploy any more (#4728); the session
+        # module's own decrypt is what must never run.
+        patch("_pat_session.cerberus_pem_session", _must_not_run("the Cerberus PEM decrypt")),
         patch("sys.argv", ["new_repo.py", *argv]),
     ]
     with contextlib.ExitStack() as stack:
@@ -171,12 +172,12 @@ def test_a_github_repository_is_created_without_any_cerberus_pem(tmp_path: Path,
     assert "Cerberus secrets" not in out.out, "a run without a PEM still reports Cerberus secrets"
 
 
-def test_the_pem_flags_stay_refused_with_no_github(tmp_path: Path):
-    """The optional flags still need a GitHub repo to deploy to."""
+def test_the_pem_flags_are_refused_even_with_no_github(tmp_path: Path):
+    """The flags went with the deploy tool they called (#4728): argparse refuses them."""
     argv = ["new_repo.py", "Conflict", "--no-github", "--cerberus-pem-gpg", str(tmp_path / "x.gpg")]
     with patch("new_repo.config"), patch("sys.argv", argv), pytest.raises(SystemExit) as exc:
         new_repo.main()
-    assert exc.value.code == 1
+    assert exc.value.code == 2
 
 
 def test_the_scaffolder_has_no_default_pem_and_no_pem_gate():

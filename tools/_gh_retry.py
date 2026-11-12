@@ -12,7 +12,8 @@ etc.) are returned as-is for the caller to inspect.
 
 On retry exhaustion, raises rather than silently returning a failed
 response. This is the loud-failure variant; the silent-return form
-(used previously in `new_repo_setup.py` and `deploy_cerberus_secrets.py`)
+(used previously in `new_repo_setup.py` and the Cerberus secret deploy tool,
+retired by #4728)
 let permanent transient failures masquerade as flow control. (#1052)
 
 Existing callers wrap calls in `try / except requests.RequestException`

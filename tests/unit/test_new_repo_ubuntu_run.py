@@ -117,7 +117,6 @@ def _all_ok(**overrides):
         "push_succeeded": True,
         "repo_settings_ok": True,
         "protection_ok": True,
-        "cerberus_status": "OK",
         "hook_results": [],
         "gh_checks": (5, 5),
     }
@@ -139,7 +138,6 @@ class TestFailedSteps:
             push_succeeded=False,
             repo_settings_ok=False,
             protection_ok=False,
-            cerberus_status=None,
             gh_checks=(0, 0),
         ))
         assert failed == [
@@ -150,10 +148,10 @@ class TestFailedSteps:
             "branch protection",
         ]
 
-    def test_cerberus_failure_counts(self):
-        assert failed_steps(**_all_ok(cerberus_status="PEM_GPG_FAILED")) == [
-            "Cerberus secrets (PEM_GPG_FAILED)",
-        ]
+    def test_no_cerberus_step_is_judged(self):
+        """The scaffolder deploys no Cerberus secret (#4728), so no step names one."""
+        with pytest.raises(TypeError):
+            failed_steps(**_all_ok(cerberus_status="PEM_GPG_FAILED"))
 
     def test_failed_hook_counts(self):
         hooks = [(Path("hooks/deploy_token.py"), "FAILED: exit 1"), (Path("hooks/x.py"), "OK")]

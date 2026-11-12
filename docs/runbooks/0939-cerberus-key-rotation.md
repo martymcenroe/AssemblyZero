@@ -24,7 +24,7 @@ A Cerberus App private key has three copies that matter:
 2. **Operator-side encrypted blob** — `~/.secrets/cerberus-pem.gpg`. Offline copy enabling re-deploy without regenerating.
 3. **The Worker's secret** — `CERBERUS_PRIVATE_KEY_B64` (with `CERBERUS_APP_ID`) in the pr-sentinel Worker, put there by `tools/cerberus_worker_key.py`. The bytes the Worker signs its JWT with before it approves a PR (`sentinel/src/cerberus.js`).
 
-A fourth copy may linger: `REVIEWER_APP_PRIVATE_KEY` in a repo's Actions secrets, deployed when Auto Review still ran. Nothing reads it (#4724). A rotation leaves it holding the old key, and when the old key is revoked it becomes dead bytes, which breaks nothing.
+A fourth copy may linger: `REVIEWER_APP_PRIVATE_KEY` in a repo's Actions or Dependabot secrets, deployed when Auto Review still ran. Nothing reads it (#4724). A rotation leaves it holding the old key, and when the old key is revoked it becomes dead bytes, which breaks nothing. `tools/fleet_remove_cerberus_secrets.py` removes it from every repo (#4728; see the Tool Reference below), and nothing deploys it any more.
 
 **The Worker holds ONE key.** It keeps K1 until you put K2 there.
 
@@ -155,17 +155,19 @@ poetry run python tools/cerberus_worker_key.py
 - The key never reaches argv, the environment, a file or the screen; the run ends by listing the Worker's secret names
 - Issue: #3663
 
-### `tools/deploy_cerberus_secrets.py` (not part of a rotation)
+### `tools/fleet_remove_cerberus_secrets.py` (operator-run, not part of a rotation)
+
+From the AssemblyZero checkout, in your own terminal (Ubuntu bash, or Git Bash on Windows). The first command is a dry run that lists every repo holding either secret and deletes nothing; the second deletes them.
 
 ```bash
-poetry run python tools/deploy_cerberus_secrets.py \
-    --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg [--all | --repo NAME]
+poetry run python tools/fleet_remove_cerberus_secrets.py
+poetry run python tools/fleet_remove_cerberus_secrets.py --apply
 ```
 
-- Deploys the encrypted blob's key content to one or all repos as `REVIEWER_APP_PRIVATE_KEY` + `REVIEWER_APP_ID`. Nothing reads those since Auto Review's retirement (#4724); this matters only if Auto Review is restored
-- ADR-0216-compliant (in-process classic PAT decryption, no env-block exposure)
-- Reports per-repo OK/FAILED
-- Issue lineage: AZ#1007 (in-process classic PAT migration), AZ#1254 (`--cerberus-pem-gpg` support)
+- Removes the per-repo `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`, in the Actions and the Dependabot scope, from every repo you own. Nothing reads them since Auto Review's retirement (#4724); the Worker signs with its own secrets, so removing them breaks nothing
+- Touches no other secret; reads each deletion back; stops at the first failure with exit 1 and names it; a rerun skips the repos already clean
+- ADR-0216-compliant (in-process classic PAT decryption, no env-block exposure). `--repo NAME` limits a run to one repo
+- Issue: #4728. It replaces the per-repo deploy tool, which is retired, so nothing deploys these secrets again
 
 ---
 
@@ -173,6 +175,6 @@ poetry run python tools/deploy_cerberus_secrets.py \
 
 - [`0927-new-repo-human-checklist.md`](0927-new-repo-human-checklist.md) — new-repo creation (Cerberus PEM gpg setup is documented there)
 - [`0930-gpg-and-classic-pat-rotation.md`](0930-gpg-and-classic-pat-rotation.md) — sibling for the classic PAT
-- ADR-0216 — in-process classic PAT pattern (deploy_cerberus_secrets uses it)
+- ADR-0216 — in-process classic PAT pattern (`cerberus_worker_key.py` and `fleet_remove_cerberus_secrets.py` use it)
 - unleashed#658 — architectural finding that motivated this runbook
 - AZ wiki "Closing the Agent Self-Authorization Loop" — Cerberus architecture overview + failure-mode taxonomy

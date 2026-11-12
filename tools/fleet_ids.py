@@ -6,7 +6,7 @@
 
 A program reads an identifier here instead of hard-coding it or prompting the
 operator for it. On 2026-09-27 `tools/cerberus_worker_key.py` asked him for the
-Cerberus App ID, which `tools/deploy_cerberus_secrets.py` already held.
+Cerberus App ID, which the Cerberus secret deploy tool (retired by #4728) already held.
 
 The file is generated from the operator's private registry. Change a value there and
 regenerate; never edit the file here. Standard library only.

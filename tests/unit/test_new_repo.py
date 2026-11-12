@@ -845,7 +845,7 @@ class TestMainLocalWorkflow:
 
 
 # ===========================================================================
-# Pillar 1 — Optional --cerberus-pem (#4724, was required by #1206) +
+# Pillar 1 — No Cerberus PEM (#4728; optional by #4724, required by #1206) +
 # GitHub-side verification (#1200, #1202)
 # ===========================================================================
 
@@ -860,19 +860,21 @@ from new_repo import (  # noqa: E402
 
 
 class TestCerberusPemOptional:
-    """T290-T292: --cerberus-pem is OPTIONAL for new GitHub repos (#4724).
+    """T290-T292: a new GitHub repo takes no Cerberus PEM (#4724, #4728).
 
-    #1206 required it, because the Auto Review caller signed Cerberus's
+    #1206 required one, because the Auto Review caller signed Cerberus's
     approval with the per-repo secrets the PEM deploys. Auto Review is retired
     (#3663) and nothing else reads them: the pr-sentinel Worker approves with
-    its own copy of the key. The #1543 fallback to ~/.secrets/cerberus-pem.gpg
-    is gone with the gate. The full GitHub-path run without a PEM is in
-    tests/unit/test_cerberus_after_auto_review.py.
+    its own copy of the key. #4724 made the PEM optional and dropped the #1543
+    fallback to ~/.secrets/cerberus-pem.gpg; #4728 removed the two PEM flags
+    with the deploy tool they called. The full GitHub-path run is in
+    tests/unit/test_cerberus_after_auto_review.py, and the refused flags in
+    tests/unit/test_cerberus_secret_deploy_retired.py.
     """
 
     @patch("new_repo.config")
     def test_T290_missing_pem_without_no_github_proceeds_to_creation(self, mock_config, tmp_path):
-        """Without a PEM flag and without --no-github, main hands off to creation with no PEM."""
+        """Without --no-github, main hands off to creation, and the args carry no PEM."""
         _setup_config_mock(mock_config, tmp_path)
         seen = {}
 
@@ -883,8 +885,8 @@ class TestCerberusPemOptional:
                 patch("new_repo._create_repo", side_effect=record), \
                 patch("sys.argv", ["new_repo.py", "OptionalTest"]):
             main()  # should NOT exit
-        assert seen["args"].cerberus_pem is None
-        assert seen["args"].cerberus_pem_gpg is None
+        assert not hasattr(seen["args"], "cerberus_pem")
+        assert not hasattr(seen["args"], "cerberus_pem_gpg")
 
     @patch("new_repo.config")
     @patch("new_repo.run_command")
@@ -897,15 +899,17 @@ class TestCerberusPemOptional:
         assert (tmp_path / "NoGitTest").exists()
 
     @patch("new_repo.config")
-    def test_T292_cerberus_pem_plus_no_github_still_conflict(self, mock_config, tmp_path):
-        """Pre-existing conflict check still fires: --cerberus-pem + --no-github → exit 1."""
+    def test_T292_cerberus_pem_is_refused_with_or_without_no_github(self, mock_config, tmp_path):
+        """--cerberus-pem is no longer a flag (#4728): argparse refuses it, exit 2."""
         _setup_config_mock(mock_config, tmp_path)
-        with patch("sys.argv", [
-            "new_repo.py", "ConflictTest", "--no-github", "--cerberus-pem", "/tmp/fake.pem",
-        ]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 1
+        for extra in ([], ["--no-github"]):
+            with patch("sys.argv", [
+                "new_repo.py", "ConflictTest", *extra, "--cerberus-pem", "/nowhere/fake.pem",
+            ]):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+                assert exc_info.value.code == 2
+        assert not (tmp_path / "ConflictTest").exists()
 
     @patch("new_repo.config")
     def test_T292b_no_default_gpg_fallback_when_neither_flag_passed(
@@ -1498,29 +1502,16 @@ class TestGitHubRepoNameCasePreservation:
 
 
 class TestCerberusPostDeployAdvice:
-    """#134 supersedes #1536. The post-deploy advice must NOT branch.
+    """#134 superseded #1536; #4728 removed the deploy the advice followed.
 
-    #1536 split the advice by flow: the plaintext flow (`--cerberus-pem`)
-    deletes the .pem, so it was told to revoke as belt-and-braces, while
-    the encrypted-reusable flow (`--cerberus-pem-gpg`) was told not to,
-    because revoking would invalidate the blob it had just kept.
-
-    That split asks the wrong question. Revoking does not retire an
-    on-disk copy — it removes the PUBLIC half registered on the App, so
-    GitHub can no longer validate a JWT signed by that key, and the
-    REVIEWER_APP_PRIVATE_KEY secret the run just deployed becomes dead
-    bytes. No installation token, no approving review, mergeable_state
-    stuck at `blocked` — in the new repo AND in every other repo holding
-    the same key.
-
-    The question is not "did a plaintext file survive this run". It is
-    "is this key deployed anywhere", and after either flow the answer is
-    yes, because deploying it is the point of the run. So the advice is
-    the same on both paths: keep the key active, rotate via runbook 0939.
-
-    These tests previously asserted the presence of the revoke
-    instruction, which is how the defect stayed shipped through a green
-    suite. They now assert its absence.
+    #1536 told the plaintext `--cerberus-pem` flow to revoke the App key
+    after deploying it. Revoking does not retire an on-disk copy: it removes
+    the PUBLIC half registered on the App, so GitHub can no longer validate a
+    JWT signed by that key. #134 replaced that with "keep the key active,
+    rotate via runbook 0939". Since #4728 the scaffolder deploys no Cerberus
+    key at all, so it prints no post-deploy advice; the keep-active rule, which
+    still binds because the pr-sentinel Worker signs with the App key, lives
+    in runbook 0939 (tests/unit/test_new_repo_guidance.py holds it there).
     """
 
     def test_no_revoke_instruction_on_any_flow(self):
@@ -1528,44 +1519,18 @@ class TestCerberusPostDeployAdvice:
         script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
         assert "REMEMBER to revoke the key in the app UI" not in content, (
-            "#134: deploy-then-revoke instruction is back. Revoking "
-            "invalidates the Actions secret this run just deployed."
+            "#134: deploy-then-revoke instruction is back. Revoking the App "
+            "key stops the pr-sentinel Worker approving as Cerberus."
         )
         assert "Revoke the key you just used" not in content
 
-    def test_keep_active_guidance_is_present_on_both_flows(self):
-        """Deleting the bad advice without replacing it would pass the test
-        above and leave the operator at a Revoke button with no guidance."""
+    def test_the_scaffolder_gives_no_post_deploy_advice(self):
+        """Nothing is deployed, so nothing is reported as deployed (#4728)."""
         from pathlib import Path
         script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
-        assert "do NOT revoke" in content or "Do NOT revoke" in content
-        assert "0939" in content, "must point at the rotation runbook"
-
-    def test_anchor_comment_naming_issue_present(self):
-        """A comment naming #134 should sit at the cerberus_status branch so
-        the next reader does not re-derive the on-disk model and
-        re-introduce the split."""
-        from pathlib import Path
-        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
-        content = script.read_text(encoding="utf-8")
-        assert "#134" in content
-        # The #1536 anchor must be near the `if cerberus_status == \"OK\":`
-        # branch (within a few hundred chars of the branch text — the
-        # anchor comment introduces the conditional). It was an `elif` until
-        # #4724 removed the manual-steps branch before it.
-        branch_loc = content.find('if cerberus_status == "OK":')
-        anchor = content.find("#1536")
-        assert branch_loc != -1 and anchor != -1
-        delta = branch_loc - anchor
-        # Comment may sit ON the same logical block as the branch, so the
-        # offset is small in either direction; just check they are within
-        # 800 chars of each other.
-        assert abs(delta) < 800, (
-            f"#1536 anchor at offset {anchor}; cerberus_status branch at "
-            f"{branch_loc} (delta={delta}). The fix-anchor comment is no "
-            "longer adjacent to the cerberus advice branch."
-        )
+        assert "Cerberus secrets deployed and verified" not in content
+        assert "cerberus_status" not in content
 
 
 # ===========================================================================

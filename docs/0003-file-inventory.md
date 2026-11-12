@@ -224,7 +224,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `tools/assemblyzero_credentials.py` | Stable | Credential management utilities |
 | `tools/assemblyzero-harvest.py` | Beta | Pattern harvester for permission discovery |
 | `tools/archive_worktree_lineage.py` | Stable | Post-merge lineage archival |
-| `tools/new_repo.py` | Stable | New repository initialization (Python bootstrap via `--lang python`/none default; optional `--cerberus-pem` for the per-repo Cerberus secrets, which nothing reads since #4724; in-process classic PAT for privileged ops) |
+| `tools/new_repo.py` | Stable | New repository initialization (Python bootstrap via `--lang python`/none default; deploys no per-repo Cerberus secret, which nothing reads since #4724, and takes no PEM since #4728; in-process classic PAT for privileged ops) |
 
 ### Privileged-Path / Fleet Tools (in-process classic PAT — ADR-0216)
 
@@ -233,7 +233,7 @@ These tools use `tools/_pat_session.classic_pat_session()` so the classic PAT ne
 | File | Status | Description |
 |------|--------|-------------|
 | `tools/_pat_session.py` | Stable | Context manager for in-process classic PAT decryption |
-| `tools/deploy_cerberus_secrets.py` | Stable | Per-repo Cerberus secret deployment (sealed-box + Contents API; #1007) |
+| `tools/fleet_remove_cerberus_secrets.py` | Stable | Lists, and with `--apply` deletes, the unused per-repo Cerberus secrets `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` in the Actions and Dependabot scopes of every owned repo; reads each deletion back, stops at the first failure (#4728; replaces the retired per-repo deploy tool) |
 | `tools/sentinel_migrate.py` | Stable | Migrate outlier repos to fleet-standard pr-sentinel context (#960) |
 | `tools/fleet_delete_pr_sentinel.py` | Stable | Fleet-wide deletion of legacy pr-sentinel.yml (#975 / #886 Phase 3) |
 | `tools/fleet_set_delete_branch_on_merge.py` | Stable | Fleet flip of `delete_branch_on_merge: true` (#1019); reference `_request_with_retry` |
