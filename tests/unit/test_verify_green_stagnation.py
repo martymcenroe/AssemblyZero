@@ -7,6 +7,7 @@ test-count stagnation check that fires when passed_count is unchanged from the
 previous iteration.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -15,12 +16,22 @@ from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phas
 
 pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
 
+#: #4706: the state's repository, under each test's own tmp_path. N5 clears
+#: its coverage report and snapshots its best iteration under repo_root, and
+#: the old "/tmp/repo" was C:\tmp\repo on Windows.
+_REPO = {"root": ""}
+
+
+@pytest.fixture(autouse=True)
+def _repo_under_tmp_path(tmp_path, monkeypatch):
+    monkeypatch.setitem(_REPO, "root", str(tmp_path / "repo"))
+
 
 def _make_state(**overrides):
     """Create a minimal TestingWorkflowState dict for testing."""
     base = {
         "test_files": ["/tmp/test_example.py"],
-        "repo_root": "/tmp/repo",
+        "repo_root": _REPO["root"],
         "audit_dir": "",
         "file_counter": 0,
         "issue_number": 42,
@@ -29,8 +40,8 @@ def _make_state(**overrides):
         "coverage_target": 90,
         # #3585: N5 halts when nothing names a coverage target, and the
         # full-suite gate's `git status` halts outside a repository, which
-        # /tmp/repo is not; the gate is not this file's subject.
-        "implementation_files": ["/tmp/repo/pkg/mod.py"],
+        # the state's repo is not; the gate is not this file's subject.
+        "implementation_files": [str(Path(_REPO["root"]) / "pkg" / "mod.py")],
         "full_suite_validated": True,
         "skip_e2e": True,
         "previous_coverage": -1.0,

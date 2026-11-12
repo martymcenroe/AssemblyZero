@@ -100,7 +100,7 @@ def test_010(mock_subprocess_run, mock_state):
         assert result["error_message"] == "", "Should succeed without error"
 
 
-def test_020(mock_subprocess_run, mock_state):
+def test_020(mock_subprocess_run, mock_state, tmp_path):
     """
     Verify encoding param on finalize subprocess | Unit | Mock
     subprocess.run | Called with encoding='utf-8' | Assert call includes
@@ -115,7 +115,9 @@ def test_020(mock_subprocess_run, mock_state):
     with patch("assemblyzero.workflows.requirements.nodes.finalize.next_file_number") as mock_file_num, \
          patch("assemblyzero.workflows.requirements.nodes.finalize.save_audit_file"):
         mock_file_num.return_value = 1
-        mock_state["audit_dir"] = str(Path("/tmp/audit"))
+        # #4706: the folder this test makes is under its tmp_path; the old
+        # "/tmp/audit" was C:\tmp\audit on Windows.
+        mock_state["audit_dir"] = str(tmp_path / "audit")
         Path(mock_state["audit_dir"]).mkdir(parents=True, exist_ok=True)
 
         # TDD: Act

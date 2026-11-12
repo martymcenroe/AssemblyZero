@@ -9,6 +9,7 @@ iteration that improved on the last earns one more, up to a ceiling of 10.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -24,6 +25,16 @@ from assemblyzero.workflows.testing.state import (
 from assemblyzero.workflows.testing.step_budget import recursion_limit
 
 pytestmark = pytest.mark.usefixtures("coverage_as_reported")  # #4436: routing, not measuring
+
+#: #4706: the state's repository, under each test's own tmp_path. N5 clears
+#: its coverage report and snapshots its best iteration under repo_root, and
+#: the old "/tmp/repo" was C:\tmp\repo on Windows.
+_REPO = {"root": ""}
+
+
+@pytest.fixture(autouse=True)
+def _repo_under_tmp_path(tmp_path, monkeypatch):
+    monkeypatch.setitem(_REPO, "root", str(tmp_path / "repo"))
 
 
 class TestTheGraceRule:
@@ -54,7 +65,7 @@ class TestTheGraceRule:
 def _state(**overrides):
     base = {
         "test_files": ["/tmp/test_example.py"],
-        "repo_root": "/tmp/repo",
+        "repo_root": _REPO["root"],
         "audit_dir": "",
         "file_counter": 0,
         "issue_number": 4,
@@ -62,7 +73,7 @@ def _state(**overrides):
         "max_iterations": DEFAULT_MAX_ITERATIONS,
         "coverage_target": 95,
         # #3585: N5 halts when nothing names a coverage target.
-        "implementation_files": ["/tmp/repo/pkg/mod.py"],
+        "implementation_files": [str(Path(_REPO["root"]) / "pkg" / "mod.py")],
         "skip_e2e": True,
         "previous_coverage": 92.0,
         "previous_passed": 45,
