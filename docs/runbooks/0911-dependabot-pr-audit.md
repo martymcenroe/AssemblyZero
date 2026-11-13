@@ -58,6 +58,14 @@ poetry run python tools/dependabot_review.py --fleet
 
 Or via the skill: `/dependabot` (single-repo) or `/dependabot --fleet` (fleet mode).
 
+### Private repositories are skipped (#4750)
+
+The tool acts only on repositories GitHub reports as `PUBLIC`. On a private repository every approval and merge, and every `@dependabot rebase` or `@dependabot recreate`, runs workflows that spend GitHub Actions minutes; public repositories run them free. The operator ruled on 2026-11-13 that this stays off until December.
+
+- Visibility is read in every run: in `--fleet` mode from the `gh repo list` listing, and otherwise with `gh repo view <owner>/<name> --json visibility`. A visibility that cannot be read counts as private.
+- A skipped repository gets no review, comment, `@dependabot` command, merge or test run, in the zero-review pre-pass as in the sweep. Each prints one `[SKIP]` line with its reason, and the Summary lists them under `Skipped (private, #4750)`.
+- The switch is the module constant `INCLUDE_PRIVATE_REPOS` in `tools/dependabot_review.py`, `False` until the operator turns it on. `--include-private` turns it on for a single run.
+
 ---
 
 ## Prerequisites
@@ -83,9 +91,9 @@ This prevents the tool from ever operating on a PR it wasn't designed to handle.
 
 `poetry run pytest -q --tb=short` must exit 0. Any non-zero exit means:
 - No approval, no merge
-- A comment is posted on the PR noting the exit code and the forensics worktree path
+- A review comment (a COMMENTED review) is posted on the PR giving the exit code
 - The PR is recorded as `deferred`
-- The worktree is NOT cleaned up — it's left in place so the user can investigate
+- The audit worktree and its branch are removed, as on every path (#1116, #1133). The evidence of the deferral is the run log and the review comment on the PR; see §Forensics on failure
 - If the PR updates multiple packages, `@dependabot recreate` is posted to split it into per-package PRs
 
 No human judgment is applied to the exit code. No LLM is consulted about whether "the failures look related." Trust the exit code.
@@ -124,9 +132,9 @@ The check applies to every repo the nightly tests. A repo whose `main` has no gu
    process tree is killed and the exit is 124: deferred, no baseline (#4737)
 
    --- exit != 0 ---
-6a. Comment on PR with exit code + worktree path (forensics)
+6a. `gh pr review <N> --comment` with the exit code (a COMMENTED review)
 6b. If multi-package, comment `@dependabot recreate`
-6c. Leave worktree in place; move to next PR
+6c. Go to step 6f, which removes the worktree
 
    --- exit == 0 ---
 6a. `gh pr edit <N> --body "<body>\n\nNo-Issue: automated dependency update (...)"`
@@ -136,7 +144,9 @@ The check applies to every repo the nightly tests. A repo whose `main` has no gu
      attributed to the invoking user (Code Review profile stat accrues to that user)
 6d. Poll `mergeable_state` until `clean` (up to 5 min)
 6e. `gh pr merge <N> --squash`
-6f. Evict worktree's poetry venv; `git worktree remove`; `git branch -D` the
+
+   --- every path, from process_pr's finally (#1116, #1133) ---
+6f. Evict worktree's poetry venv; `git worktree remove`; `git branch -d` the
      audit branch
 
 7. Print one `OUTCOME PR #<N>: <status> -- <reason>` line and clear the
@@ -197,23 +207,23 @@ This is bisect-by-dependabot, not bisect-by-us. Dependabot does the splitting; o
 
 ## Forensics on failure
 
-When the tool leaves a worktree in place, it's at `C:/Users/mcwiz/Projects/AssemblyZero-dependabot-<N>`. You can:
+The tool keeps no worktree for a deferred or errored PR. `process_pr` removes the audit worktree and deletes its branch on every path, in its `finally` (#1116, #1133). The evidence of a deferral is in two places:
+
+- **The run log**, `data/dependabot-runs/<stamp>.log` in the checkout the tool runs from. The run names it as it starts (`Run log:`) and again after the Summary (`Full run log:`). The PR's section starts `=== PR #<N>:` and holds its `pytest exit code:` line and its `OUTCOME PR #<N>: deferred -- <reason>` line.
+- **The review comment on the PR**, a COMMENTED review that gives the reason. The PR's Actions output carries the failing tests.
+
+To reproduce a failure, test the PR yourself in a worktree of your own with `gh pr checkout <N> --detach`, as the review comment says.
+
+**When removal fails.** The run prints `CLEANUP FAILURE` with git's stderr and `WARNING: leftover state for PR #<N> at <path>`. The next run's orphan check then skips that repo until the worktree is gone. First find what made it fail, such as the uncommitted files a `CLEANUP WARNING` lists; never discard them. Then, from the repo's own checkout:
 
 ```bash
-cd C:/Users/mcwiz/Projects/AssemblyZero-dependabot-<N>
-poetry run pytest --tb=long <path_to_failing_test> -x
+poetry -C <path> env remove --all
+git worktree remove <path>
 ```
 
-When done investigating:
+The tool deletes its audit branch, `dependabot-audit-<N>`, with `git branch -d`. A branch left behind once its worktree is gone goes to the fleet's landed-branch cleanup tool, never to a deletion by hand.
 
-```bash
-cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry env remove --all
-git worktree remove ../AssemblyZero-dependabot-<N>
-git branch -D dependabot-audit-<N>
-```
-
-The cleanup skill will also catch this as an orphan directory per Fix 5's logic.
+The cleanup skill will also catch a leftover worktree as an orphan directory per Fix 5's logic.
 
 ---
 
@@ -223,14 +233,17 @@ At end of run, the tool prints:
 
 ```
 === Summary ===
-  Merged:   [756, 741]
-  Deferred: [479]
+  Merged:   ['martymcenroe/AssemblyZero#756', 'martymcenroe/AssemblyZero#741']
+  Deferred: ['martymcenroe/AssemblyZero#479']
   Errored:  []
+  Review events created: 2 APPROVED + 1 COMMENTED = 3 total
 ```
 
 - **Merged:** PR passed both gates and is on main.
 - **Deferred:** PR failed a gate (test failure, poetry install failure, pytest timeout, or a head without the fake-root guard). A review comment is posted, and possibly `@dependabot rebase` or `@dependabot recreate`. Also a PR that two earlier runs began at this head and never finished; that deferral runs nothing and posts nothing (§Outcome lines and the in-flight ledger).
 - **Errored:** Infrastructure failure (couldn't create worktree, couldn't checkout PR, couldn't approve, the fake-root guard check failed, etc.), an exception while testing the PR (the operator is alerted and the sweep goes on), or an interrupt (the run then stops). Worktree is cleaned up; the PR needs manual attention.
+- **Skipped (private, #4750):** printed only when the run skipped a repository. It lists repositories, not PRs: each was private, or its visibility could not be read, and nothing was done to it (§Private repositories are skipped).
+- **Review events created:** the reviews the run posted, counted by kind as each `gh pr review` call succeeds (#4746), never inferred from the lists above. A PR approved and then deferred (its `mergeable_state` never cleared, #1399) or errored (a merge conflict, or the squash merge failed) counts as APPROVED. A deferral that posted no review counts nothing.
 
 The Summary prints even when the run is interrupted, and it names every PR the run touched, the one interrupted mid-test included (#4737).
 
@@ -342,3 +355,5 @@ The PowerShell wrapper (in the private orchestration repo since #2156) is the du
 | 2026-05-10 | v2.2 (#1092): Windows Task Scheduler integration — `tools/run_dependabot_fleet.ps1` + daily `Claude-DependabotFleet` task at 06:00. Passive cross-repo processing with operator-credentialed review attribution. |
 | 2026-05-10 | v2.3 (#1093): Cross-repo parallelism via `--workers N` (default 3) for shorter fleet sweeps. Summary now reports review-event count (APPROVED + COMMENTED) so Code Review profile-stat math is visible per run. |
 | 2026-11-13 | v2.4 (#4736, #4737): Fake-root guard gate: a head without the guard `origin/main` has is deferred untested, with a rebase request when stale. The pytest timeout kills the process tree and defers. One `OUTCOME` line per PR, a Summary that survives an interrupt, and the in-flight ledger with its `REPEAT` line and two-strike deferral. |
+| 2026-11-13 | (#4744, #4745, #4746): A deferred PR's worktree is removed like every other; §Forensics on failure now points at the run log and the review comment, and the Summary's deferred heading makes no worktree claim. The audit branch is deleted with `git branch -d`, and a leftover goes to the fleet's landed-branch cleanup tool. The Summary's review-event counts are the reviews posted, recorded as each review call succeeds. |
+| 2026-11-13 | (#4750): The tool acts only on public repositories, by the operator's ruling that work costing GitHub Actions minutes stays off until December. A private repository, or one whose visibility cannot be read, is skipped before the pre-pass and listed in the Summary. `INCLUDE_PRIVATE_REPOS` is the switch, and `--include-private` turns it on for one run. |

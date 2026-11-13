@@ -21,6 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
 
 import dependabot_review  # noqa: E402
 
+# #4743: no test here may start `gh`, or git against a network remote.
+pytestmark = pytest.mark.usefixtures("no_network_commands")
+
 
 # 30KB is well above the empirically-observed Windows CreateProcess limit
 # (~32K total including the rest of the command). Real PR #953 body was ~19KB.
@@ -392,6 +395,14 @@ class TestProcessPrDeferralStaleBranchPriority:
             "checkout_pr_into_worktree",
             lambda worktree, pr_number, repo: True,
         )
+        # #4743: the test chooses the Python gate; unstubbed, this sent a real
+        # `gh pr diff` to GitHub and its failure chose the gate.
+        monkeypatch.setattr(dependabot_review, "_pr_changed_files",
+                            lambda pr_number, repo: ["poetry.lock"])
+        # #4743: the deferral posts its review through `gh pr review`, which
+        # reached GitHub until this stub.
+        monkeypatch.setattr(dependabot_review, "review_comment_on_pr",
+                            lambda pr_number, repo, body: True)
         # #4736: the head carries the fake-root guard, so the suite runs.
         monkeypatch.setattr(dependabot_review, "fake_root_guard_gap",
                             lambda worktree, rev="HEAD", fetch=True: ([], ""))

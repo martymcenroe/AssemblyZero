@@ -226,6 +226,23 @@ def no_live_model_calls(request, monkeypatch):
     yield
 
 
+@pytest.fixture
+def no_network_commands(request, monkeypatch):
+    """A test that starts `gh`, or git against a network remote, fails (#4743).
+
+    Every test file that loads `tools/dependabot_review.py` opts in with
+    `pytestmark = pytest.mark.usefixtures("no_network_commands")`, and
+    `tests/unit/test_dependabot_network_guard.py` fails if one does not. The
+    command is refused before it starts; one the code under test swallowed
+    still fails the test here, at teardown. See `tests/network_command_guard.py`.
+    """
+    from tests.network_command_guard import fail_if_caught, install
+
+    caught = install(monkeypatch, request.node.nodeid)
+    yield caught
+    fail_if_caught(caught, request.node.nodeid)
+
+
 @pytest.fixture(autouse=True)
 def home_state_stays_out_of_home(tmp_path, monkeypatch):
     """Every test's halt snapshots, resume contracts and audit lines land
