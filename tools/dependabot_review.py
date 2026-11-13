@@ -77,17 +77,42 @@ import tempfile
 import threading
 import time
 import tomllib
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# #4737: installed before anything can spawn, as tools/orchestrate.py does.
+# It adds CREATE_NO_WINDOW to every child, which composes with
+# _CREATION_FLAGS' CREATE_NEW_PROCESS_GROUP: the child gets a console of its
+# own instead of sharing this one. A console Ctrl-C broadcast from inside the
+# audited suite (the source is tracked in #4740) then reaches only that
+# child's console. Before this, it reached the nightly itself, which raised
+# KeyboardInterrupt in the middle of every PR #4315 run from 2026-11-01 on.
+from assemblyzero.core.no_console import install as _install_no_console
+
+_install_no_console()
+
+# #2673: a tool that installs no_console runs headless and echoes child
+# output, so it widens its streams at import too; main() repeats it through
+# _force_utf8_streams (#1876).
+from assemblyzero.core.utf8_console import install as _install_utf8_console
+
+_install_utf8_console()
+
+from assemblyzero.core.alert import alert_operator
 from assemblyzero.core.pr_poll import (  # noqa: E402
     VERDICT_GONE,
     VERDICT_READY,
     VERDICT_STUCK,
     poll_verdict,
+)
+from assemblyzero.utils.process import (
+    ProcessTreeKillError,
+    kill_process_tree,
 )
 
 GITHUB_USER = "martymcenroe"
@@ -100,6 +125,10 @@ DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
 # convention (speedrun run-log, hallucination telemetry) — operator-visible
 # in the Projects tree, machine-local, gitignored.
 RUN_LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "dependabot-runs"
+# #4737 R3: the PRs a run began and has not yet recorded an outcome for. Only
+# main() hands this path to process_repo, so a test that drives process_repo
+# never writes into the repo.
+IN_FLIGHT_LEDGER = RUN_LOG_DIR / "in-flight.json"
 
 
 class _Tee:
@@ -302,6 +331,52 @@ SKIP_AFTER_DEFERRALS = 3
 # majority to the normal sweep. It does NOT raise the total (--limit is
 # unchanged, #1339 stands) and it does not reorder anything else.
 ZERO_REVIEW_PREPASS_MAX = 5
+# #4736: files whose presence on the base branch means the suite guards its
+# fake absolute roots (#4706). A closed set, checked for every repo the
+# nightly tests. On Windows an unguarded suite turns each fake root its tests
+# hand the code (/tmp/repo, /nonexistent, ...) into a real folder at the top
+# of the C: drive, so a head that predates the guard is never tested as is.
+FAKE_ROOT_GUARD_PATHS: tuple[str, ...] = ("tests/fake_root_guard.py",)
+# The branch the guard is read from. The rest of this tool assumes `main`
+# too: create_audit_worktree cuts from it and is_pr_branch_stale compares
+# against it.
+BASE_BRANCH = "main"
+# #4737: the exit code run() reports for a command that hit its timeout.
+TIMEOUT_EXIT = 124
+# #4737: how long the pipes may stay open once the tree is killed before the
+# kill is reported as failed.
+KILL_DRAIN_TIMEOUT_S = 60
+# #4737 R3: after this many runs began a PR at one head and recorded no
+# outcome, the next run defers it without running it.
+IN_FLIGHT_STRIKES = 2
+# #4737 R1: the only outcomes a tested PR can end with.
+OUTCOME_STATUSES: tuple[str, ...] = ("merged", "deferred", "errored")
+# Every list a run's summary prints, in process_repo's result dict.
+RESULT_KEYS: tuple[str, ...] = (
+    "merged", "deferred", "errored", "limit_skipped", "skipped_unchanged",
+)
+# #4737: the PRs in "deferred" that the two-strike rule deferred without
+# running. That path posts no review, so main()'s COMMENTED count leaves them
+# out. It is not one of RESULT_KEYS: each PR in it is already in "deferred".
+UNREVIEWED_DEFERRED = "deferred_unreviewed"
+
+
+class Outcome(str):
+    """A tested PR's status, carrying the reason it was reached (#4737).
+
+    It is a str, so every caller that compares the status with "merged",
+    "deferred" or "errored", or indexes a result dict by it, keeps working;
+    process_repo reads `.reason` for the one OUTCOME line it prints.
+    """
+
+    reason: str
+
+    def __new__(cls, status: str, reason: str) -> Self:
+        if status not in OUTCOME_STATUSES:
+            raise ValueError(f"unknown PR outcome {status!r}")
+        obj = super().__new__(cls, status)
+        obj.reason = reason
+        return obj
 
 
 @dataclass
@@ -365,6 +440,87 @@ class PRBudget:
         return self._limit
 
 
+class InFlightLedgerError(RuntimeError):
+    """The in-flight ledger file cannot be read as a ledger (#4737 R3).
+
+    Raised instead of resetting the file: a reset would forget the runs that
+    began a PR and recorded no outcome, which is the record R3 keeps.
+    """
+
+
+class InFlightLedger:
+    """The PRs a run began and has not yet recorded an outcome for (#4737 R3).
+
+    The file is JSON keyed by ``"<repo>#<pr>"``; each entry is
+    ``{"head": sha, "runs": [run_label, ...]}``. ``begin`` is called just
+    before a PR is tested and ``clear`` once its outcome is recorded, so an
+    entry that survives names every run that started the PR at that head and
+    never finished it. A missing file is an empty ledger. Every read goes to
+    disk under one lock, so repo workers on threads share it safely, and every
+    write replaces the file atomically.
+    """
+
+    def __init__(self, path: Path, run_label: str):
+        self.path = Path(path)
+        self.run_label = run_label
+        self._lock = threading.Lock()
+
+    def _load(self) -> dict:
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise InFlightLedgerError(
+                f"in-flight ledger {self.path} is not valid JSON ({exc}); "
+                f"it was left as it is"
+            ) from exc
+        if not isinstance(data, dict):
+            raise InFlightLedgerError(
+                f"in-flight ledger {self.path} holds a JSON "
+                f"{type(data).__name__}, not an object; it was left as it is"
+            )
+        return data
+
+    def _save(self, data: dict) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n",
+                       encoding="utf-8")
+        os.replace(tmp, self.path)
+
+    def entry(self, key: str) -> dict | None:
+        """The entry for ``key``, or None when no run left one."""
+        with self._lock:
+            return self._load().get(key)
+
+    def begin(self, key: str, head: str) -> None:
+        """Record that this run began ``key`` at ``head``.
+
+        The run is appended when the entry's head is ``head``; a new head
+        starts the count again from this run.
+        """
+        with self._lock:
+            data = self._load()
+            current = data.get(key)
+            if isinstance(current, dict) and current.get("head") == head:
+                runs = list(current.get("runs") or []) + [self.run_label]
+            else:
+                runs = [self.run_label]
+            data[key] = {"head": head, "runs": runs}
+            self._save(data)
+
+    def clear(self, key: str) -> None:
+        """Remove ``key``'s entry; its outcome has been recorded."""
+        with self._lock:
+            data = self._load()
+            if key in data:
+                del data[key]
+                self._save(data)
+
+
 # ---------------------------------------------------------------------------
 # Subprocess wrapper — every command is visible
 # ---------------------------------------------------------------------------
@@ -372,8 +528,14 @@ class PRBudget:
 def run(cmd: list[str], cwd: str | None = None,
         timeout: int | None = None,
         quiet_on_failure: bool = False,
-        env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        env: dict[str, str] | None = None,
+        kill_tree: bool = False) -> subprocess.CompletedProcess:
     """Run a subprocess and echo the command to stdout.
+
+    `kill_tree=True` (#4737) makes the timeout real for a command whose
+    child spawns children of its own, as `poetry run pytest` does: see
+    `_run_killing_tree`. Only the pytest gate passes it; the other unbounded
+    call sites are #1966's.
 
     `encoding="utf-8", errors="replace"` is mandatory on Windows.
     Default `text=True` decodes with the system locale (cp1252 on most
@@ -399,44 +561,118 @@ def run(cmd: list[str], cwd: str | None = None,
     """
     ts = datetime.datetime.now().strftime("%H:%M:%S")
     print(f"  [{ts}] $ {' '.join(cmd)}")
-    try:
-        result = subprocess.run(
-            cmd, cwd=cwd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout, check=False,
-            creationflags=_CREATION_FLAGS,
-            env=env,
-        )
-    except subprocess.TimeoutExpired:
-        ts2 = datetime.datetime.now().strftime("%H:%M:%S")
-        print(f"  [{ts2}] TIMEOUT after {timeout}s")
-        return subprocess.CompletedProcess(cmd, returncode=124, stdout="", stderr="TIMEOUT")
+    if kill_tree:
+        result, timed_out = _run_killing_tree(cmd, cwd, timeout, env)
+        if timed_out:
+            return result
+    else:
+        try:
+            result = subprocess.run(
+                cmd, cwd=cwd, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                timeout=timeout, check=False,
+                creationflags=_CREATION_FLAGS,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            ts2 = datetime.datetime.now().strftime("%H:%M:%S")
+            print(f"  [{ts2}] TIMEOUT after {timeout}s")
+            return subprocess.CompletedProcess(
+                cmd, returncode=TIMEOUT_EXIT, stdout="", stderr="TIMEOUT")
     if result.returncode != 0 and not quiet_on_failure:
-        stderr = (result.stderr or "").strip()
-        stdout = (result.stdout or "").strip()
-        ts3 = datetime.datetime.now().strftime("%H:%M:%S")
-        # Show the TAIL of the output (last 2000 chars), not the head.
-        # Pytest's failure summary, mypy's error counts, gh's last
-        # response, git's actual error line -- all live at the END of
-        # subprocess output. The original 500-char head capture was
-        # consistently showing only the boring lead-in (e.g. pytest
-        # progress dots) and missing the actual failure details that
-        # make diagnosis possible.
-        if stderr:
-            tail = stderr[-2000:] if len(stderr) > 2000 else stderr
-            prefix = "tail" if len(stderr) > 2000 else "all"
-            print(f"  [{ts3}] [exit {result.returncode}] stderr ({prefix}, {len(stderr)} chars):")
-            for line in tail.splitlines():
-                print(f"  | {line}")
-        elif stdout:
-            tail = stdout[-2000:] if len(stdout) > 2000 else stdout
-            prefix = "tail" if len(stdout) > 2000 else "all"
-            print(f"  [{ts3}] [exit {result.returncode}] stdout ({prefix}, {len(stdout)} chars):")
-            for line in tail.splitlines():
-                print(f"  | {line}")
-        else:
-            print(f"  [{ts3}] [exit {result.returncode}] (no output)")
+        _print_output_tail(result)
     return result
+
+
+def _print_output_tail(result: subprocess.CompletedProcess) -> None:
+    """Print the tail of a failed command's stderr, or of its stdout."""
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    ts3 = datetime.datetime.now().strftime("%H:%M:%S")
+    # Show the TAIL of the output (last 2000 chars), not the head.
+    # Pytest's failure summary, mypy's error counts, gh's last
+    # response, git's actual error line -- all live at the END of
+    # subprocess output. The original 500-char head capture was
+    # consistently showing only the boring lead-in (e.g. pytest
+    # progress dots) and missing the actual failure details that
+    # make diagnosis possible.
+    if stderr:
+        tail = stderr[-2000:] if len(stderr) > 2000 else stderr
+        prefix = "tail" if len(stderr) > 2000 else "all"
+        print(f"  [{ts3}] [exit {result.returncode}] stderr ({prefix}, {len(stderr)} chars):")
+        for line in tail.splitlines():
+            print(f"  | {line}")
+    elif stdout:
+        tail = stdout[-2000:] if len(stdout) > 2000 else stdout
+        prefix = "tail" if len(stdout) > 2000 else "all"
+        print(f"  [{ts3}] [exit {result.returncode}] stdout ({prefix}, {len(stdout)} chars):")
+        for line in tail.splitlines():
+            print(f"  | {line}")
+    else:
+        print(f"  [{ts3}] [exit {result.returncode}] (no output)")
+
+
+def _run_killing_tree(
+    cmd: list[str], cwd: str | None, timeout: int | None,
+    env: dict[str, str] | None,
+) -> tuple[subprocess.CompletedProcess, bool]:
+    """Run `cmd` and, on timeout or interruption, kill its whole tree (#4737).
+
+    `subprocess.run`'s timeout kills only the process it started. On
+    Windows that is `poetry`; the pytest grandchild keeps the inherited
+    pipes open, and the `communicate()` that follows the kill waits for it.
+    That is how ten of twelve November runs of PR #4315 lasted past
+    PYTEST_TIMEOUT_S with no TIMEOUT line. `kill_process_tree` kills the
+    descendants too (`taskkill /T` on Windows, the process group elsewhere).
+
+    Off Windows the child starts a session of its own, so its process group
+    is not ours and the group kill cannot reach this process.
+
+    Returns (result, timed_out). On a timeout the result's exit code is
+    TIMEOUT_EXIT and its stdout is what the command wrote before the kill.
+    Raises ProcessTreeKillError when the tree could not be killed, or its
+    pipes are still open KILL_DRAIN_TIMEOUT_S after the kill. Any exception
+    raised while waiting, KeyboardInterrupt included, kills the tree first
+    and then propagates unchanged.
+    """
+    extra: dict = {} if sys.platform == "win32" else {"start_new_session": True}
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace",
+        creationflags=_CREATION_FLAGS, env=env, **extra,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        ts = datetime.datetime.now(datetime.UTC).astimezone().strftime("%H:%M:%S")
+        print(f"  [{ts}] TIMEOUT after {timeout}s -- killing the process "
+              f"tree of pid {proc.pid} (#4737)")
+        kill_process_tree(proc.pid)
+        try:
+            partial, _ = proc.communicate(timeout=KILL_DRAIN_TIMEOUT_S)
+        except subprocess.TimeoutExpired as exc:
+            raise ProcessTreeKillError(
+                f"the pipes of pid {proc.pid} are still open "
+                f"{KILL_DRAIN_TIMEOUT_S}s after its tree was killed; a "
+                f"descendant survived (#4737)") from exc
+        result = subprocess.CompletedProcess(
+            cmd, returncode=TIMEOUT_EXIT, stdout=partial or "",
+            stderr="TIMEOUT")
+        if (partial or "").strip():
+            print("  output before the kill:")
+            _print_output_tail(subprocess.CompletedProcess(
+                cmd, returncode=TIMEOUT_EXIT, stdout=partial, stderr=""))
+        return result, True
+    except BaseException:
+        # The tree must not outlive the wait: a KeyboardInterrupt here used
+        # to leave pytest running on while cleanup removed its worktree.
+        try:
+            kill_process_tree(proc.pid)
+        except ProcessTreeKillError:
+            pass  # kill_process_tree printed ERROR [KILL]; the original propagates
+        raise
+    return subprocess.CompletedProcess(
+        cmd, returncode=proc.returncode, stdout=stdout, stderr=stderr), False
 
 
 def run_gh_with_body(args_pre: list[str], body: str) -> subprocess.CompletedProcess:
@@ -564,6 +800,45 @@ def checkout_pr_into_worktree(worktree: Path, pr_number: int, repo: str) -> bool
     return result.returncode == 0
 
 
+def fake_root_guard_gap(worktree: Path, rev: str = "HEAD",
+                        fetch: bool = True) -> tuple[list[str], str]:
+    """#4736: the fake-root guard files the base branch has and `rev` lacks.
+
+    Returns (missing, error). `missing` names each FAKE_ROOT_GUARD_PATHS
+    entry present at origin/BASE_BRANCH and absent at `rev`; empty means
+    `rev` may be tested. `error` is set when either could not be read, and
+    then nothing may be tested.
+
+    The base is read from origin, fetched first, and never from the local
+    `main`: the audit worktree is cut from the primary checkout's local
+    `main`, which can lag origin, and a stale local `main` must not hide
+    the guard. `fetch=False` reuses a fetch already made in this worktree.
+    """
+    base = f"origin/{BASE_BRANCH}"
+    try:
+        if fetch:
+            fetched = run(["git", "fetch", "origin", BASE_BRANCH],
+                          cwd=str(worktree))
+            if fetched.returncode != 0:
+                return [], (f"could not fetch {BASE_BRANCH} from origin "
+                            f"(exit {fetched.returncode})")
+        missing: list[str] = []
+        for path in FAKE_ROOT_GUARD_PATHS:
+            on_base = run(["git", "ls-tree", base, "--", path],
+                          cwd=str(worktree))
+            at_rev = run(["git", "ls-tree", rev, "--", path],
+                         cwd=str(worktree))
+            for listing, where in ((on_base, base), (at_rev, rev)):
+                if listing.returncode != 0:
+                    return [], (f"`git ls-tree {where} -- {path}` failed "
+                                f"(exit {listing.returncode})")
+            if (on_base.stdout or "").strip() and not (at_rev.stdout or "").strip():
+                missing.append(path)
+    except OSError as err:
+        return [], f"worktree unusable ({err})"
+    return missing, ""
+
+
 # #2126: the audit venv is destroyed and rebuilt from scratch for every PR
 # (evict_poetry_venv, below), so every locked binary dependency must have a
 # wheel for whichever interpreter poetry resolves. On this machine poetry
@@ -682,11 +957,15 @@ def run_tests(worktree: Path) -> int:
 
 def run_tests_detailed(worktree: Path) -> tuple[int, str]:
     """#1992: as run_tests, but also returns captured output so the caller
-    can compare WHICH tests failed against a baseline run of the base."""
+    can compare WHICH tests failed against a baseline run of the base.
+
+    #4737: the run kills pytest's whole process tree at PYTEST_TIMEOUT_S and
+    then returns TIMEOUT_EXIT, which the caller records as a deferral."""
     pytest_env = _clean_subprocess_env()
     pytest_env["PYTHONDONTWRITEBYTECODE"] = "1"
     result = run(["poetry", "run", "pytest", "-q", "--tb=short"],
-                 cwd=str(worktree), timeout=PYTEST_TIMEOUT_S, env=pytest_env)
+                 cwd=str(worktree), timeout=PYTEST_TIMEOUT_S, env=pytest_env,
+                 kill_tree=True)
     print(f"  pytest exit code: {result.returncode}")
     return result.returncode, (result.stdout or "") + (result.stderr or "")
 
@@ -1059,7 +1338,8 @@ def request_dependabot_recreate(pr_number: int, repo: str) -> None:
     comment_on_pr(pr_number, repo, "@dependabot recreate")
 
 
-def request_dependabot_rebase(pr_number: int, repo: str) -> None:
+def request_dependabot_rebase(pr_number: int, repo: str,
+                              explanation: str | None = None) -> None:
     """Issue #994: auto-recover from stale-branch deferrals.
 
     When a dependabot PR's base SHA is behind current main, test failures
@@ -1070,14 +1350,18 @@ def request_dependabot_rebase(pr_number: int, repo: str) -> None:
 
     Non-destructive: if the failure is real (upgrade incompatibility),
     the rebased PR will fail again on next run.
+
+    #4736: `explanation` replaces the first comment when the deferral was not
+    a test failure, so the comment never claims a suite failed that never ran.
     """
     comment_on_pr(
         pr_number, repo,
-        "Test suite failed AND this PR's base is behind current `main`. "
-        "Many failures from this pattern resolve after rebasing onto the "
-        "latest baseline (vs. being real upgrade incompatibilities). "
-        "Requesting `@dependabot rebase` so the next `/dependabot` run "
-        "evaluates against current main.",
+        explanation or (
+            "Test suite failed AND this PR's base is behind current `main`. "
+            "Many failures from this pattern resolve after rebasing onto the "
+            "latest baseline (vs. being real upgrade incompatibilities). "
+            "Requesting `@dependabot rebase` so the next `/dependabot` run "
+            "evaluates against current main."),
     )
     comment_on_pr(pr_number, repo, "@dependabot rebase")
 
@@ -1535,12 +1819,27 @@ def run_baseline_gate(pr: PRInfo, worktree: Path, touches_py: bool,
     output = ""
     code = 0
     if touches_py:
+        # #4736: the base commit is the primary checkout's local `main`,
+        # which can lag origin. A base that predates the fake-root guard is
+        # not run either; an unrun baseline is simply not exonerable.
+        missing, guard_error = fake_root_guard_gap(worktree, fetch=False)
+        if guard_error or missing:
+            why = guard_error or (f"the base lacks {', '.join(missing)}, "
+                                  f"which origin/{BASE_BRANCH} has")
+            print(f"  BASELINE: not run, {why} (#4736) -- not exonerable",
+                  file=sys.stderr)
+            return 0, ""
         evict_poetry_venv(worktree)
         if not install_deps(worktree):
             print("  BASELINE: poetry install failed on the base -- not "
                   "exonerable", file=sys.stderr)
             return 0, ""
         code, output = run_tests_detailed(worktree)
+        if code == TIMEOUT_EXIT:
+            print(f"  BASELINE: pytest timed out on the base after "
+                  f"{PYTEST_TIMEOUT_S}s -- not exonerable (#4737)",
+                  file=sys.stderr)
+            return 0, ""
         if code == PYTEST_EXIT_NO_TESTS_COLLECTED:
             code = 0
     if code == 0 and js_dirs:
@@ -1554,15 +1853,16 @@ def run_baseline_gate(pr: PRInfo, worktree: Path, touches_py: bool,
 
 def _process_pr_inside_worktree(
     pr: PRInfo, repo: str, worktree: Path,
-) -> str:
+) -> Outcome:
     """Inner pipeline that assumes the audit worktree has been created.
 
-    Returns 'merged', 'deferred', or 'errored'. Does NOT clean up --
-    cleanup is the caller's responsibility (process_pr's try/finally).
+    Returns an Outcome: 'merged', 'deferred', or 'errored', with its reason.
+    Does NOT clean up -- cleanup is the caller's responsibility
+    (process_pr's try/finally).
     """
     if not checkout_pr_into_worktree(worktree, pr.number, repo):
         print("  ERROR: gh pr checkout failed")
-        return "errored"
+        return Outcome("errored", "gh pr checkout failed")
 
     files = _pr_changed_files(pr.number, repo)
     if files is None:
@@ -1576,6 +1876,42 @@ def _process_pr_inside_worktree(
     exit_code = 0
     defer_reason = ""
     gate_output = ""
+    # #4736/#4737: a deferral whose suite never ran, or was killed, has no
+    # failures to compare, so the baseline is not run for it either.
+    skip_baseline = False
+    rebase_explanation: str | None = None
+
+    # #4736: before the Python gate installs or runs anything, make sure the
+    # head carries the fake-root guard whenever the base branch does. On
+    # Windows an unguarded suite creates real folders at the top of the C:
+    # drive for every fake root its tests use.
+    guard_missing: list[str] = []
+    if touches_py:
+        guard_missing, guard_error = fake_root_guard_gap(worktree)
+        if guard_error:
+            print(f"  ERROR: could not compare the fake-root guard with "
+                  f"origin/{BASE_BRANCH}: {guard_error}. Not running the "
+                  f"suite (#4736).")
+            return Outcome(
+                "errored",
+                f"fake-root guard check failed ({guard_error}); suite not run")
+        if guard_missing:
+            names = ", ".join(guard_missing)
+            print(f"  SKIP GATE: this head lacks {names}, which "
+                  f"origin/{BASE_BRANCH} has. Its suite would run without the "
+                  f"fake-root guard (#4706), so install, pytest and the "
+                  f"baseline are not run (#4736).")
+            exit_code = 1
+            skip_baseline = True
+            defer_reason = (f"this head predates the fake-root guard ({names} "
+                            f"is on {BASE_BRANCH} but not in this head), so "
+                            f"the suite was not run (#4736); it is tested "
+                            f"once the branch carries the guard")
+            rebase_explanation = (
+                f"This PR's head predates `{names}`, which `{BASE_BRANCH}` "
+                f"carries, so its suite was not run. Requesting "
+                f"`@dependabot rebase` so the next `/dependabot` run tests it "
+                f"with the guard in place.")
 
     # #1400: only run the Python gate (poetry install + pytest) when the
     # PR actually touches a Python file or manifest. A Dockerfile-only
@@ -1584,7 +1920,7 @@ def _process_pr_inside_worktree(
     # PRs is wasted work and creates false-negative deferrals when the
     # PR's branch has any pre-existing lockfile issue (e.g. honeypot's
     # docker PRs #52/#53/#55 carried the pre-cleanup jiter manifest).
-    if touches_py:
+    if touches_py and not guard_missing:
         evict_poetry_venv(worktree)
 
         if not install_deps(worktree):
@@ -1597,7 +1933,7 @@ def _process_pr_inside_worktree(
                 "`poetry install` failed. See the PR's Actions output for the "
                 "captured stderr; re-run locally via `gh pr checkout` if needed.",
             )
-            return "deferred"
+            return Outcome("deferred", "poetry install failed")
 
         exit_code, gate_output = run_tests_detailed(worktree)
 
@@ -1606,7 +1942,16 @@ def _process_pr_inside_worktree(
         # failure. A dep bump cannot turn N>0 tests into 0, so exit 5 means
         # "this repo has no test suite" -- safe to treat as pass for the
         # dep-bump gate. Log loudly so the run output reflects the decision.
-        if exit_code == PYTEST_EXIT_NO_TESTS_COLLECTED:
+        if exit_code == TIMEOUT_EXIT:
+            # #4737: run() killed the suite's whole tree and printed
+            # TIMEOUT. A killed run has no failure list to compare with a
+            # baseline, and a second 30-minute run would only time out too.
+            print(f"  pytest: TIMEOUT after {PYTEST_TIMEOUT_S}s -- deferring "
+                  f"(#4737)")
+            defer_reason = (f"pytest TIMEOUT after {PYTEST_TIMEOUT_S}s; the "
+                            f"suite's process tree was killed (#4737)")
+            skip_baseline = True
+        elif exit_code == PYTEST_EXIT_NO_TESTS_COLLECTED:
             print("  pytest: no tests collected (exit 5) -- treating as PASS "
                   "(decorative-deps repo with no test suite)")
             gate_descs.append("pytest: no tests collected (exit 5, treated "
@@ -1633,7 +1978,7 @@ def _process_pr_inside_worktree(
     # broken, in which case the bump is being blamed for a failure that
     # predates it. Re-run the same gate against the base and compare.
     # Only ever runs on the failure path, so a passing PR costs nothing.
-    if exit_code != 0:
+    if exit_code != 0 and not skip_baseline:
         pr_failures = extract_failures(gate_output)
         base_code, base_output = run_baseline_gate(
             pr, worktree, touches_py, js_dirs)
@@ -1689,24 +2034,28 @@ def _process_pr_inside_worktree(
         if is_pr_branch_stale(pr.number, repo):
             print("  PR branch is stale (base behind main) -- "
                   "requesting @dependabot rebase")
-            request_dependabot_rebase(pr.number, repo)
-        elif package_count > 1:
+            if rebase_explanation:
+                request_dependabot_rebase(pr.number, repo,
+                                          explanation=rebase_explanation)
+            else:
+                request_dependabot_rebase(pr.number, repo)
+        elif package_count > 1 and not guard_missing:
             print(f"  Multi-package PR ({package_count} packages) -- "
                   f"requesting dependabot recreate")
             request_dependabot_recreate(pr.number, repo)
-        return "deferred"
+        return Outcome("deferred", defer_reason)
 
     # ---- Green path ----
     if not inject_no_issue(pr, repo):
         print("  ERROR: inject No-Issue failed")
-        return "errored"
+        return Outcome("errored", "inject No-Issue failed")
 
     # Small wait for pr-sentinel to re-evaluate the edited body
     time.sleep(5)
 
     if not approve_pr(pr.number, repo, "; ".join(gate_descs)):
         print("  ERROR: approve failed")
-        return "errored"
+        return Outcome("errored", "approve failed")
 
     if not wait_for_mergeable(pr.number, repo):
         # Distinguish failure modes. Re-query mergeable_state to decide
@@ -1734,7 +2083,9 @@ def _process_pr_inside_worktree(
                   f"requesting @dependabot rebase. Approval persists; next run "
                   f"re-evaluates post-rebase.")
             request_dependabot_rebase(pr.number, repo)
-            return "errored"
+            return Outcome("errored", f"approved, but mergeable_state "
+                                      f"'{final_state}' ({reason}); "
+                                      f"@dependabot rebase requested")
         # #1399: blocked/behind/unknown after timeout = state is genuinely
         # in-flight (cerberus arrival tail, required check still running,
         # base branch lag, etc.), NOT a permanent failure. Classify as
@@ -1746,17 +2097,19 @@ def _process_pr_inside_worktree(
         print(f"  DEFER: mergeable_state '{final_state}' after wait timeout -- "
               f"likely cerberus-arrival tail or pending check. Approval "
               f"persists; next run will re-evaluate. (See #1399.)")
-        return "deferred"
+        return Outcome("deferred", f"approved, but mergeable_state "
+                                   f"'{final_state}' after the wait (#1399)")
 
     if not squash_merge(pr.number, repo):
         print("  ERROR: merge failed")
-        return "errored"
+        return Outcome("errored", "squash merge failed")
 
-    return "merged"
+    return Outcome("merged", "; ".join(gate_descs))
 
 
-def process_pr(pr: PRInfo, repo: str, target_repo: Path) -> str:
-    """Process a single PR. Returns 'merged', 'deferred', or 'errored'.
+def process_pr(pr: PRInfo, repo: str, target_repo: Path) -> Outcome:
+    """Process a single PR. Returns an Outcome: 'merged', 'deferred', or
+    'errored', with its reason.
 
     #1360: `target_repo` is the local clone of the PR's repo. Pre-#1360
     this was `main_repo` (always AssemblyZero), which forced foreign
@@ -1771,7 +2124,8 @@ def process_pr(pr: PRInfo, repo: str, target_repo: Path) -> str:
     print(f"\n=== PR #{pr.number}: {pr.title} ===")
 
     if not verify_author(pr):
-        return "errored"
+        return Outcome("errored", f"author {pr.author_login!r} is not "
+                                  f"dependabot; refused")
 
     worktree, branch = create_audit_worktree(target_repo, pr.number)
     if worktree is None:
@@ -1779,7 +2133,7 @@ def process_pr(pr: PRInfo, repo: str, target_repo: Path) -> str:
         # path). create_audit_worktree already printed the diagnostic.
         # Record this PR as errored and let the sweep continue -- do NOT
         # enter the cleanup try/finally below with a None worktree.
-        return "errored"
+        return Outcome("errored", "could not create the audit worktree")
 
     try:
         return _process_pr_inside_worktree(pr, repo, worktree)
@@ -1883,6 +2237,7 @@ def process_repo(
     skip_after: int = SKIP_AFTER_DEFERRALS,
     only_prs: set[int] | None = None,
     skip_prs: set[int] | None = None,
+    ledger: "InFlightLedger | None" = None,
 ) -> dict[str, list[str]]:
     """Process all dependabot PRs in one repo, sequentially.
 
@@ -1903,10 +2258,17 @@ def process_repo(
     #1339: PRs process oldest-first (ascending PR number) — FIFO drains
     the queue tail, and under ``--limit`` it makes selection deterministic
     instead of inheriting gh's newest-first listing order.
+
+    #4737: every tested or skipped PR is recorded once, through
+    _record_outcome, with one OUTCOME line. With a ``ledger``, a PR is
+    entered in it before it is tested and cleared once its outcome is
+    recorded; a PR that IN_FLIGHT_STRIKES runs began at its current head
+    without recording an outcome is deferred without running. Anything that
+    escapes the PR loop carries the results so far as ``dependabot_partial``.
     """
     sub: dict[str, list[str]] = {
         "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
-        "skipped_unchanged": [],
+        "skipped_unchanged": [], UNREVIEWED_DEFERRED: [],
     }
     print(f"\n{'=' * 60}")
     print(f"REPO: {repo}")
@@ -1970,34 +2332,120 @@ def process_repo(
               f"({count_packages(pr.body)} packages)")
     if dry_run:
         return sub
-    for pr in sorted(prs, key=lambda p: p.number):
-        # #2155: the zero-review pre-pass runs this same function with
-        # `only_prs` set, so its PRs go through every gate below exactly as
-        # the normal sweep would -- no second processing path to drift.
-        # The sweep then passes `skip_prs` for whatever the pre-pass already
-        # handled, so a PR is never audited twice in one run (which would
-        # post a duplicate review and spend a second budget slot).
-        if only_prs is not None and pr.number not in only_prs:
-            continue
-        if skip_prs and pr.number in skip_prs:
-            continue
-        # #1838: a PR already deferred at this exact head SHA cannot
-        # produce a different result -- skip before spending a budget
-        # slot, building a worktree, or posting a duplicate review.
-        if already_deferred_at_head(pr, repo, skip_after):
-            print(f"  SKIP #{pr.number}: deferred {skip_after}+ times at "
-                  f"current head {pr.head_oid[:9]} -- unchanged since last "
-                  f"audit (#1838/#1947)")
-            sub["skipped_unchanged"].append(f"{repo}#{pr.number}")
-            continue
-        if budget is not None and not budget.try_acquire():
-            # #1339: budget spent — remaining PRs are untouched, recorded
-            # visibly (no silent caps), and left for the next harvest.
-            sub["limit_skipped"].append(f"{repo}#{pr.number}")
-            continue
-        status = process_pr(pr, repo, target_repo)
-        sub[status].append(f"{repo}#{pr.number}")
+    try:
+        for pr in sorted(prs, key=lambda p: p.number):
+            # #2155: the zero-review pre-pass runs this same function with
+            # `only_prs` set, so its PRs go through every gate below exactly
+            # as the normal sweep would -- no second processing path to
+            # drift. The sweep then passes `skip_prs` for whatever the
+            # pre-pass already handled, so a PR is never audited twice in one
+            # run (which would post a duplicate review and spend a second
+            # budget slot).
+            if only_prs is not None and pr.number not in only_prs:
+                continue
+            if skip_prs and pr.number in skip_prs:
+                continue
+            # #1838: a PR already deferred at this exact head SHA cannot
+            # produce a different result -- skip before spending a budget
+            # slot, building a worktree, or posting a duplicate review.
+            if already_deferred_at_head(pr, repo, skip_after):
+                print(f"  SKIP #{pr.number}: deferred {skip_after}+ times at "
+                      f"current head {pr.head_oid[:9]} -- unchanged since "
+                      f"last audit (#1838/#1947)")
+                _record_outcome(
+                    sub, repo, pr, "skipped_unchanged",
+                    f"deferred {skip_after}+ times at current head "
+                    f"{pr.head_oid[:9]}; unchanged since last audit",
+                )
+                continue
+            key = f"{repo}#{pr.number}"
+            # #4737 R3: a run that began this PR and recorded no outcome left
+            # its entry behind. Say so; once IN_FLIGHT_STRIKES runs have done
+            # it at the PR's current head, do not run it a further time.
+            prior = ledger.entry(key) if ledger is not None else None
+            if prior is not None:
+                prior_runs = prior.get("runs") or []
+                prior_head = str(prior.get("head") or "")
+                last_run = prior_runs[-1] if prior_runs else "?"
+                repeat = (f"run {last_run} began this PR at head "
+                          f"{prior_head[:9]} and recorded no outcome")
+                print(f"  REPEAT PR #{pr.number}: {repeat}")
+                if (pr.head_oid and prior_head == pr.head_oid
+                        and len(prior_runs) >= IN_FLIGHT_STRIKES):
+                    _record_outcome(
+                        sub, repo, pr, "deferred",
+                        f"{repeat}; deferred without running after "
+                        f"{len(prior_runs)} runs with no outcome",
+                    )
+                    sub[UNREVIEWED_DEFERRED].append(key)
+                    continue
+            if budget is not None and not budget.try_acquire():
+                # #1339: budget spent — remaining PRs are untouched, recorded
+                # visibly (no silent caps), and left for the next harvest.
+                _record_outcome(
+                    sub, repo, pr, "limit_skipped",
+                    "harvest limit reached; left for the next run",
+                )
+                continue
+            if ledger is not None:
+                ledger.begin(key, pr.head_oid)
+            try:
+                result = process_pr(pr, repo, target_repo)
+            except KeyboardInterrupt:
+                # The entry stays: the next run reports this PR as a repeat
+                # and, at IN_FLIGHT_STRIKES, defers it without running it.
+                _record_outcome(
+                    sub, repo, pr, "errored",
+                    "interrupted by SIGINT during this PR; in-flight entry "
+                    "kept (see #4740)",
+                )
+                raise
+            except Exception as exc:  # noqa: BLE001 -- recorded, alerted, next PR
+                traceback.print_exc()
+                cause = f"{type(exc).__name__}: {exc}"
+                _record_outcome(sub, repo, pr, "errored", cause)
+                if ledger is not None:
+                    ledger.clear(key)
+                alert_operator(
+                    what=f"testing dependabot PR {key}",
+                    where="tools/dependabot_review.py, process_repo",
+                    cause=cause,
+                    consequence=(
+                        f"{key} is recorded errored for this run; the sweep "
+                        f"goes on to the repo's next PR"
+                    ),
+                    repo=repo,
+                )
+                continue
+            status = str(result)
+            reason = getattr(result, "reason", "")
+            if status not in OUTCOME_STATUSES:
+                reason = (f"process_pr returned the unknown status "
+                          f"{status!r}" + (f" ({reason})" if reason else ""))
+                status = "errored"
+            _record_outcome(sub, repo, pr, status, reason)
+            if ledger is not None:
+                ledger.clear(key)
+    except BaseException as exc:
+        exc.dependabot_partial = sub
+        raise
     return sub
+
+
+def _record_outcome(sub: dict[str, list[str]], repo: str, pr: PRInfo,
+                    status: str, reason: str) -> None:
+    """Record one PR's result in ``sub`` and print its OUTCOME line (#4737)."""
+    sub[status].append(f"{repo}#{pr.number}")
+    print(f"  OUTCOME PR #{pr.number}: {status} -- {reason}")
+
+
+def _extend_results(results: dict[str, list[str]],
+                    sub: dict[str, list[str]] | None) -> None:
+    """Add one process_repo result dict, possibly partial, to ``results``."""
+    if not sub:
+        return
+    for k in (*RESULT_KEYS, UNREVIEWED_DEFERRED):
+        results[k].extend(sub.get(k, []))
 
 
 # ---------------------------------------------------------------------------
@@ -2214,8 +2662,18 @@ def main() -> None:
     # Aggregate results across repos.
     results: dict[str, list[str]] = {
         "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
-        "skipped_unchanged": [],
+        "skipped_unchanged": [], UNREVIEWED_DEFERRED: [],
     }
+
+    # #4737 R3: one ledger for the run, shared by every process_repo call.
+    # A run is named by its log file, or by the same timestamp form when it
+    # keeps no log.
+    ledger = InFlightLedger(
+        IN_FLIGHT_LEDGER,
+        run_log_path.name if run_log_path
+        else datetime.datetime.now(datetime.UTC).astimezone().strftime(
+            "%Y-%m-%d_%H%M%S"),
+    )
 
     # #2155: zero-review pre-pass. Repos process in sorted-name order, so a
     # --limit budget is spent by the alphabetically-early repos and the same
@@ -2267,13 +2725,19 @@ def main() -> None:
                 if budget is not None and budget.exhausted:
                     break
                 print(f"\n{'=' * 60}\nPRE-PASS REPO: {repo}\n{'=' * 60}")
-                sub = process_repo(
-                    repo, main_repo, args.dry_run, args.ignore_orphans,
-                    budget=budget, skip_after=skip_after, only_prs=numbers,
-                )
-                for k in ("merged", "deferred", "errored", "limit_skipped",
-                          "skipped_unchanged"):
-                    results[k].extend(sub[k])
+                try:
+                    sub = process_repo(
+                        repo, main_repo, args.dry_run, args.ignore_orphans,
+                        budget=budget, skip_after=skip_after,
+                        only_prs=numbers, ledger=ledger,
+                    )
+                except BaseException as exc:
+                    # #4737: the PRs this repo finished before the failure
+                    # still reach the summary in the finally below.
+                    _extend_results(results,
+                                    getattr(exc, "dependabot_partial", None))
+                    raise
+                _extend_results(results, sub)
                 done_by_repo.setdefault(repo, set()).update(numbers)
 
         # Issue #1093: parallelize across repos in --fleet mode. Single-
@@ -2287,6 +2751,7 @@ def main() -> None:
                     executor.submit(
                         process_repo, repo, main_repo, args.dry_run,
                         args.ignore_orphans, None, skip_after,
+                        ledger=ledger,
                     ): repo
                     for repo in repos
                 }
@@ -2294,10 +2759,13 @@ def main() -> None:
                     repo = futures[future]
                     try:
                         sub = future.result()
-                    except KeyboardInterrupt:
+                    except KeyboardInterrupt as exc:
                         # Intentional Ctrl-C: let it propagate to __main__'s
                         # handler (sys.exit(130)). The finally below still
-                        # prints the partial summary first.
+                        # prints the partial summary first, with the PRs
+                        # this repo finished before it (#4737).
+                        _extend_results(results,
+                                        getattr(exc, "dependabot_partial", None))
                         raise
                     except BaseException as e:
                         # #1370: catch BaseException, not just Exception. A
@@ -2311,12 +2779,13 @@ def main() -> None:
                         # truthful regardless of the exception class.
                         print(f"\n  [ERROR] worker for {repo} raised: "
                               f"{type(e).__name__}: {e}")
+                        # #4737: the PRs it finished before it raised.
+                        _extend_results(results,
+                                        getattr(e, "dependabot_partial", None))
                         sub = {"merged": [], "deferred": [],
                                "errored": [repo], "limit_skipped": [],
                                "skipped_unchanged": []}
-                    for k in ("merged", "deferred", "errored", "limit_skipped",
-                              "skipped_unchanged"):
-                        results[k].extend(sub[k])
+                    _extend_results(results, sub)
         else:
             for repo in repos:
                 # #1339: once the budget is spent, later repos are not even
@@ -2326,14 +2795,19 @@ def main() -> None:
                     print(f"\n  Harvest limit reached — skipping {repo} "
                           f"(queue untouched).")
                     continue
-                sub = process_repo(
-                    repo, main_repo, args.dry_run, args.ignore_orphans,
-                    budget=budget, skip_after=skip_after,
-                    skip_prs=done_by_repo.get(repo),
-                )
-                for k in ("merged", "deferred", "errored", "limit_skipped",
-                          "skipped_unchanged"):
-                    results[k].extend(sub[k])
+                try:
+                    sub = process_repo(
+                        repo, main_repo, args.dry_run, args.ignore_orphans,
+                        budget=budget, skip_after=skip_after,
+                        skip_prs=done_by_repo.get(repo), ledger=ledger,
+                    )
+                except BaseException as exc:
+                    # #4737: the PRs this repo finished before the failure
+                    # still reach the summary in the finally below.
+                    _extend_results(results,
+                                    getattr(exc, "dependabot_partial", None))
+                    raise
+                _extend_results(results, sub)
     finally:
         # Dry-run skips the result-aggregation summary -- it only
         # listed PRs without taking action, so there's nothing to
@@ -2351,8 +2825,11 @@ def main() -> None:
             # generated nothing (the script bailed before any gh pr review
             # call). The counter makes Code Review profile-stat math visible
             # so the operator can verify credit was earned each run.
+            # #4737: a PR the two-strike rule deferred without running
+            # posted no review, so it is left out of the COMMENTED count.
             approved_events = len(results["merged"])
-            commented_events = len(results["deferred"])
+            commented_events = (len(results["deferred"])
+                                - len(results[UNREVIEWED_DEFERRED]))
             total_events = approved_events + commented_events
 
             print("\n=== Summary ===")
