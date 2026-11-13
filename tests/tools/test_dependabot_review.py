@@ -392,6 +392,9 @@ class TestProcessPrDeferralStaleBranchPriority:
             "checkout_pr_into_worktree",
             lambda worktree, pr_number, repo: True,
         )
+        # #4736: the head carries the fake-root guard, so the suite runs.
+        monkeypatch.setattr(dependabot_review, "fake_root_guard_gap",
+                            lambda worktree, rev="HEAD", fetch=True: ([], ""))
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda worktree: None)
         monkeypatch.setattr(dependabot_review, "install_deps", lambda worktree: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda worktree: exit_code)
@@ -896,6 +899,9 @@ class TestPipelineSkippedForNonPythonPR:
         the function without hitting the network."""
         monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
                             lambda worktree, pr_number, repo: True)
+        # #4736: the head carries the fake-root guard, so the suite runs.
+        monkeypatch.setattr(dependabot_review, "fake_root_guard_gap",
+                            lambda worktree, rev="HEAD", fetch=True: ([], ""))
         monkeypatch.setattr(dependabot_review, "inject_no_issue",
                             lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "approve_pr",
@@ -1635,6 +1641,9 @@ class TestProcessPrJsFlow:
         # exonerable. Tests that want exoneration stub this themselves.
         monkeypatch.setattr(dependabot_review, "run_baseline_gate",
                             lambda pr, wt, py, js: (0, ""))
+        # #4736: the head carries the fake-root guard, so the suite runs.
+        monkeypatch.setattr(dependabot_review, "fake_root_guard_gap",
+                            lambda worktree, rev="HEAD", fetch=True: ([], ""))
         monkeypatch.setattr(dependabot_review, "inject_no_issue",
                             lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
@@ -2008,6 +2017,9 @@ class TestBaselineGateFlow:
                             lambda w: (1, PYTEST_FAIL))
         monkeypatch.setattr(dependabot_review, "run_baseline_gate",
                             lambda pr, w, py, js: baseline)
+        # #4736: the head carries the fake-root guard, so the suite runs.
+        monkeypatch.setattr(dependabot_review, "fake_root_guard_gap",
+                            lambda worktree, rev="HEAD", fetch=True: ([], ""))
         monkeypatch.setattr(dependabot_review, "inject_no_issue",
                             lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "wait_for_mergeable",

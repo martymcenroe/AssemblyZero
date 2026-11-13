@@ -1,8 +1,8 @@
 # 0911 - Dependabot PR Audit
 
 **Category:** Runbook / Security Maintenance
-**Version:** 2.3
-**Last Updated:** 2026-05-10
+**Version:** 2.4
+**Last Updated:** 2026-11-13
 
 ---
 
@@ -31,6 +31,11 @@ Safely review, approve, and merge Dependabot PRs with regression verification. D
 **New in v2.3 (#1093):**
 - `--workers N` flag (default 3) enables cross-repo parallelism in `--fleet` mode. PRs within a single repo remain sequential (subsequent PRs need to test against the post-merge HEAD); only repos run in parallel. Substantially shortens fleet-sweep wall-clock time when many repos have queued PRs.
 - Summary now prints a review-event counter line (`N APPROVED + M COMMENTED = N+M total`) so the Code Review profile-stat math is visible per-run. Lets the operator verify each fleet sweep is delivering the expected credit.
+
+**New in v2.4 (#4736, #4737):**
+- Fake-root guard gate: a PR head that lacks a guard file `origin/main` has is not installed or tested; it is deferred with a `SKIP GATE:` line and, when stale, a rebase request. See §Hard gates → Fake-root guard gate.
+- The pytest timeout kills the whole process tree, prints `TIMEOUT after`, and defers the PR. See §Hard gates → Exit-code gate.
+- Every PR the run reaches prints exactly one `OUTCOME PR #<N>:` line, and the Summary names it even when the run is interrupted. A PR that earlier runs began and never finished prints `REPEAT PR #<N>:`, and after two such runs at the same head it is deferred without running. See §Outcome lines and the in-flight ledger.
 
 ---
 
@@ -85,16 +90,38 @@ This prevents the tool from ever operating on a PR it wasn't designed to handle.
 
 No human judgment is applied to the exit code. No LLM is consulted about whether "the failures look related." Trust the exit code.
 
+**Timeout (#4737).** The suite gets `PYTEST_TIMEOUT_S` (1800s). Past that, the tool prints `TIMEOUT after 1800s -- killing the process tree of pid <N>` and kills the whole tree, pytest included, not only `poetry`: before #4737, on Windows, killing `poetry` left pytest holding the pipes and the run waited on it with no `TIMEOUT` line. The exit is 124, the PR is recorded `deferred` with the reason `pytest TIMEOUT after 1800s`, and the baseline is not run. If the tree cannot be killed, or its pipes are still open 60s after the kill, the tool raises `ProcessTreeKillError`: the PR is recorded `errored`, the operator is alerted, and the sweep goes on.
+
+### Fake-root guard gate (#4736)
+
+A PR head cut before #4706 lacks `tests/fake_root_guard.py`, and its suite, run on Windows, turns the tests' fake absolute roots into real folders such as `C:\tmp\repo`. So for a PR that touches Python, before `poetry install`, the tool fetches `main` from origin and compares each file in `FAKE_ROOT_GUARD_PATHS` at `origin/main` with the PR head. It reads `origin/main`, not the local `main`, because the audit worktree is cut from the local `main`, which can lag.
+
+- **The head lacks a file `origin/main` has:** the log says `SKIP GATE: this head lacks <file>, which origin/main has`. Install, pytest and the baseline are not run. The PR is recorded `deferred`, a review comment gives the reason, and a stale branch gets `@dependabot rebase` with a comment saying the head predates the guard. `@dependabot recreate` is not posted. The next run tests the PR once its head carries the guard.
+- **The check fails** (the fetch or a `git ls-tree` exits non-zero): the PR is recorded `errored` and no suite runs.
+
+The baseline run checks the base commit the same way. A base that lacks the guard is not run and is not exonerable.
+
+The check applies to every repo the nightly tests. A repo whose `main` has no guard file passes it unchanged; only AssemblyZero has one today.
+
 ---
 
 ## End-to-end flow (per PR)
 
 ```
+0. In the repo's PR loop (#4737): if two earlier runs began this PR at its
+   current head and recorded no outcome, record it `deferred` without
+   running and go to the next PR (§Outcome lines and the in-flight ledger).
+   Otherwise write its in-flight entry.
 1. Create audit worktree from current main at ../AssemblyZero-dependabot-<N>
 2. `gh pr checkout <N>` into the worktree — brings the dependabot bump in
+2a. If the PR touches Python: fetch main from origin and check the head
+    carries the fake-root guard (#4736). Missing: `SKIP GATE:`, skip
+    steps 3-5 and the baseline, go to the exit != 0 path. Check failed:
+    record `errored`
 3. Evict cached poetry venv (Fix 5 / #944) so locks release
 4. `poetry install` — fresh install of updated dependencies
-5. `poetry run pytest -q --tb=short` — capture exit code
+5. `poetry run pytest -q --tb=short` — capture exit code. Past 1800s the
+   process tree is killed and the exit is 124: deferred, no baseline (#4737)
 
    --- exit != 0 ---
 6a. Comment on PR with exit code + worktree path (forensics)
@@ -111,6 +138,10 @@ No human judgment is applied to the exit code. No LLM is consulted about whether
 6e. `gh pr merge <N> --squash`
 6f. Evict worktree's poetry venv; `git worktree remove`; `git branch -D` the
      audit branch
+
+7. Print one `OUTCOME PR #<N>: <status> -- <reason>` line and clear the
+   PR's in-flight entry (#4737). An interrupt prints the line as `errored`
+   and keeps the entry.
 ```
 
 ---
@@ -141,6 +172,8 @@ Dependabot PRs can sit open for days or weeks while main moves forward. By the t
 1. Compares the PR's `base.sha` to current `main` HEAD via `gh api`
 2. If they differ (branch is stale): posts `@dependabot rebase` as a second comment
 3. If they match AND the PR is multi-package: falls back to the `@dependabot recreate` flow described below
+
+For a PR deferred by the fake-root guard gate (#4736), no suite ran, so the rebase comment says the head predates the guard instead of "Test suite failed", and step 3's recreate is not posted.
 
 Staleness check supersedes recreate — rebasing is cheaper and the more likely fix. If the rebased branch fails again, the next `/dependabot` run will treat it as multi-package recreate (or single-package real-incompatibility) territory.
 
@@ -196,8 +229,49 @@ At end of run, the tool prints:
 ```
 
 - **Merged:** PR passed both gates and is on main.
-- **Deferred:** PR failed a gate (test failure or poetry install failure). Worktree retained, comment posted, possibly `@dependabot recreate` posted.
-- **Errored:** Infrastructure failure (couldn't create worktree, couldn't checkout PR, couldn't approve, etc.). Worktree is cleaned up; the PR needs manual attention.
+- **Deferred:** PR failed a gate (test failure, poetry install failure, pytest timeout, or a head without the fake-root guard). A review comment is posted, and possibly `@dependabot rebase` or `@dependabot recreate`. Also a PR that two earlier runs began at this head and never finished; that deferral runs nothing and posts nothing (§Outcome lines and the in-flight ledger).
+- **Errored:** Infrastructure failure (couldn't create worktree, couldn't checkout PR, couldn't approve, the fake-root guard check failed, etc.), an exception while testing the PR (the operator is alerted and the sweep goes on), or an interrupt (the run then stops). Worktree is cleaned up; the PR needs manual attention.
+
+The Summary prints even when the run is interrupted, and it names every PR the run touched, the one interrupted mid-test included (#4737).
+
+---
+
+## Outcome lines and the in-flight ledger (#4737)
+
+From 2026-11-01 the nightly tested PR #4315 night after night and recorded nothing: each run was interrupted inside pytest, the PR reached no Summary list, and the next night picked it first again. Two things now prevent that.
+
+**One line per PR.** Every PR the run takes up, the skipped-unchanged and limit-skipped ones included, ends with exactly one line in the log:
+
+```
+  OUTCOME PR #<N>: <status> -- <reason>
+```
+
+`<status>` is `merged`, `deferred`, `errored`, `limit_skipped` or `skipped_unchanged`. A `=== PR #<N>` section with no OUTCOME line means the process ended before the outcome could be recorded; its in-flight entry stays, and the next run reports it.
+
+**The in-flight ledger.** `data/dependabot-runs/in-flight.json`, in the checkout the tool runs from, holds one entry per PR a run began and has not finished:
+
+```json
+{
+  "martymcenroe/AssemblyZero#4315": {
+    "head": "<full head sha>",
+    "runs": ["<run label>"]
+  }
+}
+```
+
+A run's label is its log file's name, such as `2026-11-13_050008.log`.
+
+The tool writes the entry just before it tests a PR and removes it when the PR's outcome is recorded. An interrupt keeps it. The next run that reaches the PR prints:
+
+```
+  REPEAT PR #<N>: run <label> began this PR at head <sha9> and recorded no outcome
+```
+
+and tests it again, adding its own label. Once two runs (`IN_FLIGHT_STRIKES`) have begun the PR at its current head with no outcome, later runs record it `deferred` without running it, and the entry stays. A new head (a rebase or a new dependabot push) starts the count again from that run.
+
+If the file is not valid JSON, or not a JSON object, the tool raises `InFlightLedgerError`, naming the path, and leaves the file as it is rather than reset it and forget the runs it records.
+
+**Clearing an entry by hand.** When the cause is fixed and you want the PR tested at its current head, open `in-flight.json` in the checkout the nightly runs from, delete that PR's key and its value, and keep the rest of the object valid JSON. An empty ledger is `{}`. A missing file reads as an empty ledger, so deleting the file clears every entry at once. The next run tests the PR as new.
 
 ---
 
@@ -267,3 +341,4 @@ The PowerShell wrapper (in the private orchestration repo since #2156) is the du
 | 2026-05-10 | v2.1 (#1091): Failure-path comments switched to `gh pr review --comment` so deferred PRs also accrue Code Review credit. `--fleet` flag added — enumerates user-owned Poetry repos and processes dependabot PRs across the fleet for cross-repo coverage. |
 | 2026-05-10 | v2.2 (#1092): Windows Task Scheduler integration — `tools/run_dependabot_fleet.ps1` + daily `Claude-DependabotFleet` task at 06:00. Passive cross-repo processing with operator-credentialed review attribution. |
 | 2026-05-10 | v2.3 (#1093): Cross-repo parallelism via `--workers N` (default 3) for shorter fleet sweeps. Summary now reports review-event count (APPROVED + COMMENTED) so Code Review profile-stat math is visible per run. |
+| 2026-11-13 | v2.4 (#4736, #4737): Fake-root guard gate: a head without the guard `origin/main` has is deferred untested, with a rebase request when stale. The pytest timeout kills the process tree and defers. One `OUTCOME` line per PR, a Summary that survives an interrupt, and the in-flight ledger with its `REPEAT` line and two-strike deferral. |
