@@ -14,6 +14,9 @@ _spec = importlib.util.spec_from_file_location(
 dependabot_review = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dependabot_review)
 
+# #4743: no test here may start `gh`, or git against a network remote.
+pytestmark = pytest.mark.usefixtures("no_network_commands")
+
 
 def _mk_completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
@@ -115,10 +118,13 @@ def test_deferred_install_fail_path_calls_cleanup_worktree(tmp_path):
     def fake_cleanup(main_repo_arg, worktree_arg, branch_arg):
         cleanup_called.append((main_repo_arg, worktree_arg, branch_arg))
 
+    # #4743: the test chooses the Python gate; unstubbed, `_pr_changed_files`
+    # sent a real `gh pr diff` to GitHub and its failure chose the gate.
     with patch.object(dependabot_review, "verify_author", return_value=True), \
          patch.object(dependabot_review, "create_audit_worktree",
                       return_value=(tmp_path / "repo-dependabot-42", "dependabot-audit-42")), \
          patch.object(dependabot_review, "checkout_pr_into_worktree", return_value=True), \
+         patch.object(dependabot_review, "_pr_changed_files", return_value=["poetry.lock"]), \
          patch.object(dependabot_review, "fake_root_guard_gap", return_value=([], "")), \
          patch.object(dependabot_review, "evict_poetry_venv"), \
          patch.object(dependabot_review, "install_deps", return_value=False), \
@@ -151,10 +157,13 @@ def test_deferred_test_fail_path_calls_cleanup_worktree(tmp_path):
     def fake_cleanup(main_repo_arg, worktree_arg, branch_arg):
         cleanup_called.append((main_repo_arg, worktree_arg, branch_arg))
 
+    # #4743: the test chooses the Python gate; unstubbed, `_pr_changed_files`
+    # sent a real `gh pr diff` to GitHub and its failure chose the gate.
     with patch.object(dependabot_review, "verify_author", return_value=True), \
          patch.object(dependabot_review, "create_audit_worktree",
                       return_value=(tmp_path / "repo-dependabot-43", "dependabot-audit-43")), \
          patch.object(dependabot_review, "checkout_pr_into_worktree", return_value=True), \
+         patch.object(dependabot_review, "_pr_changed_files", return_value=["poetry.lock"]), \
          patch.object(dependabot_review, "fake_root_guard_gap", return_value=([], "")), \
          patch.object(dependabot_review, "evict_poetry_venv"), \
          patch.object(dependabot_review, "install_deps", return_value=True), \
@@ -1044,7 +1053,6 @@ class TestProcessRepoWithBudget:
         sub = dependabot_review.process_repo("o/r", tmp_path)
         assert set(sub) == {
             "merged", "deferred", "errored", "limit_skipped", "skipped_unchanged",
-            dependabot_review.UNREVIEWED_DEFERRED,
         }
 
 

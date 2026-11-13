@@ -9,6 +9,9 @@ Covers four of the issue's requirements:
   when an interrupt cuts the run short;
 - the in-flight ledger and the two-strike rule built on it;
 - ``run(..., kill_tree=True)`` kills a real grandchild on timeout.
+
+It also covers the Summary's deferred heading (#4744) and its review counts,
+taken from the reviews posted (#4746).
 """
 import ast
 import importlib.util
@@ -16,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -33,6 +37,9 @@ _spec = importlib.util.spec_from_file_location(
 )
 dr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dr)
+
+# #4743: no test here may start `gh`, or git against a network remote.
+pytestmark = pytest.mark.usefixtures("no_network_commands")
 
 REPO = "o/r"
 
@@ -79,12 +86,35 @@ def _repo_preconditions(tmp_path: Path, prs: list):
 
 
 @contextmanager
-def _pipeline(tmp_path: Path, pytest_results: dict):
+def _pipeline(tmp_path: Path, pytest_results: dict, *,
+              real_reviews: bool = False, unmergeable: tuple = (),
+              merge_fails: tuple = (), final_state: str = "blocked"):
     """Stub everything the real process_pr touches except its outcome mapping.
 
     ``pytest_results`` maps a PR number to what run_tests_detailed gives for
     it: an ``(exit_code, output)`` tuple, or an exception instance to raise.
+
+    #4746: with ``real_reviews``, approve_pr and review_comment_on_pr run for
+    real, so they record what they post in REVIEW_TALLY; only the ``gh``
+    commands under them are faked, and every one is kept in ``gh_calls``.
+    The PRs in ``unmergeable`` never become mergeable and then report
+    ``final_state``; the PRs in ``merge_fails`` fail their squash merge.
     """
+    gh_calls: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        gh_calls.append(list(cmd))
+        if cmd[:3] == ["gh", "pr", "review"] and "--approve" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        if cmd[:2] == ["gh", "api"] and cmd[-1] == ".mergeable_state":
+            return subprocess.CompletedProcess(cmd, 0, f"{final_state}\n", "")
+        raise AssertionError(f"command this test does not expect: {cmd}")
+
+    def fake_run_gh_with_body(args_pre, body):
+        gh_calls.append(list(args_pre))
+        assert args_pre[:3] == ["gh", "pr", "review"], args_pre
+        return subprocess.CompletedProcess(args_pre, 0, "", "")
+
     def fake_create(target_repo, number):
         worktree = tmp_path / f"wt-{number}"
         worktree.mkdir(exist_ok=True)
@@ -109,18 +139,25 @@ def _pipeline(tmp_path: Path, pytest_results: dict):
         stub("install_deps", return_value=True)
         tests = stub("run_tests_detailed", side_effect=fake_tests)
         baseline = stub("run_baseline_gate", return_value=(0, ""))
-        stub("review_comment_on_pr", return_value=True)
         stub("is_pr_branch_stale", return_value=False)
         stub("request_dependabot_recreate")
         stub("request_dependabot_rebase")
         stub("inject_no_issue", return_value=True)
-        stub("approve_pr", return_value=True)
-        stub("wait_for_mergeable", return_value=True)
-        stub("squash_merge", return_value=True)
+        if real_reviews:
+            stub("run", side_effect=fake_run)
+            stub("run_gh_with_body", side_effect=fake_run_gh_with_body)
+        else:
+            stub("review_comment_on_pr", return_value=True)
+            stub("approve_pr", return_value=True)
+        stub("wait_for_mergeable",
+             side_effect=lambda number, repo: number not in unmergeable)
+        stub("squash_merge",
+             side_effect=lambda number, repo: number not in merge_fails)
         alert = stub("alert_operator")
         stack.enter_context(patch.object(dr.time, "sleep"))
         yield SimpleNamespace(cleanup=cleanup, tests=tests,
-                              baseline=baseline, alert=alert)
+                              baseline=baseline, alert=alert,
+                              gh_calls=gh_calls)
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +280,9 @@ def _summary_list(lists: dict[str, list[str]], label_start: str) -> list[str]:
 
 
 @contextmanager
-def _main_harness(tmp_path: Path, prs: list, fake_process_pr):
+def _main_harness(tmp_path: Path, prs: list, fake_process_pr=None):
+    """Run main() over ``prs`` with no network. With no ``fake_process_pr``
+    the real process_pr runs, so the caller supplies _pipeline's stubs."""
     main_repo = tmp_path / "main"
     (main_repo / ".git").mkdir(parents=True)
     ledger_path = tmp_path / "ledger" / "in-flight.json"
@@ -255,9 +294,13 @@ def _main_harness(tmp_path: Path, prs: list, fake_process_pr):
         stack.enter_context(patch.object(dr, "guard_not_worktree"))
         stack.enter_context(patch.object(dr, "_force_utf8_streams"))
         setup_log = stack.enter_context(patch.object(dr, "setup_run_log"))
+        # #4750: main() reads each repository's visibility; REPO is public.
+        stack.enter_context(patch.object(dr, "repo_is_public",
+                                         return_value=(True, "")))
         stack.enter_context(_repo_preconditions(tmp_path, prs))
-        stack.enter_context(patch.object(
-            dr, "process_pr", side_effect=fake_process_pr))
+        if fake_process_pr is not None:
+            stack.enter_context(patch.object(
+                dr, "process_pr", side_effect=fake_process_pr))
         alert = stack.enter_context(patch.object(dr, "alert_operator"))
         yield SimpleNamespace(ledger_path=ledger_path, alert=alert,
                               setup_log=setup_log)
@@ -319,20 +362,118 @@ def test_main_summary_keeps_the_prs_an_interrupt_cut_short(tmp_path, capsys):
 def test_main_counts_no_commented_review_for_a_two_strike_deferral(tmp_path,
                                                                   capsys):
     # PR 1 is deferred by the two-strike rule, which posts no review; PR 2 is
-    # tested and deferred, which posts one COMMENTED review.
-    def fake_process_pr(pr, repo, target_repo):
-        assert pr.number == 2, "the two-strike PR must not be run"
-        return dr.Outcome("deferred", "test suite FAILED (exit 1)")
-
-    with _main_harness(tmp_path, [_pr(1), _pr(2)], fake_process_pr) as h:
+    # tested, fails, and is deferred through the real process_pr, which posts
+    # one COMMENTED review. #4746: the count is what was posted.
+    failed = (1, "FAILED tests/test_x.py::test_y - boom")
+    with (
+        _main_harness(tmp_path, [_pr(1), _pr(2)]) as h,
+        _pipeline(tmp_path, {2: failed}, real_reviews=True) as stubs,
+    ):
         _seed(h.ledger_path, "sha-a", "run-A", "run-B")
         dr.main()
     out = capsys.readouterr().out
 
+    assert stubs.tests.call_count == 1, "the two-strike PR must not be run"
     lists = _summary_lists(out)
     assert _summary_list(lists, "Deferred") == [_key(1), _key(2)]
     assert ("Review events created: 0 APPROVED + 1 COMMENTED = 1 total"
             in out)
+
+
+# ---------------------------------------------------------------------------
+# #4744 test 2: the Summary's deferred heading makes no worktree claim
+# ---------------------------------------------------------------------------
+
+def test_main_summary_deferred_heading_makes_no_worktree_claim(tmp_path,
+                                                               capsys):
+    # process_pr removes the audit worktree on every path, so a heading that
+    # says a deferred PR's worktree is kept sends the reader to nothing.
+    def fake_process_pr(pr, repo, target_repo):
+        return dr.Outcome("deferred", "test suite FAILED (exit 1)")
+
+    with _main_harness(tmp_path, [_pr(1)], fake_process_pr):
+        dr.main()
+    out = capsys.readouterr().out
+
+    lists = _summary_lists(out)
+    assert lists.get("Deferred") == [_key(1)], lists
+    summary = out.split("=== Summary ===", 1)[1]
+    deferred_lines = [ln for ln in summary.splitlines()
+                      if ln.strip().startswith("Deferred")]
+    assert len(deferred_lines) == 1, deferred_lines
+    assert "retain" not in deferred_lines[0].lower()
+    assert "worktree" not in deferred_lines[0].lower()
+
+
+# ---------------------------------------------------------------------------
+# #4746: the Summary counts the reviews posted, not the outcome lists
+# ---------------------------------------------------------------------------
+
+def test_main_counts_the_reviews_posted_whatever_the_outcome(tmp_path,
+                                                             capsys):
+    # PR 1 is approved and merged. PR 2 is approved, then its
+    # mergeable_state never clears and it is deferred (#1399). PR 3 is
+    # approved, then its squash merge fails and it errors. PR 4 fails its
+    # suite and is deferred with a COMMENTED review. Before #4746 the Summary
+    # read 1 APPROVED + 2 COMMENTED = 3 total.
+    passed = (0, "1 passed")
+    failed = (1, "FAILED tests/test_x.py::test_y - boom")
+    with (
+        _main_harness(tmp_path, [_pr(1), _pr(2), _pr(3), _pr(4)]),
+        _pipeline(tmp_path, {1: passed, 2: passed, 3: passed, 4: failed},
+                  real_reviews=True, unmergeable=(2,), merge_fails=(3,),
+                  final_state="blocked") as stubs,
+    ):
+        # A review counted before this run must not reach its Summary.
+        dr.REVIEW_TALLY.record(dr.REVIEW_APPROVED)
+        dr.main()
+    out = capsys.readouterr().out
+
+    stubs.alert.assert_not_called()
+    lists = _summary_lists(out)
+    assert _summary_list(lists, "Merged") == [_key(1)]
+    assert _summary_list(lists, "Deferred") == [_key(2), _key(4)]
+    assert _summary_list(lists, "Errored") == [_key(3)]
+    reviews = [c for c in stubs.gh_calls if c[:3] == ["gh", "pr", "review"]]
+    assert [(c[3], "--approve" in c) for c in reviews] == [
+        ("1", True), ("2", True), ("3", True), ("4", False)]
+    assert ("Review events created: 3 APPROVED + 1 COMMENTED = 4 total"
+            in out)
+
+
+def test_a_review_github_refuses_is_not_counted():
+    tally = dr.REVIEW_TALLY
+    tally.reset()
+    refused = subprocess.CompletedProcess([], 1, "", "HTTP 422")
+    with (
+        patch.object(dr, "run", return_value=refused),
+        patch.object(dr, "run_gh_with_body", return_value=refused),
+    ):
+        assert dr.approve_pr(1, REPO, "pytest passed (exit 0)") is False
+        assert dr.review_comment_on_pr(1, REPO, "body") is False
+    assert tally.count(dr.REVIEW_APPROVED) == 0
+    assert tally.count(dr.REVIEW_COMMENTED) == 0
+
+
+def test_review_tally_is_exact_under_concurrent_records():
+    # process_repo runs in ThreadPoolExecutor workers in --fleet mode.
+    tally = dr.ReviewTally()
+    per_thread = 2000
+
+    def record_both():
+        for _ in range(per_thread):
+            tally.record(dr.REVIEW_APPROVED)
+            tally.record(dr.REVIEW_COMMENTED)
+
+    threads = [threading.Thread(target=record_both) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert tally.count(dr.REVIEW_APPROVED) == 8 * per_thread
+    assert tally.count(dr.REVIEW_COMMENTED) == 8 * per_thread
+    with pytest.raises(ValueError, match="unknown review kind"):
+        tally.record("CHANGES_REQUESTED")
 
 
 # ---------------------------------------------------------------------------

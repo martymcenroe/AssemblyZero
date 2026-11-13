@@ -18,6 +18,10 @@ sys.path.insert(0, str(TOOLS))
 
 import _npm_manifest as npm  # noqa: E402
 
+# #4743: one test here loads tools/dependabot_review.py, so no test here may
+# start `gh`, or git against a network remote.
+pytestmark = pytest.mark.usefixtures("no_network_commands")
+
 
 def _pkg(d: Path, scripts=None, lock="package-lock.json"):
     d.mkdir(parents=True, exist_ok=True)

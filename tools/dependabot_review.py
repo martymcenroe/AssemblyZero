@@ -271,6 +271,19 @@ _CREATION_FLAGS = (
 # Issue #1091: --fleet mode uses gh repo list to enumerate user-owned repos.
 # Cap at 200 — well above current ~60-repo count without paginating.
 FLEET_REPO_LIMIT = 200
+# #4750: the nightly acts only on repositories GitHub reports as PUBLIC. On a
+# private repository every approval and merge, and every @dependabot rebase
+# or recreate, runs workflows that spend GitHub Actions minutes; public
+# repositories run them free. Private repositories stay off until the
+# operator turns them on (ruling of 2026-11-13: until December). This
+# constant is the switch; --include-private turns it on for a single run.
+INCLUDE_PRIVATE_REPOS = False
+VISIBILITY_TIMEOUT_S = 60
+# #4750: each repository's visibility as GitHub reported it in this run,
+# keyed by owner/name. main() empties it at the start of every run, and
+# list_fleet_repos fills it from the fleet listing; repo_is_public asks GitHub
+# for any repository the listing did not cover.
+_REPO_VISIBILITY: dict[str, str] = {}
 # GitHub returns different strings for the same bot depending on API surface:
 #   - REST API / web UI:              "dependabot[bot]"
 #   - gh CLI GraphQL .author.login:   "app/dependabot"
@@ -355,10 +368,10 @@ OUTCOME_STATUSES: tuple[str, ...] = ("merged", "deferred", "errored")
 RESULT_KEYS: tuple[str, ...] = (
     "merged", "deferred", "errored", "limit_skipped", "skipped_unchanged",
 )
-# #4737: the PRs in "deferred" that the two-strike rule deferred without
-# running. That path posts no review, so main()'s COMMENTED count leaves them
-# out. It is not one of RESULT_KEYS: each PR in it is already in "deferred".
-UNREVIEWED_DEFERRED = "deferred_unreviewed"
+# #4746: the review kinds the tool posts, as GitHub names their states.
+REVIEW_APPROVED = "APPROVED"
+REVIEW_COMMENTED = "COMMENTED"
+REVIEW_KINDS: tuple[str, ...] = (REVIEW_APPROVED, REVIEW_COMMENTED)
 
 
 class Outcome(str):
@@ -438,6 +451,43 @@ class PRBudget:
     @property
     def limit(self) -> int:
         return self._limit
+
+
+class ReviewTally:
+    """Thread-safe count of the reviews a run posted, by kind (#4746).
+
+    approve_pr and review_comment_on_pr each record their kind once
+    GitHub accepts the review, so main()'s Summary counts what was posted.
+    Before #4746 the Summary inferred the counts from the outcome lists,
+    and a PR approved and then deferred or errored was miscounted.
+    process_repo runs in ThreadPoolExecutor workers in --fleet mode, so
+    every access holds the lock.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._counts = dict.fromkeys(REVIEW_KINDS, 0)
+
+    def record(self, kind: str) -> None:
+        """Count one posted review of ``kind``; an unknown kind raises."""
+        if kind not in REVIEW_KINDS:
+            raise ValueError(f"unknown review kind {kind!r}; expected one "
+                             f"of {REVIEW_KINDS}")
+        with self._lock:
+            self._counts[kind] += 1
+
+    def count(self, kind: str) -> int:
+        with self._lock:
+            return self._counts[kind]
+
+    def reset(self) -> None:
+        with self._lock:
+            self._counts = dict.fromkeys(REVIEW_KINDS, 0)
+
+
+# #4746: the reviews this process has posted. main() resets it at the start
+# of a run and prints its counts in the Summary.
+REVIEW_TALLY = ReviewTally()
 
 
 class InFlightLedgerError(RuntimeError):
@@ -1181,7 +1231,10 @@ def approve_pr(pr_number: int, repo: str, gate_desc: str) -> bool:
     """#1839: the review body states WHICH gate actually ran. The prior
     fixed text claimed "test suite passed (exit 0)" even on the #1400
     skip path where no test ran -- a false audit record for npm/docker/
-    actions PRs."""
+    actions PRs.
+
+    #4746: a posted approval is recorded in REVIEW_TALLY, whatever the PR's
+    outcome turns out to be."""
     result = run([
         "gh", "pr", "review", str(pr_number), "--repo", repo, "--approve",
         "--body",
@@ -1189,7 +1242,10 @@ def approve_pr(pr_number: int, repo: str, gate_desc: str) -> bool:
         "Deterministic gate; no LLM in loop. "
         "Author and exit-code gates enforced.",
     ])
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    REVIEW_TALLY.record(REVIEW_APPROVED)
+    return True
 
 
 def wait_for_mergeable(pr_number: int, repo: str) -> bool:
@@ -1317,7 +1373,7 @@ def review_comment_on_pr(pr_number: int, repo: str, body: str) -> bool:
     auditing the PR — should get review credit even though the PR
     isn't being merged.
 
-    Returns True on success.
+    Returns True on success, and records the review in REVIEW_TALLY (#4746).
     """
     result = run_gh_with_body(
         [
@@ -1326,7 +1382,10 @@ def review_comment_on_pr(pr_number: int, repo: str, body: str) -> bool:
         ],
         body,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    REVIEW_TALLY.record(REVIEW_COMMENTED)
+    return True
 
 
 def request_dependabot_recreate(pr_number: int, repo: str) -> None:
@@ -2194,15 +2253,22 @@ def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
     PRs is processable; repos with nothing open have nothing to do.
 
     Returned sorted for deterministic ordering run to run.
+
+    #4750: the listing also carries each repository's visibility, which is
+    recorded in _REPO_VISIBILITY so repo_is_public needs no second call.
     """
     result = run([
         "gh", "repo", "list", user,
         "--limit", str(FLEET_REPO_LIMIT),
-        "--json", "name,nameWithOwner,isArchived,isFork",
+        "--json", "name,nameWithOwner,isArchived,isFork,visibility",
     ])
     if result.returncode != 0:
         sys.exit(f"Failed to list fleet repos: {result.stderr}")
     repos = json.loads(result.stdout or "[]")
+    for r in repos:
+        visibility = str(r.get("visibility") or "").strip().upper()
+        if visibility:
+            _REPO_VISIBILITY[r["nameWithOwner"]] = visibility
     allowed = {
         r["nameWithOwner"] for r in repos
         if not r.get("isArchived") and not r.get("isFork")
@@ -2222,6 +2288,65 @@ def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
     with_open_prs = {row["repository"]["nameWithOwner"] for row in rows}
 
     return sorted(with_open_prs & allowed)
+
+
+def repo_is_public(repo: str) -> tuple[bool, str]:
+    """#4750: whether GitHub reports ``repo`` as PUBLIC, and if not, why.
+
+    Returns ``(True, "")`` for a public repository and ``(False, reason)``
+    for any other. The visibility comes from this run's fleet listing when it
+    covered the repository, and otherwise from ``gh repo view``. A visibility
+    that cannot be read counts as private: skipping spends no Actions minutes,
+    and acting on a private repository would.
+    """
+    visibility = _REPO_VISIBILITY.get(repo)
+    if visibility is None:
+        try:
+            result = run(["gh", "repo", "view", repo,
+                          "--json", "visibility", "--jq", ".visibility"],
+                         timeout=VISIBILITY_TIMEOUT_S)
+        except OSError as exc:
+            return False, (f"visibility could not be read "
+                           f"({type(exc).__name__}: {exc}); treated as private")
+        if result.returncode != 0:
+            detail = ((result.stderr or "").strip()
+                      or f"exit {result.returncode}")
+            return False, (f"visibility could not be read ({detail[:200]}); "
+                           f"treated as private")
+        visibility = (result.stdout or "").strip().upper()
+        if not visibility:
+            return False, ("visibility could not be read (gh returned "
+                           "nothing); treated as private")
+        _REPO_VISIBILITY[repo] = visibility
+    if visibility == "PUBLIC":
+        return True, ""
+    return False, f"visibility is {visibility}"
+
+
+def select_public_repos(
+    repos: list[str], include_private: bool,
+) -> tuple[list[str], list[str]]:
+    """#4750: split ``repos`` into those this run acts on and those it skips.
+
+    main() calls this once, before the zero-review pre-pass, and every path
+    that acts on a repository (the pre-pass, the worker pool, the sequential
+    loop, --repo mode) takes its repositories from the first list. Each
+    skipped repository prints one line naming it and the reason. With
+    ``include_private`` every repository is kept and no visibility is read.
+    """
+    if include_private:
+        return list(repos), []
+    kept: list[str] = []
+    skipped: list[str] = []
+    for repo in repos:
+        public, reason = repo_is_public(repo)
+        if public:
+            kept.append(repo)
+        else:
+            skipped.append(repo)
+            print(f"  [SKIP] {repo}: {reason}. Private repositories are off "
+                  f"until the operator turns them on (#4750).")
+    return kept, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -2266,10 +2391,7 @@ def process_repo(
     without recording an outcome is deferred without running. Anything that
     escapes the PR loop carries the results so far as ``dependabot_partial``.
     """
-    sub: dict[str, list[str]] = {
-        "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
-        "skipped_unchanged": [], UNREVIEWED_DEFERRED: [],
-    }
+    sub: dict[str, list[str]] = {k: [] for k in RESULT_KEYS}
     print(f"\n{'=' * 60}")
     print(f"REPO: {repo}")
     print(f"{'=' * 60}")
@@ -2377,7 +2499,6 @@ def process_repo(
                         f"{repeat}; deferred without running after "
                         f"{len(prior_runs)} runs with no outcome",
                     )
-                    sub[UNREVIEWED_DEFERRED].append(key)
                     continue
             if budget is not None and not budget.try_acquire():
                 # #1339: budget spent — remaining PRs are untouched, recorded
@@ -2444,7 +2565,7 @@ def _extend_results(results: dict[str, list[str]],
     """Add one process_repo result dict, possibly partial, to ``results``."""
     if not sub:
         return
-    for k in (*RESULT_KEYS, UNREVIEWED_DEFERRED):
+    for k in RESULT_KEYS:
         results[k].extend(sub.get(k, []))
 
 
@@ -2600,6 +2721,16 @@ def main() -> None:
             "picks."
         ),
     )
+    parser.add_argument(
+        "--include-private", action="store_true",
+        help=(
+            "#4750: act on private repositories too, for this run only. By "
+            "default the tool acts only on repositories GitHub reports as "
+            "PUBLIC, because on a private repository every review, merge and "
+            "@dependabot command spends GitHub Actions minutes. The standing "
+            "switch is INCLUDE_PRIVATE_REPOS."
+        ),
+    )
     args = parser.parse_args()
 
     if args.audit_python:
@@ -2633,6 +2764,9 @@ def main() -> None:
     # AZ's namespace) with AZ's own orphans. See #1360 for the full
     # investigation; #1358 closed by this same change.
 
+    # #4750: visibility is read afresh in every run.
+    _REPO_VISIBILITY.clear()
+
     # Issue #1091: fleet mode enumerates user-owned Poetry repos.
     if args.fleet:
         print(f"Fleet mode — enumerating {GITHUB_USER}'s repos with open "
@@ -2641,6 +2775,19 @@ def main() -> None:
         print(f"  Found {len(repos)} repo(s) with open dependabot PRs.")
     else:
         repos = [args.repo]
+
+    # #4750: act only on public repositories unless the switch is on. This
+    # is the one point every path passes through: the pre-pass, the worker
+    # pool, the sequential loop and --repo mode all take their repositories
+    # from `repos` below, so a skipped repository gets no review, comment,
+    # @dependabot command, merge or test run.
+    include_private = INCLUDE_PRIVATE_REPOS or args.include_private
+    if include_private:
+        print("Private repositories included this run (#4750).")
+    else:
+        print(f"Public repositories only (#4750): checking the visibility of "
+              f"{len(repos)} repo(s)...")
+    repos, skipped_private = select_public_repos(repos, include_private)
 
     # #1339: calibrated harvest. gh's repo listing orders by recent push
     # (non-deterministic run to run), so a limited run sorts repos by name
@@ -2660,10 +2807,9 @@ def main() -> None:
         print(f"Harvest limit: {budget.limit} PR(s) this run (sequential).")
 
     # Aggregate results across repos.
-    results: dict[str, list[str]] = {
-        "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
-        "skipped_unchanged": [], UNREVIEWED_DEFERRED: [],
-    }
+    results: dict[str, list[str]] = {k: [] for k in RESULT_KEYS}
+    # #4746: the Summary counts the reviews this run posts, so start at zero.
+    REVIEW_TALLY.reset()
 
     # #4737 R3: one ledger for the run, shared by every process_repo call.
     # A run is named by its log file, or by the same timestamp form when it
@@ -2819,23 +2965,23 @@ def main() -> None:
         if args.dry_run:
             print("\n(dry-run; exiting)")
         else:
-            # Issue #1093: review-event counter — every merged PR generated
-            # one APPROVED review event; every deferred PR generated one
-            # COMMENTED review event (per change A in #1091). Errored PRs
-            # generated nothing (the script bailed before any gh pr review
-            # call). The counter makes Code Review profile-stat math visible
-            # so the operator can verify credit was earned each run.
-            # #4737: a PR the two-strike rule deferred without running
-            # posted no review, so it is left out of the COMMENTED count.
-            approved_events = len(results["merged"])
-            commented_events = (len(results["deferred"])
-                                - len(results[UNREVIEWED_DEFERRED]))
+            # Issue #1093: review-event counter. The counter makes Code
+            # Review profile-stat math visible so the operator can verify
+            # credit was earned each run. #4746: the counts are the reviews
+            # approve_pr and review_comment_on_pr posted, as REVIEW_TALLY
+            # recorded them, not inferred from the outcome lists: a PR
+            # approved and then deferred or errored got an APPROVED review,
+            # and a deferral that ran nothing posted no review.
+            approved_events = REVIEW_TALLY.count(REVIEW_APPROVED)
+            commented_events = REVIEW_TALLY.count(REVIEW_COMMENTED)
             total_events = approved_events + commented_events
 
             print("\n=== Summary ===")
             print(f"  Merged:   {results['merged']}")
-            print(f"  Deferred (test failures / install errors, worktree retained): "
-                  f"{results['deferred']}")
+            # #4744: no claim about the worktree here. process_pr removes it
+            # on every path; a deferral's evidence is the run log and the
+            # review comment on the PR.
+            print(f"  Deferred: {results['deferred']}")
             print(f"  Errored:  {results['errored']}")
             if results["limit_skipped"]:
                 # #1339: no silent caps — every PR the limit left behind
@@ -2848,6 +2994,10 @@ def main() -> None:
                 # budget. A rebase or new push re-audits them.
                 print(f"  Skipped (already deferred at unchanged head): "
                       f"{results['skipped_unchanged']}")
+            if skipped_private:
+                # #4750: repositories, not PRs, so they stay out of
+                # RESULT_KEYS. None of them was touched this run.
+                print(f"  Skipped (private, #4750): {skipped_private}")
             print(
                 f"  Review events created: {approved_events} APPROVED "
                 f"+ {commented_events} COMMENTED = {total_events} total"

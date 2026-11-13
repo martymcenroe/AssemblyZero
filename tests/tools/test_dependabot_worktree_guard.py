@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
 
 import dependabot_review as dr  # noqa: E402
 
+# #4743: no test here may start `gh`, or git against a network remote.
+pytestmark = pytest.mark.usefixtures("no_network_commands")
+
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(

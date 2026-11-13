@@ -20,6 +20,10 @@ _spec = importlib.util.spec_from_file_location(
 dependabot_review = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dependabot_review)
 
+# #4743: no test here may start `gh`, or git against a network remote. The
+# tmp_path bare repository these tests fetch from is local and passes.
+pytestmark = pytest.mark.usefixtures("no_network_commands")
+
 GUARD = "tests/fake_root_guard.py"
 BASE_REF = f"origin/{dependabot_review.BASE_BRANCH}"
 
