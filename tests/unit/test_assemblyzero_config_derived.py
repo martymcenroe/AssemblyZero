@@ -1,8 +1,11 @@
 """assemblyzero_config's defaults are derived from the checkout, on every platform (#3536)."""
 
+import json
 import logging
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
@@ -80,3 +83,89 @@ def test_windows_format_off_windows_is_the_windows_spelling(tmp_path, monkeypatc
     """What new_repo.py writes into a scaffold's inherit_from (#4180)."""
     config = _config_off_windows(tmp_path, monkeypatch)
     assert config.assemblyzero_root() == DEFAULTS["assemblyzero_root"]["windows"]
+
+
+# ---------------------------------------------------------------------------
+# #4763: new_repo_root, optional keys, and load_error
+# ---------------------------------------------------------------------------
+
+FLEET_KEYS = ("assemblyzero_root", "projects_root", "user_claude_dir")
+
+
+def _config_from(tmp_path, monkeypatch, content):
+    """A config read from a file holding `content`: a dict as JSON, a str as it
+    stands, None for no file."""
+    path = tmp_path / "config.json"
+    if isinstance(content, dict):
+        path.write_text(json.dumps(content), encoding="utf-8")
+    elif content is not None:
+        path.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(assemblyzero_config, "CONFIG_PATH", path)
+    return path, assemblyzero_config.AssemblyZeroConfig()
+
+
+def test_a_file_holding_only_new_repo_root_loads_and_keeps_every_default(
+    tmp_path, monkeypatch
+):
+    _, config = _config_from(tmp_path, monkeypatch, {
+        "version": "1.0",
+        "paths": {"new_repo_root": {"unix": "/home/dev/Projects"}},
+    })
+    assert config.load_error is None
+    assert config.new_repo_root("unix") == "/home/dev/Projects"
+    for key in FLEET_KEYS:
+        for fmt in ("windows", "unix"):
+            assert getattr(config, key)(fmt) == DEFAULTS[key][fmt], (key, fmt)
+
+
+def test_a_fleet_key_missing_a_format_is_rejected_and_named(tmp_path, monkeypatch):
+    path, config = _config_from(tmp_path, monkeypatch, {
+        "version": "1.0",
+        "paths": {"projects_root": {"unix": "/home/dev/Projects"}},
+    })
+    assert config.load_error is not None
+    assert str(path) in config.load_error
+    assert "Path 'projects_root' missing 'windows' format" in config.load_error
+    # Rejected, so every key is its default, as before #4763.
+    assert config.projects_root("unix") == DEFAULTS["projects_root"]["unix"]
+
+
+@pytest.mark.parametrize("value, reason", [
+    ({}, "Path 'new_repo_root' carries neither 'windows' nor 'unix'"),
+    ({"unix": 5}, "Path 'new_repo_root' format 'unix' must be a string"),
+], ids=["no-format", "not-a-string"])
+def test_a_new_repo_root_without_a_usable_format_is_rejected(
+    tmp_path, monkeypatch, value, reason
+):
+    _, config = _config_from(tmp_path, monkeypatch, {
+        "version": "1.0", "paths": {"new_repo_root": value},
+    })
+    assert config.load_error is not None
+    assert reason in config.load_error
+
+
+def test_invalid_json_names_the_file_and_the_reason(tmp_path, monkeypatch):
+    path, config = _config_from(tmp_path, monkeypatch, "{ not json")
+    assert config.load_error is not None
+    assert config.load_error.startswith(str(path))
+    assert "is not valid JSON (line 1, column 3)" in config.load_error
+
+
+def test_an_absent_file_is_no_error(tmp_path, monkeypatch):
+    path, config = _config_from(tmp_path, monkeypatch, None)
+    assert not path.exists()
+    assert config.load_error is None
+
+
+@pytest.mark.parametrize("content", [
+    None,
+    {"version": "1.0",
+     "paths": {"projects_root": {"windows": "D:\\Work", "unix": "/home/dev/Work"}}},
+], ids=["no-file", "projects-root-only"])
+def test_without_new_repo_root_it_is_the_projects_root(tmp_path, monkeypatch, content):
+    _, config = _config_from(tmp_path, monkeypatch, content)
+    assert config.load_error is None
+    for fmt in ("windows", "unix"):
+        assert config.new_repo_root(fmt) == config.projects_root(fmt), fmt
+    if content is not None:
+        assert config.new_repo_root("unix") == "/home/dev/Work"

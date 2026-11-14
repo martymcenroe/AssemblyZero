@@ -1,21 +1,58 @@
-# Implementation report: #4763 (work in progress)
+# Implementation report: #4763
 
-Status: in progress. This commit holds the code change; the new tests and the suite run are still to do.
+## The defect
 
-| File | Change |
-|---|---|
-| `tools/assemblyzero_config.py` | New optional path key `new_repo_root` and method `new_repo_root(fmt)`, which returns `projects_root(fmt=fmt)` when the key is absent. Every `paths` key is now optional: an absent key takes its default. A fleet key that is present still needs both formats; `new_repo_root` needs at least one; every format carried must be a string. A non-object top level or `paths` is an error. A file that exists but is rejected sets `load_error` (path and reason); absent or valid leaves it `None`. Other tools keep falling back to defaults. |
-| `tools/new_repo.py` | `resolve_project_path()` refuses when `config.load_error` is set ("Nothing was created") and otherwise uses `config.new_repo_root(fmt='auto')`, keeping the absolute-and-existing check and text. `PROJECT_ROOT`, `TOOLS_DIR` and the CLAUDE.md `Project Root (Unix)` line come from `_spellings(project_path)["unix"]`. New `windows_spelling()` gives `PROJECT_ROOT_WINDOWS`: the `C:\` spelling for a drive path, `\\wsl.localhost\<WSL_DISTRO_NAME>\...` for an ext4 path under WSL, the POSIX path when that variable is unset. `inherit_from` still names AssemblyZero's real location (`config.assemblyzero_root()`). |
-| `tests/unit/test_new_repo.py`, `tests/unit/test_new_repo_ubuntu_run.py` | Mocks of `new_repo.config` set `load_error = None` and `new_repo_root`, the surface new_repo now reads. |
+`tools/new_repo.py` put every new repository at `config.projects_root(fmt='auto') / name`. With no `~/.assemblyzero/config.json`, `projects_root` is the folder holding the AssemblyZero checkout, so on this machine every new repository landed in `/mnt/c/Users/mcwiz/Projects`, the Windows drive read over 9p, and none could start on Ubuntu's own ext4 disk. The scaffold also built `PROJECT_ROOT`, `TOOLS_DIR` and the CLAUDE.md "Project Root (Unix)" line from `projects_root_unix()` and the name, not from where the repository is, so a repository anywhere else would have named a path under the Projects root.
 
-## Readers of `.claude/project.json`
+## The setting (R1, R4)
 
-- `tools/assemblyzero-generate.py` substitutes every key under `variables` into `{{KEY}}` placeholders. No template under `.claude/templates/` carries `{{PROJECT_ROOT_WINDOWS}}`, so today it substitutes the key nowhere. It reads `inherit_from` as the AssemblyZero location.
-- `tools/new_repo.py`'s local check only parses the file as JSON.
+`tools/assemblyzero_config.py` gains an optional path key, `new_repo_root`, and a method `new_repo_root(fmt)`. With the key absent it returns exactly what `projects_root(fmt)` returns, so with no configuration nothing changes (R4). The key is separate from `projects_root` so a new repository can start on another disk while every tool that reads `projects_root` still sees the whole fleet. The fleet-wide half of R1, one Projects-root setting that every tool reads, is tracked in #4765; when it lands, `new_repo.py` reads that one.
+
+Validation changed with it:
+
+- Every `paths` key is now optional; an absent key takes its default. `REQUIRED_PATH_KEYS` is renamed `PATH_KEYS`.
+- A fleet key that is present (`assemblyzero_root`, `projects_root`, `user_claude_dir`) still needs both the `windows` and the `unix` format.
+- `new_repo_root` needs at least one format, because an ext4 path has no Windows spelling of its own.
+- Every format a key carries must be a string, and a top level or `paths` that is not a JSON object is an error.
+
+A new attribute, `load_error`, is `None` when the file is absent or valid. When the file exists but is not used (invalid JSON, not UTF-8, unreadable, or failing validation) it holds the file's path and the reason. Every other tool keeps falling back to the defaults as before.
+
+## Where `new_repo.py` builds
+
+`resolve_project_path()` raises `ValueError` naming `load_error` when it is set, and `main()` turns that into exit 1 before anything is created or any command runs. A file that exists but was rejected may have been meant to move the root, so building at the default instead would be a silent wrong. Otherwise the parent is `config.new_repo_root(fmt='auto')`, and the existing check that the root is absolute and exists is kept with its text.
+
+## The paths written into the repository (R2, R3)
+
+`PROJECT_ROOT`, `TOOLS_DIR` and the CLAUDE.md "Project Root (Unix)" line now come from `_spellings(project_path)["unix"]`, the repository's own location.
+
+`PROJECT_ROOT_WINDOWS` comes from a new helper, `windows_spelling(path)`:
+
+- a path on a Windows drive, `C:\...` or `/mnt/c/...`, gets its `C:\` spelling, as before;
+- an ext4 path, with `WSL_DISTRO_NAME` set, gets `\\wsl.localhost\<distro>\...`, the share through which Windows reads it;
+- with `WSL_DISTRO_NAME` unset there is no such share, and the POSIX path is kept.
+
+### Readers of `.claude/project.json`
+
+R2 asked for every reader before choosing between the WSL-share form and leaving the key out.
+
+- `tools/assemblyzero-generate.py` substitutes every key under `variables` into `{{KEY}}` placeholders in the templates under `.claude/templates/`. No template there uses `{{PROJECT_ROOT_WINDOWS}}`, so no generated file carries the key today. It reads `inherit_from` as the AssemblyZero location.
+- `tools/new_repo.py`'s own local check parses the file as JSON and reads no key's value.
 - A tool in a private repository scans the file as text for stale names and does not interpret the key.
 
-The WSL-share form was chosen as the preferred value.
+No reader requires the key, and none rejects the WSL-share form. The WSL-share form is therefore the preferred value, not a required one: it names a path Windows can open, where the POSIX path would not.
 
-## Still to do
+### Reading R3
 
-New tests (T1, T2, default-case project.json, config decisions 2 and 3), the same mock update in `tests/unit/test_new_repo_no_auto_review_caller.py` and `tests/unit/test_cerberus_after_auto_review.py`, ruff, the unit tier, and the final reports.
+R3 says nothing `new_repo.py` writes into a repository on ext4 names `/mnt/c/Users/mcwiz/Projects` or `C:\Users\mcwiz\Projects`. It is read as covering every path about the new repository. A pointer to AssemblyZero, such as `inherit_from` in `project.json`, names where AssemblyZero really is, from `config.assemblyzero_root()`. While AssemblyZero's checkout sits on the Windows drive, that pointer names the Windows drive, which is true. T2 points `assemblyzero_root` at a temporary directory, so its walk tests only the paths that follow the new repository.
+
+## Tests
+
+- `tests/unit/test_new_repo_ubuntu_run.py`: T1, T2 and the default case, listed in the test report.
+- `tests/unit/test_assemblyzero_config_derived.py`: the setting, its validation and `load_error`.
+- Mocks of `new_repo.config` in `tests/unit/test_new_repo.py`, `tests/unit/test_new_repo_ubuntu_run.py`, `tests/unit/test_new_repo_no_auto_review_caller.py` and `tests/unit/test_cerberus_after_auto_review.py` now set `load_error = None` and `new_repo_root`, the surface `new_repo.py` reads, in place of `projects_root` and `projects_root_unix`.
+
+T3, the end-to-end run on `/home/mcwiz/Projects`, creates a real GitHub repository and waits for the operator; it is tracked in #4764.
+
+## Ruff
+
+`ruff check` on the seven changed files reports 37 errors on this branch and the same 37 on main (ed77a367), compared by file, rule and message. The change adds none. The one it first added, UP045 on the new `load_error` annotation, now reads `str | None`.

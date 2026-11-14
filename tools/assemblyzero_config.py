@@ -237,7 +237,7 @@ class AssemblyZeroConfig:
         """
         # Why a config file that exists was not used, or None (#4763). Tools
         # fall back to defaults as before; new_repo.py refuses instead.
-        self.load_error: Optional[str] = None
+        self.load_error: str | None = None
         path = CONFIG_PATH
         if not path.exists():
             logger.debug(f"Config file not found at {path}, using defaults")

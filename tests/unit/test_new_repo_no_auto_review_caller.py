@@ -39,8 +39,8 @@ def _ok(cmd, cwd=None, check=True):
 
 def _scaffold(tmp_path: Path, name: str, *flags: str) -> tuple[Path, list[list[str]]]:
     with patch("new_repo.config") as cfg, patch("new_repo.run_command") as run:
-        cfg.projects_root.return_value = str(tmp_path)
-        cfg.projects_root_unix.return_value = "/tmp/projects"
+        cfg.load_error = None
+        cfg.new_repo_root.return_value = str(tmp_path)
         cfg.assemblyzero_root.return_value = str(tmp_path / "AssemblyZero")
         run.side_effect = _ok
         with patch("sys.argv", ["new_repo.py", name, "--no-github", *flags]):
