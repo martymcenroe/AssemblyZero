@@ -697,7 +697,7 @@ class TestMainAuditMode:
     @patch("new_repo.config")
     def test_T220_audit_nonexistent_directory(self, mock_config, tmp_path):
         """--audit on non-existent directory exits with error."""
-        mock_config.projects_root.return_value = str(tmp_path)
+        _setup_config_mock(mock_config, tmp_path)
         with patch("sys.argv", ["new_repo.py", "NonExistent", "--audit"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
@@ -707,7 +707,7 @@ class TestMainAuditMode:
     @patch("new_repo.audit_structure")
     def test_T221_audit_existing_directory(self, mock_audit, mock_config, tmp_path):
         """--audit on existing directory calls audit_structure."""
-        mock_config.projects_root.return_value = str(tmp_path)
+        _setup_config_mock(mock_config, tmp_path)
         (tmp_path / "TestProject").mkdir()
         mock_audit.return_value = 0
         with patch("sys.argv", ["new_repo.py", "TestProject", "--audit"]):
@@ -723,7 +723,7 @@ class TestMainDirectoryExists:
     @patch("new_repo.config")
     def test_T230_directory_already_exists(self, mock_config, tmp_path):
         """Exit with error if project directory already exists."""
-        mock_config.projects_root.return_value = str(tmp_path)
+        _setup_config_mock(mock_config, tmp_path)
         (tmp_path / "ExistingProject").mkdir()
         with patch("sys.argv", ["new_repo.py", "ExistingProject"]):
             with pytest.raises(SystemExit) as exc_info:
@@ -738,7 +738,7 @@ class TestMainGitHubAuth:
     @patch("new_repo.get_github_username")
     def test_T240_gh_not_authenticated(self, mock_gh, mock_config, tmp_path):
         """Exit with error when gh CLI is not authenticated."""
-        mock_config.projects_root.return_value = str(tmp_path)
+        _setup_config_mock(mock_config, tmp_path)
         mock_gh.side_effect = subprocess.CalledProcessError(1, "gh")
         with patch("sys.argv", ["new_repo.py", "NewProject"]):
             with pytest.raises(SystemExit) as exc_info:
@@ -748,8 +748,8 @@ class TestMainGitHubAuth:
 
 def _setup_config_mock(mock_config, tmp_path):
     """Configure the mock config object with all required attributes."""
-    mock_config.projects_root.return_value = str(tmp_path)
-    mock_config.projects_root_unix.return_value = "/tmp/projects"
+    mock_config.load_error = None
+    mock_config.new_repo_root.return_value = str(tmp_path)
     mock_config.assemblyzero_root.return_value = str(tmp_path / "AssemblyZero")
 
 

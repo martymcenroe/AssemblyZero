@@ -93,8 +93,8 @@ class TestIncompleteRunExitsAndAlerts:
                 patch("new_repo.run_command",
                       return_value=subprocess.CompletedProcess([], 0, "", "")), \
                 patch("sys.argv", ["new_repo.py", "Broken", "--no-github"]):
-            cfg.projects_root.return_value = str(tmp_path)
-            cfg.projects_root_unix.return_value = "/tmp/projects"
+            cfg.load_error = None
+            cfg.new_repo_root.return_value = str(tmp_path)
             cfg.assemblyzero_root.return_value = str(tmp_path / "AssemblyZero")
             with pytest.raises(SystemExit) as exc:
                 new_repo.main()

@@ -37,7 +37,12 @@ logger = logging.getLogger(__name__)
 PathFormat = Literal['windows', 'unix', 'auto']
 
 # Expected config schema keys (for validation)
-REQUIRED_PATH_KEYS = {'assemblyzero_root', 'projects_root', 'user_claude_dir'}
+# Every path key is optional in the file (#4763): a key it leaves out takes its
+# default. A fleet key it does carry needs both formats, as before.
+PATH_KEYS = {'assemblyzero_root', 'projects_root', 'user_claude_dir'}
+# Where new_repo.py creates a repository (#4763). Either format may be absent;
+# with the key absent, new_repo_root() is projects_root().
+NEW_REPO_ROOT_KEY = 'new_repo_root'
 REQUIRED_FORMAT_KEYS = {'windows', 'unix'}
 
 def _spellings(path: Path) -> dict:
@@ -115,6 +120,9 @@ class AssemblyZeroConfig:
         Returns:
             List of validation error messages (empty if valid)
         """
+        if not isinstance(config, dict):
+            return ["Top level must be a JSON object"]
+
         errors = []
 
         if "version" not in config:
@@ -125,16 +133,27 @@ class AssemblyZeroConfig:
             return errors  # Can't validate further without paths
 
         paths = config["paths"]
+        if not isinstance(paths, dict):
+            errors.append("'paths' must be a dictionary")
+            return errors
 
-        for key in REQUIRED_PATH_KEYS:
+        for key in sorted(PATH_KEYS | {NEW_REPO_ROOT_KEY}):
             if key not in paths:
-                errors.append(f"Missing path key: '{key}'")
-            elif not isinstance(paths[key], dict):
+                continue  # an absent key takes its default (#4763)
+            value = paths[key]
+            if not isinstance(value, dict):
                 errors.append(f"Path '{key}' must be a dictionary")
-            else:
-                for fmt in REQUIRED_FORMAT_KEYS:
-                    if fmt not in paths[key]:
+                continue
+            if key in PATH_KEYS:
+                for fmt in sorted(REQUIRED_FORMAT_KEYS):
+                    if fmt not in value:
                         errors.append(f"Path '{key}' missing '{fmt}' format")
+            carried = [fmt for fmt in sorted(REQUIRED_FORMAT_KEYS) if fmt in value]
+            if not carried:
+                errors.append(f"Path '{key}' carries neither 'windows' nor 'unix'")
+            for fmt in carried:
+                if not isinstance(value[fmt], str):
+                    errors.append(f"Path '{key}' format '{fmt}' must be a string")
 
         return errors
 
@@ -216,20 +235,30 @@ class AssemblyZeroConfig:
         Returns:
             Config dictionary (defaults if file missing/invalid)
         """
-        if not CONFIG_PATH.exists():
-            logger.debug(f"Config file not found at {CONFIG_PATH}, using defaults")
+        # Why a config file that exists was not used, or None (#4763). Tools
+        # fall back to defaults as before; new_repo.py refuses instead.
+        self.load_error: Optional[str] = None
+        path = CONFIG_PATH
+        if not path.exists():
+            logger.debug(f"Config file not found at {path}, using defaults")
             return {"version": "1.0", "paths": DEFAULTS}
 
         try:
-            with open(CONFIG_PATH, encoding='utf-8') as f:
+            with open(path, encoding='utf-8') as f:
                 config = json.load(f)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             # Security: Generic error message, no exception details
             logger.warning("Config file contains invalid JSON, using defaults")
+            self.load_error = f"{path} is not valid JSON (line {e.lineno}, column {e.colno})"
             return {"version": "1.0", "paths": DEFAULTS}
-        except IOError:
+        except UnicodeDecodeError:
+            logger.warning("Config file is not UTF-8, using defaults")
+            self.load_error = f"{path} is not UTF-8 text"
+            return {"version": "1.0", "paths": DEFAULTS}
+        except IOError as e:
             # Security: Generic error message, no exception details
             logger.warning("Could not read config file, using defaults")
+            self.load_error = f"{path} could not be read ({e.strerror or type(e).__name__})"
             return {"version": "1.0", "paths": DEFAULTS}
 
         # Validate schema
@@ -240,6 +269,7 @@ class AssemblyZeroConfig:
             )
             for error in errors:
                 logger.debug(f"  Validation error: {error}")
+            self.load_error = f"{path} failed validation: " + "; ".join(errors)
             return {"version": "1.0", "paths": DEFAULTS}
 
         return config
@@ -299,6 +329,17 @@ class AssemblyZeroConfig:
     def projects_root_unix(self) -> str:
         """Get projects root directory path in Unix format."""
         return self._get_path('projects_root', 'unix')
+
+    def new_repo_root(self, fmt: PathFormat = 'windows') -> str:
+        """Where new_repo.py creates a new repository (#4763).
+
+        Its own key, so a new repository can start on another disk while every
+        tool that reads projects_root still sees the whole fleet. With the key
+        absent, exactly what projects_root(fmt) returns.
+        """
+        if NEW_REPO_ROOT_KEY not in self._config.get("paths", {}):
+            return self.projects_root(fmt=fmt)
+        return self._get_path(NEW_REPO_ROOT_KEY, fmt)
 
     def user_claude_dir(self, fmt: PathFormat = 'windows') -> str:
         """
