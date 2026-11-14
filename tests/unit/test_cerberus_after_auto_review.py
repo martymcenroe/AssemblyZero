@@ -150,8 +150,8 @@ def _run_main(tmp_path: Path, argv: list[str]):
     with contextlib.ExitStack() as stack:
         mocks = [stack.enter_context(p) for p in patches]
         cfg = mocks[0]
-        cfg.projects_root.return_value = str(tmp_path)
-        cfg.projects_root_unix.return_value = "/tmp/projects"
+        cfg.load_error = None
+        cfg.new_repo_root.return_value = str(tmp_path)
         cfg.assemblyzero_root.return_value = str(tmp_path / "AssemblyZero")
         try:
             new_repo.main()

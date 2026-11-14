@@ -535,21 +535,39 @@ def create_project_json(project_path: Path, name: str, github_user: str) -> None
     project_json_path.write_text(json.dumps(project_json, indent=2) + "\n", encoding='utf-8')
 
 
+def windows_spelling(path: Path) -> str:
+    """How Windows names `path`, for PROJECT_ROOT_WINDOWS (#4180, #4763).
+
+    A path on a Windows drive has its `C:\\...` spelling. A path on Ubuntu's own
+    disk has none of its own: Windows reaches it through the WSL share,
+    `\\\\wsl.localhost\\<distro>\\home\\...`, for the distro this runs in. With
+    WSL_DISTRO_NAME unset there is no such share, and the POSIX path is kept.
+    """
+    spelled = _spellings(path)["windows"]
+    posix = path.as_posix()
+    distro = os.environ.get("WSL_DISTRO_NAME", "")
+    if spelled != posix or not distro or not posix.startswith("/"):
+        return spelled
+    return "\\\\wsl.localhost\\" + distro + posix.replace("/", "\\")
+
+
 def project_json_content(project_path: Path, name: str, github_user: str) -> dict:
     """What create_project_json writes, built without touching the disk."""
-    # Get path formats from config
-    projects_root_unix = config.projects_root_unix()
+    # Every path naming the repository comes from where it is (#4763), never
+    # from the Projects root: a repository on ext4 is not under that root.
+    project_unix = _spellings(project_path)["unix"]
+    # AssemblyZero's own location, wherever the new repository is (#4763).
     assemblyzero_root_windows = config.assemblyzero_root()
 
     return {
         "variables": {
-            "PROJECT_ROOT": f"{projects_root_unix}/{name}",
+            "PROJECT_ROOT": project_unix,
             # The Windows spelling whichever side runs this: from Ubuntu,
-            # project_path is /mnt/c/... (#4180).
-            "PROJECT_ROOT_WINDOWS": _spellings(project_path)["windows"],
+            # project_path is /mnt/c/... (#4180), or on ext4 the WSL share (#4763).
+            "PROJECT_ROOT_WINDOWS": windows_spelling(project_path),
             "PROJECT_NAME": name,
             "GITHUB_REPO": f"{github_user}/{name}",
-            "TOOLS_DIR": f"{projects_root_unix}/{name}/tools",
+            "TOOLS_DIR": f"{project_unix}/tools",
             "WORKTREE_PATTERN": f"{name}-{{ID}}"
         },
         "inherit_from": assemblyzero_root_windows,
@@ -719,7 +737,8 @@ def create_claude_md(
     See: #1266 (minimum-viable slice), #1291 (project-type branching),
     #1292 (test coverage), #1258 (ADR 0219).
     """
-    projects_root_unix = config.projects_root_unix()
+    # From where the repository is, not the Projects root (#4763).
+    project_unix = _spellings(project_path)["unix"]
     context_block = _project_specific_context(project_type, name)
 
     # Footer: invitation to document workflow overrides explicitly. Pushes
@@ -742,7 +761,7 @@ You are a team member on the {name} project, not a tool.
 
 - **Repository:** `{github_user}/{name}`
 - **Project Root (Windows):** `{project_path}`
-- **Project Root (Unix):** `{projects_root_unix}/{name}`
+- **Project Root (Unix):** `{project_unix}`
 - **Worktree Pattern:** `{name}-{{IssueID}}` (e.g., `{name}-45`)
 
 {context_block}
@@ -2808,7 +2827,15 @@ def resolve_project_path(name: str) -> Path:
             current directory, and that joined path does not exist. Nothing
             has been created when this is raised.
     """
-    projects_root = Path(config.projects_root(fmt='auto'))
+    if config.load_error is not None:
+        # A file that exists but was rejected may have meant to move the
+        # root; building at the default instead is the silent wrong (#4763).
+        raise ValueError(
+            f"the AssemblyZero configuration could not be used: {config.load_error}. "
+            "Fix or remove the file. Nothing was created."
+        )
+    # new_repo_root, or the Projects root when it is not configured (#4763).
+    projects_root = Path(config.new_repo_root(fmt='auto'))
     if not projects_root.is_absolute() or not projects_root.is_dir():
         raise ValueError(
             f"the Projects root '{projects_root}' is not an existing directory "
