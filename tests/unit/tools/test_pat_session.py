@@ -17,7 +17,7 @@ from unittest import mock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "tools"))
 
 import _pat_session  # noqa: E402
 

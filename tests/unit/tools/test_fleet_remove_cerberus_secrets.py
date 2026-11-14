@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-TOOLS = Path(__file__).resolve().parent.parent.parent / "tools"
+TOOLS = Path(__file__).resolve().parent.parent.parent.parent / "tools"
 sys.path.insert(0, str(TOOLS))
 
 import fleet_remove_cerberus_secrets as frs

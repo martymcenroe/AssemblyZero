@@ -20,11 +20,11 @@ from unittest import mock
 import pytest
 
 # Ensure project root is importable
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 # Import module under test using importlib to handle the hyphenated filename.
 # This relies on the __main__ guard being present — importing must not trigger execution.
-_scraper_path = Path(__file__).resolve().parents[2] / "tools" / "claude-usage-scraper.py"
+_scraper_path = Path(__file__).resolve().parents[3] / "tools" / "claude-usage-scraper.py"
 _spec = importlib.util.spec_from_file_location("claude_usage_scraper", _scraper_path)
 scraper = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scraper)
@@ -267,8 +267,8 @@ class TestRegression:
 
     def test_scraper_regression_output_unchanged(self):
         """T300: Scraper parse output matches golden file after refactor."""
-        golden_input_path = Path(__file__).resolve().parents[1] / "fixtures" / "scraper" / "golden_input.txt"
-        golden_output_path = Path(__file__).resolve().parents[1] / "fixtures" / "scraper" / "golden_output.txt"
+        golden_input_path = Path(__file__).resolve().parents[2] / "fixtures" / "scraper" / "golden_input.txt"
+        golden_output_path = Path(__file__).resolve().parents[2] / "fixtures" / "scraper" / "golden_output.txt"
 
         if not golden_input_path.exists() or not golden_output_path.exists():
             pytest.skip(

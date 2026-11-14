@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "tools"))
 
 import land_staged_workflow as lsw
 import land_workflow_plan as lwp

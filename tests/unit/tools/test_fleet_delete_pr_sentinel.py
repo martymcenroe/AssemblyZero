@@ -13,7 +13,7 @@ from unittest import mock
 
 import requests
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "tools"))
 
 import fleet_delete_pr_sentinel as fdps  # noqa: E402
 

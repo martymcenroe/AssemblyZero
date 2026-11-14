@@ -97,7 +97,7 @@ extend-exclude = ["docs/lineage", "tests/fixtures/issue7_run*"]
 "tools/run_requirements_workflow.py" = ["E402"]
 "tools/run_scout_workflow.py" = ["E402"]
 "tools/test-gate.py" = ["E402"]
-"tests/tools/test_claude_usage_scraper.py" = ["E402"]
+"tests/unit/tools/test_claude_usage_scraper.py" = ["E402"]
 
 [tool.poetry]
 packages = [{include = "assemblyzero"}]

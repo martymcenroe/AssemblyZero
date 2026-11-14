@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "tools"))
 
 import require_status_check as rsc  # noqa: E402
 

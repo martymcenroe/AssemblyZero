@@ -6,9 +6,10 @@ the file -- including pytest, which died collecting `tests/tools/` with
 `INTERNALERROR ... SystemExit: 1` before running a single test. Exit code 3, no
 test results, and a failure that reads as "the test framework broke".
 
-These tests live in `tests/unit/` on purpose. The natural home is `tests/tools/`,
-but no CI step collects that directory yet (#3453), and a regression test that
-does not run is not a regression test.
+These tests were put in `tests/unit/` on purpose. The natural home was
+`tests/tools/`, but no CI step collected that directory (#3453), and a
+regression test that does not run is not a regression test. That directory has
+since moved into the unit tier as `tests/unit/tools/` (#4278).
 """
 from __future__ import annotations
 

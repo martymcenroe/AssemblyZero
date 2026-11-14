@@ -35,8 +35,8 @@ KNOWN_LOADERS = frozenset({
     "tests/unit/test_dependabot_public_only.py",
     "tests/unit/test_dependabot_fake_root_guard.py",
     "tests/unit/test_npm_manifest.py",
-    "tests/tools/test_dependabot_review.py",
-    "tests/tools/test_dependabot_worktree_guard.py",
+    "tests/unit/tools/test_dependabot_review.py",
+    "tests/unit/tools/test_dependabot_worktree_guard.py",
 })
 
 

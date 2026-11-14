@@ -19,7 +19,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-TOOLS = Path(__file__).resolve().parents[2] / "tools"
+TOOLS = Path(__file__).resolve().parents[3] / "tools"
 
 
 def _load_suite(monkeypatch):
