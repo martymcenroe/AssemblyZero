@@ -51,6 +51,8 @@ R3 says nothing `new_repo.py` writes into a repository on ext4 names `/mnt/c/Use
 - `tests/unit/test_assemblyzero_config_derived.py`: the setting, its validation and `load_error`.
 - Mocks of `new_repo.config` in `tests/unit/test_new_repo.py`, `tests/unit/test_new_repo_ubuntu_run.py`, `tests/unit/test_new_repo_no_auto_review_caller.py` and `tests/unit/test_cerberus_after_auto_review.py` now set `load_error = None` and `new_repo_root`, the surface `new_repo.py` reads, in place of `projects_root` and `projects_root_unix`.
 
+The first version of these tests spelled the operator's Projects root as string literals, which the spelled-root guard (`tests/unit/test_no_spelled_projects_root.py`, #3609) forbids in any tracked file under `tests/`. T2 now derives its forbidden strings from `assemblyzero_config.DEFAULTS["projects_root"]` and adds the guard's own `SPELLINGS`, and the default-case test uses another user's path on the Windows drive.
+
 T3, the end-to-end run on `/home/mcwiz/Projects`, creates a real GitHub repository and waits for the operator; it is tracked in #4764.
 
 ## Ruff

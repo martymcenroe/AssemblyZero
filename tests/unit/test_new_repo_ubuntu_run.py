@@ -29,6 +29,8 @@ from new_repo import (
     resolve_project_path,
 )
 
+from tests.unit.test_no_spelled_projects_root import SPELLINGS as GUARD_SPELLINGS
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -244,14 +246,21 @@ class TestFailedSteps:
 # #4763 — a repository under a configured root names only paths real there
 # ===========================================================================
 
-# The fleet's Projects root in every spelling a scaffold could carry, the last
-# one as JSON escapes the Windows spelling.
-FLEET_ROOT_SPELLINGS = (
-    "/mnt/c/Users/mcwiz/Projects",
-    "/c/Users/mcwiz/Projects",
-    "C:\\Users\\mcwiz\\Projects",
-    "C:\\\\Users\\\\mcwiz\\\\Projects",
-)
+def _fleet_root_spellings() -> tuple[str, ...]:
+    """The default Projects root in every spelling a scaffold could carry,
+    derived from assemblyzero_config's defaults rather than spelled (#3609):
+    its Windows and Unix values, the Windows value as JSON escapes it, and
+    the Git Bash form built from the Windows value. Then the spelled-root
+    guard's own closed set, so the scaffold is held to the same rule."""
+    root = assemblyzero_config.DEFAULTS["projects_root"]
+    windows, unix = root["windows"], root["unix"]
+    spellings = {windows, unix, json.dumps(windows)[1:-1]}
+    if len(windows) > 2 and windows[1] == ":":
+        spellings.add("/" + windows[0].lower() + windows[2:].replace("\\", "/"))
+    return tuple(sorted(spellings)) + tuple(GUARD_SPELLINGS)
+
+
+FLEET_ROOT_SPELLINGS = _fleet_root_spellings()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="an ext4 root exists only off Windows")
@@ -294,9 +303,10 @@ class TestScaffoldUnderAnExt4Root:
                    if p.is_file() and ".git" not in p.relative_to(project).parts]
         assert written, "the scaffold wrote no files"
         for path in written:
-            text = path.read_bytes().decode("utf-8", errors="replace")
+            text = path.read_bytes().decode("utf-8", errors="replace").lower()
             for spelling in FLEET_ROOT_SPELLINGS:
-                assert spelling not in text, f"{path.relative_to(project)} names {spelling}"
+                assert spelling.lower() not in text, (
+                    f"{path.relative_to(project)} names {spelling}")
 
         variables = json.loads(
             (project / ".claude" / "project.json").read_text(encoding="utf-8"))["variables"]
@@ -312,12 +322,13 @@ class TestScaffoldUnderAnExt4Root:
 
 
 def test_a_repository_on_a_windows_drive_keeps_its_drive_spellings(tmp_path, monkeypatch):
-    """#4763. The default case is unchanged: a repository in the Projects root
-    seen from Ubuntu gets its /mnt/c and C:\\ spellings, even inside WSL."""
+    """#4763. The default case is unchanged: a repository on a Windows drive
+    seen from Ubuntu gets its /mnt/c and C:\\ spellings, even inside WSL. The
+    path is another user's, so no tracked file spells the Projects root (#3609)."""
     monkeypatch.setattr(new_repo, "config", _real_config(monkeypatch, tmp_path / "absent.json"))
     monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
     variables = new_repo.project_json_content(
-        Path("/mnt/c/Users/mcwiz/Projects/Foo"), "Foo", "someone")["variables"]
-    assert variables["PROJECT_ROOT"] == "/mnt/c/Users/mcwiz/Projects/Foo"
-    assert variables["TOOLS_DIR"] == "/mnt/c/Users/mcwiz/Projects/Foo/tools"
-    assert variables["PROJECT_ROOT_WINDOWS"] == "C:\\Users\\mcwiz\\Projects\\Foo"
+        Path("/mnt/c/Users/someone/Projects/Foo"), "Foo", "someone")["variables"]
+    assert variables["PROJECT_ROOT"] == "/mnt/c/Users/someone/Projects/Foo"
+    assert variables["TOOLS_DIR"] == "/mnt/c/Users/someone/Projects/Foo/tools"
+    assert variables["PROJECT_ROOT_WINDOWS"] == "C:\\Users\\someone\\Projects\\Foo"
