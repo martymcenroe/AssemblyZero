@@ -1,10 +1,12 @@
 """The requirements gate's budget, its one retry, and saying so out loud (#2290).
 
-The gate fails open by design so a provider storm cannot brick a launch (#1899),
-and that policy is unchanged. What changed is that failing open is no longer
-silent: a run that proceeded without a verdict says so in the roll's verdict
+#2290 made a run that proceeded without a verdict say so, in the roll's verdict
 block and in the orchestrator summary, because "requirements were not checked"
-and "requirements were checked and were clean" used to look identical.
+and "requirements were checked and were clean" used to look identical. #2474
+and #3585 then closed every path that proceeded: a run without a verdict now
+halts as REQUIREMENTS UNVERIFIED and reports itself through its halt. #4264
+removed the "proceeded unverified" banner and its ledger, which nothing could
+write any more.
 
 The measured case is boostgauge #7 -- two decision tables, 21 acceptance
 criteria -- which timed out at the old 300s bound on one attempt and returned a
@@ -25,12 +27,6 @@ sys.path.insert(0, str(ROOT / "tools"))
 import speedrun_roll as sr  # noqa: E402
 
 from assemblyzero.core.llm_provider import LLMCallResult  # noqa: E402
-from assemblyzero.speedrun.requirements_status import (  # noqa: E402
-    format_banner,
-    read_unverified,
-    record_unverified,
-    unverified_path,
-)
 from assemblyzero.workflows.requirements.nodes.analyze_requirements import (  # noqa: E402
     GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS,
     REQUIREMENTS_GATE_TIMEOUT_SECONDS,
@@ -374,41 +370,32 @@ class TestItHaltsWhenItCannotRun:
 
 
 class TestItSaysSoWhenItDidNotRun:
-    """The ledger behind the end-of-run banner (#2290).
+    """Every path without a verdict halts and says so (#2474, #3585).
 
-    #2474 narrowed what feeds it. The banner's own sentence is "the run
-    proceeded anyway", so it may only carry paths where the run DID proceed.
-    A halted run is reported by its halt message and recovery plan; writing it
-    here as well would put a false sentence in front of the operator.
+    #2290's ledger and end-of-run banner said "the run proceeded anyway". Once
+    no path proceeded, nothing wrote the ledger, and #4264 removed both. A
+    halted run is reported by its halt message and recovery plan.
     """
 
-    def test_an_exhausted_retry_records_nothing_because_it_halts(
-        self, tmp_path, provider, calm
-    ):
+    def test_an_exhausted_retry_halts(self, tmp_path, provider, calm):
         provider(TIMEOUT)
 
         update = analyze_requirements(_state(tmp_path))
 
         assert update.get("requirements_unverified"), "it halted"
-        assert read_unverified(tmp_path) == [], (
-            "the banner says the run proceeded anyway, which this run did not"
-        )
 
-    def test_an_unparseable_response_records_nothing_either(
-        self, tmp_path, provider, calm
-    ):
+    def test_an_unparseable_response_halts(self, tmp_path, provider, calm):
         provider(_result(True, "not json at all"))
 
         update = analyze_requirements(_state(tmp_path))
 
         assert update.get("requirements_unverified"), "it halted"
-        assert read_unverified(tmp_path) == []
 
-    def test_the_last_fail_open_path_now_halts_and_records_nothing(self, tmp_path, provider, calm):
+    def test_the_last_fail_open_path_now_halts(self, tmp_path, provider, calm):
         """#2462's path: the model answered, but every conflict it reported
         lacked a divergence condition. It used to proceed and record the
         unverified state; #3585 (ADR 0236) halts it as REQUIREMENTS UNVERIFIED,
-        and a halt reports itself, so it records nothing.
+        and a halt reports itself.
         """
         provider(_result(True, json.dumps({
             "is_consistent": False,
@@ -422,27 +409,6 @@ class TestItSaysSoWhenItDidNotRun:
         update = analyze_requirements(_state(tmp_path))
 
         assert update.get("requirements_unverified"), "it halted"
-        assert read_unverified(tmp_path) == []
-
-    def test_a_verdict_records_nothing(self, tmp_path, provider, calm):
-        provider(OK)
-
-        analyze_requirements(_state(tmp_path))
-
-        assert read_unverified(tmp_path) == []
-        assert not unverified_path(tmp_path).exists()
-
-    def test_the_standalone_precheck_does_not_write_roll_records(
-        self, tmp_path, provider, calm
-    ):
-        """Its own exit code is the signal. A record here would sit in the
-        ledger waiting to mislabel whichever roll runs next."""
-        from assemblyzero.workflows.requirements import precheck
-
-        provider(TIMEOUT)
-        precheck.run_gate(tmp_path, 7, "t", "The app shall persist state.")
-
-        assert read_unverified(tmp_path) == []
 
     def test_the_precheck_reports_no_verdict_as_error_not_conflict(
         self, tmp_path, provider, calm
@@ -459,41 +425,14 @@ class TestItSaysSoWhenItDidNotRun:
         assert result.status == "error"
         assert "no verdict" in result.detail
 
-    def test_a_record_that_cannot_be_written_alerts_and_raises(
-        self, tmp_path, operator_alerts
-    ):
-        """#3585: a lost record means the UNVERIFIED banner never prints, so the
-        write failure alerts and raises instead of returning False."""
-        blocker = tmp_path / "data"
-        blocker.write_text("not a directory", encoding="utf-8")
-        with pytest.raises(OSError):
-            record_unverified(tmp_path, issue=7, reason="x")
-        assert len(operator_alerts) == 1
 
-    def test_since_filters_older_records(self, tmp_path):
-        record_unverified(tmp_path, issue=1, reason="old", ts="2026-08-01 00:00:00")
-        record_unverified(tmp_path, issue=2, reason="new", ts="2026-08-13 00:00:00")
+class TestTheVerdictBlock:
+    """The roll's verdict block carries no "proceeded unverified" banner (#4264).
 
-        recent = read_unverified(tmp_path, since="2026-08-12 00:00:00")
+    No roll proceeds without a requirements verdict since #3585, so the banner
+    could never print; it went with its ledger.
+    """
 
-        assert [r["issue"] for r in recent] == [2]
-
-
-class TestTheBanner:
-    def test_no_records_says_nothing(self):
-        assert format_banner([]) == []
-
-    def test_the_banner_names_the_state_and_the_issue(self):
-        lines = format_banner([{"issue": 7, "reason": "analysis unavailable: timed out"}])
-        text = "\n".join(lines)
-
-        assert "REQUIREMENTS UNVERIFIED" in text
-        assert "#7" in text
-        assert "timed out" in text
-        assert "NOT the same as a clean requirements check" in text
-
-
-class TestTheVerdictBlockCarriesIt:
     def _verdict(self, capsys, repo, **over):
         kwargs = dict(
             requested=[7], rolled=[7], blocked=[], stopped_at=None, code=0, since="",
@@ -502,42 +441,14 @@ class TestTheVerdictBlockCarriesIt:
         sr._render_verdict(repo, **kwargs)
         return capsys.readouterr().out
 
-    def test_a_successful_roll_still_reports_unverified_requirements(
-        self, tmp_path, capsys
-    ):
-        """The case that matters. A roll whose gate failed open used to print
-        an unqualified ROLL SUCCEEDED and read exactly like a verified run."""
-        record_unverified(tmp_path, issue=7, reason="analysis unavailable: timed out")
-
-        out = self._verdict(capsys, tmp_path)
-
-        assert "ROLL SUCCEEDED" in out
-        assert "REQUIREMENTS UNVERIFIED" in out
-
     def test_a_clean_roll_says_nothing_extra(self, tmp_path, capsys):
         out = self._verdict(capsys, tmp_path)
 
         assert "ROLL SUCCEEDED" in out
         assert "REQUIREMENTS UNVERIFIED" not in out
 
-    def test_a_failed_roll_carries_it_too(self, tmp_path, capsys):
-        record_unverified(tmp_path, issue=7, reason="analysis unavailable: timed out")
-
+    def test_a_failed_roll_reads_as_failed(self, tmp_path, capsys):
         out = self._verdict(capsys, tmp_path, rolled=[], stopped_at=7, code=1)
 
         assert "ROLL FAILED" in out
-        assert "REQUIREMENTS UNVERIFIED" in out
-
-    def test_an_unreadable_ledger_never_costs_the_verdict(
-        self, tmp_path, capsys, monkeypatch
-    ):
-        def _boom(*a, **k):
-            raise OSError("ledger unreadable")
-
-        monkeypatch.setattr(
-            "assemblyzero.speedrun.requirements_status.read_unverified", _boom
-        )
-
-        out = self._verdict(capsys, tmp_path)
-
-        assert "ROLL SUCCEEDED" in out
+        assert "REQUIREMENTS UNVERIFIED" not in out

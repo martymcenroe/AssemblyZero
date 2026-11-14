@@ -107,10 +107,12 @@ def parse_files_to_modify(lld_content: str) -> list[FileToModify]:
         halts on.
 
     Raises:
-        ValueError: there is no Section 2.1 Files Changed table, or a row's
-            change type is not one this workflow can act on (#3585). The first
-            used to return [], indistinguishable from an empty table; the
-            second used to default to "Add".
+        ValueError: there is no Section 2.1 Files Changed table, a row has
+            fewer cells than the table's header, or a row's change type is not
+            one this workflow can act on (#3585, #4274). The first used to
+            return [], indistinguishable from an empty table; the second was
+            dropped without a word (or read across the line break into the next
+            row); the third used to default to "Add".
     """
     files: list[FileToModify] = []
 
@@ -118,7 +120,7 @@ def parse_files_to_modify(lld_content: str) -> list[FileToModify]:
     table_pattern = re.compile(
         r"###?\s*2\.1[^\n]*Files Changed[^\n]*\n"  # Section header
         r"\n*"                                       # Optional blank lines
-        r"\|[^\n]+\n"                                # Table header row
+        r"(\|[^\n]+)\n"                              # Table header row
         r"\|[-|\s]+\n"                               # Separator row
         r"((?:\|[^\n]+\n)+)",                        # Table body rows
         re.IGNORECASE,
@@ -132,7 +134,25 @@ def parse_files_to_modify(lld_content: str) -> list[FileToModify]:
             "least one body row)"
         )
 
-    table_rows = match.group(1)
+    header_row = match.group(1).strip()
+    table_rows = match.group(2)
+
+    # #4274: a row with fewer cells than the header names no change type or no
+    # description for its file. The row pattern below needs three cells, so a
+    # short row was skipped without a word, or matched across the line break
+    # into the next row. It is refused here, before any row is read.
+    header_cells = _count_cells(header_row)
+    for line in table_rows.splitlines():
+        row = line.strip()
+        if not row:
+            continue
+        row_cells = _count_cells(row)
+        if row_cells < header_cells:
+            raise ValueError(
+                f"the Section 2.1 Files Changed table has a row with "
+                f"{row_cells} cells under a header of {header_cells} "
+                f"({header_row}): {row}"
+            )
 
     # Parse each row: | `path` | ChangeType | Description |
     row_pattern = re.compile(
@@ -167,6 +187,16 @@ def parse_files_to_modify(lld_content: str) -> list[FileToModify]:
         ))
 
     return files
+
+
+def _count_cells(row: str) -> int:
+    """The number of cells in one markdown table row (#4274).
+
+    The row's outer pipes are dropped and the rest is split on ``|``, so
+    ``| a | b |`` has two cells and ``| a | b | |`` three (the last empty).
+    """
+    inner = row.strip().removeprefix("|").removesuffix("|")
+    return len(inner.split("|"))
 
 
 def _normalize_change_type(raw: str) -> str:

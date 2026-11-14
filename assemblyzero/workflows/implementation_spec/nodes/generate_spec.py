@@ -397,7 +397,16 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
                 # Find most recent spec-draft in lineage
                 drafts = sorted(audit_dir.glob("*-spec-draft.md"), reverse=True)
                 if drafts:
-                    recovered = drafts[0].read_text(encoding="utf-8")
+                    # #4272: a draft that cannot be read halts, naming the path
+                    # and the cause; it used to raise out of the node.
+                    try:
+                        recovered = drafts[0].read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError) as e:
+                        return _halt(
+                            issue_number,
+                            f"cannot read the recovered draft {drafts[0]} (#525 "
+                            f"resume): {type(e).__name__}: {e}",
+                        )
                     if recovered.strip():
                         lines = len(recovered.splitlines())
                         print(f"\n[N2] Recovered existing draft from {drafts[0].name} ({lines} lines) — skipping LLM call")
@@ -411,6 +420,11 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
                             "completeness_issues": [],
                             "error_message": "",
                         }
+                    # #4272: an empty draft used to be skipped without a word.
+                    print(
+                        f"\n[N2] The recovered draft {drafts[0]} is empty "
+                        f"({len(recovered)} chars, whitespace only); drafting again"
+                    )
 
     # #2536: a seeded draft with NO outstanding feedback is one the prior
     # grant generated but never got reviewed (run-issue331-150920: the guard

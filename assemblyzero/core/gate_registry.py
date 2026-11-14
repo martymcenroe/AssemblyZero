@@ -373,12 +373,14 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "spec.finalize.precondition", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "GUARD: Cannot finalize spec with verdict",
-        _s(f"{_IS}/nodes/finalize_spec.py::finalize_spec::return", 2, 3, 4, 5, 6, 7, 8),
+        _s(f"{_IS}/nodes/finalize_spec.py::finalize_spec::return", 2, 3, 4, 5, 6, 7, 8, 9, 10),
         notes=(
             "#3891 added the repo_root and audit_dir guards (returns 4 and 5) and "
             "made the durable hand-off write a halt (return 8); the write and "
             "not-created returns moved from 4 and 5 to 6 and 7. #3887 routes N6 "
-            "to HALT, so these now reach it instead of ending the run at END."
+            "to HALT, so these now reach it instead of ending the run at END. "
+            "#4273 added returns 9 (the audit-trail save failed) and 10 (the "
+            "lineage move to done/ failed); both used to raise out of N6."
         ),
     ),
     Gate(

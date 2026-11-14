@@ -231,8 +231,8 @@ class _FakeProvider:
 
 @pytest.fixture
 def node(monkeypatch, tmp_path):
-    """Drive the live node, capturing filings and unverified records."""
-    captured = {"filed": [], "unverified": []}
+    """Drive the live node, capturing filings."""
+    captured = {"filed": []}
 
     monkeypatch.setattr(
         "assemblyzero.speedrun.must_resolve.file_all_conflicts",
@@ -241,10 +241,6 @@ def node(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "assemblyzero.speedrun.prompt_telemetry.record_failures",
         lambda *a, **k: None,
-    )
-    monkeypatch.setattr(
-        "assemblyzero.speedrun.requirements_status.record_unverified",
-        lambda repo, **k: captured["unverified"].append(k),
     )
 
     def run(response: str) -> dict:
@@ -302,17 +298,9 @@ def test_an_all_unarticulated_verdict_files_nothing_and_halts_unverified(node, c
     assert "REJECTED" in out and A_344 in out
 
 
-def test_an_all_unarticulated_verdict_writes_no_proceeded_record(node):
-    """The record said the run proceeded without a verdict; it halts now, and
-    a halt reports itself (#3585)."""
-    node["run"](ALL_UNARTICULATED)
-
-    assert node["unverified"] == []
-
-
-def test_a_clean_verdict_is_not_recorded_as_unverified(node):
-    node["run"]('{"is_consistent": true, "conflicts": []}')
-    assert node["unverified"] == []
+# #4264: the two tests that asserted no "proceeded unverified" record is
+# written (all-unarticulated, and clean) went with the record's module. Nothing
+# can write that record now; T1 in test_requirements_status_retired.py holds it.
 
 
 def test_a_mixed_verdict_halts_on_the_real_one_and_files_only_that(node):
@@ -320,7 +308,6 @@ def test_a_mixed_verdict_halts_on_the_real_one_and_files_only_that(node):
 
     assert REQUIREMENTS_CONFLICT_MARKER in result["error_message"]
     assert [c["criterion_a"] for c in node["filed"]] == [GOOD["criterion_a"]]
-    assert node["unverified"] == [], "it did produce a verdict"
 
 
 def test_a_mixed_verdict_still_names_the_pairing_it_dropped(node):
@@ -336,4 +323,3 @@ def test_a_well_formed_verdict_is_unchanged(node):
 
     assert REQUIREMENTS_CONFLICT_MARKER in result["error_message"]
     assert len(node["filed"]) == 1
-    assert node["unverified"] == []
