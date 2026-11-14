@@ -254,7 +254,7 @@ def _analyze(
 
     # Step 4: Extract import dependencies (Issue #409 Gap 3)
     import_dependencies = _extract_import_dependencies(
-        files_to_modify, repo_root
+        files_to_modify, repo_root, base_ref_name
     )
     if import_dependencies:
         print(f"    Import dependencies: {len(import_dependencies):,} chars")
@@ -947,6 +947,7 @@ def _build_project_context(repo_root: Path) -> str:
 def _extract_import_dependencies(
     files_to_modify: list[FileToModify],
     repo_root: Path,
+    base_ref_name: str = "",
 ) -> str:
     """Extract intra-project import dependencies for files_to_modify.
 
@@ -970,23 +971,42 @@ def _extract_import_dependencies(
         file_path = file_spec["path"]
         full_path = repo_root / file_path
 
-        if not full_path.exists() or not file_path.endswith(".py"):
+        if not file_path.endswith(".py"):
             continue
 
-        # utf-8-sig, not utf-8 (#2507): a UTF-8 BOM survives a plain
-        # utf-8 read as U+FEFF, which ast.parse rejects -- so a BOM'd
-        # file silently vanished from the drafter's context here while
-        # Python's own importer ran it fine. Identical to the repair
-        # fail_open_audit made to itself; utf-8-sig == utf-8 when no
-        # BOM is present.
-        content = _read_or_raise(
-            full_path, "the planned file for its imports", encoding="utf-8-sig",
-        )
+        # #4271: a Modify or Delete target absent from the checkout is read
+        # from the base, as _load_planned_file reads it (#2033); it used to be
+        # skipped, and the drafter saw no imports for it. One found nowhere
+        # raises, naming it. An Add not yet written has no imports.
+        source = file_path
+        if full_path.exists():
+            # utf-8-sig, not utf-8 (#2507): a UTF-8 BOM survives a plain
+            # utf-8 read as U+FEFF, which ast.parse rejects -- so a BOM'd
+            # file silently vanished from the drafter's context here while
+            # Python's own importer ran it fine. Identical to the repair
+            # fail_open_audit made to itself; utf-8-sig == utf-8 when no
+            # BOM is present.
+            content = _read_or_raise(
+                full_path, "the planned file for its imports", encoding="utf-8-sig",
+            )
+        elif file_spec["change_type"] == "Add":
+            continue
+        elif base_ref_name and exists_on_base(repo_root, base_ref_name, file_path):
+            content = read_from_base(
+                repo_root, base_ref_name, file_path
+            ).removeprefix(chr(0xFEFF))
+            source = f"{file_path} on {base_ref_name}"
+        else:
+            where = f"the checkout or {base_ref_name}" if base_ref_name else "the checkout"
+            raise CodebaseReadError(
+                f"the {file_spec['change_type']} target {file_path} does not exist in "
+                f"{where}, so its imports cannot be mapped"
+            )
         try:
             tree = ast.parse(content, filename=file_path)
         except SyntaxError as exc:
             raise CodebaseReadError(
-                f"the planned file {file_path} does not parse, so its imports "
+                f"the planned file {source} does not parse, so its imports "
                 f"cannot be mapped ({_syntax_detail(exc)})"
             ) from exc
 

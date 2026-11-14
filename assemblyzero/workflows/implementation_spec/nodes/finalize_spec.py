@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.workflows.requirements.audit import (
+    LineageSourceError,
     move_lineage_to_done,
     next_file_number,
     save_audit_file,
@@ -285,12 +286,38 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Save to audit trail, then move lineage from active/ to done/ (Issue #100)
     # -------------------------------------------------------------------------
+    # #4273: neither step had a handler, so a failure in either raised out of
+    # N6 instead of returning an error_message that route_after_finalize sends
+    # to HALT, which alerts. Each now stops the run there, naming the path and
+    # the cause.
     file_num = next_file_number(audit_dir)
-    audit_path = save_audit_file(
-        audit_dir, file_num, "final-spec.md", finalized_content
-    )
+    audit_target = audit_dir / f"{file_num:03d}-final-spec.md"
+    try:
+        audit_path = save_audit_file(
+            audit_dir, file_num, "final-spec.md", finalized_content
+        )
+    except OSError as e:
+        print(f"    ERROR: Failed to save the final spec to the audit trail: {e}")
+        return {
+            "spec_path": "",
+            "error_message": (
+                f"N6 finalize for issue #{issue_number}: could not save the final "
+                f"spec to the audit trail at {audit_target} "
+                f"({type(e).__name__}: {e}); the lineage stays in active/"
+            ),
+        }
     print(f"    Audit trail: {audit_path.name}")
-    move_lineage_to_done(audit_dir, repo_root)
+    try:
+        move_lineage_to_done(audit_dir, repo_root)
+    except (OSError, LineageSourceError) as e:
+        print(f"    ERROR: Failed to move the lineage to done/: {e}")
+        return {
+            "spec_path": "",
+            "error_message": (
+                f"N6 finalize for issue #{issue_number}: could not move the lineage "
+                f"{audit_dir} to done/ in {repo_root} ({type(e).__name__}: {e})"
+            ),
+        }
 
     # -------------------------------------------------------------------------
     # Return state updates

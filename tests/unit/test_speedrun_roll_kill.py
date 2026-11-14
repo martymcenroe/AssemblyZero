@@ -321,28 +321,25 @@ class TestHaltedStageUnit:
 
 class TestKilledVerdictRendering:
     def test_a_kill_is_not_rendered_as_a_failure(self, repo, capsys):
-        with patch.object(sr, "_requirements_unverified_lines", return_value=[]):
-            sr._render_verdict(
-                repo, requested=[1], rolled=[], blocked=[], stopped_at=1,
-                code=KILL_EXIT_CODE,
-            )
+        sr._render_verdict(
+            repo, requested=[1], rolled=[], blocked=[], stopped_at=1,
+            code=KILL_EXIT_CODE,
+        )
         out = capsys.readouterr().out
         assert "STOPPED BY OPERATOR" in out
         assert "FAILED" not in out
         assert "exhausting" not in out
 
     def test_the_verdict_promises_the_resume(self, repo, capsys):
-        with patch.object(sr, "_requirements_unverified_lines", return_value=[]):
-            sr._render_verdict(
-                repo, requested=[1], rolled=[], blocked=[], stopped_at=1,
-                code=KILL_EXIT_CODE,
-            )
+        sr._render_verdict(
+            repo, requested=[1], rolled=[], blocked=[], stopped_at=1,
+            code=KILL_EXIT_CODE,
+        )
         assert "resumes" in capsys.readouterr().out
 
     def test_an_ordinary_failure_still_reads_as_a_failure(self, repo, capsys):
         """The kill branch must not swallow real failures."""
-        with patch.object(sr, "_requirements_unverified_lines", return_value=[]):
-            sr._render_verdict(
-                repo, requested=[1], rolled=[], blocked=[], stopped_at=1, code=1,
-            )
+        sr._render_verdict(
+            repo, requested=[1], rolled=[], blocked=[], stopped_at=1, code=1,
+        )
         assert "ROLL FAILED" in capsys.readouterr().out

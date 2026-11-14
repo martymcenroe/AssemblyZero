@@ -1,5 +1,5 @@
 {
-  "count": 115,
+  "count": 113,
   "entries": {
     "assemblyzero/metrics/collector.py::count_gemini_verdicts::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
@@ -523,12 +523,6 @@
       "kind": "swallowed_handler",
       "line": 2696
     },
-    "tools/orchestrate.py::main::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 365
-    },
     "tools/replay_run.py::replay_spec_stage::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
       "issue": 3581,
@@ -588,12 +582,6 @@
       "issue": 3581,
       "kind": "swallowed_handler",
       "line": 2519
-    },
-    "tools/speedrun_roll.py::_requirements_unverified_lines::swallowed_handler::1": {
-      "detail": "except Exception neither raises nor calls alert_operator",
-      "issue": 3581,
-      "kind": "swallowed_handler",
-      "line": 3398
     },
     "tools/speedrun_roll.py::_teach_map::swallowed_handler::1": {
       "detail": "except Exception neither raises nor calls alert_operator",
