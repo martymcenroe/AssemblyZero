@@ -13,7 +13,7 @@ from unittest import mock
 
 # Import under test — we need to add tools/ to sys.path
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools"))
 
 from modernize_dependencies import (
     discover_outdated,

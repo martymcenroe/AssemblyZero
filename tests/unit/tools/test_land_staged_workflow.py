@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "tools"))
 
 import land_staged_workflow as lsw  # noqa: E402
 from land_staged_workflow import (  # noqa: E402

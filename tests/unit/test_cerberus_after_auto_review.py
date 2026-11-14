@@ -199,7 +199,7 @@ HISTORICAL = ("docs/audits/", "docs/reports/")
 
 def test_the_cerberus_health_audit_and_its_tests_are_gone():
     assert not (TOOLS / f"{RETIRED_AUDIT}.py").exists()
-    assert not (ROOT / "tests" / "tools" / f"test_{RETIRED_AUDIT}.py").exists()
+    assert not (ROOT / "tests" / "unit" / "tools" / f"test_{RETIRED_AUDIT}.py").exists()
 
 
 def test_nothing_live_names_the_retired_audit():

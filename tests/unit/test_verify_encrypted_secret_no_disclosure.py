@@ -3,7 +3,7 @@
 The tool's whole reason to exist is checking a blob without exposing it. Its
 report used to print the first and last decrypted lines for every type, and a
 token is one line, so a run printed the whole credential twice. The checks
-below drive `main()`, which `tests/tools/test_verify_encrypted_secret.py` does
+below drive `main()`, which `tests/unit/tools/test_verify_encrypted_secret.py` does
 not, with `_decrypt` stood in, so no gpg runs and no real secret is involved.
 """
 

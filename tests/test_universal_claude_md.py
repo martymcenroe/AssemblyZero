@@ -43,10 +43,15 @@ AZ_STANDARDS = PROJECTS_ROOT / "AssemblyZero" / "docs" / "standards"
 # no other repository for it.
 DEFAULT_ADR_REPO = "AssemblyZero"
 
-pytestmark = pytest.mark.skipif(
-    not UNIVERSAL_PATH.exists(),
-    reason=f"Universal CLAUDE.md not found at {UNIVERSAL_PATH} (operator-machine-local test)",
-)
+# #4756: `integration`, because these tests read a file outside the repository
+# and ask GitHub through `gh`. Unmarked, no tier selected them.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not UNIVERSAL_PATH.exists(),
+        reason=f"Universal CLAUDE.md not found at {UNIVERSAL_PATH} (operator-machine-local test)",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

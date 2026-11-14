@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_TOOLS = Path(__file__).resolve().parents[2] / "tools"
+_TOOLS = Path(__file__).resolve().parents[3] / "tools"
 sys.path.insert(0, str(_TOOLS))
 
 from verify_encrypted_secret import (  # noqa: E402

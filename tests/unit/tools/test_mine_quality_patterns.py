@@ -30,7 +30,7 @@ def _recent_iso(days_ago: float, hour: int = 12) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # Add tools/ to sys.path so we can import the script as a module
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "tools"))
 
 import mine_quality_patterns  # noqa: E402
 

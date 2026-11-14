@@ -1,8 +1,9 @@
 """_pat_session.py when the passphrase prompt is a terminal pinentry (#4179).
 
-On Ubuntu, pinentry-curses draws its box in a terminal. These tests live under
-tests/unit/ rather than beside tests/tools/test_pat_session.py because no CI
-step collects tests/tools/ (#3453).
+On Ubuntu, pinentry-curses draws its box in a terminal. These tests were put
+under tests/unit/ rather than beside tests/tools/test_pat_session.py because no
+CI step collected tests/tools/ (#3453). That file has since moved into the unit
+tier too, as tests/unit/tools/test_pat_session.py (#4278).
 """
 
 import os

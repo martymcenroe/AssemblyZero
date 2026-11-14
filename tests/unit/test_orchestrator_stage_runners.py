@@ -7,9 +7,10 @@ router sent the graph back to the same node, and the run looped until
 ``GraphRecursionError``, which names no stage.
 
 CI never saw it. Its integration step selects ``-m integration`` and
-``tests/integration/test_orchestrator_graph.py`` carries no such marker, so only
+``tests/integration/test_orchestrator_graph.py`` carried no such marker, so only
 a local full run collected the test (#3737). These tests sit in the unit tier,
-which CI runs.
+which CI runs, and since #4756 so does that file, as
+``tests/unit/test_orchestrator_graph.py``.
 """
 
 from __future__ import annotations

@@ -11,7 +11,7 @@ import pytest
 
 # Import from tools
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools"))
 
 from backfill_issue_audit import (
     AUDIT_ACTIVE_DIR,
@@ -34,7 +34,7 @@ from backfill_issue_audit import (
 # Fixtures
 # =============================================================================
 
-FIXTURES_DIR = Path(__file__).parent.parent.parent / "tools" / "fixtures"
+FIXTURES_DIR = Path(__file__).parent.parent.parent.parent / "tools" / "fixtures"
 
 
 @pytest.fixture
