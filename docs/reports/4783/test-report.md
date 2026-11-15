@@ -22,3 +22,9 @@
 `tests/unit/test_gh_actions_secret.py` alone: `25 passed, 1 warning in 10.07s`.
 
 With `tests/unit/test_cerberus_secret_deploy_retired.py` and every `tests/unit/test_new_repo*.py`: `303 passed, 1 warning in 140.59s (0:02:20)`.
+
+## Unit tier, 2026-11-15
+
+Run on Ubuntu with pytest directly: `6 failed, 15365 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1031.74s (0:17:11)`.
+
+The six failures are all `tests/unit/test_pat_session_named_prompt.py::TestRealGpg`, which fail on Ubuntu because gpg-agent cannot start in their GNUPGHOME (#4766). They fail the same way on main at ed77a367. No other test failed.
