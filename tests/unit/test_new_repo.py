@@ -82,6 +82,12 @@ def run_with_real_git_init(cmd, cwd=None, check=True):
     return completed(returncode=0)
 
 
+@pytest.fixture(autouse=True)
+def _projects_roots_are_temporary(temporary_projects_roots):
+    """main() reads temporary Projects roots, never this machine's (#4765)."""
+    return temporary_projects_roots
+
+
 class FakeResponse:
     """Typed stand-in for `requests.Response`, with proof-of-life.
 
@@ -843,6 +849,52 @@ class TestMainLocalWorkflow:
         with patch("sys.argv", ["new_repo.py", "ForceProject", "--no-github", "--force"]):
             main()
         assert (tmp_path / "ForceProject").exists()
+
+
+class TestMainReadsTemporaryProjectsRoots:
+    """#4765: main() reads the fleet's Projects roots through projects_root, whose
+    CONFIG_PATH is this machine's own config. Once that config points at a roots
+    setting that leaves out a test's tmp_path, main() refuses the test's
+    new_repo_root. The module's autouse fixture keeps every test here off it."""
+
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
+    def test_a_pointer_set_on_this_machine_never_decides_a_test_of_main(
+            self, mock_run, mock_config, tmp_path, tmp_path_factory, monkeypatch, capsys):
+        from assemblyzero.core import projects_root
+
+        # The autouse fixture is in force: no pointer, and a temporary derived root.
+        temporary = projects_root.CONFIG_PATH
+        base = tmp_path_factory.getbasetemp()
+        assert temporary != Path.home() / ".assemblyzero" / "config.json"
+        assert temporary.is_relative_to(base) and not temporary.exists()
+        assert projects_root.REPO_ROOT.is_relative_to(base)
+        assert projects_root.roots_source() == projects_root.DERIVED
+
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.side_effect = run_with_real_git_init
+        argv = ["new_repo.py", "Isolated4765", "--no-github"]
+
+        # A machine whose pointer names a setting that leaves tmp_path out: the
+        # refusal every test of main() here would meet without the fixture.
+        elsewhere = tmp_path_factory.mktemp("elsewhere")
+        setting = elsewhere / "roots.json"
+        setting.write_text(json.dumps({"roots": [str(elsewhere)]}), encoding="utf-8")
+        machine = elsewhere / "config.json"
+        machine.write_text(json.dumps(
+            {"paths": {"projects_roots_file": {"unix": str(setting)}}}), encoding="utf-8")
+        monkeypatch.setattr(projects_root, "CONFIG_PATH", machine)
+        with patch("sys.argv", argv), pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+        assert str(setting) in capsys.readouterr().err
+        assert not (tmp_path / "Isolated4765").exists()
+
+        # The fixture's config again: the same run proceeds and builds under tmp_path.
+        monkeypatch.setattr(projects_root, "CONFIG_PATH", temporary)
+        with patch("sys.argv", argv):
+            main()
+        assert (tmp_path / "Isolated4765").is_dir()
 
 
 # ===========================================================================

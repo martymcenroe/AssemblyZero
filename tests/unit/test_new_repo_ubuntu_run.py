@@ -35,6 +35,13 @@ from tests.unit.test_no_spelled_projects_root import SPELLINGS as GUARD_SPELLING
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+@pytest.fixture(autouse=True)
+def _projects_roots_are_temporary(temporary_projects_roots):
+    """main() reads temporary Projects roots, never this machine's (#4765).
+    TestProjectsRoots sets its own roots after this, and those win."""
+    return temporary_projects_roots
+
+
 def _real_config(monkeypatch, path: Path, content=None):
     """A real AssemblyZeroConfig that reads `path` (#4763).
 

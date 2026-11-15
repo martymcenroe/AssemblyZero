@@ -28,6 +28,12 @@ FAKE_PAT = "ghp_fake_classic_pat_for_testing_only"
 FAKE_SECRET = "github_pat_fake_read_only_token_for_testing"
 
 
+@pytest.fixture(autouse=True)
+def _projects_roots_are_temporary(temporary_projects_roots):
+    """main() reads temporary Projects roots, never this machine's (#4765)."""
+    return temporary_projects_roots
+
+
 def _hook(tmp_path: Path, name: str, body: str) -> Path:
     path = tmp_path / f"{name}.py"
     path.write_text(body, encoding="utf-8")

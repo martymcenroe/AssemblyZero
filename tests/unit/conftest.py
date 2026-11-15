@@ -42,6 +42,34 @@ def target_can_run_pytest(monkeypatch):
     monkeypatch.setattr(e2e, "require_pytest", lambda *_a, **_k: None)
 
 
+@pytest.fixture
+def temporary_projects_roots(tmp_path_factory, monkeypatch):
+    """The fleet's Projects roots, read from temporary paths only (#4765).
+
+    `new_repo.main()` reads the roots through `assemblyzero.core.projects_root`,
+    whose CONFIG_PATH is this machine's own config and whose one derived root
+    is this checkout's parent. Here the config is a path that does not exist
+    (no pointer) and the derived root is an empty temporary folder, so no test
+    of main() turns on whether this machine has set a roots setting, and none
+    looks under a real root (#3609). Returns the derived root.
+
+    A module whose tests run main() opts in with a module-level autouse
+    fixture that requests this one. It is not autouse for the whole tree,
+    because the tests of projects_root itself read the real REPO_ROOT. A class
+    fixture that sets its own roots runs after the module's, so it wins. The
+    folder is outside the test's tmp_path, which some tests require empty.
+    """
+    from assemblyzero.core import projects_root
+
+    base = tmp_path_factory.mktemp("projects-roots")
+    derived = base / "derived"
+    (derived / "AssemblyZero").mkdir(parents=True)
+    monkeypatch.setattr(projects_root, "CONFIG_PATH", base / "home" / ".assemblyzero" / "config.json")
+    monkeypatch.setattr(projects_root, "REPO_ROOT", derived / "AssemblyZero")
+    monkeypatch.setattr(projects_root, "_windows", lambda: False)
+    return derived
+
+
 @dataclass
 class _FakePreflightResult:
     passed: bool = True
