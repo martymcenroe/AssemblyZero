@@ -143,6 +143,9 @@ def _run_main(tmp_path: Path, argv: list[str]):
         patch("new_repo.enable_dependabot_for_repo",
               return_value=SimpleNamespace(actions={}, ok=True)),
         patch("new_repo.DEFAULT_POST_CREATE_HOOKS", hook_list),
+        # The passphrase list (#4786) looks at both files; keep it off the machine's own.
+        patch("new_repo.DEFAULT_PAT_PATH", home / ".secrets" / "classic-pat.gpg"),
+        patch("new_repo.DEFAULT_PR_SENTINEL_APP_GPG", home / ".secrets" / "pr-sentinel-app.gpg"),
         patch("new_repo.read_post_create_hooks", return_value=[]),
         patch("new_repo.verify_branch_protection_on_origin", return_value=(True, "ok")),
         patch("new_repo.verify_repo_settings_on_origin", return_value=(True, "ok")),
