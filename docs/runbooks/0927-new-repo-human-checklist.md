@@ -141,7 +141,7 @@ poetry run python tools/new_repo.py {name} [--public]
 
 **No Cerberus PEM is needed (#4724).** The pr-sentinel Worker approves the new repo's PRs as Cerberus with its own copy of the key, and the per-repo secrets a PEM would deploy are read by nothing since Auto Review's retirement (#3663). #1206 used to refuse a GitHub repo without `--cerberus-pem` or `--cerberus-pem-gpg`, and #1543 picked up `~/.secrets/cerberus-pem.gpg` by itself; both are gone, and since #4728 so are the two flags, with the deploy tool they called. Passing either now fails at once with argparse's `unrecognized arguments`.
 
-With gpg-agent at `default-cache-ttl 0` (ADR-0216), pinentry asks once for each secret the run decrypts: the classic PAT, and the pr-sentinel App bundle when `~/.secrets/pr-sentinel-app.gpg` exists (for the installation check). The script handles the rest.
+With gpg-agent at `default-cache-ttl 0` (ADR-0216), pinentry asks once for each secret the run decrypts: the classic PAT, and the pr-sentinel App bundle for the installation check. The pr-sentinel passphrase is asked only when `~/.secrets/pr-sentinel-app.gpg` exists. A missing file fails the check, and the run ends `[FAILED]` with the file named (#4785); `tools/store_pr_sentinel_app_key.py` creates it. Cancelling the pr-sentinel prompt declines the check, which the count line reports as declined rather than passed. The script handles the rest.
 
 **Defaults the script picks unless you override:**
 - **License**: PolyForm Noncommercial 1.0.0. Pass `--license mit` if you want MIT instead.
