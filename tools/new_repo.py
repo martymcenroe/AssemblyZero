@@ -2602,6 +2602,16 @@ def read_post_create_hooks(list_path: Path = DEFAULT_POST_CREATE_HOOKS) -> list[
     return hooks
 
 
+# What a post-create hook may import from tools/ (#4783): module name -> the
+# names it may take from that module. Hooks live outside this repository, so
+# nothing else here records that they depend on these; a unit test imports
+# every entry, and removing or renaming one fails the suite instead of a run.
+HOOK_IMPORTABLE: dict[str, tuple[str, ...]] = {
+    "_pat_session": ("gpg_secret_session",),
+    "gh_actions_secret": ("set_secret",),
+}
+
+
 def run_post_create_hooks(
     hook_paths: list[Path],
     owner: str,
@@ -2614,6 +2624,11 @@ def run_post_create_hooks(
     and handing it to a separate program would put it in argv or the
     environment. A hook that decrypts a secret of its own uses
     _pat_session.gpg_secret_session.
+
+    The contract: a hook may import from tools/ only what HOOK_IMPORTABLE
+    names, which is _pat_session.gpg_secret_session and
+    gh_actions_secret.set_secret(repo, name, value, pat, scope="actions")
+    for setting a repository's Actions or Dependabot secret (#4783).
 
     Returns (path, status) per hook. A missing file, a module without
     post_create, or an exception in the hook yields a status beginning

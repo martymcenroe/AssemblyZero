@@ -34,7 +34,8 @@ dependencies = [
     "numpy (>=2.5.3,<3.0.0)",
     "pillow (>=13.0.0)",
     "tree-sitter (>=0.25)",
-    "tree-sitter-typescript (>=0.23)"
+    "tree-sitter-typescript (>=0.23)",
+    "pynacl (>=1.6,<2)"
 ]
 
 [tool.pytest.ini_options]
