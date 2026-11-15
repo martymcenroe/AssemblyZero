@@ -24,8 +24,10 @@ The tests were written first and failed at collection, with no `inherit_from_pat
 
 ## Targeted runs, 2026-11-14
 
-`tests/unit/test_assemblyzero_generate.py` with `tests/unit/test_new_repo_ubuntu_run.py`: `61 passed, 1 warning in 55.48s`. The wider targeted set (every `test_new_repo*.py`, the spelled-root guard, the tier guard, `test_project_json_example.py`, `test_scaffolder_lint_integration.py`, `test_assemblyzero_config_derived.py`) had not finished when this was written.
+`tests/unit/test_assemblyzero_generate.py` with `tests/unit/test_new_repo_ubuntu_run.py`: `61 passed, 1 warning in 55.48s`. The wider targeted set (every `test_new_repo*.py`, the spelled-root guard, the tier guard, `test_project_json_example.py`, `test_scaffolder_lint_integration.py`, `test_assemblyzero_config_derived.py`): `357 passed, 1 warning in 502.28s (0:08:22)`.
 
 ## Unit tier, 2026-11-14
 
-Not yet run.
+Run on Ubuntu with pytest directly: `6 failed, 15253 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1544.73s (0:25:44)`.
+
+The six failures are all `tests/unit/test_pat_session_named_prompt.py::TestRealGpg`, which fail on Ubuntu because gpg-agent cannot start there (#4766). They fail the same way on main at ed77a367. No other test failed.
