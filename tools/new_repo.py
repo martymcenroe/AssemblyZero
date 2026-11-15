@@ -113,7 +113,9 @@ DEFAULT_PR_SENTINEL_APP_GPG = Path.home() / ".secrets" / "pr-sentinel-app.gpg"
 # Operator-owned list of post-create hook modules (#3588, ADR-0216 section 8):
 # one absolute path per line, '#' starts a comment. Lives outside every repo,
 # so this public script never names what the hooks do or which repos they
-# serve. Absent file => no hooks.
+# serve. Empty file => no hooks, on purpose. Absent file => a GitHub run fails
+# (#4186): the list lives under each side's own home, so a run from the side
+# without one would skip every hook and still report success.
 DEFAULT_POST_CREATE_HOOKS = Path.home() / ".claude" / "new-repo-post-create-hooks.txt"
 
 
@@ -2567,9 +2569,12 @@ def run_pr_sentinel_check(
 def read_post_create_hooks(list_path: Path = DEFAULT_POST_CREATE_HOOKS) -> list[Path]:
     """Return the hook module paths listed in the operator's hook file (#3588).
 
-    Blank lines and '#' comments are ignored. A missing file means no hooks.
-    Paths are returned as written; run_post_create_hooks reports any that do
-    not exist, so a typo fails loudly rather than vanishing here.
+    Blank lines and '#' comments are ignored. A missing file returns [] here,
+    but it does not mean no hooks: the run checks for the file first and
+    reports a missing one as a failed step (#4186). An empty file is how a
+    side runs no hooks on purpose. Paths are returned as written;
+    run_post_create_hooks reports any that do not exist, so a typo fails
+    loudly rather than vanishing here.
     """
     if not list_path.exists():
         return []
@@ -3213,6 +3218,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # it replaces the push-failure advice, whose causes were not the cause.
     pat_failure: str | None = None
     hook_results: list[tuple[Path, str]] = []
+    # The hook list the run looked for and did not find, when it did not (#4186).
+    hook_list_missing: Path | None = None
     gh_checks_passed = 0
     gh_checks_total = 0
 
@@ -3535,17 +3542,28 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                 # `pat` in-process; a hook that needs its own secret decrypts
                 # it with its own pinentry prompt.
                 if github_created and push_succeeded:
-                    hook_paths = read_post_create_hooks()
                     print("\n" + "=" * 60)
                     print("POST-CREATE HOOKS")
                     print("=" * 60)
-                    if not hook_paths:
-                        print(f"  None listed in {DEFAULT_POST_CREATE_HOOKS}.")
-                    hook_results = run_post_create_hooks(
-                        hook_paths, github_user, args.name, pat,
-                    )
-                    for hook_path, hook_status in hook_results:
-                        print(f"  {hook_path}: {hook_status}")
+                    # A missing list is not "no hooks" (#4186): it lives under
+                    # each side's own home, and a run from the side without
+                    # one skipped every hook while printing [SUCCESS]. Read
+                    # at call time, never the parameter's import-time default.
+                    hook_list = DEFAULT_POST_CREATE_HOOKS
+                    if not hook_list.exists():
+                        hook_list_missing = hook_list
+                        print(f"  FAILED: no post-create hook list at {hook_list}. "
+                              "Create it; an empty file runs no hooks on "
+                              "purpose (#4186).")
+                    else:
+                        hook_paths = read_post_create_hooks(hook_list)
+                        if not hook_paths:
+                            print(f"  None listed in {hook_list}.")
+                        hook_results = run_post_create_hooks(
+                            hook_paths, github_user, args.name, pat,
+                        )
+                        for hook_path, hook_status in hook_results:
+                            print(f"  {hook_path}: {hook_status}")
 
                 # GitHub-side verification. Also inside the with-block --
                 # shares `pat`, no extra pinentry. (#1200, #1202)
@@ -3657,6 +3675,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         protection_ok=protection_ok,
         hook_results=hook_results,
         gh_checks=(gh_checks_passed, gh_checks_total),
+        hook_list_missing=hook_list_missing,
     )
     print("\n" + "=" * 60)
     if failed:
@@ -3736,11 +3755,14 @@ def failed_steps(
     protection_ok: bool,
     hook_results: list[tuple[Path, str]],
     gh_checks: tuple[int, int],
+    hook_list_missing: Path | None = None,
 ) -> list[str]:
     """Every step of a run that did not succeed, in run order (#4136).
 
     Empty means the run may print [SUCCESS] and exit 0. Anything else is an
     incomplete repository: the run names these steps and exits 1.
+    hook_list_missing is the post-create hook list the run looked for and
+    did not find (#4186); None means it was found, or the stage never ran.
     """
     failed = []
     passed, total = local_checks
@@ -3756,6 +3778,8 @@ def failed_steps(
         failed.append("repo settings")
     if not protection_ok:
         failed.append("branch protection")
+    if hook_list_missing is not None:
+        failed.append(f"post-create hook list (missing: {hook_list_missing})")
     for hook_path, hook_status in hook_results:
         if hook_status.startswith("FAILED"):
             failed.append(f"hook {hook_path.stem}")

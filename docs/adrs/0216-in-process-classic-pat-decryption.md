@@ -236,7 +236,10 @@ repositories this public repo must not name. So it runs **post-create hooks**
 
 - The operator lists hook modules, one absolute path per line, in
   `~/.claude/new-repo-post-create-hooks.txt`. The file lives outside every
-  repository; no file means no hooks.
+  repository, under the home of the side that runs `new_repo.py`. An empty
+  file means no hooks. No file fails the run: the hook stage reports the
+  missing list and the run exits 1 without `[SUCCESS]` (#4186), because a
+  side without the list would otherwise skip every hook unnoticed.
 - `new_repo.py` imports each module and calls
   `post_create(owner=, repo=, pat=)` **in-process, inside the existing
   `classic_pat_session()`**, after the repository is created and pushed. The

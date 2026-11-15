@@ -9,7 +9,7 @@ Diagnosed from the first Ubuntu run, 2026-10-07 at 6:42 PM Central:
 - #4136: the run then printed [SUCCESS] although the GitHub repo, the push,
   the settings, branch protection and the hook install had all failed.
 
-Issues: #4132, #4136, #4763
+Issues: #4132, #4136, #4186, #4763
 """
 
 import json
@@ -240,6 +240,35 @@ class TestFailedSteps:
         assert failed_steps(**flags) == []
         flags["local_checks"] = (5, 7)
         assert failed_steps(**flags) == ["local verification (5/7)"]
+
+    def test_a_missing_hook_list_is_a_failed_step(self):
+        """Test 1 (#4186). No hook list on the side that ran: the run ran no
+        post-create hook, so it is incomplete and names the list it lacked."""
+        missing = Path("/home/someone/.claude/new-repo-post-create-hooks.txt")
+        assert failed_steps(**_all_ok(hook_list_missing=missing)) == [
+            f"post-create hook list (missing: {missing})",
+        ]
+
+    def test_a_missing_hook_list_is_named_in_run_order(self):
+        """Test 1 (#4186). The hook stage runs after branch protection and
+        before the GitHub-side verification, and the list names it there."""
+        missing = Path("/home/someone/.claude/new-repo-post-create-hooks.txt")
+        failed = failed_steps(**_all_ok(
+            protection_ok=False, hook_list_missing=missing, gh_checks=(4, 5),
+        ))
+        assert failed == [
+            "branch protection",
+            f"post-create hook list (missing: {missing})",
+            "GitHub-side verification (4/5)",
+        ]
+
+    def test_no_missing_hook_list_changes_nothing(self):
+        """Test 1 (#4186). None, the default, leaves every result as it was."""
+        assert failed_steps(**_all_ok(hook_list_missing=None)) == []
+        hooks = [(Path("hooks/deploy_token.py"), "FAILED: exit 1")]
+        assert failed_steps(**_all_ok(hook_list_missing=None, hook_results=hooks)) == [
+            "hook deploy_token",
+        ]
 
 
 # ===========================================================================
