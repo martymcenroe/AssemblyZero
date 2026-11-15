@@ -22,6 +22,12 @@ The code change was written before these tests, so they were not seen to fail fi
 
 `test_new_repo.py`, `test_new_repo_post_create_hooks.py`, `test_new_repo_ubuntu_run.py`, `test_cerberus_after_auto_review.py`, `test_new_repo_safety.py`, `test_new_repo_guidance.py`, `test_loud_failure_check.py`, `test_gh_actions_secret.py`, `test_store_pr_sentinel_app_key.py`: `295 passed, 1 warning in 167.07s`.
 
+`test_cerberus_after_auto_review.py`'s helper now points the classic PAT and pr-sentinel paths at its tmp home, so the passphrase list never looks at the machine's own files: `10 passed`.
+
+## Unit tier, 2026-11-15
+
+Run on Ubuntu with pytest directly: `15422 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1705.79s (0:28:25)`. No test failed. The branch was then replayed onto main after #4785 landed; the replayed tree differs from the tested one only in `docs/reports/4785/test-report.md`.
+
 ## Ruff
 
 Before the two fixes below, ruff found two new findings on changed lines: an implicit string join inside a list in `passphrase_plan`, and an unused unpacked name in a test. Both were fixed. The other findings were there before this change: 20 in `tools/new_repo.py`, 1 in `tools/_pat_session.py`, 2 in the test file.
