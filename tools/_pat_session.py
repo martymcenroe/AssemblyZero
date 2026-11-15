@@ -483,13 +483,11 @@ def pr_sentinel_app_session(
     the dependent check as unverifiable rather than failed. Genuine
     decrypt failures (mistyped passphrase) still retry as usual.
 
-    One-time setup (operator, in their own shell; App ID from the App's
-    settings page, PEM freshly downloaded):
-        mkdir -p ~/.secrets
-        { echo <APP_ID>; cat <app>.private-key.pem; } \\
-            | gpg -c -o ~/.secrets/pr-sentinel-app.gpg
-        rm <app>.private-key.pem
-        # then walk the hygiene-surfaces audit gate (runbook 0927)
+    One-time setup: the operator runs tools/store_pr_sentinel_app_key.py
+    in his own terminal, with the key file downloaded from the App's
+    settings page (#4784). It proves the key with GitHub, encrypts the
+    bundle through a pipe (ADR-0227), checks it through this function,
+    removes the key file, and lists the surfaces left for his hand.
 
     Args:
         bundle_path: Path to the gpg-encrypted credential bundle.
@@ -513,11 +511,8 @@ def pr_sentinel_app_session(
     if not bundle_path.exists():
         raise FileNotFoundError(
             f"pr-sentinel App credential not found at {bundle_path}.\n"
-            f"One-time setup (operator shell; App ID + downloaded PEM):\n"
-            f"  mkdir -p {bundle_path.parent}\n"
-            f"  {{ echo <APP_ID>; cat <app>.private-key.pem; }} "
-            f"| gpg -c -o {bundle_path}\n"
-            f"  rm <app>.private-key.pem"
+            f"One-time setup: run tools/store_pr_sentinel_app_key.py --pem "
+            f"<downloaded key file> in your own terminal (#4784)."
         )
 
     last_stderr, error = "", None

@@ -21,7 +21,7 @@ Every PR must reference an open issue (`Closes #N`) or declare `No-Issue: <reaso
 |---------|-------|
 | App name | `pr-sentinel-mm` |
 | App ID | `pr_sentinel_app_id` in [`config/fleet-ids.json`](../config/fleet-ids.json) |
-| Private key | `/c/Users/mcwiz/Projects/pr-sentinel-mm.2026-02-28.private-key.pem` |
+| Private key | Encrypted with gpg at `~/.secrets/pr-sentinel-app.gpg` (App ID, then the key), made by [`tools/store_pr_sentinel_app_key.py`](../tools/store_pr_sentinel_app_key.py), which removes the downloaded key file |
 
 ## Secrets (Wrangler)
 
