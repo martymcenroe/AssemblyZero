@@ -54,3 +54,5 @@ The same seven files on the committed tree, after two comment-only `noqa` remova
 ## Unit tier, 2026-11-15
 
 Run on Ubuntu with pytest directly: `6 failed, 15382 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1037.98s (0:17:17)`. The six failures are all `tests/unit/test_pat_session_named_prompt.py::TestRealGpg`, which this branch predates the fix for (#4766). No other test failed.
+
+After merging origin/main (which brought #4766's fix and #4784's runbook paragraph, merged with this branch's by hand): `15414 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1339.73s (0:22:19)`. No test failed.
