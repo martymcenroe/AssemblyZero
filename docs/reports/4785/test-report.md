@@ -49,6 +49,8 @@ GitHub-side verification: 3/3 checks passed
 
 `test_loud_failure_check.py` passes: the change adds no exception handler that swallows.
 
-## Not run here
+The same seven files on the committed tree, after two comment-only `noqa` removals: `242 passed, 1 warning in 353.60s (0:05:53)`.
 
-The full unit tier.
+## Unit tier, 2026-11-15
+
+Run on Ubuntu with pytest directly: `6 failed, 15382 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1037.98s (0:17:17)`. The six failures are all `tests/unit/test_pat_session_named_prompt.py::TestRealGpg`, which this branch predates the fix for (#4766). No other test failed.
