@@ -18,3 +18,7 @@ The class is skipped on Windows, where tmp_path is a drive path and the roots se
 ## Targeted run, 2026-11-15
 
 `tests/unit/test_assemblyzero_generate.py`, `tests/unit/test_projects_roots.py` and `tests/unit/test_project_json_example.py`: `89 passed, 1 warning in 13.36s`.
+
+## Unit tier, 2026-11-15
+
+Run on Ubuntu with pytest directly: `6 failed, 15344 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 871.59s (0:14:31)`. The six failures are all `tests/unit/test_pat_session_named_prompt.py::TestRealGpg`, which fail on Ubuntu because gpg-agent cannot start in their GNUPGHOME (#4766). No other test failed.
