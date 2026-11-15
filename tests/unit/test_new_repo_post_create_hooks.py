@@ -135,13 +135,18 @@ def _fake_pat_session(*args, **kwargs):
     yield FAKE_PAT
 
 
-def _run_main(tmp_path: Path, hook_list: Path, name: str, hook_runner: mock.Mock) -> int:
+def _run_main(tmp_path: Path, hook_list: Path, name: str, hook_runner: mock.Mock,
+              sentinel_bundle: Path | None = None) -> int:
     """Run new_repo.main() through the GitHub path, reading its hook list from
     `hook_list` and running hooks through `hook_runner`. Returns the exit code.
 
     Every GitHub boundary is replaced, as in test_cerberus_after_auto_review,
     and the home is a tmp directory. The runner is a mock, so no listed hook
     ever runs, whichever list the run reads.
+
+    With no `sentinel_bundle` the pr-sentinel check is faked as a pass. With
+    one, the real check runs against that key file (#4785); a test that lets
+    it reach gpg fakes _pat_session's subprocess boundary itself.
     """
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -168,9 +173,15 @@ def _run_main(tmp_path: Path, hook_list: Path, name: str, hook_runner: mock.Mock
         mock.patch("new_repo.run_post_create_hooks", hook_runner),
         mock.patch("new_repo.verify_branch_protection_on_origin", return_value=(True, "ok")),
         mock.patch("new_repo.verify_repo_settings_on_origin", return_value=(True, "ok")),
-        mock.patch("new_repo.run_pr_sentinel_check", return_value=("skip", "not in a test")),
         mock.patch("sys.argv", ["new_repo.py", name]),
     ]
+    if sentinel_bundle is None:
+        patches.append(mock.patch(
+            "new_repo.run_pr_sentinel_check",
+            return_value=("pass", "App installation covers this repo (faked in a test)"),
+        ))
+    else:
+        patches.append(mock.patch("new_repo.DEFAULT_PR_SENTINEL_APP_GPG", sentinel_bundle))
     with contextlib.ExitStack() as stack:
         cfg = stack.enter_context(patches[0])
         for p in patches[1:]:
@@ -239,4 +250,85 @@ class TestHookListStage:
         runner.assert_called_once_with([hook], "owner", "OneHook", FAKE_PAT)
         assert f"  {hook}: OK" in out
         assert "[SUCCESS] Repository 'OneHook' created!" in out
+        assert operator_alerts == []
+
+
+# ---------------------------------------------------------------------------
+# #4785: the pr-sentinel check in a GitHub run, driven through main()
+# ---------------------------------------------------------------------------
+
+
+def _empty_hook_list(tmp_path: Path) -> Path:
+    listing = tmp_path / "hooks.txt"
+    listing.write_text("", encoding="utf-8")
+    return listing
+
+
+def _agent_cancels(cmd, *args, **kwargs):
+    """gpg-agent's answer when the operator presses Cancel in the box."""
+    assert cmd == ["gpg-connect-agent"], f"a test reached an unexpected command: {cmd}"
+    return subprocess.CompletedProcess(
+        cmd, 0, stdout="ERR 83886179 Operation cancelled <Pinentry>\n", stderr="",
+    )
+
+
+class TestPrSentinelStage:
+    """The run of 2026-11-14 had no key file, printed [SKIP], and then
+    "GitHub-side verification: 2/2 checks passed" (#4785)."""
+
+    def test_a_missing_key_file_fails_the_run_and_names_the_file(self, tmp_path, capsys,
+                                                                operator_alerts):
+        absent = tmp_path / "home" / ".secrets" / "pr-sentinel-app.gpg"
+        code = _run_main(tmp_path, _empty_hook_list(tmp_path), "NoSentinelKey",
+                         mock.Mock(return_value=[]), sentinel_bundle=absent)
+        out, err = capsys.readouterr()
+
+        msg = (f"key file not found: {absent}; create it with "
+               "tools/store_pr_sentinel_app_key.py. The check did not run")
+        assert code == 1, out[-2000:] + err[-2000:]
+        assert f"  [FAIL] pr-sentinel-mm Worker: {msg}\n" in out
+        assert "pinentry will prompt" not in out
+        assert "[SKIP]" not in out
+        assert "GitHub-side verification: 2/3 checks passed\n" in out
+        assert f"  pr-sentinel check:  FAILED: {msg}\n" in out
+        assert "[SUCCESS]" not in out + err
+        assert "[FAILED] Repository 'NoSentinelKey' is incomplete" in err
+        assert f"pr-sentinel check ({msg})" in err
+        assert len(operator_alerts) == 1
+        assert not absent.exists(), "the run must not create the key file it lacked"
+
+    def test_a_cancelled_prompt_is_declined_and_named_on_the_count_line(self, tmp_path,
+                                                                       capsys,
+                                                                       operator_alerts):
+        bundle = tmp_path / "pr-sentinel-app.gpg"
+        bundle.write_bytes(b"not a real bundle")
+        pat_session = sys.modules[new_repo.pr_sentinel_app_session.__module__]
+        # mock-ok: subprocess boundary of the session module only; git in the
+        # scaffold still runs for real. The answer is the agent's on Cancel.
+        with mock.patch.object(pat_session, "subprocess", SimpleNamespace(run=_agent_cancels)):
+            code = _run_main(tmp_path, _empty_hook_list(tmp_path), "DeclinedSentinel",
+                             mock.Mock(return_value=[]), sentinel_bundle=bundle)
+        out, err = capsys.readouterr()
+
+        assert code == 0, out[-2000:] + err[-2000:]
+        assert ("  pr-sentinel check: pinentry will prompt to decrypt the App "
+                "credential (cancel to decline this check).") in out
+        assert ("  [DECLINED] pr-sentinel-mm Worker: you cancelled its passphrase "
+                "prompt; the check did not run\n") in out
+        assert "GitHub-side verification: 2/2 checks passed, 1 declined\n" in out
+        assert "  pr-sentinel check:  declined\n" in out
+        assert "[SUCCESS] Repository 'DeclinedSentinel' created!" in out
+        assert operator_alerts == []
+
+    def test_a_passing_check_is_counted(self, tmp_path, capsys, operator_alerts):
+        code = _run_main(tmp_path, _empty_hook_list(tmp_path), "PassingSentinel",
+                         mock.Mock(return_value=[]))
+        out, err = capsys.readouterr()
+
+        assert code == 0, out[-2000:] + err[-2000:]
+        assert ("  [PASS] pr-sentinel-mm Worker: App installation covers this repo "
+                "(faked in a test)\n") in out
+        assert "GitHub-side verification: 3/3 checks passed\n" in out
+        assert "declined" not in out
+        assert "  pr-sentinel check:  passed\n" in out
         assert operator_alerts == []

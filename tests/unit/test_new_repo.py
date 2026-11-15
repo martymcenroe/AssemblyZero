@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -1123,34 +1124,119 @@ class TestSentinelAppBundleAndJwt:
         )
 
 
-class TestRunPrSentinelCheck:
-    """T314-T317: run_pr_sentinel_check three-state dispatch (#1822).
+import new_repo as _new_repo_module
 
-    "skip" outcomes must NOT count toward the GitHub-side denominator —
-    that is the whole point of the fix: an unperformable check must not
-    produce the WARNING banner.
+# The module new_repo's pr_sentinel_app_session really comes from, so a test
+# fakes the subprocess boundary of the session new_repo calls.
+_PAT_SESSION = sys.modules[_new_repo_module.pr_sentinel_app_session.__module__]
+
+# What gpg-agent answers when the operator presses Cancel in the passphrase box.
+AGENT_CANCELLED = "ERR 83886179 Operation cancelled <Pinentry>\n"
+
+
+def _gpg_boundary(agent_stdout: str, gpg: subprocess.CompletedProcess | None = None):
+    """A stand-in for _pat_session's subprocess module (#4785).
+
+    gpg-connect-agent answers `agent_stdout`; gpg, when it is reached, answers
+    `gpg`. Any other command fails the test. `calls` records each program run.
+    """
+    calls: list[str] = []
+
+    def run(cmd, *args, **kwargs):
+        calls.append(cmd[0])
+        if cmd[0] == "gpg-connect-agent":
+            return subprocess.CompletedProcess(cmd, 0, stdout=agent_stdout, stderr="")
+        if cmd[0] == "gpg" and gpg is not None:
+            return gpg
+        raise AssertionError(f"a test reached an unexpected command: {cmd[0]}")
+
+    return SimpleNamespace(run=run, calls=calls)
+
+
+class TestRunPrSentinelCheck:
+    """T314-T321: run_pr_sentinel_check's three outcomes (#1822, #4785).
+
+    A check that could not run is a counted failure: a missing key file, a
+    failed decrypt, a malformed bundle. Only the operator's own cancel of the
+    passphrase prompt is "declined", which stays out of the count.
     """
 
-    def test_T314_skip_when_bundle_not_provisioned(self, tmp_path):
-        """Missing encrypted bundle → ('skip', not attempted)."""
-        outcome, msg = run_pr_sentinel_check(
-            "martymcenroe", "repo-name", tmp_path / "absent.gpg",
+    def test_T314_missing_key_file_fails_and_names_the_file_and_program(self, tmp_path):
+        """Missing encrypted bundle → ('fail', the file and the program that creates it)."""
+        absent = tmp_path / "absent.gpg"
+        outcome, msg = run_pr_sentinel_check("martymcenroe", "repo-name", absent)
+        assert outcome == "fail"
+        assert msg == (
+            f"key file not found: {absent}; create it with "
+            "tools/store_pr_sentinel_app_key.py. The check did not run"
         )
-        assert outcome == "skip"
-        assert "not provisioned" in msg
-        assert "not attempted" in msg
+
+    def test_T315_cancel_in_the_passphrase_box_is_declined(self, tmp_path, monkeypatch):
+        """The real cancel path: gpg-agent answers Operation cancelled, and
+        _pat_session raises its declined error, which the check reports as
+        declined. gpg never runs."""
+        bundle = tmp_path / "pr-sentinel-app.gpg"
+        bundle.write_bytes(b"not a real bundle")
+        # mock-ok: subprocess boundary; the agent's answer when he presses Cancel.
+        boundary = _gpg_boundary(AGENT_CANCELLED)
+        monkeypatch.setattr(_PAT_SESSION, "subprocess", boundary)
+        outcome, msg = run_pr_sentinel_check("martymcenroe", "repo-name", bundle)
+        assert outcome == "declined"
+        assert msg == "you cancelled its passphrase prompt; the check did not run"
+        assert boundary.calls == ["gpg-connect-agent"]
+
+    def test_T318_cancel_reported_by_gpg_itself_is_declined(self, tmp_path, monkeypatch):
+        """The second cancel path in pr_sentinel_app_session: the box gave a
+        passphrase and gpg's own stderr says cancelled."""
+        bundle = tmp_path / "pr-sentinel-app.gpg"
+        bundle.write_bytes(b"not a real bundle")
+        gpg = subprocess.CompletedProcess(
+            ["gpg"], 2, stdout="", stderr="gpg: cancelled by user",
+        )
+        # mock-ok: subprocess boundary; a passphrase from the box, then gpg's cancel.
+        boundary = _gpg_boundary("OK 70617373\n", gpg)
+        monkeypatch.setattr(_PAT_SESSION, "subprocess", boundary)
+        outcome, _ = run_pr_sentinel_check("martymcenroe", "repo-name", bundle)
+        assert outcome == "declined"
+        assert boundary.calls == ["gpg-connect-agent", "gpg"]
+
+    def test_T319_no_prompt_shown_is_a_failure_not_a_decline(self, tmp_path, monkeypatch):
+        """gpg could not show its prompt (PinentryUnavailable): nothing was
+        asked of the operator, so nothing was declined. Counted as failed."""
+        bundle = tmp_path / "pr-sentinel-app.gpg"
+        bundle.write_bytes(b"not a real bundle")
+        # mock-ok: subprocess boundary; the agent's answer with no pinentry to draw.
+        boundary = _gpg_boundary("ERR 67108949 No pinentry <GPG Agent>\n")
+        monkeypatch.setattr(_PAT_SESSION, "subprocess", boundary)
+        outcome, msg = run_pr_sentinel_check("martymcenroe", "repo-name", bundle)
+        assert outcome == "fail"
+        assert msg.startswith("credential unavailable: gpg could not show the passphrase prompt")
+        assert msg.endswith("; the check did not run")
 
     @patch("new_repo.pr_sentinel_app_session")
-    def test_T315_skip_when_decrypt_declined(self, mock_session, tmp_path):
-        """Operator cancels pinentry (RuntimeError) → ('skip', ...)."""
+    def test_T320_failed_decrypt_is_a_failure(self, mock_session, tmp_path):
+        """A decrypt that failed after its retries → ('fail', ...), counted."""
         mock_session.side_effect = RuntimeError(
-            "decrypt declined by operator (pinentry cancelled)"
+            "gpg decrypt of pr-sentinel App bundle failed after 3 attempts. Last error: bad"
         )
         outcome, msg = run_pr_sentinel_check(
             "martymcenroe", "repo-name", tmp_path / "any.gpg",
         )
-        assert outcome == "skip"
-        assert "declined" in msg
+        assert outcome == "fail"
+        assert "failed after 3 attempts" in msg
+        assert msg.endswith("; the check did not run")
+
+    @patch("new_repo._parse_sentinel_app_bundle")
+    @patch("new_repo.pr_sentinel_app_session")
+    def test_T321_malformed_bundle_is_a_failure(self, mock_session, mock_parse, tmp_path):
+        """A bundle that decrypts but does not parse → ('fail', ...), counted."""
+        mock_session.side_effect = FakeSession("garbage")
+        mock_parse.side_effect = ValueError("no App ID on line 1")
+        outcome, msg = run_pr_sentinel_check(
+            "martymcenroe", "repo-name", tmp_path / "any.gpg",
+        )
+        assert outcome == "fail"
+        assert msg == "credential bundle malformed: no App ID on line 1; the check did not run"
 
     @patch("new_repo.verify_pr_sentinel_installation")
     @patch("new_repo._mint_github_app_jwt")
@@ -1192,6 +1278,71 @@ class TestRunPrSentinelCheck:
         )
         assert outcome == "fail"
         assert "NOT installed" in msg
+
+
+from new_repo import failed_steps, pr_sentinel_summary
+
+MISSING_KEY_MSG = (
+    "key file not found: /home/someone/.secrets/pr-sentinel-app.gpg; create it "
+    "with tools/store_pr_sentinel_app_key.py. The check did not run"
+)
+
+
+def _clean_run(**overrides):
+    """failed_steps' arguments for a run where every step succeeded."""
+    flags = {
+        "no_github": False,
+        "local_checks": (7, 7),
+        "github_created": True,
+        "push_succeeded": True,
+        "repo_settings_ok": True,
+        "protection_ok": True,
+        "hook_results": [],
+        "gh_checks": (3, 3),
+    }
+    flags.update(overrides)
+    return flags
+
+
+class TestPrSentinelOutcomeInTheRunResult:
+    """T322-T324: the pr-sentinel outcome in failed_steps and SUMMARY (#4785)."""
+
+    def test_T322_a_failed_check_is_a_failed_step_that_names_its_cause(self):
+        failed = failed_steps(**_clean_run(
+            gh_checks=(2, 3), pr_sentinel=("fail", MISSING_KEY_MSG),
+        ))
+        assert failed == [
+            "GitHub-side verification (2/3)",
+            f"pr-sentinel check ({MISSING_KEY_MSG})",
+        ]
+
+    @pytest.mark.parametrize("result", [
+        ("pass", "App installation covers this repo (id 1)"),
+        ("declined", "you cancelled its passphrase prompt; the check did not run"),
+        None,
+    ], ids=["pass", "declined", "never-ran"])
+    def test_T323_pass_declined_or_absent_is_no_failed_step(self, result):
+        assert failed_steps(**_clean_run(pr_sentinel=result)) == []
+
+    def test_T323b_no_github_repo_judges_no_pr_sentinel_outcome(self):
+        """No repo was created: the failed step is the repo, not a check of it."""
+        failed = failed_steps(**_clean_run(
+            github_created=False, gh_checks=(0, 0), pr_sentinel=("fail", "x"),
+        ))
+        assert "pr-sentinel check (x)" not in failed
+        assert "GitHub repo" in failed
+
+    @pytest.mark.parametrize("result,github_created,expected", [
+        (("pass", "covers"), True, "passed"),
+        (("fail", MISSING_KEY_MSG), True, f"FAILED: {MISSING_KEY_MSG}"),
+        (("declined", "cancelled"), True, "declined"),
+        (None, False, "not run (no GitHub repo)"),
+        (None, True, "not run (the run stopped before it)"),
+    ], ids=["passed", "failed", "declined", "no-repo", "stopped"])
+    def test_T324_summary_names_the_outcome_on_every_run(
+        self, result, github_created, expected,
+    ):
+        assert pr_sentinel_summary(result, github_created) == expected
 
 
 # ===========================================================================

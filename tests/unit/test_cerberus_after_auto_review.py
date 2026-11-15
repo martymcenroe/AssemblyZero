@@ -146,7 +146,8 @@ def _run_main(tmp_path: Path, argv: list[str]):
         patch("new_repo.read_post_create_hooks", return_value=[]),
         patch("new_repo.verify_branch_protection_on_origin", return_value=(True, "ok")),
         patch("new_repo.verify_repo_settings_on_origin", return_value=(True, "ok")),
-        patch("new_repo.run_pr_sentinel_check", return_value=("skip", "not in a test")),
+        patch("new_repo.run_pr_sentinel_check",
+              return_value=("pass", "App installation covers this repo (faked in a test)")),
         # new_repo imports no Cerberus PEM decrypt or deploy any more (#4728); the session
         # module's own decrypt is what must never run.
         patch("_pat_session.cerberus_pem_session", _must_not_run("the Cerberus PEM decrypt")),

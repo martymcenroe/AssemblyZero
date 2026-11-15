@@ -105,10 +105,15 @@ _DEFAULT_SCHEMA_PATH = Path(__file__).parent.parent / "docs" / "standards" / "00
 
 # Canonical location for the encrypted pr-sentinel App credential bundle
 # (App ID on line 1, private-key PEM after), used by the installation
-# check (#1822). Absent file => the check reports "unverifiable" and is
-# excluded from the GitHub-side pass/fail denominator entirely — an
-# unperformable check must not produce a warning banner.
+# check (#1822). Absent file => the check fails and is counted (#4785):
+# a check that never ran is never folded into a pass.
+# tools/store_pr_sentinel_app_key.py creates the file.
 DEFAULT_PR_SENTINEL_APP_GPG = Path.home() / ".secrets" / "pr-sentinel-app.gpg"
+
+# How _pat_session words a cancelled passphrase prompt (#4785). The only
+# failure to decrypt that is the operator's own decision, and so the only
+# pr-sentinel outcome kept out of the GitHub-side count.
+PINENTRY_DECLINED = "decrypt declined by operator"
 
 # Operator-owned list of post-create hook modules (#3588, ADR-0216 section 8):
 # one absolute path per line, '#' starts a comment. Lives outside every repo,
@@ -2551,33 +2556,33 @@ def verify_pr_sentinel_installation(
 def run_pr_sentinel_check(
     github_user: str, repo_name: str, bundle_path: Path,
 ) -> tuple[str, str]:
-    """Three-state pr-sentinel installation check (#1822).
+    """Three-state pr-sentinel installation check (#1822, #4785).
 
     Returns (outcome, message) with outcome one of:
-        "pass" -- App verified installed on the repo.
-        "fail" -- App verifiably NOT installed, or the authenticated
-                  probe errored: counts against the GitHub-side
-                  denominator (genuine investigate signal).
-        "skip" -- unverifiable, not attempted: credential bundle not
-                  provisioned, operator declined the pinentry boost, or
-                  bundle malformed. Excluded from the denominator so an
-                  unperformable check cannot cry wolf — an always-firing
-                  warning banner trains operators to ignore it, which
-                  then cannot alert on a genuine failure.
+        "pass"     -- App verified installed on the repo.
+        "fail"     -- App NOT installed, the probe errored, or the check
+                      could not run: key file missing, decrypt failed,
+                      bundle malformed. Counted. A check that never ran is
+                      never a pass (#4785).
+        "declined" -- the operator cancelled the passphrase prompt. The only
+                      outcome left out of the count, and the count line
+                      says so.
     """
     try:
         with pr_sentinel_app_session(bundle_path) as bundle:
             app_id, pem = _parse_sentinel_app_bundle(bundle)
             app_jwt = _mint_github_app_jwt(app_id, pem)
     except FileNotFoundError:
-        return "skip", (
-            f"encrypted App credential not provisioned ({bundle_path}); "
-            "check not attempted"
+        return "fail", (
+            f"key file not found: {bundle_path}; create it with "
+            "tools/store_pr_sentinel_app_key.py. The check did not run"
         )
     except RuntimeError as e:
-        return "skip", f"credential unavailable: {e}; check not attempted"
+        if not isinstance(e, PinentryUnavailable) and str(e).startswith(PINENTRY_DECLINED):
+            return "declined", "you cancelled its passphrase prompt; the check did not run"
+        return "fail", f"credential unavailable: {e}; the check did not run"
     except ValueError as e:
-        return "skip", f"credential bundle malformed: {e}; check not attempted"
+        return "fail", f"credential bundle malformed: {e}; the check did not run"
     ok, msg = verify_pr_sentinel_installation(github_user, repo_name, app_jwt)
     return ("pass" if ok else "fail"), msg
 
@@ -2720,8 +2725,10 @@ Examples:
              "(App ID on line 1, private-key PEM after; default "
              "~/.secrets/pr-sentinel-app.gpg). Used by the installation "
              "check; decrypted in-process, pinentry per run is the consent "
-             "event. If the file is absent or the decrypt is declined, the "
-             "check reports unverifiable and is NOT counted (#1822)."
+             "event. A missing file fails the check and the run (#4785); "
+             "tools/store_pr_sentinel_app_key.py creates it. Cancelling the "
+             "passphrase prompt declines the check, which the count line "
+             "reports as declined."
     )
     parser.add_argument(
         "--lang",
@@ -3253,6 +3260,11 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     hook_list_missing: Path | None = None
     gh_checks_passed = 0
     gh_checks_total = 0
+    # Operator-declined GitHub-side checks: outside the count, named on the
+    # count line (#4785).
+    gh_checks_declined = 0
+    # The pr-sentinel check's (outcome, message); None when it never ran.
+    pr_sentinel_result: tuple[str, str] | None = None
 
     # Local post-setup verification (no PAT required, runs BEFORE the
     # GitHub-side elevated batch so scaffold problems surface before any
@@ -3626,35 +3638,33 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     # pr-sentinel installation check -- requires the App's
                     # OWN credential (JWT); GitHub refuses /user/installations
                     # to personal access tokens of any shape, so no PAT can
-                    # perform this check. Three-state per #1822: "skip" means
-                    # unverifiable/not attempted and is EXCLUDED from the
-                    # denominator -- no false warning banner. The decrypt
-                    # pinentry (TTL 0) is the operator's per-run consent to
-                    # this extra permission boost; cancelling it declines.
+                    # perform this check. A check that could not run, a
+                    # missing key file among them, is a counted failure
+                    # (#4785). The decrypt pinentry (TTL 0) is the operator's
+                    # per-run consent to this extra permission boost;
+                    # cancelling it declines the check, which stays outside
+                    # the count and is named on the count line.
                     sentinel_bundle = Path(
                         args.sentinel_app_gpg or DEFAULT_PR_SENTINEL_APP_GPG
                     )
                     if sentinel_bundle.exists():
                         print("  pr-sentinel check: pinentry will prompt to "
-                              "decrypt the App credential (cancel to skip "
+                              "decrypt the App credential (cancel to decline "
                               "this check).")
-                    outcome, msg = run_pr_sentinel_check(
+                    pr_sentinel_result = run_pr_sentinel_check(
                         github_user, args.name, sentinel_bundle,
                     )
+                    outcome, msg = pr_sentinel_result
                     if outcome == "pass":
                         gh_checks_total += 1
                         gh_checks_passed += 1
                         print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
-                    elif outcome == "fail":
+                    elif outcome == "declined":
+                        gh_checks_declined += 1
+                        print(f"  [DECLINED] pr-sentinel-mm Worker: {msg}")
+                    else:
                         gh_checks_total += 1
                         print(f"  [FAIL] pr-sentinel-mm Worker: {msg}")
-                        print("         If pr-sentinel checks don't appear on the first PR,")
-                        print("         the App's installation scope likely drifted from "
-                              "'All repositories'.")
-                    else:
-                        print(f"  [SKIP] pr-sentinel-mm Worker: {msg}")
-                        print("         (not counted; the first PR doubles as the live "
-                              "sentinel verification)")
 
         except FileNotFoundError as e:
             pat_failure = f"classic PAT not configured: {e}"
@@ -3673,7 +3683,13 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("  Re-enter passphrase carefully and re-run.")
 
         if github_created:
-            print(f"\nGitHub-side verification: {gh_checks_passed}/{gh_checks_total} checks passed")
+            count_line = (
+                f"\nGitHub-side verification: "
+                f"{gh_checks_passed}/{gh_checks_total} checks passed"
+            )
+            if gh_checks_declined:
+                count_line += f", {gh_checks_declined} declined"
+            print(count_line)
 
             if gh_checks_passed < gh_checks_total:
                 print("\nWARNING: GitHub-side checks failed. Investigate before opening PRs!")
@@ -3693,6 +3709,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print(f"  Branch protection:  {'OK' if protection_ok else 'FAILED — configure manually or re-run with classic PAT'}")
         for hook_path, hook_status in hook_results:
             print(f"  Hook {hook_path.stem}: {hook_status}")
+        print(f"  pr-sentinel check:  "
+              f"{pr_sentinel_summary(pr_sentinel_result, github_created)}")
         if any(s.startswith("FAILED") for _, s in hook_results):
             print("\nWARNING: a post-create hook failed. Its secret or setting is "
                   "NOT in place; fix the cause and run the hook's own tool.")
@@ -3707,6 +3725,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         hook_results=hook_results,
         gh_checks=(gh_checks_passed, gh_checks_total),
         hook_list_missing=hook_list_missing,
+        pr_sentinel=pr_sentinel_result,
     )
     print("\n" + "=" * 60)
     if failed:
@@ -3787,6 +3806,7 @@ def failed_steps(
     hook_results: list[tuple[Path, str]],
     gh_checks: tuple[int, int],
     hook_list_missing: Path | None = None,
+    pr_sentinel: tuple[str, str] | None = None,
 ) -> list[str]:
     """Every step of a run that did not succeed, in run order (#4136).
 
@@ -3794,6 +3814,9 @@ def failed_steps(
     incomplete repository: the run names these steps and exits 1.
     hook_list_missing is the post-create hook list the run looked for and
     did not find (#4186); None means it was found, or the stage never ran.
+    pr_sentinel is run_pr_sentinel_check's (outcome, message), None when the
+    check never ran. A "fail" outcome, a missing key file among them, is a
+    failed step and names its cause (#4785); "declined" is not.
     """
     failed = []
     passed, total = local_checks
@@ -3817,7 +3840,29 @@ def failed_steps(
     gh_passed, gh_total = gh_checks
     if github_created and gh_passed < gh_total:
         failed.append(f"GitHub-side verification ({gh_passed}/{gh_total})")
+    if github_created and pr_sentinel is not None and pr_sentinel[0] == "fail":
+        failed.append(f"pr-sentinel check ({pr_sentinel[1]})")
     return failed
+
+
+def pr_sentinel_summary(
+    result: tuple[str, str] | None, github_created: bool,
+) -> str:
+    """The SUMMARY block's word for the pr-sentinel check, on every run (#4785).
+
+    result is run_pr_sentinel_check's (outcome, message), None when the
+    check never ran.
+    """
+    if result is None:
+        if not github_created:
+            return "not run (no GitHub repo)"
+        return "not run (the run stopped before it)"
+    outcome, msg = result
+    if outcome == "pass":
+        return "passed"
+    if outcome == "declined":
+        return "declined"
+    return f"FAILED: {msg}"
 
 
 def _maybe_print_pypi_reminder(
