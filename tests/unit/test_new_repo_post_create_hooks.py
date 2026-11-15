@@ -28,6 +28,12 @@ FAKE_PAT = "ghp_fake_classic_pat_for_testing_only"
 FAKE_SECRET = "github_pat_fake_read_only_token_for_testing"
 
 
+@pytest.fixture(autouse=True)
+def _projects_roots_are_temporary(temporary_projects_roots):
+    """main() reads temporary Projects roots, never this machine's (#4765)."""
+    return temporary_projects_roots
+
+
 def _hook(tmp_path: Path, name: str, body: str) -> Path:
     path = tmp_path / f"{name}.py"
     path.write_text(body, encoding="utf-8")
@@ -406,7 +412,7 @@ def _run_counting_prompts(tmp_path, monkeypatch, capsys, hooks, name, sentinel):
 
     monkeypatch.setattr(pat_session, "_ask_passphrase", ask)
     monkeypatch.setattr(pat_session, "_run_gpg", gpg)
-    monkeypatch.setattr(new_repo, "_mint_github_app_jwt", lambda app_id, pem: "fake.jwt")
+    monkeypatch.setattr(new_repo._github_app_jwt, "mint_app_jwt", lambda app_id, pem: "fake.jwt")
     monkeypatch.setattr(new_repo, "verify_pr_sentinel_installation",
                         lambda user, repo, jwt: (True, "installed (faked in a test)"))
     code = _run_main(tmp_path, listing, name, None, sentinel_bundle=sentinel,

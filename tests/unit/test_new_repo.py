@@ -82,6 +82,12 @@ def run_with_real_git_init(cmd, cwd=None, check=True):
     return completed(returncode=0)
 
 
+@pytest.fixture(autouse=True)
+def _projects_roots_are_temporary(temporary_projects_roots):
+    """main() reads temporary Projects roots, never this machine's (#4765)."""
+    return temporary_projects_roots
+
+
 class FakeResponse:
     """Typed stand-in for `requests.Response`, with proof-of-life.
 
@@ -845,13 +851,59 @@ class TestMainLocalWorkflow:
         assert (tmp_path / "ForceProject").exists()
 
 
+class TestMainReadsTemporaryProjectsRoots:
+    """#4765: main() reads the fleet's Projects roots through projects_root, whose
+    CONFIG_PATH is this machine's own config. Once that config points at a roots
+    setting that leaves out a test's tmp_path, main() refuses the test's
+    new_repo_root. The module's autouse fixture keeps every test here off it."""
+
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
+    def test_a_pointer_set_on_this_machine_never_decides_a_test_of_main(
+            self, mock_run, mock_config, tmp_path, tmp_path_factory, monkeypatch, capsys):
+        from assemblyzero.core import projects_root
+
+        # The autouse fixture is in force: no pointer, and a temporary derived root.
+        temporary = projects_root.CONFIG_PATH
+        base = tmp_path_factory.getbasetemp()
+        assert temporary != Path.home() / ".assemblyzero" / "config.json"
+        assert temporary.is_relative_to(base) and not temporary.exists()
+        assert projects_root.REPO_ROOT.is_relative_to(base)
+        assert projects_root.roots_source() == projects_root.DERIVED
+
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.side_effect = run_with_real_git_init
+        argv = ["new_repo.py", "Isolated4765", "--no-github"]
+
+        # A machine whose pointer names a setting that leaves tmp_path out: the
+        # refusal every test of main() here would meet without the fixture.
+        elsewhere = tmp_path_factory.mktemp("elsewhere")
+        setting = elsewhere / "roots.json"
+        setting.write_text(json.dumps({"roots": [str(elsewhere)]}), encoding="utf-8")
+        machine = elsewhere / "config.json"
+        machine.write_text(json.dumps(
+            {"paths": {"projects_roots_file": {"unix": str(setting)}}}), encoding="utf-8")
+        monkeypatch.setattr(projects_root, "CONFIG_PATH", machine)
+        with patch("sys.argv", argv), pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+        assert str(setting) in capsys.readouterr().err
+        assert not (tmp_path / "Isolated4765").exists()
+
+        # The fixture's config again: the same run proceeds and builds under tmp_path.
+        monkeypatch.setattr(projects_root, "CONFIG_PATH", temporary)
+        with patch("sys.argv", argv):
+            main()
+        assert (tmp_path / "Isolated4765").is_dir()
+
+
 # ===========================================================================
 # Pillar 1 — No Cerberus PEM (#4728; optional by #4724, required by #1206) +
 # GitHub-side verification (#1200, #1202)
 # ===========================================================================
 
+from _github_app_jwt import mint_app_jwt
 from new_repo import (  # noqa: E402
-    _mint_github_app_jwt,
     _parse_sentinel_app_bundle,
     run_pr_sentinel_check,
     verify_branch_protection_on_origin,
@@ -1101,7 +1153,7 @@ class TestSentinelAppBundleAndJwt:
         from cryptography.hazmat.primitives.asymmetric import padding
 
         pem = self._test_pem()
-        token = _mint_github_app_jwt("123456", pem)
+        token = mint_app_jwt("123456", pem)
         header_b64, payload_b64, sig_b64 = token.split(".")
 
         def unb64(seg: str) -> bytes:
@@ -1239,7 +1291,7 @@ class TestRunPrSentinelCheck:
         assert msg == "credential bundle malformed: no App ID on line 1; the check did not run"
 
     @patch("new_repo.verify_pr_sentinel_installation")
-    @patch("new_repo._mint_github_app_jwt")
+    @patch("_github_app_jwt.mint_app_jwt")
     @patch("new_repo._parse_sentinel_app_bundle")
     @patch("new_repo.pr_sentinel_app_session")
     def test_T316_pass_when_verified(
@@ -1259,9 +1311,26 @@ class TestRunPrSentinelCheck:
         # Proof-of-life: the credential was borrowed through `with`, and given
         # back. A pair of bare mocks could not tell this from never running.
         assert (session.entered, session.exited) == (1, 1)
+        # The one copy of the JWT code minted the token the probe sent (#4791).
+        mock_mint.assert_called_once_with("123456", "PEM")
+        mock_verify.assert_called_once_with("martymcenroe", "repo-name", "jwt")
+
+    def test_T325_new_repo_keeps_no_jwt_code_of_its_own(self):
+        """#4791: new_repo.py defines no JWT minting function and loads no
+        private key itself; the check mints through _github_app_jwt."""
+        import ast
+
+        assert not hasattr(_new_repo_module, "_mint_github_app_jwt")
+        assert _new_repo_module._github_app_jwt.mint_app_jwt is mint_app_jwt
+        tree = ast.parse(Path(_new_repo_module.__file__).read_text(encoding="utf-8"))
+        names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        assert not [n for n in names if "jwt" in n.lower()]
+        loads = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Attribute) and n.attr == "load_pem_private_key"]
+        assert loads == []
 
     @patch("new_repo.verify_pr_sentinel_installation")
-    @patch("new_repo._mint_github_app_jwt")
+    @patch("_github_app_jwt.mint_app_jwt")
     @patch("new_repo._parse_sentinel_app_bundle")
     @patch("new_repo.pr_sentinel_app_session")
     def test_T317_fail_when_app_absent(

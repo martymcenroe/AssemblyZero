@@ -31,6 +31,12 @@ CALLER = "auto-reviewer.yml"
 RETIRED_TOOLS = ("deploy_auto_reviewer_workflow", "upgrade_auto_reviewer_caller")
 
 
+@pytest.fixture(autouse=True)
+def _projects_roots_are_temporary(temporary_projects_roots):
+    """main() reads temporary Projects roots, never this machine's (#4765)."""
+    return temporary_projects_roots
+
+
 def _ok(cmd, cwd=None, check=True):
     if cmd[:2] == ["git", "init"]:
         subprocess.run(["git", "init", "-q"], cwd=cwd, check=True)

@@ -44,6 +44,12 @@ RETIRED_READERS = {"auto-reviewer.yml", "auto-reviewer-caller.yml"}
 SECRET_READ = re.compile(r"secrets\.(REVIEWER_APP_ID|REVIEWER_APP_PRIVATE_KEY)\b")
 
 
+@pytest.fixture(autouse=True)
+def _projects_roots_are_temporary(temporary_projects_roots):
+    """main() reads temporary Projects roots, never this machine's (#4765)."""
+    return temporary_projects_roots
+
+
 # ---------------------------------------------------------------------------
 # #4724 R3: the finding that nothing reads the secrets, re-checked every run
 # ---------------------------------------------------------------------------

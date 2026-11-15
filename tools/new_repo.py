@@ -37,6 +37,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+# Every Projects root the fleet keeps (#4773). A new repository's name is
+# refused when any root already holds it, and --audit looks under each root
+# (#4765, #4778). Called through the module, so a test's roots take effect.
+from assemblyzero.core import projects_root as fleet_roots
+
 # Import AssemblyZero config for path resolution
 try:
     from assemblyzero_config import _spellings, config
@@ -60,6 +65,15 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from _npm_manifest import dirs_missing_test_script
+
+# The App JWT the pr-sentinel installation check sends (#1822). One copy of
+# the minting code, shared with tools/store_pr_sentinel_app_key.py (#4791).
+# Called through the module, so a test patches it in one place.
+try:
+    import _github_app_jwt
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    import _github_app_jwt
 
 # In-process classic PAT for privileged REST calls (ADR-0216).
 # Branch protection PUT and repo settings PATCH used to shell out to
@@ -2476,36 +2490,6 @@ def _parse_sentinel_app_bundle(bundle: str) -> tuple[str, str]:
     return app_id, pem
 
 
-def _mint_github_app_jwt(app_id: str, pem: str) -> str:
-    """Mint a short-lived RS256 JWT authenticating AS the GitHub App.
-
-    Standard GitHub App JWT shape: iat backdated 60s for clock drift,
-    9-minute expiry (GitHub caps at 10), iss = the App ID. Signed with
-    the App's private key via `cryptography` (already a project
-    dependency) — no JWT library needed for the one fixed header shape
-    GitHub accepts. (#1822)
-    """
-    import base64 as _b64
-    import json as _json
-    import time as _time
-
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding as _padding
-
-    def _b64url(data: bytes) -> bytes:
-        return _b64.urlsafe_b64encode(data).rstrip(b"=")
-
-    now = int(_time.time())
-    header = _b64url(_json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
-    payload = _b64url(_json.dumps(
-        {"iat": now - 60, "exp": now + 540, "iss": app_id}
-    ).encode())
-    signing_input = header + b"." + payload
-    key = serialization.load_pem_private_key(pem.encode(), password=None)
-    signature = key.sign(signing_input, _padding.PKCS1v15(), hashes.SHA256())
-    return (signing_input + b"." + _b64url(signature)).decode()
-
-
 def verify_pr_sentinel_installation(
     github_user: str, repo_name: str, app_jwt: str,
 ) -> tuple[bool, str]:
@@ -2528,7 +2512,7 @@ def verify_pr_sentinel_installation(
     Args:
         github_user: GitHub username (org or user account owning the repo).
         repo_name: Repository name (no owner prefix).
-        app_jwt: RS256 App JWT from _mint_github_app_jwt(). Bearer
+        app_jwt: RS256 App JWT from _github_app_jwt.mint_app_jwt(). Bearer
             header only; never reaches env or argv.
     """
     headers = {
@@ -2579,7 +2563,7 @@ def run_pr_sentinel_check(
     try:
         with pr_sentinel_app_session(bundle_path) as bundle:
             app_id, pem = _parse_sentinel_app_bundle(bundle)
-            app_jwt = _mint_github_app_jwt(app_id, pem)
+            app_jwt = _github_app_jwt.mint_app_jwt(app_id, pem)
     except FileNotFoundError:
         return "fail", (
             f"key file not found: {bundle_path}; create it with "
@@ -2981,18 +2965,45 @@ Examples:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Handle audit mode
+    # The fleet's Projects roots (#4765, #4778): where a name is looked for,
+    # and, when a setting lists them, the only places a repository is built.
+    # Read before anything is created or audited; a broken pointer stops here.
+    try:
+        roots, listed_in = projects_roots_in_use()
+    except RuntimeError as e:
+        print(f"ERROR: the Projects roots could not be read: {e}", file=sys.stderr)
+        print("ERROR: nothing was created or audited.", file=sys.stderr)
+        sys.exit(1)
+    searched = roots_to_search(project_path.parent, roots, listed_in)
+
+    # Handle audit mode: the repository may be under any root (#4778).
     if args.audit:
-        if not project_path.exists():
-            print(f"ERROR: Project directory not found: {project_path}")
+        audit_path, refusal = audit_target(args.name, searched)
+        if audit_path is None:
+            for line in refusal:
+                print(line, file=sys.stderr)
             sys.exit(1)
-        exit_code = audit_structure(project_path, args.name)
+        exit_code = audit_structure(audit_path, args.name)
         sys.exit(exit_code)
+
+    # new_repo_root must be one of the listed roots (#4765 R1).
+    refusal = new_repo_root_refusal(project_path.parent, roots, listed_in)
+    if refusal:
+        for line in refusal:
+            print(line, file=sys.stderr)
+        sys.exit(1)
 
     # Check if directory already exists
     if project_path.exists():
         print(f"ERROR: Directory already exists: {project_path}")
         print("Use --audit to check an existing project's structure")
+        sys.exit(1)
+
+    # No other root may hold the name either (#4765 R2).
+    refusal = held_name_refusal(args.name, searched)
+    if refusal:
+        for line in refusal:
+            print(line, file=sys.stderr)
         sys.exit(1)
 
     # Get GitHub username (unless --no-github)
@@ -3064,6 +3075,91 @@ def resolve_project_path(name: str) -> Path:
             "Nothing was created."
         )
     return projects_root / name
+
+
+def projects_roots_in_use() -> tuple[list[Path], str | None]:
+    """The fleet's Projects roots for this side, and the setting that lists them (#4765).
+
+    The setting's path is given when ``paths.projects_roots_file`` points at
+    one (#4773); None when no pointer is configured, and the one root is
+    AssemblyZero's parent. A config or setting that is broken raises
+    RuntimeError naming the file and what is wrong with it.
+    """
+    roots = fleet_roots.projects_roots()
+    source = fleet_roots.roots_source()
+    return roots, (None if source == fleet_roots.DERIVED else source)
+
+
+def _same_folder(a: Path, b: Path) -> bool:
+    """True when both paths name one folder, compared resolved on this side."""
+    return Path(a).resolve() == Path(b).resolve()
+
+
+def roots_to_search(new_root: Path, roots: list[Path], listed_in: str | None) -> list[Path]:
+    """Where a repository's name is looked for (#4765 R2, #4778 R1).
+
+    With the roots listed in a setting, those roots. With none listed, the one
+    derived root and also ``new_repo_root`` when it is another folder: a
+    repository is built under new_repo_root, so a name already there is found.
+    """
+    if listed_in is not None or any(_same_folder(new_root, root) for root in roots):
+        return list(roots)
+    return [*roots, new_root]
+
+
+def new_repo_root_refusal(new_root: Path, roots: list[Path], listed_in: str | None) -> list[str]:
+    """ERROR lines when new_repo_root is not one of the listed roots (#4765 R1).
+
+    Empty when no setting lists the roots (#4765 R3: unchanged from #4763), or
+    when new_repo_root is one of them.
+    """
+    if listed_in is None or any(_same_folder(new_root, root) for root in roots):
+        return []
+    return [
+        f"ERROR: new_repo_root is {new_root}, which is not one of the Projects "
+        f"roots listed in {listed_in}: " + ", ".join(str(root) for root in roots),
+        ("ERROR: set new_repo_root to one of those roots, or add it to that "
+         "setting. Nothing was created."),
+    ]
+
+
+def held_name_refusal(name: str, searched: list[Path]) -> list[str]:
+    """ERROR lines when any searched root already holds ``name`` (#4765 R2).
+
+    A new repository must never shadow, or be shadowed by, a copy under
+    another root. A root that does not exist refuses too, since a copy could be
+    under it. Empty when no root holds the name.
+    """
+    try:
+        held = fleet_roots.locate_repo(name, searched)
+    except RuntimeError as e:
+        return [f"ERROR: refusing to create {name}: {e}. Nothing was created."]
+    if not held.exists():
+        return []
+    return [
+        f"ERROR: the name {name} is already held under a Projects root: {held}",
+        ("ERROR: a new repository must not shadow a copy under another root. "
+         "Pick another name. Nothing was created."),
+    ]
+
+
+def audit_target(name: str, searched: list[Path]) -> tuple[Path | None, list[str]]:
+    """The repository ``--audit`` looks at, under whichever root holds it (#4778).
+
+    Returns ``(path, [])`` for the one copy. A name under two roots, under
+    none, or a root that does not exist gives ``(None, ERROR lines)``: two
+    copies named, or every root searched.
+    """
+    try:
+        held = fleet_roots.locate_repo(name, searched)
+    except RuntimeError as e:
+        return None, [f"ERROR: cannot audit {name}: {e}"]
+    if not held.exists():
+        return None, [
+            f"ERROR: Project directory not found: {name} is under none of the "
+            "Projects roots searched: " + ", ".join(str(root) for root in searched)
+        ]
+    return held, []
 
 
 def _diagnose_existing_path(project_path: Path) -> tuple[str, list[str]]:
