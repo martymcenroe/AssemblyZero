@@ -31,8 +31,10 @@ import re
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 # Import AssemblyZero config for path resolution
@@ -68,6 +70,9 @@ except ImportError:
 import requests  # noqa: E402
 try:
     from _pat_session import (
+        DEFAULT_PAT_PATH,
+        SECRET_CLASSIC_PAT,
+        SECRET_PR_SENTINEL_APP,
         PinentryUnavailable,
         classic_pat_session,
         pr_sentinel_app_session,
@@ -75,6 +80,9 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from _pat_session import (
+        DEFAULT_PAT_PATH,
+        SECRET_CLASSIC_PAT,
+        SECRET_PR_SENTINEL_APP,
         PinentryUnavailable,
         classic_pat_session,
         pr_sentinel_app_session,
@@ -2617,8 +2625,179 @@ HOOK_IMPORTABLE: dict[str, tuple[str, ...]] = {
 }
 
 
+class HookLoadError(Exception):
+    """A post-create hook cannot be loaded (#4786); the message names the cause."""
+
+
+@dataclass(frozen=True)
+class LoadedHook:
+    """One listed post-create hook, loaded once, before the run's first prompt (#4786).
+
+    module is None, and error names the cause, when the hook cannot run.
+    passphrases is the hook's PASSPHRASES, or None when it declares none.
+    """
+
+    path: Path
+    module: ModuleType | None
+    error: str | None
+    passphrases: tuple[str, ...] | None
+
+
+_UNDECLARED = object()
+
+
+def _exec_hook_module(path: Path, index: int) -> ModuleType:
+    """Execute the hook file at `path` as a module (#4786).
+
+    Raises:
+        HookLoadError: The file is not a Python module, or its top level
+            raised; the message names the exception.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        f"_new_repo_post_create_hook_{index}", path,
+    )
+    if spec is None or spec.loader is None:
+        raise HookLoadError("not importable as a Python module")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise HookLoadError(f"{type(e).__name__}: {e}") from e
+    return module
+
+
+def _declared_passphrases(module: ModuleType) -> tuple[str, ...] | None:
+    """The hook's PASSPHRASES, or None when it has no such attribute (#4786).
+
+    Raises:
+        HookLoadError: PASSPHRASES is not a tuple of non-empty strings. The
+            message names the wrong type, never the value.
+    """
+    declared = getattr(module, "PASSPHRASES", _UNDECLARED)
+    if declared is _UNDECLARED:
+        return None
+    rule = "PASSPHRASES must be a tuple of non-empty strings"
+    if not isinstance(declared, tuple):
+        raise HookLoadError(f"{rule}, not a {type(declared).__name__}")
+    for i, name in enumerate(declared):
+        if not isinstance(name, str):
+            raise HookLoadError(f"{rule}; item {i} is a {type(name).__name__}")
+        if not name.strip():
+            raise HookLoadError(f"{rule}; item {i} is empty")
+    return declared
+
+
+def _load_hook(path: Path, index: int) -> LoadedHook:
+    """Load one hook: its module, its PASSPHRASES and its post_create (#4786)."""
+    if not path.is_file():
+        return LoadedHook(path, None, "hook file not found", None)
+    try:
+        module = _exec_hook_module(path, index)
+        passphrases = _declared_passphrases(module)
+    except HookLoadError as e:
+        return LoadedHook(path, None, str(e), None)
+    if not callable(getattr(module, "post_create", None)):
+        return LoadedHook(path, None, "no post_create function", passphrases)
+    return LoadedHook(path, module, None, passphrases)
+
+
+def load_post_create_hooks(hook_paths: list[Path]) -> list[LoadedHook]:
+    """Load each listed hook once, before the run asks for anything (#4786).
+
+    The run lists the passphrases each hook declares before its first
+    prompt, then runs these same modules: no hook module executes twice.
+    A hook that cannot load comes back with its error, never dropped.
+    """
+    return [_load_hook(path, i) for i, path in enumerate(hook_paths)]
+
+
+def passphrase_plan(
+    pat_path: Path,
+    hook_list: Path,
+    hooks: list[LoadedHook] | None,
+    sentinel_path: Path,
+) -> tuple[list[str], list[str], list[str]]:
+    """Every passphrase a GitHub run will ask for, worked out before the first (#4786).
+
+    hooks is None when the hook list is missing. Returns (asked, not_asked,
+    uncounted), one line each:
+        asked     -- each prompt, in the order the run makes them: the
+                     classic PAT, each hook's PASSPHRASES, the pr-sentinel
+                     App credential.
+        not_asked -- each passphrase the run expected to ask for and will
+                     not, with the reason.
+        uncounted -- each hook without PASSPHRASES; it may still ask.
+    """
+    asked = [f"{SECRET_CLASSIC_PAT}: file {pat_path}"]
+    not_asked: list[str] = []
+    uncounted: list[str] = []
+    if hooks is None:
+        not_asked.append(
+            f"every hook's passphrases: the post-create hook list {hook_list} "
+            "is missing, so no hook runs"
+        )
+    for hook in hooks or []:
+        if hook.error is not None:
+            named = f" ({', '.join(hook.passphrases)})" if hook.passphrases else ""
+            not_asked.append(
+                f"the hook {hook.path}{named} cannot load: {hook.error}"
+            )
+        elif hook.passphrases is None:
+            uncounted.append(
+                f"the hook {hook.path} declares no passphrases; it may still ask"
+            )
+        else:
+            asked += [f"{name}: asked by the hook {hook.path}" for name in hook.passphrases]
+    if sentinel_path.exists():
+        asked.append(f"{SECRET_PR_SENTINEL_APP}: file {sentinel_path}")
+    else:
+        not_asked.append(
+            f"{SECRET_PR_SENTINEL_APP}: its file {sentinel_path} is missing; "
+            "create it with tools/store_pr_sentinel_app_key.py"
+        )
+    if not pat_path.exists():
+        # The PAT session refuses before its prompt, and every step after it
+        # runs inside that session: nothing is asked.
+        not_asked = (
+            [f"{SECRET_CLASSIC_PAT}: its file {pat_path} is missing, so no GitHub step runs"]
+            + [f"{line} (not reached)" for line in asked[1:]]
+            + not_asked
+        )
+        return [], not_asked, []
+    return asked, not_asked, uncounted
+
+
+def passphrase_block(
+    pat_path: Path,
+    hook_list: Path,
+    hooks: list[LoadedHook] | None,
+    sentinel_path: Path,
+) -> str:
+    """The list the run prints before its first prompt (#4786).
+
+    On 2026-11-14 a run said "Single pinentry prompt" and asked for one
+    passphrase where three were expected; nothing said the other two
+    would not come. The count is the number of prompts the run makes
+    when every step reaches its own, each passphrase typed right.
+    """
+    asked, not_asked, uncounted = passphrase_plan(
+        pat_path, hook_list, hooks, sentinel_path,
+    )
+    lines = ["", "=" * 60, f"PASSPHRASES THIS RUN WILL ASK FOR: {len(asked)}", "=" * 60]
+    lines += [f"  {n}. {entry}" for n, entry in enumerate(asked, 1)]
+    lines += [f"  Not counted: {entry}" for entry in uncounted]
+    if not_asked:
+        lines.append(f"  Expected and NOT asked: {len(not_asked)}")
+        lines += [f"    - {entry}" for entry in not_asked]
+    lines.append("  A wrong passphrase is asked for again; a step that fails "
+                 "before its prompt asks for nothing.")
+    return "\n".join(lines)
+
+
 def run_post_create_hooks(
-    hook_paths: list[Path],
+    hooks: list[LoadedHook] | list[Path],
     owner: str,
     repo: str,
     pat: str,
@@ -2633,33 +2812,31 @@ def run_post_create_hooks(
     The contract: a hook may import from tools/ only what HOOK_IMPORTABLE
     names, which is _pat_session.gpg_secret_session and
     gh_actions_secret.set_secret(repo, name, value, pat, scope="actions")
-    for setting a repository's Actions or Dependabot secret (#4783).
+    for setting a repository's Actions or Dependabot secret (#4783). A hook
+    that asks for a passphrase names each secret it asks for in
+    `PASSPHRASES: tuple[str, ...]`, so the run lists it before its first
+    prompt (#4786). Anything else there is a load error; a hook without it
+    is listed as declaring none, which it may still ask for.
 
-    Returns (path, status) per hook. A missing file, a module without
-    post_create, or an exception in the hook yields a status beginning
-    "FAILED" that names the cause. Nothing is skipped silently.
+    `hooks` are the hooks load_post_create_hooks returned, so each module
+    has executed once; a path is loaded here.
+
+    Returns (path, status) per hook. A missing file, a module that cannot
+    load, a module without post_create, or an exception in the hook yields
+    a status beginning "FAILED" that names the cause. Nothing is skipped
+    silently.
     """
-    import importlib.util
-
     results: list[tuple[Path, str]] = []
-    for i, path in enumerate(hook_paths):
-        if not path.is_file():
-            results.append((path, "FAILED: hook file not found"))
+    for i, entry in enumerate(hooks):
+        hook = entry if isinstance(entry, LoadedHook) else _load_hook(entry, i)
+        if hook.error is not None:
+            results.append((hook.path, f"FAILED: {hook.error}"))
             continue
         try:
-            spec = importlib.util.spec_from_file_location(
-                f"_new_repo_post_create_hook_{i}", path,
-            )
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            hook = getattr(module, "post_create", None)
-            if not callable(hook):
-                results.append((path, "FAILED: no post_create function"))
-                continue
-            status = hook(owner=owner, repo=repo, pat=pat)
-            results.append((path, str(status)))
+            status = hook.module.post_create(owner=owner, repo=repo, pat=pat)
+            results.append((hook.path, str(status)))
         except Exception as e:  # a hook's failure must not abort repo creation
-            results.append((path, f"FAILED: {type(e).__name__}: {e}"))
+            results.append((hook.path, f"FAILED: {type(e).__name__}: {e}"))
     return results
 
 
@@ -3403,12 +3580,29 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("\n  All elevated operations -- repo create, workflow upload,")
         print("  repo settings, branch protection, Dependabot, hooks, and")
         print("  GitHub-side verification -- run inside ONE classic_pat_session().")
-        print("  Single pinentry prompt; the PAT lives only in this Python")
-        print("  process's heap and is removed programmatically when the block")
-        print("  exits. No env vars, no subprocess argv. (#1268)\n")
+        print("  The PAT lives only in this Python process's heap and is removed")
+        print("  programmatically when the block exits. No env vars, no")
+        print("  subprocess argv. (#1268)")
+
+        # Every passphrase the run will ask for, listed before the first
+        # (#4786). The hooks load here, once, so each hook's PASSPHRASES is
+        # read from the module the hook stage runs. A missing list is not
+        # "no hooks" (#4186); the hook stage fails it. Read at call time,
+        # never the parameter's import-time default.
+        hook_list = DEFAULT_POST_CREATE_HOOKS
+        loaded_hooks = (
+            load_post_create_hooks(read_post_create_hooks(hook_list))
+            if hook_list.exists() else None
+        )
+        sentinel_bundle = Path(
+            args.sentinel_app_gpg or DEFAULT_PR_SENTINEL_APP_GPG
+        )
+        print(passphrase_block(
+            DEFAULT_PAT_PATH, hook_list, loaded_hooks, sentinel_bundle,
+        ) + "\n")
 
         try:
-            with classic_pat_session() as pat:
+            with classic_pat_session(DEFAULT_PAT_PATH) as pat:
                 _api_headers = {
                     "Authorization": f"token {pat}",
                     "Accept": "application/vnd.github+json",
@@ -3590,20 +3784,18 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     print("=" * 60)
                     # A missing list is not "no hooks" (#4186): it lives under
                     # each side's own home, and a run from the side without
-                    # one skipped every hook while printing [SUCCESS]. Read
-                    # at call time, never the parameter's import-time default.
-                    hook_list = DEFAULT_POST_CREATE_HOOKS
-                    if not hook_list.exists():
+                    # one skipped every hook while printing [SUCCESS]. The
+                    # hooks were loaded before the first prompt (#4786).
+                    if loaded_hooks is None:
                         hook_list_missing = hook_list
                         print(f"  FAILED: no post-create hook list at {hook_list}. "
                               "Create it; an empty file runs no hooks on "
                               "purpose (#4186).")
                     else:
-                        hook_paths = read_post_create_hooks(hook_list)
-                        if not hook_paths:
+                        if not loaded_hooks:
                             print(f"  None listed in {hook_list}.")
                         hook_results = run_post_create_hooks(
-                            hook_paths, github_user, args.name, pat,
+                            loaded_hooks, github_user, args.name, pat,
                         )
                         for hook_path, hook_status in hook_results:
                             print(f"  {hook_path}: {hook_status}")
@@ -3643,10 +3835,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     # (#4785). The decrypt pinentry (TTL 0) is the operator's
                     # per-run consent to this extra permission boost;
                     # cancelling it declines the check, which stays outside
-                    # the count and is named on the count line.
-                    sentinel_bundle = Path(
-                        args.sentinel_app_gpg or DEFAULT_PR_SENTINEL_APP_GPG
-                    )
+                    # the count and is named on the count line. The bundle
+                    # path is the one the passphrase list named (#4786).
                     if sentinel_bundle.exists():
                         print("  pr-sentinel check: pinentry will prompt to "
                               "decrypt the App credential (cancel to decline "

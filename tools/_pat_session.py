@@ -480,7 +480,7 @@ def pr_sentinel_app_session(
     (#1822). Deliberate deviation from the sibling sessions: a
     user-CANCELLED pinentry aborts immediately with RuntimeError instead
     of retrying — cancel means "I decline the boost", and callers report
-    the dependent check as unverifiable rather than failed. Genuine
+    the dependent check as declined, outside the count (#4785). Genuine
     decrypt failures (mistyped passphrase) still retry as usual.
 
     One-time setup: the operator runs tools/store_pr_sentinel_app_key.py
@@ -499,10 +499,11 @@ def pr_sentinel_app_session(
         Decrypted bundle text (App ID line + PEM). Deleted on exit.
 
     Raises:
-        FileNotFoundError: Bundle file absent — treat the dependent
-            check as unverifiable, not failed.
-        RuntimeError: Decrypt declined (pinentry cancel) or failed
-            after MAX_GPG_ATTEMPTS — same unverifiable treatment.
+        FileNotFoundError: Bundle file absent. The dependent check did
+            not run, and callers count it as failed (#4785).
+        RuntimeError: Decrypt declined (pinentry cancel), which callers
+            report as declined, or failed after MAX_GPG_ATTEMPTS, which
+            they count as failed (#4785).
 
     Implementation note: mirrors cerberus_pem_session's structure rather
     than sharing a helper, per that function's stated convention — the
