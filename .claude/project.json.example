@@ -9,9 +9,11 @@
     "WORKTREE_PATTERN": "YourProject-{ID}"
   },
 
-  "inherit_from": "<absolute path to the Projects directory>",
+  "inherit_from": "<absolute path to AssemblyZero's root>",
 
   "// VARIABLE REFERENCE": {
+    "inherit_from": "AssemblyZero's root, in any spelling (C:\\..., /c/..., /mnt/c/..., a POSIX path, or \\\\wsl.localhost\\<distro>\\...); the generator reads it on the side it runs on",
+    "ASSEMBLYZERO_ROOT": "Not set here: the generator derives it from inherit_from, spelled for the side that runs it",
     "PROJECT_ROOT": "Unix-style absolute path to the project (for Bash commands)",
     "PROJECT_NAME": "Human-readable project name (used in Gemini prompts, worktree patterns, and messages)",
     "GITHUB_REPO": "GitHub repository in owner/repo format (for gh CLI commands)",
@@ -42,7 +44,7 @@
   "// USAGE": [
     "1. Copy this file to your project: cp .claude/project.json.example YourProject/.claude/project.json",
     "2. Edit the values in 'variables' section",
-    "3. From YOUR_PROJECT, run the generator: poetry run --directory ../AssemblyZero python ../AssemblyZero/tools/assemblyzero-generate.py --project YourProject",
+    "3. Run the generator: poetry run --directory <AssemblyZero's root> python <AssemblyZero's root>/tools/assemblyzero-generate.py --project <absolute path to YOUR_PROJECT>",
     "4. The generator will create concrete configs from templates"
   ]
 }

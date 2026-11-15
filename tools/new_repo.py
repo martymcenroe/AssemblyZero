@@ -558,7 +558,9 @@ def project_json_content(project_path: Path, name: str, github_user: str) -> dic
     # Every path naming the repository comes from where it is (#4763), never
     # from the Projects root: a repository on ext4 is not under that root.
     project_unix = _spellings(project_path)["unix"]
-    # AssemblyZero's own location, wherever the new repository is (#4763).
+    # AssemblyZero's own location, wherever the new repository is (#4763). Its
+    # Windows spelling, C:\... or on ext4 the POSIX path: assemblyzero-generate
+    # reads either on both sides (#4775), as it reads every file written so far.
     assemblyzero_root_windows = config.assemblyzero_root()
 
     return {
@@ -719,8 +721,20 @@ def create_claude_md(
     github_user: str,
     project_type: str = "minimal",
 ) -> None:
+    """Create the project CLAUDE.md file, holding claude_md_content()."""
+    claude_md_path = project_path / "CLAUDE.md"
+    claude_md_path.write_text(
+        claude_md_content(project_path, name, github_user, project_type), encoding='utf-8')
+
+
+def claude_md_content(
+    project_path: Path,
+    name: str,
+    github_user: str,
+    project_type: str = "minimal",
+) -> str:
     """
-    Create the project CLAUDE.md file.
+    What create_claude_md writes, built without touching the disk.
 
     Emits the lean per-repo template per ADR 0219 (#1258): identifiers plus
     a project-type-specific Project-Specific Context stub (per #1291).
@@ -741,6 +755,9 @@ def create_claude_md(
     """
     # From where the repository is, not the Projects root (#4763).
     project_unix = _spellings(project_path)["unix"]
+    # The line labelled Windows holds a path Windows opens (#4777): from Ubuntu,
+    # C:\... for a drive path and the WSL share for an ext4 one.
+    project_windows = windows_spelling(project_path)
     context_block = _project_specific_context(project_type, name)
 
     # Footer: invitation to document workflow overrides explicitly. Pushes
@@ -762,7 +779,7 @@ You are a team member on the {name} project, not a tool.
 ## Project Identifiers
 
 - **Repository:** `{github_user}/{name}`
-- **Project Root (Windows):** `{project_path}`
+- **Project Root (Windows):** `{project_windows}`
 - **Project Root (Unix):** `{project_unix}`
 - **Worktree Pattern:** `{name}-{{IssueID}}` (e.g., `{name}-45`)
 
@@ -778,8 +795,7 @@ Three of them, and only one is committed.
 The `-g` is for git-tracked. If a file is here because you downloaded it, it belongs in `data-dl/`.
 
 {overrides_footer}"""
-    claude_md_path = project_path / "CLAUDE.md"
-    claude_md_path.write_text(content, encoding='utf-8')
+    return content
 
 
 def create_readme(project_path: Path, name: str) -> None:

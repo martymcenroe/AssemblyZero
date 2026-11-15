@@ -9,13 +9,13 @@ Diagnosed from the first Ubuntu run, 2026-10-07 at 6:42 PM Central:
 - #4136: the run then printed [SUCCESS] although the GitHub repo, the push,
   the settings, branch protection and the hook install had all failed.
 
-Issues: #4132, #4136, #4186, #4763
+Issues: #4132, #4136, #4186, #4763, #4775, #4777
 """
 
 import json
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 import pytest
@@ -29,6 +29,7 @@ from new_repo import (
     resolve_project_path,
 )
 
+from tests.unit.test_assemblyzero_generate import inherit_from_path
 from tests.unit.test_no_spelled_projects_root import SPELLINGS as GUARD_SPELLINGS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -369,3 +370,103 @@ def test_a_repository_on_a_windows_drive_keeps_its_drive_spellings(tmp_path, mon
     assert variables["PROJECT_ROOT"] == "/mnt/c/Users/someone/Projects/Foo"
     assert variables["TOOLS_DIR"] == "/mnt/c/Users/someone/Projects/Foo/tools"
     assert variables["PROJECT_ROOT_WINDOWS"] == "C:\\Users\\someone\\Projects\\Foo"
+
+
+# ===========================================================================
+# #4775 R2 — the inherit_from a new repository gets is read on both sides
+# ===========================================================================
+
+
+class TestInheritFromIsReadOnBothSides:
+    """T2 (#4775). project_json_content() keeps writing config.assemblyzero_root(),
+    and the generator's reader accepts it on Ubuntu and on Windows."""
+
+    def test_assemblyzero_on_a_drive(self, tmp_path, monkeypatch):
+        mount = tmp_path / "mnt"
+        az = mount / "c" / "Users" / "someone" / "Projects" / "AssemblyZero"
+        (az / ".claude" / "templates").mkdir(parents=True)
+        monkeypatch.setattr(new_repo, "config", _real_config(monkeypatch, tmp_path / "c.json", {
+            "version": "1.0",
+            "paths": {"assemblyzero_root": {
+                "windows": "C:\\Users\\someone\\Projects\\AssemblyZero",
+                "unix": "/mnt/c/Users/someone/Projects/AssemblyZero",
+            }},
+        }))
+        inherit_from = new_repo.project_json_content(
+            Path("/home/someone/Projects/Foo"), "Foo", "someone")["inherit_from"]
+
+        on_ubuntu = inherit_from_path(inherit_from, windows=False, mount_root=mount.as_posix())
+        assert (Path(on_ubuntu) / ".claude" / "templates").is_dir()
+        assert inherit_from_path(inherit_from, windows=True) == (
+            "C:\\Users\\someone\\Projects\\AssemblyZero")
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="an ext4 root exists only off Windows")
+    def test_assemblyzero_on_ext4(self, tmp_path, monkeypatch):
+        az = tmp_path / "AssemblyZero"
+        (az / ".claude" / "templates").mkdir(parents=True)
+        monkeypatch.setattr(new_repo, "config", _real_config(monkeypatch, tmp_path / "c.json", {
+            "version": "1.0",
+            "paths": {"assemblyzero_root": {"windows": str(az), "unix": str(az)}},
+        }))
+        inherit_from = new_repo.project_json_content(
+            tmp_path / "Foo", "Foo", "someone")["inherit_from"]
+
+        on_ubuntu = inherit_from_path(inherit_from, windows=False)
+        assert (Path(on_ubuntu) / ".claude" / "templates").is_dir()
+        on_windows = inherit_from_path(inherit_from, windows=True)
+        assert on_windows == "\\\\wsl.localhost\\Ubuntu" + az.as_posix().replace("/", "\\")
+
+    def test_this_checkout_by_default(self, tmp_path, monkeypatch):
+        """With no config file, inherit_from names this checkout, which the
+        reader opens on the side this test runs on."""
+        monkeypatch.setattr(new_repo, "config", _real_config(monkeypatch, tmp_path / "absent.json"))
+        inherit_from = new_repo.project_json_content(
+            tmp_path / "Foo", "Foo", "someone")["inherit_from"]
+        here = inherit_from_path(inherit_from, windows=sys.platform == "win32")
+        assert Path(here).resolve() == REPO_ROOT
+        assert (Path(here) / ".claude" / "templates").is_dir()
+
+
+# ===========================================================================
+# #4777 — CLAUDE.md's "Project Root (Windows)" line holds a Windows path
+# ===========================================================================
+
+
+def _windows_line(text: str) -> str:
+    return next(line for line in text.splitlines() if "**Project Root (Windows):**" in line)
+
+
+class TestClaudeMdWindowsLine:
+
+    def test_an_ext4_path_is_the_wsl_share(self, monkeypatch):
+        """T1 (#4777)."""
+        monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+        text = new_repo.claude_md_content(Path("/home/mcwiz/Projects/Foo"), "Foo", "someone")
+        assert _windows_line(text) == (
+            "- **Project Root (Windows):** `\\\\wsl.localhost\\Ubuntu\\home\\mcwiz\\Projects\\Foo`")
+        assert "- **Project Root (Unix):** `/home/mcwiz/Projects/Foo`" in text
+
+    def test_a_drive_path_seen_from_ubuntu_is_its_drive_spelling(self, monkeypatch):
+        """T1 (#4777)."""
+        monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+        text = new_repo.claude_md_content(
+            Path("/mnt/c/Users/someone/Projects/Foo"), "Foo", "someone")
+        assert _windows_line(text) == (
+            "- **Project Root (Windows):** `C:\\Users\\someone\\Projects\\Foo`")
+        assert "- **Project Root (Unix):** `/mnt/c/Users/someone/Projects/Foo`" in text
+
+    @pytest.mark.parametrize("path", [
+        Path("C:\\Users\\someone\\Projects\\Foo"),
+        PureWindowsPath("C:\\Users\\someone\\Projects\\Foo"),
+    ], ids=["as-written", "windows-path"])
+    def test_a_windows_path_is_unchanged(self, monkeypatch, path):
+        """T2 (#4777). From Windows the line is the path as before."""
+        monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+        text = new_repo.claude_md_content(path, "Foo", "someone")
+        assert _windows_line(text) == f"- **Project Root (Windows):** `{path}`"
+
+    def test_create_claude_md_writes_the_content(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+        new_repo.create_claude_md(tmp_path, "Foo", "someone", "python")
+        assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == (
+            new_repo.claude_md_content(tmp_path, "Foo", "someone", "python"))
