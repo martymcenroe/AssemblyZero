@@ -20,6 +20,8 @@ The tests were written first. They failed before the module and the program exis
 
 The three new or extended files, with `test_set_new_repo_root.py` and `test_projects_root.py`: `138 passed, 1 warning in 162.05s (0:02:42)`.
 
-## Not yet run
+## Unit tier, 2026-11-14
 
-The full unit tier, and the other importers' test files, were not run before this wip commit.
+Run on Ubuntu with pytest directly, 15,380 tests selected: `6 failed, 15301 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1885.96s (0:31:25)`.
+
+The six failures are all `tests/unit/test_pat_session_named_prompt.py::TestRealGpg`, which fail on Ubuntu because gpg-agent cannot start there (#4766). They fail the same way on main at ed77a367. No other test failed.
