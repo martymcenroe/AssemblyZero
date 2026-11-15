@@ -7,7 +7,10 @@ outputs concrete configs to the project's .claude/ directory.
 
 Usage:
   python tools/assemblyzero-generate.py --project /path/to/project
-  python tools/assemblyzero-generate.py --project Aletheia  # Relative to Projects dir
+  python tools/assemblyzero-generate.py --project Aletheia  # A name, looked up under every Projects root
+
+A name is found under any Projects root (#4773, #4775). A name held under two
+roots is refused, and nothing is generated. An absolute path is used as given.
 
 Files processed:
   - commands/*.md.template → commands/*.md
@@ -22,6 +25,9 @@ import os
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import argparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.core.projects_root import locate_repo  # #4775 R3
 
 #: Where Windows names a path on Ubuntu's own disk.
 WSL_SHARE = "//wsl.localhost/"
@@ -220,15 +226,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python tools/assemblyzero-generate.py --project ../Aletheia
+  python tools/assemblyzero-generate.py --project /path/to/Aletheia
   python tools/assemblyzero-generate.py --project Aletheia
-  python tools/assemblyzero-generate.py --project . --templates ../.claude/templates
+  python tools/assemblyzero-generate.py --project Aletheia --templates /path/to/.claude/templates
         """
     )
     parser.add_argument(
         "--project", "-p",
         required=True,
-        help="Path to project directory (absolute or relative to Projects dir)"
+        help=("Project directory: an absolute path, used as given, or a name, "
+              "looked up under every Projects root (a name under two roots is refused)")
     )
     parser.add_argument(
         "--templates", "-t",
@@ -253,13 +260,16 @@ Examples:
 
     args = parser.parse_args()
 
-    # Resolve project path
+    # Resolve project path. A name is looked up under every Projects root
+    # (#4773, #4775): one copy is used, a name under two roots is refused, and a
+    # name under none is the first root's path, which the check below reports.
     project_path = Path(args.project)
     if not project_path.is_absolute():
-        # Assume relative to Projects directory
-        # Use Windows-native path that works in both cmd and Git Bash
-        projects_dir = Path.home() / "Projects"
-        project_path = projects_dir / args.project
+        try:
+            project_path = locate_repo(args.project)
+        except RuntimeError as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
 
     if not project_path.exists():
         print(f"ERROR: Project directory not found: {project_path}")
