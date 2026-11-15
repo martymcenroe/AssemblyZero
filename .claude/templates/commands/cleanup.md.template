@@ -104,7 +104,7 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 **Full mode adds (10 parallel calls total):**
 - git -C {{PROJECT_ROOT}} branch -vv
 - git -C {{PROJECT_ROOT}} branch -r
-- poetry run --directory {{PROJECT_ROOT}}/../AssemblyZero python {{PROJECT_ROOT}}/../AssemblyZero/tools/assemblyzero-permissions.py --quick-check --project {{PROJECT_NAME}}
+- poetry run --directory {{ASSEMBLYZERO_ROOT}} python {{ASSEMBLYZERO_ROOT}}/tools/assemblyzero-permissions.py --quick-check --project {{PROJECT_NAME}}
 
 ## Phase 2: Conditional Fixes
 

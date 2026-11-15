@@ -13,11 +13,86 @@ Files processed:
   - commands/*.md.template → commands/*.md
   - hooks/*.sh.template → hooks/*.sh
   - settings.json.template → settings.json
+
+Besides project.json's variables, templates get {{ASSEMBLYZERO_ROOT}}: AssemblyZero's
+root, read from project.json's inherit_from on the side this runs on (#4775, #4776).
 """
 import json
+import os
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import argparse
+
+#: Where Windows names a path on Ubuntu's own disk.
+WSL_SHARE = "//wsl.localhost/"
+
+
+def _drive(value: str) -> tuple[str, str] | None:
+    """(letter, rest) when `value` names a Windows drive, else None.
+
+    `value` has forward slashes. The drive spellings are `C:/...`, Git Bash's
+    `/c/...` and WSL's `/mnt/c/...`; `rest` is what follows the drive.
+    """
+    if value[1:2] == ":":
+        letter, rest = value[:1], value[2:]
+    elif value.startswith("/mnt/"):
+        letter, rest = value[5:6], value[6:]
+    elif value.startswith("/"):
+        letter, rest = value[1:2], value[2:]
+    else:
+        return None
+    if letter.isascii() and letter.isalpha() and rest[:1] in ("", "/"):
+        return letter, rest
+    return None
+
+
+def inherit_from_path(value: str, *, windows: bool, mount_root: str = "/mnt",
+                      distro: str = "Ubuntu") -> str:
+    """AssemblyZero's root from project.json's `inherit_from`, spelled for this side (#4775).
+
+    The file holds whatever spelling the side that created the repository wrote:
+    `C:\\...`, `C:/...`, `/c/...`, `/mnt/c/...`, a plain POSIX path, or the WSL
+    share `\\\\wsl.localhost\\<distro>\\...` (or `//wsl.localhost/...`).
+
+    On Ubuntu (`windows=False`) a drive path opens through `mount_root`, so
+    `C:\\X` is `/mnt/c/X`, and a WSL share path is its POSIX path. On Windows a
+    drive path is `C:\\X`, and a POSIX path is on Ubuntu's disk, reached through
+    the share for `distro`. A relative value is returned as written, and is read
+    against the working directory as it always was.
+    """
+    text = value.strip().replace("\\", "/")
+    if len(text) > 1:
+        text = text.rstrip("/") or "/"
+
+    if text.lower().startswith(WSL_SHARE):
+        share_distro, _, inner = text[len(WSL_SHARE):].partition("/")
+        posix = "/" + inner
+        if windows:
+            return "\\\\wsl.localhost\\" + share_distro + posix.replace("/", "\\")
+        return posix
+
+    drive = _drive(text)
+    if drive:
+        letter, rest = drive
+        if windows:
+            return letter.upper() + ":" + (rest or "/").replace("/", "\\")
+        return mount_root.rstrip("/") + "/" + letter.lower() + rest
+
+    if text.startswith("/"):
+        if windows:
+            return "\\\\wsl.localhost\\" + distro + text.replace("/", "\\")
+        return text
+    return value
+
+
+def root_variable(root: str, *, windows: bool) -> str:
+    """ASSEMBLYZERO_ROOT as templates hold it (#4776): the root with forward slashes.
+
+    Templates put it in bash commands, where an unquoted backslash is lost. On
+    Windows `C:/...` and `//wsl.localhost/...` are read by Git Bash and by
+    Windows programs alike; on Ubuntu the root is already a POSIX path.
+    """
+    return (PureWindowsPath(root) if windows else PurePosixPath(root)).as_posix()
 
 
 def load_project_config(project_path: Path) -> dict:
@@ -200,16 +275,27 @@ Examples:
 
     # Load project configuration (required for template generation)
     config = load_project_config(project_path)
-    variables = config.get("variables", {})
+    variables = dict(config.get("variables", {}))
 
-    # Resolve templates path
-    if args.templates:
-        templates_path = Path(args.templates)
-    elif "inherit_from" in config:
-        templates_path = Path(config["inherit_from"]) / ".claude" / "templates"
+    # AssemblyZero's root, from inherit_from in whatever spelling the file holds
+    # (#4775).
+    windows = os.name == "nt"
+    if "inherit_from" in config:
+        assemblyzero_root = Path(inherit_from_path(config["inherit_from"], windows=windows))
+        default_templates = assemblyzero_root / ".claude" / "templates"
     else:
         # Default: parent directory's templates
-        templates_path = project_path.parent / ".claude" / "templates"
+        default_templates = project_path.parent / ".claude" / "templates"
+
+    # Resolve templates path
+    templates_path = Path(args.templates) if args.templates else default_templates
+    if "inherit_from" not in config:
+        # The AssemblyZero whose .claude/templates these are.
+        assemblyzero_root = templates_path.resolve().parent.parent
+
+    # Templates reach AssemblyZero through this, never as a sibling of the
+    # project (#4776). project.json does not hold it: inherit_from is its one source.
+    variables["ASSEMBLYZERO_ROOT"] = root_variable(str(assemblyzero_root), windows=windows)
 
     if not templates_path.exists():
         print(f"ERROR: Templates directory not found: {templates_path}")
