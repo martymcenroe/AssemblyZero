@@ -8,9 +8,13 @@
   a sibling of the repository. Beside a repository on Ubuntu's ext4 disk there
   is no such sibling. They now use `{{ASSEMBLYZERO_ROOT}}`, which the generator
   fills from `inherit_from`.
+- #4775 R3: `--project <name>` is looked up under every Projects root, and a
+  name under two roots is refused.
 
 Every path here is a temporary one or another user's (`someone`): no test
-spells the operator's own Projects root (#3609).
+spells the operator's own Projects root (#3609). The Projects roots tests point
+`projects_root.CONFIG_PATH` at a config under tmp_path, as
+`test_projects_roots.py` does, and never read the machine's real config.
 
 Issues: #4775, #4776
 """
@@ -26,6 +30,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from assemblyzero.core import projects_root as pr
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GENERATOR = REPO_ROOT / "tools" / "assemblyzero-generate.py"
@@ -208,6 +214,108 @@ class TestCleanupTemplateUnderAnExt4Root:
                 " --quick-check --project Foo") in text
         assert "/../AssemblyZero" not in text
         assert "{{" not in text
+
+
+# ===========================================================================
+# #4775 T3: --project <name> is looked up under every Projects root
+# ===========================================================================
+
+
+@pytest.fixture
+def two_roots(tmp_path, monkeypatch):
+    """Two temporary Projects roots, in a setting a temporary config points at,
+    read as Ubuntu, and a temporary AssemblyZero holding one template."""
+    config = tmp_path / "home" / ".assemblyzero" / "config.json"
+    monkeypatch.setattr(pr, "CONFIG_PATH", config)
+    monkeypatch.setattr(pr, "_windows", lambda: False)
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    setting = tmp_path / "fleet" / "roots.json"
+    setting.parent.mkdir()
+    setting.write_text(
+        json.dumps({"roots": [first.as_posix(), second.as_posix()]}), encoding="utf-8")
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({
+        "version": "1.0",
+        "paths": {"projects_roots_file": {"unix": setting.as_posix()}},
+    }), encoding="utf-8")
+    az = tmp_path / "elsewhere" / "AssemblyZero"
+    commands = az / ".claude" / "templates" / "commands"
+    commands.mkdir(parents=True)
+    (commands / "hello.md.template").write_text("Hello {{PROJECT_NAME}}\n", encoding="utf-8")
+    return first, second, az
+
+
+def _run_generator(project: str, capsys) -> tuple[object, str]:
+    """(the exit code, or None when main returns; stdout and stderr together)."""
+    with patch("sys.argv", ["assemblyzero-generate.py", "--project", project]):
+        try:
+            generate.main()
+            code = None
+        except SystemExit as e:
+            code = e.code
+    captured = capsys.readouterr()
+    return code, captured.out + captured.err
+
+
+def _generated(project: Path) -> Path:
+    return project / ".claude" / "commands" / "hello.md"
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the roots setting holds Ubuntu paths; tmp_path is a drive path on Windows")
+class TestProjectNameUnderEveryRoot:
+
+    def test_a_name_held_only_under_the_second_root_is_found(self, two_roots, capsys):
+        first, second, az = two_roots
+        project = second / "Foo"
+        _write_project(project, az.as_posix())
+
+        code, out = _run_generator("Foo", capsys)
+
+        assert code is None, out
+        assert f"Project:   {project}" in out
+        assert _generated(project).read_text(encoding="utf-8") == "Hello Foo\n"
+        assert not (first / "Foo").exists()
+
+    def test_a_name_held_under_both_roots_is_refused(self, two_roots, capsys):
+        first, second, az = two_roots
+        for root in (first, second):
+            _write_project(root / "Twin", az.as_posix())
+
+        code, out = _run_generator("Twin", capsys)
+
+        assert code == 1
+        assert "ERROR:" in out
+        assert str(first / "Twin") in out
+        assert str(second / "Twin") in out
+        assert not _generated(first / "Twin").exists()
+        assert not _generated(second / "Twin").exists()
+
+    def test_a_name_under_neither_root_is_reported_not_found(self, two_roots, capsys):
+        first, _, _ = two_roots
+
+        code, out = _run_generator("Nope", capsys)
+
+        assert code == 1
+        assert f"ERROR: Project directory not found: {first / 'Nope'}" in out
+
+    def test_an_absolute_path_is_used_as_given(self, two_roots, tmp_path, capsys):
+        """The name is under both roots, so a lookup would refuse it; the
+        absolute path to a third copy is never looked up."""
+        first, second, az = two_roots
+        for root in (first, second):
+            _write_project(root / "Twin", az.as_posix())
+        outside = tmp_path / "outside" / "Twin"
+        _write_project(outside, az.as_posix())
+
+        code, out = _run_generator(str(outside), capsys)
+
+        assert code is None, out
+        assert _generated(outside).read_text(encoding="utf-8") == "Hello Twin\n"
+        assert not _generated(first / "Twin").exists()
+        assert not _generated(second / "Twin").exists()
 
 
 def _tracked_claude_files() -> list[Path]:
