@@ -23,3 +23,7 @@ Run on 2026-11-15 in the worktree, after the test-isolation change below. The fu
 ## Lint
 
 `ruff check` on the changed files: no finding on a changed line after the fixes in this commit (the remaining findings are on lines this change did not touch).
+
+## Unit tier, 2026-11-15
+
+Run on Ubuntu with pytest directly, after replaying the branch onto main: `15433 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 3126.86s (0:52:06)`. No test failed.
