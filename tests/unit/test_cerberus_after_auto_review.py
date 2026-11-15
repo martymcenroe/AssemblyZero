@@ -118,6 +118,10 @@ def _run_main(tmp_path: Path, argv: list[str]):
     (home / ".secrets").mkdir(parents=True)
     # The PEM the #1543 fallback used to pick up on its own. It must now be ignored.
     (home / ".secrets" / "cerberus-pem.gpg").write_bytes(b"not a real key")
+    # An empty hook list: no hooks, on purpose. A missing one fails the run (#4186).
+    hook_list = home / ".claude" / "new-repo-post-create-hooks.txt"
+    hook_list.parent.mkdir(parents=True)
+    hook_list.write_text("", encoding="utf-8")
 
     fake_requests = MagicMock()
     fake_requests.post.return_value = _response(201)
@@ -138,6 +142,7 @@ def _run_main(tmp_path: Path, argv: list[str]):
         patch("new_repo.create_canonical_labels", return_value=(2, 2)),
         patch("new_repo.enable_dependabot_for_repo",
               return_value=SimpleNamespace(actions={}, ok=True)),
+        patch("new_repo.DEFAULT_POST_CREATE_HOOKS", hook_list),
         patch("new_repo.read_post_create_hooks", return_value=[]),
         patch("new_repo.verify_branch_protection_on_origin", return_value=(True, "ok")),
         patch("new_repo.verify_repo_settings_on_origin", return_value=(True, "ok")),
