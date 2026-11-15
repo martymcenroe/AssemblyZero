@@ -406,7 +406,7 @@ def _run_counting_prompts(tmp_path, monkeypatch, capsys, hooks, name, sentinel):
 
     monkeypatch.setattr(pat_session, "_ask_passphrase", ask)
     monkeypatch.setattr(pat_session, "_run_gpg", gpg)
-    monkeypatch.setattr(new_repo, "_mint_github_app_jwt", lambda app_id, pem: "fake.jwt")
+    monkeypatch.setattr(new_repo._github_app_jwt, "mint_app_jwt", lambda app_id, pem: "fake.jwt")
     monkeypatch.setattr(new_repo, "verify_pr_sentinel_installation",
                         lambda user, repo, jwt: (True, "installed (faked in a test)"))
     code = _run_main(tmp_path, listing, name, None, sentinel_bundle=sentinel,

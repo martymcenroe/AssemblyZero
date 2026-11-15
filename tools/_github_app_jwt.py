@@ -3,10 +3,10 @@
     from _github_app_jwt import mint_app_jwt
     token = mint_app_jwt(app_id, pem)       # Authorization: Bearer <token>
 
-The logic is new_repo.py's `_mint_github_app_jwt` (#1822), moved here so that
-`tools/store_pr_sentinel_app_key.py` can prove a key with GitHub before it stores
-it. new_repo.py still carries its own copy; switching it to this module is a
-separate change.
+The logic is new_repo.py's former `_mint_github_app_jwt` (#1822), moved here so
+that `tools/store_pr_sentinel_app_key.py` can prove a key with GitHub before it
+stores it. new_repo.py's pr-sentinel check calls this module too, and keeps no
+copy of its own (#4791), so the key program and the check mint one token.
 
 GitHub's App JWT has one fixed shape: header `{"alg": "RS256", "typ": "JWT"}`,
 `iat` backdated 60 seconds for clock drift, `exp` nine minutes on (GitHub caps it

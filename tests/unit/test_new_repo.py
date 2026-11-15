@@ -850,8 +850,8 @@ class TestMainLocalWorkflow:
 # GitHub-side verification (#1200, #1202)
 # ===========================================================================
 
+from _github_app_jwt import mint_app_jwt
 from new_repo import (  # noqa: E402
-    _mint_github_app_jwt,
     _parse_sentinel_app_bundle,
     run_pr_sentinel_check,
     verify_branch_protection_on_origin,
@@ -1101,7 +1101,7 @@ class TestSentinelAppBundleAndJwt:
         from cryptography.hazmat.primitives.asymmetric import padding
 
         pem = self._test_pem()
-        token = _mint_github_app_jwt("123456", pem)
+        token = mint_app_jwt("123456", pem)
         header_b64, payload_b64, sig_b64 = token.split(".")
 
         def unb64(seg: str) -> bytes:
@@ -1239,7 +1239,7 @@ class TestRunPrSentinelCheck:
         assert msg == "credential bundle malformed: no App ID on line 1; the check did not run"
 
     @patch("new_repo.verify_pr_sentinel_installation")
-    @patch("new_repo._mint_github_app_jwt")
+    @patch("_github_app_jwt.mint_app_jwt")
     @patch("new_repo._parse_sentinel_app_bundle")
     @patch("new_repo.pr_sentinel_app_session")
     def test_T316_pass_when_verified(
@@ -1259,9 +1259,26 @@ class TestRunPrSentinelCheck:
         # Proof-of-life: the credential was borrowed through `with`, and given
         # back. A pair of bare mocks could not tell this from never running.
         assert (session.entered, session.exited) == (1, 1)
+        # The one copy of the JWT code minted the token the probe sent (#4791).
+        mock_mint.assert_called_once_with("123456", "PEM")
+        mock_verify.assert_called_once_with("martymcenroe", "repo-name", "jwt")
+
+    def test_T325_new_repo_keeps_no_jwt_code_of_its_own(self):
+        """#4791: new_repo.py defines no JWT minting function and loads no
+        private key itself; the check mints through _github_app_jwt."""
+        import ast
+
+        assert not hasattr(_new_repo_module, "_mint_github_app_jwt")
+        assert _new_repo_module._github_app_jwt.mint_app_jwt is mint_app_jwt
+        tree = ast.parse(Path(_new_repo_module.__file__).read_text(encoding="utf-8"))
+        names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        assert not [n for n in names if "jwt" in n.lower()]
+        loads = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Attribute) and n.attr == "load_pem_private_key"]
+        assert loads == []
 
     @patch("new_repo.verify_pr_sentinel_installation")
-    @patch("new_repo._mint_github_app_jwt")
+    @patch("_github_app_jwt.mint_app_jwt")
     @patch("new_repo._parse_sentinel_app_bundle")
     @patch("new_repo.pr_sentinel_app_session")
     def test_T317_fail_when_app_absent(

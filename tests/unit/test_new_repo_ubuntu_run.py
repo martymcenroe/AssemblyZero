@@ -470,3 +470,141 @@ class TestClaudeMdWindowsLine:
         new_repo.create_claude_md(tmp_path, "Foo", "someone", "python")
         assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == (
             new_repo.claude_md_content(tmp_path, "Foo", "someone", "python"))
+
+
+# ===========================================================================
+# #4765, #4778 — new_repo_root against the fleet's Projects roots
+# ===========================================================================
+
+from assemblyzero.core import projects_root as fleet_roots
+
+
+class TestProjectsRoots:
+    """Temporary roots only, set as test_projects_roots.py sets them: no test
+    reads this machine's config or looks under a real root (#3609)."""
+
+    @pytest.fixture(autouse=True)
+    def env(self, tmp_path, monkeypatch):
+        self.tmp = tmp_path
+        self.derived = tmp_path / "derived"
+        (self.derived / "AssemblyZero").mkdir(parents=True)
+        self.config = tmp_path / "home" / ".assemblyzero" / "config.json"
+        monkeypatch.setattr(fleet_roots, "CONFIG_PATH", self.config)
+        monkeypatch.setattr(fleet_roots, "REPO_ROOT", self.derived / "AssemblyZero")
+        monkeypatch.setattr(fleet_roots, "_windows", lambda: False)
+        self.first, self.second, self.third = (tmp_path / n for n in ("first", "second", "third"))
+        for root in (self.first, self.second, self.third):
+            root.mkdir()
+
+    def _point(self):
+        setting = self.tmp / "fleet" / "roots.json"
+        setting.parent.mkdir()
+        setting.write_text(json.dumps({"roots": [str(self.first), str(self.second)]}), encoding="utf-8")
+        self.config.parent.mkdir(parents=True)
+        self.config.write_text(json.dumps(
+            {"paths": {"projects_roots_file": {"unix": str(setting)}}}), encoding="utf-8")
+        return setting
+
+    def _main(self, new_root, *argv):
+        """main() with every creating step recorded, never run."""
+        with patch.object(new_repo, "config") as cfg, \
+                patch("new_repo._create_repo") as create, \
+                patch("new_repo.run_command") as run, \
+                patch("new_repo.get_github_username", return_value="owner") as gh, \
+                patch("new_repo.audit_structure", return_value=0) as audit, \
+                patch("sys.argv", ["new_repo.py", *argv]):
+            cfg.load_error = None
+            cfg.new_repo_root.return_value = str(new_root)
+            try:
+                new_repo.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code or 0
+        return code, create, run, gh, audit
+
+    def test_T1_4765_a_new_repo_root_outside_the_roots_is_refused(self, capsys):
+        setting = self._point()
+        code, create, run, gh, _ = self._main(self.third, "Fresh")
+        err = capsys.readouterr().err
+        print(err)
+        assert code == 1
+        for path in (self.first, self.second, self.third, setting):
+            assert str(path) in err
+        assert "Nothing was created" in err
+        create.assert_not_called(), run.assert_not_called(), gh.assert_not_called()
+        assert not (self.third / "Fresh").exists()
+
+    def test_T1_4765_a_new_repo_root_that_is_a_root_proceeds(self):
+        self._point()
+        code, create, _, _, _ = self._main(self.second, "Fresh")
+        assert code == 0
+        assert create.call_args.args[0] == self.second / "Fresh"
+
+    def test_T2_4765_a_name_under_another_root_is_refused(self, capsys):
+        self._point()
+        (self.first / "Taken").mkdir()
+        code, create, run, gh, _ = self._main(self.second, "Taken")
+        err = capsys.readouterr().err
+        print(err)
+        assert code == 1
+        assert str(self.first / "Taken") in err
+        create.assert_not_called(), run.assert_not_called(), gh.assert_not_called()
+        assert not (self.second / "Taken").exists()
+
+    def test_T2_4765_with_no_pointer_the_one_root_is_checked_too(self, capsys):
+        (self.derived / "Taken").mkdir()
+        code, create, _, gh, _ = self._main(self.third, "Taken")
+        assert code == 1
+        assert str(self.derived / "Taken") in capsys.readouterr().err
+        create.assert_not_called(), gh.assert_not_called()
+
+    def test_T3_4765_with_no_pointer_new_repo_root_is_not_checked(self):
+        """R3: unchanged from #4763; resolve_project_path builds under new_repo_root."""
+        code, create, _, _, _ = self._main(self.third, "Fresh")
+        assert code == 0
+        assert create.call_args.args[0] == self.third / "Fresh"
+        with patch.object(new_repo, "config") as cfg:
+            cfg.load_error = None
+            cfg.new_repo_root.return_value = str(self.third)
+            assert resolve_project_path("Fresh") == self.third / "Fresh"
+
+    def test_a_broken_pointer_stops_before_anything(self, capsys):
+        self.config.parent.mkdir(parents=True)
+        self.config.write_text(json.dumps(
+            {"paths": {"projects_roots_file": {"unix": str(self.tmp / "absent.json")}}}), encoding="utf-8")
+        code, create, _, gh, _ = self._main(self.second, "Fresh")
+        assert code == 1
+        assert "the Projects roots could not be read" in capsys.readouterr().err
+        create.assert_not_called(), gh.assert_not_called()
+
+    def test_T1_4778_audit_finds_a_repository_under_the_first_root(self):
+        self._point()
+        (self.first / "Old").mkdir()
+        code, create, _, _, audit = self._main(self.second, "Old", "--audit")
+        assert code == 0
+        assert audit.call_args.args[0] == self.first / "Old"
+        create.assert_not_called()
+
+    def test_T2_4778_audit_refuses_two_copies_and_names_every_root_for_none(self, capsys):
+        self._point()
+        (self.first / "Twice").mkdir()
+        (self.second / "Twice").mkdir()
+        code, _, _, _, audit = self._main(self.second, "Twice", "--audit")
+        err = capsys.readouterr().err
+        print(err)
+        assert code == 1
+        assert str(self.first / "Twice") in err and str(self.second / "Twice") in err
+        code, _, _, _, audit2 = self._main(self.second, "Nowhere", "--audit")
+        err = capsys.readouterr().err
+        print(err)
+        assert code == 1
+        assert str(self.first) in err and str(self.second) in err
+        audit.assert_not_called(), audit2.assert_not_called()
+
+    def test_T3_4778_resolve_project_path_still_builds_under_new_repo_root(self):
+        self._point()
+        (self.first / "Old").mkdir()
+        with patch.object(new_repo, "config") as cfg:
+            cfg.load_error = None
+            cfg.new_repo_root.return_value = str(self.second)
+            assert resolve_project_path("Old") == self.second / "Old"
