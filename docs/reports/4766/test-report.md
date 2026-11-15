@@ -18,6 +18,6 @@ Ubuntu, in an agent session, `TMPDIR=/home/mcwiz/agent-tmp/claude-pid-2292220`.
 - After: `16 passed, 1 warning in 18.40s`, nothing skipped. The warning is the pydantic one on Python 3.14, the same as before.
 - No gpg-agent from the run was left running.
 
-## Not covered here
+## Unit tier, 2026-11-15
 
-The unit tier on Ubuntu is run separately, before the change lands.
+Run on Ubuntu with pytest directly, in an agent session: `15397 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1320.50s (0:22:00)`. No test failed. Before this change every Ubuntu run of the tier had these six failures.
