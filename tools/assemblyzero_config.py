@@ -43,6 +43,11 @@ PATH_KEYS = {'assemblyzero_root', 'projects_root', 'user_claude_dir'}
 # Where new_repo.py creates a repository (#4763). Either format may be absent;
 # with the key absent, new_repo_root() is projects_root().
 NEW_REPO_ROOT_KEY = 'new_repo_root'
+# Where the fleet's Projects roots setting is (#4773): a pointer, set only on the
+# operator's machine, so no tracked file names where that setting lives. Either
+# format may be absent; with the key absent, projects_roots_file() is None and
+# assemblyzero.core.projects_root uses the checkout's parent as the one root.
+PROJECTS_ROOTS_FILE_KEY = 'projects_roots_file'
 REQUIRED_FORMAT_KEYS = {'windows', 'unix'}
 
 def _spellings(path: Path) -> dict:
@@ -137,7 +142,7 @@ class AssemblyZeroConfig:
             errors.append("'paths' must be a dictionary")
             return errors
 
-        for key in sorted(PATH_KEYS | {NEW_REPO_ROOT_KEY}):
+        for key in sorted(PATH_KEYS | {NEW_REPO_ROOT_KEY, PROJECTS_ROOTS_FILE_KEY}):
             if key not in paths:
                 continue  # an absent key takes its default (#4763)
             value = paths[key]
@@ -340,6 +345,21 @@ class AssemblyZeroConfig:
         if NEW_REPO_ROOT_KEY not in self._config.get("paths", {}):
             return self.projects_root(fmt=fmt)
         return self._get_path(NEW_REPO_ROOT_KEY, fmt)
+
+    def projects_roots_file(self, fmt: PathFormat = 'windows') -> str | None:
+        """Where the fleet's Projects roots setting is, or None (#4773).
+
+        None when the key is absent, and when it carries no value for this
+        format: unlike the other paths, it never falls back to the other OS's
+        spelling, which would name a file this side cannot open.
+        assemblyzero.core.projects_root reads the same key itself.
+        """
+        if fmt == 'auto':
+            fmt = self._get_os_format()
+        entry = self._config.get("paths", {}).get(PROJECTS_ROOTS_FILE_KEY)
+        if not isinstance(entry, dict) or fmt not in entry:
+            return None
+        return self._sanitize_path(entry[fmt])
 
     def user_claude_dir(self, fmt: PathFormat = 'windows') -> str:
         """
