@@ -167,15 +167,53 @@ _FAKE_PINENTRY = (
 )
 
 
+# Where /run/user/<uid> is absent, gpg-agent keeps its sockets in the gpg home
+# itself, and it refuses to start when a socket's path is this many bytes or
+# more: measured with gpg 2.4.8 on Ubuntu, 106 starts and 107 does not (#4766).
+# The browser socket has the longest name, so it is the one that hits it.
+GPG_SOCKET_LIMIT = 107
+_AGENT_SOCKETS = ("S.gpg-agent", "S.gpg-agent.extra", "S.gpg-agent.browser", "S.gpg-agent.ssh")
+
+
+def _socket_dir(home: Path) -> Path:
+    """Where gpg-agent puts its sockets for this home, as gpgconf reports it."""
+    result = subprocess.run(
+        ["gpgconf", "--list-dirs", "socketdir"],
+        env={**os.environ, "GNUPGHOME": str(home)},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return Path(result.stdout.strip())
+
+
+def _check_socket_paths(socket_dir: Path) -> None:
+    """Fail, naming the path and its length, when gpg-agent's longest socket
+    in socket_dir is too long for gpg-agent to start. gpg itself says only
+    'General error' (#4766)."""
+    longest = max((socket_dir / name for name in _AGENT_SOCKETS),
+                  key=lambda path: len(os.fsencode(path)))
+    length = len(os.fsencode(longest))
+    if length >= GPG_SOCKET_LIMIT:
+        pytest.fail(
+            f"gpg-agent cannot start: its socket path {longest} is {length} bytes, and "
+            f"gpg-agent refuses a socket path of {GPG_SOCKET_LIMIT} bytes or more. "
+            "Shorten TMPDIR so pytest's temporary folder is shorter.",
+            pytrace=False,
+        )
+
+
 @pytest.fixture
-def pinentry_marker(tmp_path, monkeypatch):
+def pinentry_marker(tmp_path, tmp_path_factory, monkeypatch):
     """A gpg home of the test's own, whose agent's pinentry is the stand-in.
 
-    Yields the file the stand-in marks if it is ever called. Stops the
-    test's agent afterwards.
+    The home comes from tmp_path_factory, not tmp_path, so its path carries
+    no test name and gpg-agent's sockets in it stay short enough to start
+    (#4766). Yields the file the stand-in marks if it is ever called. Stops
+    the test's agent afterwards.
     """
-    home = tmp_path / "g"
-    home.mkdir(mode=0o700)
+    home = tmp_path_factory.mktemp("g")
+    home.chmod(0o700)
+    _check_socket_paths(_socket_dir(home))
     marker = tmp_path / "pinentry-was-called"
     pinentry = tmp_path / "fake-pinentry"
     pinentry.write_text(f"#!{sys.executable}\n{_FAKE_PINENTRY % str(marker)}", encoding="utf-8")
@@ -209,6 +247,69 @@ def _encrypt(tmp_path: Path, filename: str) -> Path:
     assert result.returncode == 0, result.stderr
     plain.unlink()
     return out
+
+
+def _home_with_socket_length(base: Path, length: int) -> Path:
+    """A gpg home under base whose browser socket path is exactly length bytes."""
+    pad = length - len(os.fsencode(base)) - len("/") - len("/g/S.gpg-agent.browser")
+    assert pad >= 1, f"the temporary folder {base} is too long to build a {length}-byte socket path"
+    home = base / ("p" * pad) / "g"
+    assert len(os.fsencode(home / "S.gpg-agent.browser")) == length
+    home.mkdir(parents=True)
+    home.chmod(0o700)
+    return home
+
+
+def _start_agent(home: Path) -> tuple[int, str]:
+    """Start gpg-agent by hand in home, stop it, and give its exit code and stderr."""
+    env = {**os.environ, "GNUPGHOME": str(home)}
+    err_file = home.parent / "agent-stderr"
+    try:
+        # A started agent keeps its stderr open, so it goes to a file, never a pipe.
+        with open(err_file, "w", encoding="utf-8") as err:
+            result = subprocess.run(
+                ["gpg-agent", "--homedir", str(home), "--daemon"], env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err,
+                timeout=30, check=False,
+            )
+    finally:
+        subprocess.run(["gpgconf", "--kill", "gpg-agent"], env=env,
+                       capture_output=True, timeout=30, check=False)
+    return result.returncode, err_file.read_text(encoding="utf-8")
+
+
+class TestGpgHomeLength:
+    """gpg-agent cannot start when its socket path is too long, and gpg then
+    says only 'General error'. The fixture's check names the cause (#4766)."""
+
+    def test_a_home_too_long_for_gpg_agent_fails_naming_the_path_and_its_length(self, tmp_path):
+        home = tmp_path / ("p" * 120) / "g"
+        browser = home / "S.gpg-agent.browser"
+
+        with pytest.raises(pytest.fail.Exception) as excinfo:
+            _check_socket_paths(home)
+
+        message = str(excinfo.value)
+        assert str(browser) in message
+        assert f"is {len(os.fsencode(browser))} bytes" in message
+        assert f"{GPG_SOCKET_LIMIT} bytes or more" in message
+
+    @requires_real_gpg
+    def test_the_limit_is_where_real_gpg_agent_stops_starting(self, tmp_path_factory):
+        base = tmp_path_factory.mktemp("lim")
+        fits = _home_with_socket_length(base, GPG_SOCKET_LIMIT - 1)
+        if _socket_dir(fits) != fits:
+            pytest.skip("gpg keeps its sockets outside the gpg home here")
+
+        _check_socket_paths(fits)
+        returncode, stderr = _start_agent(fits)
+        assert returncode == 0, stderr
+
+        too_long = _home_with_socket_length(base, GPG_SOCKET_LIMIT)
+        with pytest.raises(pytest.fail.Exception):
+            _check_socket_paths(too_long)
+        returncode, stderr = _start_agent(too_long)
+        assert returncode != 0 and "is too long" in stderr, stderr
 
 
 @requires_real_gpg
