@@ -169,3 +169,61 @@ def test_without_new_repo_root_it_is_the_projects_root(tmp_path, monkeypatch, co
         assert config.new_repo_root(fmt) == config.projects_root(fmt), fmt
     if content is not None:
         assert config.new_repo_root("unix") == "/home/dev/Work"
+
+
+# ---------------------------------------------------------------------------
+# projects_roots_file: the pointer to the fleet's roots setting (#4773)
+# ---------------------------------------------------------------------------
+
+
+def test_the_pointer_key_is_named_once():
+    assert assemblyzero_config.PROJECTS_ROOTS_FILE_KEY == "projects_roots_file"
+
+
+def test_a_file_holding_only_the_pointer_loads_and_keeps_every_default(tmp_path, monkeypatch):
+    _, config = _config_from(tmp_path, monkeypatch, {
+        "version": "1.0",
+        "paths": {"projects_roots_file": {"unix": "/srv/fleet/roots.json"}},
+    })
+    assert config.load_error is None
+    assert config.projects_roots_file("unix") == "/srv/fleet/roots.json"
+    for key in FLEET_KEYS:
+        for fmt in ("windows", "unix"):
+            assert getattr(config, key)(fmt) == DEFAULTS[key][fmt], (key, fmt)
+
+
+@pytest.mark.parametrize("value, reason", [
+    ({}, "Path 'projects_roots_file' carries neither 'windows' nor 'unix'"),
+    ({"unix": 5}, "Path 'projects_roots_file' format 'unix' must be a string"),
+    ("/srv/fleet/roots.json", "Path 'projects_roots_file' must be a dictionary"),
+], ids=["no-format", "not-a-string", "not-a-dictionary"])
+def test_a_pointer_without_a_usable_format_is_rejected(tmp_path, monkeypatch, value, reason):
+    path, config = _config_from(tmp_path, monkeypatch, {
+        "version": "1.0", "paths": {"projects_roots_file": value},
+    })
+    assert config.load_error is not None
+    assert str(path) in config.load_error
+    assert reason in config.load_error
+    assert config.projects_roots_file("unix") is None  # rejected, so defaults, which hold no pointer
+
+
+@pytest.mark.parametrize("content", [
+    None,
+    {"version": "1.0", "paths": {}},
+    {"version": "1.0", "paths": {"new_repo_root": {"unix": "/home/dev/Projects"}}},
+], ids=["no-file", "no-paths", "other-keys-only"])
+def test_without_the_pointer_projects_roots_file_is_none(tmp_path, monkeypatch, content):
+    _, config = _config_from(tmp_path, monkeypatch, content)
+    assert config.load_error is None
+    for fmt in ("windows", "unix", "auto"):
+        assert config.projects_roots_file(fmt) is None, fmt
+
+
+def test_a_pointer_for_one_side_is_none_on_the_other(tmp_path, monkeypatch):
+    _, config = _config_from(tmp_path, monkeypatch, {
+        "version": "1.0",
+        "paths": {"projects_roots_file": {"windows": "/srv/windows/roots.json"}},
+    })
+    assert config.load_error is None
+    assert config.projects_roots_file("unix") is None  # never the other side's value
+    assert config.projects_roots_file("windows") == "/srv/windows/roots.json"
