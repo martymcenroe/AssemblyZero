@@ -63,6 +63,14 @@ def _real_git_init(cmd, cwd=None, check=True):
 
 class TestResolveProjectPath:
 
+    @pytest.fixture(autouse=True)
+    def _no_machine_config(self, tmp_path, monkeypatch):
+        """Every test here reads a config at a temporary path, never this
+        machine's own ~/.assemblyzero/config.json (#4770). A test that writes
+        its own file installs it over this one."""
+        monkeypatch.setattr(
+            new_repo, "config", _real_config(monkeypatch, tmp_path / "absent.json"))
+
     def test_real_config_gives_an_absolute_path_beside_this_checkout(self):
         """T1. On any OS, the target is <checkout's parent>/<name>."""
         target = resolve_project_path("foo")

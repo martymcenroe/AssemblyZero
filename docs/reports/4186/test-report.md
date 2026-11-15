@@ -34,3 +34,9 @@ The four failures are `tests/unit/test_new_repo_ubuntu_run.py::TestResolveProjec
 `10 failed, 15210 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1245.96s (0:20:45)`
 
 Six failures are `tests/unit/test_pat_session_named_prompt.py::TestRealGpg`, four `test_the_right_passphrase_decrypts_with_no_box_from_gpg` cases, `test_a_wrong_passphrase_fails_cleanly` and `test_the_passphrase_is_never_in_argv_env_output_or_errors`: the failures #4766 tracks, in a file this change does not touch. The other four are the `TestResolveProjectPath` tests above, which fail on the primary too. No other test failed.
+
+The four `TestResolveProjectPath` failures are #4770, fixed in the same PR. After that fix, the full unit tier on this branch, with the machine's config setting `new_repo_root`:
+
+`6 failed, 15214 passed, 66 skipped, 7 deselected, 7 xfailed, 34 warnings in 1203.93s (0:20:03)`
+
+The six are the `TestRealGpg` failures above (#4766). No other test failed.
